@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>专利审查梳理工具</title>
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <h1>专利审查梳理工具</h1>
+      <p class="subtitle">Patent Examination History Helper</p>
+    </header>
+
+    <main class="app-main">
+      <section class="search-section">
+        <div class="search-box">
+          <input
+            type="text"
+            id="patent-input"
+            placeholder="输入专利号（如 US14412875 或 CN202310000001.X）"
+            autocomplete="off"
+          >
+          <button id="search-btn" class="btn-primary">查询</button>
+          <button id="convert-btn" class="btn-secondary">格式转换</button>
+        </div>
+        <div id="office-badge" class="office-badge hidden"></div>
+      </section>
+
+      <section id="result-section" class="result-section hidden">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="overview">概览</button>
+          <button class="tab-btn" data-tab="timeline">审查时间线</button>
+          <button class="tab-btn" data-tab="documents">审查文档</button>
+          <button class="tab-btn" data-tab="continuity">续案/分案</button>
+        </div>
+
+        <div id="tab-overview" class="tab-content active">
+          <div id="overview-content" class="card-grid">
+            <div class="info-card">
+              <div class="card-header">申请信息</div>
+              <div id="app-info" class="card-body">
+                <p class="placeholder">请输入专利号进行查询</p>
+              </div>
+            </div>
+            <div class="info-card">
+              <div class="card-header">当前状态</div>
+              <div id="app-status" class="card-body">
+                <p class="placeholder">-</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-timeline" class="tab-content">
+          <div id="timeline-content">
+            <p class="placeholder">审查时间线将在此显示</p>
+          </div>
+        </div>
+
+        <div id="tab-documents" class="tab-content">
+          <div id="documents-content">
+            <p class="placeholder">审查文档列表将在此显示</p>
+          </div>
+        </div>
+
+        <div id="tab-continuity" class="tab-content">
+          <div id="continuity-content">
+            <p class="placeholder">续案/分案关系将在此显示</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="convert-section" class="convert-section hidden">
+        <div class="info-card">
+          <div class="card-header">格式转换结果</div>
+          <div id="convert-result" class="card-body"></div>
+        </div>
+      </section>
+
+      <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <p>正在查询 USPTO 数据库...</p>
+      </div>
+
+      <div id="error-toast" class="toast hidden"></div>
+    </main>
+  </div>
+
+  <script src="scripts/app.js"></script>
+</body>
+</html>
