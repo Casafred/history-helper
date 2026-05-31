@@ -5,17 +5,22 @@ mod models;
 mod parser;
 mod patent;
 
+use api::global_dossier::GlobalDossierClient;
 use api::uspto::UsptoClient;
+use cache::{CacheStore, DB_FILENAME, DEFAULT_TTL_SECS};
 use patent::converter::{detect_office, normalize_us_application_number, parse_patent_number, PatentOffice};
 use parser::office_action::{EventCategory, OfficeActionType};
 use serde::Serialize;
 use std::sync::Mutex;
+use tauri::Manager;
 
 struct AppState {
     uspto_client: Mutex<Option<UsptoClient>>,
+    gd_token: Mutex<Option<String>>,
+    cache: Mutex<Option<CacheStore>>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct CommandResult {
     success: bool,
     data: Option<serde_json::Value>,
@@ -56,6 +61,18 @@ fn get_or_create_client(state: &AppState) -> Result<UsptoClient, String> {
         .ok_or_else(|| "Failed to create API client".to_string())
 }
 
+fn get_gd_client(state: &AppState) -> Result<GlobalDossierClient, String> {
+    let guard = state
+        .gd_token
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
+
+    guard
+        .as_ref()
+        .map(|t| GlobalDossierClient::new(t.clone()))
+        .ok_or_else(|| "Global Dossier token not set. Call set_gd_token first.".to_string())
+}
+
 #[tauri::command]
 async fn convert_patent_number(input: String) -> Result<CommandResult, String> {
     Ok(match parse_patent_number(&input) {
@@ -77,20 +94,111 @@ async fn fetch_examination_history(
     app_number: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<CommandResult, String> {
+    let mut warnings: Vec<String> = Vec::new();
+
     let office = detect_office(&app_number);
     match office {
         Some(PatentOffice::US) => {}
         Some(other) => {
-            return Ok(CommandResult::err(format!(
-                "暂不支持 {} 专利局的审查历史查询，目前仅支持美国 (US) 专利",
-                other
-            )));
+            if other.supports_examination_history() {
+                let gd_client = match get_gd_client(&state) {
+                    Ok(c) => c,
+                    Err(_) => {
+                        return Ok(CommandResult::err(format!(
+                            "查询 {} 专利需要先登录 Global Dossier（点击「GD 登录」按钮）",
+                            other.display_name()
+                        )));
+                    }
+                };
+
+                let normalized = match other {
+                    PatentOffice::EP => patent::converter::normalize_ep_application_number(&app_number)
+                        .map_err(|e| e.to_string())
+                        .ok(),
+                    PatentOffice::WO => patent::converter::normalize_wo_application_number(&app_number)
+                        .map_err(|e| e.to_string())
+                        .ok(),
+                    _ => Some(app_number.clone()),
+                };
+
+                let doc_num = match normalized {
+                    Some(n) => n,
+                    None => app_number.clone(),
+                };
+
+                let office_code = other.to_string();
+                let mut result = serde_json::Map::new();
+                result.insert("applicationNumber".into(), serde_json::Value::String(doc_num.clone()));
+                result.insert("office".into(), serde_json::Value::String(office_code.clone()));
+
+                match gd_client.get_family("application", &office_code, &doc_num).await {
+                    Ok(data) => {
+                        result.insert("family".into(), data);
+                    }
+                    Err(e) => {
+                        warnings.push(format!("同族查询失败: {}", e));
+                    }
+                }
+
+                match gd_client.get_doc_list(&office_code, &doc_num, "A").await {
+                    Ok(data) => {
+                        result.insert("documents".into(), data);
+                    }
+                    Err(e) => {
+                        warnings.push(format!("文档列表查询失败: {}", e));
+                    }
+                }
+
+                if !warnings.is_empty() {
+                    result.insert(
+                        "warnings".into(),
+                        serde_json::Value::Array(
+                            warnings.into_iter().map(serde_json::Value::String).collect(),
+                        ),
+                    );
+                }
+
+                return Ok(CommandResult::ok(serde_json::Value::Object(result)));
+            } else {
+                if let Some(msg) = other.api_unavailable_message() {
+                    return Ok(CommandResult::err(msg));
+                }
+                return Ok(CommandResult::err(format!(
+                    "暂不支持 {} 专利局的审查历史查询",
+                    other.display_name()
+                )));
+            }
         }
         None => {
             return Ok(CommandResult::err(format!(
-                "无法识别专利号格式: {}，请输入有效的美国专利申请号（如 US14412875 或 14412875）",
+                "无法识别专利号格式: {}，请输入有效的专利申请号",
                 app_number
             )));
+        }
+    }
+
+    let normalized = match normalize_us_application_number(&app_number) {
+        Ok(n) => n,
+        Err(e) => return Ok(CommandResult::err(e.to_string())),
+    };
+
+    let cache_key = CacheStore::make_cache_key("US", &normalized, "examination_history");
+
+    {
+        let mut cache_guard = state
+            .cache
+            .lock()
+            .map_err(|e| format!("Cache lock error: {}", e))?;
+
+        if let Some(ref mut cache_store) = *cache_guard {
+            if let Some(cached_data) = cache_store.get(&cache_key) {
+                if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&cached_data) {
+                    if let Some(obj) = val.as_object_mut() {
+                        obj.insert("cached".into(), serde_json::Value::Bool(true));
+                    }
+                    return Ok(CommandResult::ok(val));
+                }
+            }
         }
     }
 
@@ -99,14 +207,8 @@ async fn fetch_examination_history(
         Err(e) => return Ok(CommandResult::err(e)),
     };
 
-    let normalized = match normalize_us_application_number(&app_number) {
-        Ok(n) => n,
-        Err(e) => return Ok(CommandResult::err(e.to_string())),
-    };
-
     let mut result = serde_json::Map::new();
     result.insert("applicationNumber".into(), serde_json::Value::String(normalized.clone()));
-    let mut warnings: Vec<String> = Vec::new();
 
     match client.get_application(&normalized).await {
         Ok(data) => {
@@ -223,7 +325,22 @@ async fn fetch_examination_history(
         );
     }
 
-    Ok(CommandResult::ok(serde_json::Value::Object(result)))
+    let result_val = serde_json::Value::Object(result);
+
+    {
+        let mut cache_guard = state
+            .cache
+            .lock()
+            .map_err(|e| format!("Cache lock error: {}", e))?;
+
+        if let Some(ref mut cache_store) = *cache_guard {
+            if let Ok(serialized) = serde_json::to_string(&result_val) {
+                cache_store.set(&cache_key, "US", &normalized, "examination_history", &serialized, DEFAULT_TTL_SECS);
+            }
+        }
+    }
+
+    Ok(CommandResult::ok(result_val))
 }
 
 #[tauri::command]
@@ -375,6 +492,91 @@ async fn download_document(
     }
 }
 
+#[tauri::command]
+async fn set_gd_token(token: String, state: tauri::State<'_, AppState>) -> Result<CommandResult, String> {
+    let mut guard = state
+        .gd_token
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
+    *guard = Some(token);
+    Ok(CommandResult::ok(serde_json::json!({"saved": true})))
+}
+
+#[tauri::command]
+async fn fetch_family(
+    type_code: String,
+    office_code: String,
+    doc_number: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<CommandResult, String> {
+    let client = match get_gd_client(&state) {
+        Ok(c) => c,
+        Err(e) => return Ok(CommandResult::err(e)),
+    };
+
+    match client.get_family(&type_code, &office_code, &doc_number).await {
+        Ok(data) => Ok(CommandResult::ok(data)),
+        Err(e) => Ok(CommandResult::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+async fn fetch_gd_doc_list(
+    country: String,
+    doc_number: String,
+    kind_code: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<CommandResult, String> {
+    let client = match get_gd_client(&state) {
+        Ok(c) => c,
+        Err(e) => return Ok(CommandResult::err(e)),
+    };
+
+    match client.get_doc_list(&country, &doc_number, &kind_code).await {
+        Ok(data) => Ok(CommandResult::ok(data)),
+        Err(e) => Ok(CommandResult::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+async fn download_gd_document(
+    country: String,
+    doc_number: String,
+    doc_id: String,
+    pages: String,
+    format: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<CommandResult, String> {
+    let client = match get_gd_client(&state) {
+        Ok(c) => c,
+        Err(e) => return Ok(CommandResult::err(e)),
+    };
+
+    match client.get_document(&country, &doc_number, &doc_id, &pages, &format).await {
+        Ok(data) => {
+            let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
+            Ok(CommandResult::ok(serde_json::json!({
+                "data": encoded,
+                "size": data.len(),
+            })))
+        }
+        Err(e) => Ok(CommandResult::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+async fn batch_fetch_examination_history(
+    app_numbers: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<CommandResult>, String> {
+    let mut results = Vec::with_capacity(app_numbers.len());
+    for app_number in app_numbers {
+        let result = fetch_examination_history(app_number, state.clone()).await?;
+        results.push(result);
+    }
+    Ok(results)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Ok(path) = std::env::current_exe() {
@@ -390,8 +592,23 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState {
             uspto_client: Mutex::new(None),
+            gd_token: Mutex::new(None),
+            cache: Mutex::new(None),
         })
         .setup(|app| {
+            let app_data_dir = app.path().app_data_dir()?;
+            let db_path = app_data_dir.join(DB_FILENAME);
+            match CacheStore::new(&db_path) {
+                Ok(cache_store) => {
+                    let state = app.state::<AppState>();
+                    let mut guard = state.cache.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+                    *guard = Some(cache_store);
+                }
+                Err(e) => {
+                    log::error!("Failed to initialize cache: {}", e);
+                }
+            }
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -411,6 +628,11 @@ pub fn run() {
             fetch_continuity,
             fetch_foreign_priority,
             download_document,
+            set_gd_token,
+            fetch_family,
+            fetch_gd_doc_list,
+            download_gd_document,
+            batch_fetch_examination_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

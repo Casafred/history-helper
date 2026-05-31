@@ -4,8 +4,10 @@ const patentInput = document.getElementById("patent-input");
 const searchBtn = document.getElementById("search-btn");
 const convertBtn = document.getElementById("convert-btn");
 const officeBadge = document.getElementById("office-badge");
+const gdStatus = document.getElementById("gd-status");
 const resultSection = document.getElementById("result-section");
 const convertSection = document.getElementById("convert-section");
+const batchSection = document.getElementById("batch-section");
 const loading = document.getElementById("loading");
 const loadingText = document.getElementById("loading-text");
 const errorToast = document.getElementById("error-toast");
@@ -13,7 +15,7 @@ const errorToast = document.getElementById("error-toast");
 const aiSettingsBtn = document.getElementById("ai-settings-btn");
 const aiSettingsModal = document.getElementById("ai-settings-modal");
 const modalCloseBtn = document.getElementById("modal-close-btn");
-const modalOverlay = document.querySelector(".modal-overlay");
+const modalOverlay = document.querySelector("#ai-settings-modal .modal-overlay");
 const aiProviderSelect = document.getElementById("ai-provider-select");
 const aiApiKeyInput = document.getElementById("ai-api-key-input");
 const aiBaseUrlInput = document.getElementById("ai-base-url-input");
@@ -24,6 +26,22 @@ const aiTestResult = document.getElementById("ai-test-result");
 const aiSummarizeBtn = document.getElementById("ai-summarize-btn");
 const aiStatus = document.getElementById("ai-status");
 const aiSummaryResult = document.getElementById("ai-summary-result");
+
+const gdLoginBtn = document.getElementById("gd-login-btn");
+const gdLoginModal = document.getElementById("gd-login-modal");
+const gdModalCloseBtn = document.getElementById("gd-modal-close-btn");
+const gdTokenInput = document.getElementById("gd-token-input");
+const gdSaveBtn = document.getElementById("gd-save-btn");
+
+const batchBtn = document.getElementById("batch-btn");
+const batchInput = document.getElementById("batch-input");
+const batchStartBtn = document.getElementById("batch-start-btn");
+const batchCancelBtn = document.getElementById("batch-cancel-btn");
+const batchProgress = document.getElementById("batch-progress");
+const progressFill = document.getElementById("progress-fill");
+const progressText = document.getElementById("progress-text");
+const batchResults = document.getElementById("batch-results");
+const batchResultsList = document.getElementById("batch-results-list");
 
 const CONTINUITY_TYPE_MAP = {
   CON: "续案 (Continuation)",
@@ -47,8 +65,40 @@ const EVENT_CATEGORY_STYLE = {
   other: { label: "其他", cls: "cat-other" },
 };
 
+const OFFICE_NAMES = {
+  US: "美国 (USPTO)",
+  CN: "中国 (CNIPA)",
+  EP: "欧洲 (EPO)",
+  JP: "日本 (JPO)",
+  KR: "韩国 (KIPO)",
+  WO: "WIPO (PCT)",
+  WIPO: "WIPO (PCT)",
+};
+
 let currentData = null;
+let currentOffice = null;
 let aiAbortController = null;
+let batchAbortController = null;
+
+function loadGdToken() {
+  return localStorage.getItem("gd_token") || "";
+}
+
+function saveGdToken(token) {
+  localStorage.setItem("gd_token", token);
+}
+
+function updateGdStatus() {
+  const token = loadGdToken();
+  if (token) {
+    gdStatus.textContent = "GD 已登录 ✓";
+    gdStatus.className = "gd-status gd-logged-in";
+  } else {
+    gdStatus.textContent = "GD 未登录";
+    gdStatus.className = "gd-status gd-logged-out";
+  }
+  gdStatus.classList.remove("hidden");
+}
 
 patentInput.addEventListener("input", async () => {
   const val = patentInput.value.trim();
@@ -59,7 +109,9 @@ patentInput.addEventListener("input", async () => {
   try {
     const result = await invoke("detect_patent_office", { input: val });
     if (result.success) {
-      officeBadge.textContent = result.data + " 专利";
+      const office = result.data;
+      const name = OFFICE_NAMES[office] || office;
+      officeBadge.textContent = name + " 专利";
       officeBadge.classList.remove("hidden");
     } else {
       officeBadge.classList.add("hidden");
@@ -78,10 +130,11 @@ searchBtn.addEventListener("click", async () => {
   if (!input) return;
 
   searchBtn.disabled = true;
-  loadingText.textContent = "正在查询 USPTO 数据库...";
+  loadingText.textContent = "正在查询审查历史...";
   loading.classList.remove("hidden");
   resultSection.classList.add("hidden");
   convertSection.classList.add("hidden");
+  batchSection.classList.add("hidden");
   hideError();
 
   try {
@@ -92,6 +145,11 @@ searchBtn.addEventListener("click", async () => {
     }
 
     currentData = result.data;
+    currentOffice = currentData?.office || "US";
+
+    if (currentData?.cached) {
+      showWarning("数据来自本地缓存（1小时有效期）");
+    }
 
     if (currentData.warnings && currentData.warnings.length > 0) {
       currentData.warnings.forEach((w) => showWarning(w));
@@ -129,6 +187,14 @@ searchBtn.addEventListener("click", async () => {
         '<p class="placeholder" style="color:var(--danger)">续案/同族渲染失败</p>';
     }
 
+    try {
+      renderFamily(currentData);
+    } catch (e) {
+      console.error("renderFamily error:", e);
+      document.getElementById("family-content").innerHTML =
+        '<p class="placeholder" style="color:var(--danger)">GD 同族渲染失败</p>';
+    }
+
     aiSummarizeBtn.disabled = false;
     resultSection.classList.remove("hidden");
   } catch (e) {
@@ -163,6 +229,125 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.classList.add("active");
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
   });
+});
+
+gdLoginBtn.addEventListener("click", () => {
+  gdTokenInput.value = loadGdToken();
+  gdLoginModal.classList.remove("hidden");
+});
+
+gdModalCloseBtn.addEventListener("click", () => {
+  gdLoginModal.classList.add("hidden");
+});
+
+document.querySelector("#gd-login-modal .modal-overlay").addEventListener("click", () => {
+  gdLoginModal.classList.add("hidden");
+});
+
+gdSaveBtn.addEventListener("click", async () => {
+  const token = gdTokenInput.value.trim();
+  if (!token) {
+    showError("请输入 Access Token");
+    return;
+  }
+
+  try {
+    await invoke("set_gd_token", { token });
+    saveGdToken(token);
+    updateGdStatus();
+    gdLoginModal.classList.add("hidden");
+  } catch (e) {
+    showError("保存 Token 失败: " + e.toString());
+  }
+});
+
+batchBtn.addEventListener("click", () => {
+  batchSection.classList.toggle("hidden");
+});
+
+batchStartBtn.addEventListener("click", async () => {
+  const text = batchInput.value.trim();
+  if (!text) return;
+
+  const numbers = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  if (numbers.length === 0) return;
+
+  batchStartBtn.disabled = true;
+  batchCancelBtn.classList.remove("hidden");
+  batchProgress.classList.remove("hidden");
+  batchResults.classList.remove("hidden");
+  batchResultsList.innerHTML = "";
+  batchAbortController = new AbortController();
+
+  let completed = 0;
+  progressFill.style.width = "0%";
+  progressText.textContent = `0/${numbers.length}`;
+
+  for (const num of numbers) {
+    if (batchAbortController.signal.aborted) break;
+
+    try {
+      const result = await invoke("fetch_examination_history", { appNumber: num });
+      completed++;
+      progressFill.style.width = `${(completed / numbers.length) * 100}%`;
+      progressText.textContent = `${completed}/${numbers.length}`;
+
+      const item = document.createElement("div");
+      item.className = "batch-item";
+
+      if (result.success) {
+        const data = result.data;
+        const office = data?.office || "US";
+        const appNum = data?.applicationNumber || num;
+        const appData = data?.application?.patentFileWrapperDataBag?.[0]?.applicationMetaData;
+        const title = appData?.inventionTitle || "-";
+        const status = appData?.applicationStatusDescriptionText || "-";
+
+        item.innerHTML =
+          '<div class="batch-item-header">' +
+          '<span class="batch-item-num">' + (OFFICE_NAMES[office] || office) + " " + appNum + "</span>" +
+          '<span class="batch-item-status">' + status + "</span>" +
+          "</div>" +
+          '<div class="batch-item-title">' + title + "</div>";
+      } else {
+        item.innerHTML =
+          '<div class="batch-item-header">' +
+          '<span class="batch-item-num">' + num + "</span>" +
+          '<span class="batch-item-error">' + (result.error || "查询失败") + "</span>" +
+          "</div>";
+      }
+
+      batchResultsList.appendChild(item);
+    } catch (e) {
+      completed++;
+      progressFill.style.width = `${(completed / numbers.length) * 100}%`;
+      progressText.textContent = `${completed}/${numbers.length}`;
+
+      const item = document.createElement("div");
+      item.className = "batch-item";
+      item.innerHTML =
+        '<div class="batch-item-header">' +
+        '<span class="batch-item-num">' + num + "</span>" +
+        '<span class="batch-item-error">' + e.toString() + "</span>" +
+        "</div>";
+      batchResultsList.appendChild(item);
+    }
+  }
+
+  batchStartBtn.disabled = false;
+  batchCancelBtn.classList.add("hidden");
+});
+
+batchCancelBtn.addEventListener("click", () => {
+  if (batchAbortController) {
+    batchAbortController.abort();
+  }
+  batchStartBtn.disabled = false;
+  batchCancelBtn.classList.add("hidden");
 });
 
 aiSettingsBtn.addEventListener("click", () => {
@@ -329,9 +514,10 @@ function buildSummaryPrompt(data) {
   const events = data?.events || [];
   const officeActions = data?.officeActions || [];
 
-  let prompt = "请分析以下美国专利申请的审查历史，梳理关键信息：\n\n";
+  let prompt = "请分析以下专利申请的审查历史，梳理关键信息：\n\n";
   prompt += "【申请信息】\n";
-  prompt += "- 申请号: " + (appData?.applicationNumberText || "-") + "\n";
+  prompt += "- 申请号: " + (appData?.applicationNumberText || data?.applicationNumber || "-") + "\n";
+  prompt += "- 专利局: " + (OFFICE_NAMES[data?.office] || data?.office || "US") + "\n";
   prompt += "- 发明名称: " + (meta.inventionTitle || "-") + "\n";
   prompt += "- 申请人: " + (meta.firstApplicantName || "-") + "\n";
   prompt += "- 审查员: " + (meta.examinerNameText || "-") + "\n";
@@ -394,6 +580,34 @@ function markdownToHtml(text) {
 }
 
 function renderOverview(data) {
+  const office = data?.office || "US";
+
+  if (office !== "US") {
+    const appNum = data?.applicationNumber || "-";
+    const officeName = OFFICE_NAMES[office] || office;
+    let html = infoRow("专利局", officeName);
+    html += infoRow("申请号", appNum);
+
+    if (data?.family) {
+      const familyList = data.family?.list || [];
+      if (familyList.length > 0) {
+        const first = familyList[0];
+        html += infoRow("发明名称", first.title || "-");
+        html += infoRow("申请人", first.applicantNames || "-");
+      }
+      html += infoRow("同族成员数", familyList.length.toString());
+    }
+
+    if (data?.documents?.docs) {
+      html += infoRow("审查文档数", data.documents.docs.length.toString());
+    }
+
+    document.getElementById("app-info").innerHTML = html;
+    document.getElementById("app-status").innerHTML =
+      '<p class="placeholder">非 US 专利状态详情请查看 GD 同族 Tab</p>';
+    return;
+  }
+
   const appData = data?.application;
   const bag = appData?.patentFileWrapperDataBag?.[0];
   if (!bag) {
@@ -433,7 +647,7 @@ function renderTimeline(data) {
   const events = data?.events || [];
   if (events.length === 0) {
     document.getElementById("timeline-content").innerHTML =
-      '<p class="placeholder">无审查事件记录</p>';
+      '<p class="placeholder">无审查事件记录（非 US 专利暂无时间线数据）</p>';
     return;
   }
 
@@ -472,8 +686,53 @@ function renderTimeline(data) {
 }
 
 function renderDocuments(data) {
+  const office = data?.office || "US";
+
+  if (office !== "US" && data?.documents?.docs) {
+    const docs = data.documents.docs;
+    if (docs.length === 0) {
+      document.getElementById("documents-content").innerHTML =
+        '<p class="placeholder">无审查文档</p>';
+      return;
+    }
+
+    const html = docs
+      .map((d) => {
+        const code = d.docCode || d.docCodeDesc || "-";
+        const date = d.legalDateStr || "-";
+        const desc = d.docDesc || d.docCodeDesc || "-";
+        const docId = d.docId || "";
+        const pages = d.numberOfPages;
+
+        const downloadHtml = docId
+          ? '<button class="doc-download gd-doc-download" data-country="' +
+            office + '" data-doc-number="' +
+            (data.applicationNumber || "") + '" data-doc-id="' +
+            docId + '" data-pages="1">PDF' +
+            (pages ? " (" + pages + "p)" : "") +
+            "</button>"
+          : "";
+
+        return (
+          '<div class="doc-item">' +
+          '<span class="doc-type">' + code + "</span>" +
+          '<div class="doc-info">' +
+          '<div class="doc-desc">' + desc + "</div>" +
+          '<div class="doc-date">' + date + "</div>" +
+          "</div>" +
+          downloadHtml +
+          "</div>"
+        );
+      })
+      .join("");
+
+    document.getElementById("documents-content").innerHTML = html;
+    bindGdDocDownload();
+    return;
+  }
+
   const docs = data?.documents || [];
-  if (docs.length === 0) {
+  if (!Array.isArray(docs) || docs.length === 0) {
     document.getElementById("documents-content").innerHTML =
       '<p class="placeholder">无审查文档</p>';
     return;
@@ -536,8 +795,11 @@ function renderDocuments(data) {
     .join("");
 
   document.getElementById("documents-content").innerHTML = html;
+  bindUsptoDocDownload();
+}
 
-  document.querySelectorAll(".doc-download").forEach((btn) => {
+function bindUsptoDocDownload() {
+  document.querySelectorAll(".doc-download:not(.gd-doc-download)").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const url = btn.getAttribute("data-url");
       if (!url) return;
@@ -554,23 +816,7 @@ function renderDocuments(data) {
           return;
         }
 
-        const byteCharacters = atob(result.data.data);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: "application/pdf" });
-        const blobUrl = URL.createObjectURL(blob);
-
-        const a = document.createElement("a");
-        a.href = blobUrl;
-        a.download = "document.pdf";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-
+        downloadBlob(result.data.data, "document.pdf");
         btn.textContent = "已下载";
         setTimeout(() => {
           btn.textContent = "PDF";
@@ -585,7 +831,73 @@ function renderDocuments(data) {
   });
 }
 
+function bindGdDocDownload() {
+  document.querySelectorAll(".gd-doc-download").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const country = btn.getAttribute("data-country");
+      const docNumber = btn.getAttribute("data-doc-number");
+      const docId = btn.getAttribute("data-doc-id");
+      const pages = btn.getAttribute("data-pages");
+
+      btn.disabled = true;
+      btn.textContent = "下载中...";
+
+      try {
+        const result = await invoke("download_gd_document", {
+          country,
+          docNumber,
+          docId,
+          pages,
+          format: "PDF",
+        });
+        if (!result.success) {
+          showError(result.error || "下载失败");
+          btn.textContent = "PDF";
+          btn.disabled = false;
+          return;
+        }
+
+        downloadBlob(result.data.data, "document.pdf");
+        btn.textContent = "已下载";
+        setTimeout(() => {
+          btn.textContent = "PDF";
+          btn.disabled = false;
+        }, 2000);
+      } catch (e) {
+        showError("文档下载失败: " + e.toString());
+        btn.textContent = "PDF";
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+function downloadBlob(base64Data, filename) {
+  const byteCharacters = atob(base64Data);
+  const byteNumbers = new Array(byteCharacters.length);
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+  const byteArray = new Uint8Array(byteNumbers);
+  const blob = new Blob([byteArray], { type: "application/pdf" });
+  const blobUrl = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(blobUrl);
+}
+
 function renderContinuity(data) {
+  if (data?.office && data.office !== "US") {
+    document.getElementById("continuity-content").innerHTML =
+      '<p class="placeholder">非 US 专利的续案信息请查看 GD 同族 Tab</p>';
+    return;
+  }
+
   const contBag = data?.continuity?.patentFileWrapperDataBag?.[0];
   const parents = contBag?.parentContinuityBag || [];
   const children = contBag?.childContinuityBag || [];
@@ -667,6 +979,83 @@ function renderContinuity(data) {
   document.getElementById("continuity-content").innerHTML = html;
 }
 
+function renderFamily(data) {
+  const office = data?.office || "US";
+
+  if (office === "US" && data?.family) {
+    renderFamilyData(data.family);
+    return;
+  }
+
+  if (data?.family) {
+    renderFamilyData(data.family);
+    return;
+  }
+
+  const token = loadGdToken();
+  if (!token) {
+    document.getElementById("family-content").innerHTML =
+      '<p class="placeholder">需要登录 Global Dossier 后查看同族专利信息。请点击上方「GD 登录」按钮。</p>';
+    return;
+  }
+
+  document.getElementById("family-content").innerHTML =
+    '<p class="placeholder">查询后自动显示同族信息</p>';
+}
+
+function renderFamilyData(family) {
+  if (!family) {
+    document.getElementById("family-content").innerHTML =
+      '<p class="placeholder">无同族数据</p>';
+    return;
+  }
+
+  const list = family.list || [];
+  if (list.length === 0) {
+    document.getElementById("family-content").innerHTML =
+      '<p class="placeholder">未找到同族专利</p>';
+    return;
+  }
+
+  let html = '<div class="family-list">';
+
+  list.forEach((member) => {
+    const country = member.countryCode || "-";
+    const appNum = member.appNum || "-";
+    const title = member.title || "-";
+    const applicant = member.applicantNames || "-";
+    const appDate = member.appDateStr || "-";
+    const officeName = OFFICE_NAMES[country] || country;
+
+    let pubs = "";
+    if (member.pubList && member.pubList.length > 0) {
+      pubs = member.pubList
+        .map(
+          (p) =>
+            (p.pubCountry || "") + " " + (p.pubNum || "") + " (" + (p.pubDateStr || "-") + ")"
+        )
+        .join(", ");
+    }
+
+    html +=
+      '<div class="family-member">' +
+      '<div class="family-member-header">' +
+      '<span class="family-member-office">' + officeName + "</span>" +
+      '<span class="family-member-num">' + appNum + "</span>" +
+      "</div>" +
+      '<div class="family-member-title">' + title + "</div>" +
+      '<div class="family-member-info">' +
+      '<span>申请人: ' + applicant + "</span>" +
+      '<span>申请日: ' + appDate + "</span>" +
+      "</div>" +
+      (pubs ? '<div class="family-member-pubs">公开: ' + pubs + "</div>" : "") +
+      "</div>";
+  });
+
+  html += "</div>";
+  document.getElementById("family-content").innerHTML = html;
+}
+
 function renderConvertResult(data) {
   if (!data) {
     document.getElementById("convert-result").innerHTML =
@@ -676,7 +1065,7 @@ function renderConvertResult(data) {
 
   const html = [
     infoRow("原始输入", data.raw),
-    infoRow("识别局", data.office),
+    infoRow("识别局", OFFICE_NAMES[data.office] || data.office),
     infoRow("申请号", data.applicationNumber),
     infoRow("公开号", data.publicationNumber || "-"),
     infoRow("专利号", data.patentNumber || "-"),
@@ -704,7 +1093,7 @@ function showError(msg) {
 function showWarning(msg) {
   const warningEl = document.createElement("div");
   warningEl.className = "toast warning-toast";
-  warningEl.textContent = "⚠ " + msg;
+  warningEl.textContent = "\u26A0 " + msg;
   document.querySelector(".app-main").appendChild(warningEl);
   setTimeout(() => {
     if (warningEl.parentNode) {
@@ -716,3 +1105,5 @@ function showWarning(msg) {
 function hideError() {
   errorToast.classList.add("hidden");
 }
+
+updateGdStatus();

@@ -19,14 +19,42 @@
           <input
             type="text"
             id="patent-input"
-            placeholder="输入专利号（如 US14412875 或 14412875）"
+            placeholder="输入专利号（如 US14412875, EP1234567, WO2023123456）"
             autocomplete="off"
           >
           <button id="search-btn" class="btn-primary">查询</button>
           <button id="convert-btn" class="btn-secondary">格式转换</button>
+          <button id="gd-login-btn" class="btn-secondary" title="登录 Global Dossier 查询非 US 专利">GD 登录</button>
+          <button id="batch-btn" class="btn-secondary" title="批量查询">批量查询</button>
           <button id="ai-settings-btn" class="btn-icon" title="AI 设置">⚙</button>
         </div>
         <div id="office-badge" class="office-badge hidden"></div>
+        <div id="gd-status" class="gd-status hidden"></div>
+      </section>
+
+      <section id="batch-section" class="batch-section hidden">
+        <div class="info-card">
+          <div class="card-header">批量查询</div>
+          <div class="card-body">
+            <textarea id="batch-input" placeholder="每行一个专利号，如：&#10;US14412875&#10;EP1234567&#10;WO2023123456" rows="6"></textarea>
+            <div class="batch-actions">
+              <button id="batch-start-btn" class="btn-primary">开始批量查询</button>
+              <button id="batch-cancel-btn" class="btn-secondary hidden">取消</button>
+            </div>
+            <div id="batch-progress" class="batch-progress hidden">
+              <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+              </div>
+              <span id="progress-text">0/0</span>
+            </div>
+          </div>
+        </div>
+        <div id="batch-results" class="batch-results hidden">
+          <div class="info-card">
+            <div class="card-header">批量查询结果</div>
+            <div id="batch-results-list" class="card-body"></div>
+          </div>
+        </div>
       </section>
 
       <section id="result-section" class="result-section hidden">
@@ -35,6 +63,7 @@
           <button class="tab-btn" data-tab="timeline">审查时间线</button>
           <button class="tab-btn" data-tab="documents">审查文档</button>
           <button class="tab-btn" data-tab="continuity">续案/同族</button>
+          <button class="tab-btn" data-tab="family">GD 同族</button>
           <button class="tab-btn" data-tab="ai-summary">AI 梳理</button>
         </div>
 
@@ -73,6 +102,12 @@
           </div>
         </div>
 
+        <div id="tab-family" class="tab-content">
+          <div id="family-content">
+            <p class="placeholder">需要登录 Global Dossier 后查看同族专利信息</p>
+          </div>
+        </div>
+
         <div id="tab-ai-summary" class="tab-content">
           <div id="ai-summary-content">
             <div class="ai-summary-header">
@@ -92,6 +127,27 @@
           <div id="convert-result" class="card-body"></div>
         </div>
       </section>
+
+      <div id="gd-login-modal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>Global Dossier 登录</h2>
+            <button id="gd-modal-close-btn" class="btn-icon">&times;</button>
+          </div>
+          <div class="modal-body">
+            <p class="gd-login-hint">登录 Global Dossier 后可查询 EP/JP/KR/WO 等非美国专利的审查历史和同族信息。</p>
+            <div class="form-group">
+              <label>Access Token</label>
+              <input type="password" id="gd-token-input" placeholder="粘贴 Global Dossier Access Token">
+            </div>
+            <p class="gd-login-hint">获取方式：在浏览器中打开 <a href="https://globaldossier.uspto.gov" target="_blank" rel="noopener">globaldossier.uspto.gov</a>，登录后按 F12 打开开发者工具，在 Network 标签中找到任意 API 请求的 Authorization 头，复制 Bearer 后面的 Token。</p>
+            <div class="form-actions">
+              <button id="gd-save-btn" class="btn-primary">保存 Token</button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div id="ai-settings-modal" class="modal hidden">
         <div class="modal-overlay"></div>
@@ -132,7 +188,7 @@
 
       <div id="loading" class="loading hidden">
         <div class="spinner"></div>
-        <p id="loading-text">正在查询 USPTO 数据库...</p>
+        <p id="loading-text">正在查询...</p>
       </div>
 
       <div id="error-toast" class="toast hidden"></div>
