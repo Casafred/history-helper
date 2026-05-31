@@ -24,7 +24,7 @@
           >
           <button id="search-btn" class="btn-primary">查询</button>
           <button id="convert-btn" class="btn-secondary">格式转换</button>
-          <button id="gd-login-btn" class="btn-secondary" title="登录 Global Dossier 查询非 US 专利">GD 登录</button>
+          <button id="gd-login-btn" class="btn-secondary" title="登录 Global Dossier">GD 登录</button>
           <button id="batch-btn" class="btn-secondary" title="批量查询">批量查询</button>
           <button id="ai-settings-btn" class="btn-icon" title="AI 设置">⚙</button>
         </div>
@@ -60,10 +60,8 @@
       <section id="result-section" class="result-section hidden">
         <div class="tabs">
           <button class="tab-btn active" data-tab="overview">概览</button>
-          <button class="tab-btn" data-tab="timeline">审查时间线</button>
-          <button class="tab-btn" data-tab="documents">审查文档</button>
-          <button class="tab-btn" data-tab="continuity">续案/同族</button>
           <button class="tab-btn" data-tab="family">GD 同族</button>
+          <button class="tab-btn" data-tab="documents">审查文档</button>
           <button class="tab-btn" data-tab="ai-summary">AI 梳理</button>
         </div>
 
@@ -84,27 +82,15 @@
           </div>
         </div>
 
-        <div id="tab-timeline" class="tab-content">
-          <div id="timeline-content">
-            <p class="placeholder">审查时间线将在此显示</p>
+        <div id="tab-family" class="tab-content">
+          <div id="family-content">
+            <p class="placeholder">需要登录 Global Dossier 后查看同族专利信息</p>
           </div>
         </div>
 
         <div id="tab-documents" class="tab-content">
           <div id="documents-content">
-            <p class="placeholder">审查文档列表将在此显示</p>
-          </div>
-        </div>
-
-        <div id="tab-continuity" class="tab-content">
-          <div id="continuity-content">
-            <p class="placeholder">续案/分案关系将在此显示</p>
-          </div>
-        </div>
-
-        <div id="tab-family" class="tab-content">
-          <div id="family-content">
-            <p class="placeholder">需要登录 Global Dossier 后查看同族专利信息</p>
+            <p class="placeholder">需要登录 Global Dossier 后查看审查文档</p>
           </div>
         </div>
 
@@ -136,7 +122,7 @@
             <button id="gd-modal-close-btn" class="btn-icon">&times;</button>
           </div>
           <div class="modal-body">
-            <p class="gd-login-hint">登录 Global Dossier 后可查询 EP/JP/KR/WO 等非美国专利的审查历史和同族信息。</p>
+            <p class="gd-login-hint">登录 Global Dossier 后可查询 IP5 各国（US/CN/EP/JP/KR/WO）的专利信息。</p>
             <div class="form-group">
               <label>Access Token</label>
               <input type="password" id="gd-token-input" placeholder="粘贴 Global Dossier Access Token">
