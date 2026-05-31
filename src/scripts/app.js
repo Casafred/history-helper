@@ -92,10 +92,43 @@ searchBtn.addEventListener("click", async () => {
     }
 
     currentData = result.data;
-    renderOverview(currentData);
-    renderTimeline(currentData);
-    renderDocuments(currentData);
-    renderContinuity(currentData);
+
+    if (currentData.warnings && currentData.warnings.length > 0) {
+      currentData.warnings.forEach((w) => showWarning(w));
+    }
+
+    try {
+      renderOverview(currentData);
+    } catch (e) {
+      console.error("renderOverview error:", e);
+      document.getElementById("app-info").innerHTML =
+        '<p class="placeholder" style="color:var(--danger)">概览渲染失败</p>';
+    }
+
+    try {
+      renderTimeline(currentData);
+    } catch (e) {
+      console.error("renderTimeline error:", e);
+      document.getElementById("timeline-content").innerHTML =
+        '<p class="placeholder" style="color:var(--danger)">时间线渲染失败</p>';
+    }
+
+    try {
+      renderDocuments(currentData);
+    } catch (e) {
+      console.error("renderDocuments error:", e);
+      document.getElementById("documents-content").innerHTML =
+        '<p class="placeholder" style="color:var(--danger)">文档渲染失败</p>';
+    }
+
+    try {
+      renderContinuity(currentData);
+    } catch (e) {
+      console.error("renderContinuity error:", e);
+      document.getElementById("continuity-content").innerHTML =
+        '<p class="placeholder" style="color:var(--danger)">续案/同族渲染失败</p>';
+    }
+
     aiSummarizeBtn.disabled = false;
     resultSection.classList.remove("hidden");
   } catch (e) {
@@ -473,11 +506,11 @@ function renderDocuments(data) {
         : "";
 
       const downloadHtml = downloadUrl
-        ? '<a class="doc-download" href="' +
+        ? '<button class="doc-download" data-url="' +
           downloadUrl +
-          '" target="_blank">PDF' +
+          '">PDF' +
           (pages ? " (" + pages + "p)" : "") +
-          "</a>"
+          "</button>"
         : "";
 
       return (
@@ -503,6 +536,53 @@ function renderDocuments(data) {
     .join("");
 
   document.getElementById("documents-content").innerHTML = html;
+
+  document.querySelectorAll(".doc-download").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const url = btn.getAttribute("data-url");
+      if (!url) return;
+
+      btn.disabled = true;
+      btn.textContent = "下载中...";
+
+      try {
+        const result = await invoke("download_document", { url });
+        if (!result.success) {
+          showError(result.error || "下载失败");
+          btn.textContent = "PDF";
+          btn.disabled = false;
+          return;
+        }
+
+        const byteCharacters = atob(result.data.data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: "application/pdf" });
+        const blobUrl = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = "document.pdf";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+
+        btn.textContent = "已下载";
+        setTimeout(() => {
+          btn.textContent = "PDF";
+          btn.disabled = false;
+        }, 2000);
+      } catch (e) {
+        showError("文档下载失败: " + e.toString());
+        btn.textContent = "PDF";
+        btn.disabled = false;
+      }
+    });
+  });
 }
 
 function renderContinuity(data) {
@@ -619,6 +699,18 @@ function showError(msg) {
   errorToast.textContent = msg;
   errorToast.classList.remove("hidden");
   setTimeout(() => errorToast.classList.add("hidden"), 5000);
+}
+
+function showWarning(msg) {
+  const warningEl = document.createElement("div");
+  warningEl.className = "toast warning-toast";
+  warningEl.textContent = "⚠ " + msg;
+  document.querySelector(".app-main").appendChild(warningEl);
+  setTimeout(() => {
+    if (warningEl.parentNode) {
+      warningEl.parentNode.removeChild(warningEl);
+    }
+  }, 8000);
 }
 
 function hideError() {

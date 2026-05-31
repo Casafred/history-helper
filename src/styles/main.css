@@ -369,6 +369,11 @@ body {
   border-color: var(--accent);
 }
 
+.doc-download:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .loading {
   text-align: center;
   padding: 40px 0;
@@ -400,6 +405,21 @@ body {
   border-radius: var(--radius);
   font-size: 13px;
   z-index: 1000;
+  animation: fadeIn 0.3s ease;
+}
+
+.warning-toast {
+  position: relative;
+  bottom: auto;
+  left: auto;
+  transform: none;
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--warning);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  margin-bottom: 8px;
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  font-size: 13px;
   animation: fadeIn 0.3s ease;
 }
 

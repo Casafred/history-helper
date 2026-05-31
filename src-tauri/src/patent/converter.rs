@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum PatentOffice {
     US,
     CN,
@@ -41,6 +41,7 @@ pub enum ConversionError {
     #[error("Invalid patent number: {0}")]
     InvalidNumber(String),
     #[error("Conversion not supported: {from} -> {to}")]
+    #[allow(dead_code)]
     NotSupported { from: String, to: String },
 }
 

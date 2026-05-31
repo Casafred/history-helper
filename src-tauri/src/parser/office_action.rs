@@ -39,6 +39,7 @@ impl OfficeActionType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ParsedOfficeAction {
     pub document_code: String,
     pub action_type: OfficeActionType,
@@ -49,6 +50,7 @@ pub struct ParsedOfficeAction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ExaminationTimeline {
     pub application_number: String,
     pub events: Vec<TimelineEvent>,
@@ -56,6 +58,7 @@ pub struct ExaminationTimeline {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct TimelineEvent {
     pub date: String,
     pub code: String,
@@ -87,6 +90,7 @@ impl EventCategory {
     }
 }
 
+#[allow(dead_code)]
 pub fn parse_office_actions(documents: &[DocumentInfo]) -> Vec<ParsedOfficeAction> {
     documents
         .iter()
@@ -126,6 +130,7 @@ pub fn parse_office_actions(documents: &[DocumentInfo]) -> Vec<ParsedOfficeActio
         .collect()
 }
 
+#[allow(dead_code)]
 pub fn build_timeline(
     app_number: &str,
     events: &[EventData],

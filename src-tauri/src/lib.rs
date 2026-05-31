@@ -1,11 +1,12 @@
 mod api;
+#[allow(dead_code)]
 mod models;
 mod parser;
 mod patent;
 
 use api::uspto::UsptoClient;
 use patent::converter::{detect_office, normalize_us_application_number, parse_patent_number, PatentOffice};
-use parser::office_action::{build_timeline, EventCategory, OfficeActionType};
+use parser::office_action::{EventCategory, OfficeActionType};
 use serde::Serialize;
 use std::sync::Mutex;
 
@@ -55,61 +56,62 @@ fn get_or_create_client(state: &AppState) -> Result<UsptoClient, String> {
 }
 
 #[tauri::command]
-async fn convert_patent_number(input: String) -> CommandResult {
-    match parse_patent_number(&input) {
+async fn convert_patent_number(input: String) -> Result<CommandResult, String> {
+    Ok(match parse_patent_number(&input) {
         Ok(pn) => CommandResult::ok(serde_json::to_value(pn).unwrap_or_default()),
         Err(e) => CommandResult::err(e.to_string()),
-    }
+    })
 }
 
 #[tauri::command]
-async fn detect_patent_office(input: String) -> CommandResult {
-    match detect_office(&input) {
+async fn detect_patent_office(input: String) -> Result<CommandResult, String> {
+    Ok(match detect_office(&input) {
         Some(office) => CommandResult::ok(serde_json::Value::String(office.to_string())),
         None => CommandResult::err(format!("Unrecognized patent number format: {}", input)),
-    }
+    })
 }
 
 #[tauri::command]
 async fn fetch_examination_history(
     app_number: String,
     state: tauri::State<'_, AppState>,
-) -> CommandResult {
+) -> Result<CommandResult, String> {
     let office = detect_office(&app_number);
     match office {
         Some(PatentOffice::US) => {}
         Some(other) => {
-            return CommandResult::err(format!(
+            return Ok(CommandResult::err(format!(
                 "暂不支持 {} 专利局的审查历史查询，目前仅支持美国 (US) 专利",
                 other
-            ));
+            )));
         }
         None => {
-            return CommandResult::err(format!(
+            return Ok(CommandResult::err(format!(
                 "无法识别专利号格式: {}，请输入有效的美国专利申请号（如 US14412875 或 14412875）",
                 app_number
-            ));
+            )));
         }
     }
 
     let client = match get_or_create_client(&state) {
         Ok(c) => c,
-        Err(e) => return CommandResult::err(e),
+        Err(e) => return Ok(CommandResult::err(e)),
     };
 
     let normalized = match normalize_us_application_number(&app_number) {
         Ok(n) => n,
-        Err(e) => return CommandResult::err(e.to_string()),
+        Err(e) => return Ok(CommandResult::err(e.to_string())),
     };
 
     let mut result = serde_json::Map::new();
     result.insert("applicationNumber".into(), serde_json::Value::String(normalized.clone()));
+    let mut warnings: Vec<String> = Vec::new();
 
     match client.get_application(&normalized).await {
         Ok(data) => {
             result.insert("application".into(), serde_json::to_value(data).unwrap_or_default());
         }
-        Err(e) => return CommandResult::err(e.to_string()),
+        Err(e) => return Ok(CommandResult::err(e.to_string())),
     }
 
     match client.get_transactions(&normalized).await {
@@ -146,7 +148,9 @@ async fn fetch_examination_history(
             }
         }
         Err(e) => {
-            log::warn!("Failed to fetch transactions: {}", e);
+            let msg = format!("审查事件查询失败: {}", e);
+            log::warn!("{}", msg);
+            warnings.push(msg);
         }
     }
 
@@ -178,7 +182,9 @@ async fn fetch_examination_history(
             result.insert("officeActions".into(), serde_json::Value::Array(office_actions));
         }
         Err(e) => {
-            log::warn!("Failed to fetch documents: {}", e);
+            let msg = format!("审查文档查询失败: {}", e);
+            log::warn!("{}", msg);
+            warnings.push(msg);
         }
     }
 
@@ -187,7 +193,9 @@ async fn fetch_examination_history(
             result.insert("continuity".into(), serde_json::to_value(data).unwrap_or_default());
         }
         Err(e) => {
-            log::warn!("Failed to fetch continuity: {}", e);
+            let msg = format!("续案信息查询失败: {}", e);
+            log::warn!("{}", msg);
+            warnings.push(msg);
         }
     }
 
@@ -199,139 +207,170 @@ async fn fetch_examination_history(
             );
         }
         Err(e) => {
-            log::warn!("Failed to fetch foreign priority: {}", e);
+            let msg = format!("外国优先权查询失败: {}", e);
+            log::warn!("{}", msg);
+            warnings.push(msg);
         }
     }
 
-    CommandResult::ok(serde_json::Value::Object(result))
+    if !warnings.is_empty() {
+        result.insert(
+            "warnings".into(),
+            serde_json::Value::Array(
+                warnings.into_iter().map(serde_json::Value::String).collect(),
+            ),
+        );
+    }
+
+    Ok(CommandResult::ok(serde_json::Value::Object(result)))
 }
 
 #[tauri::command]
-async fn fetch_application(app_number: String, state: tauri::State<'_, AppState>) -> CommandResult {
+async fn fetch_application(app_number: String, state: tauri::State<'_, AppState>) -> Result<CommandResult, String> {
     let office = detect_office(&app_number);
     if !matches!(office, Some(PatentOffice::US)) {
-        return CommandResult::err(format!(
-            "暂不支持该专利号所属专利局的查询，请输入美国专利申请号"
-        ));
+        return Ok(CommandResult::err("暂不支持该专利号所属专利局的查询，请输入美国专利申请号"));
     }
 
     let client = match get_or_create_client(&state) {
         Ok(c) => c,
-        Err(e) => return CommandResult::err(e),
+        Err(e) => return Ok(CommandResult::err(e)),
     };
 
     let normalized = match normalize_us_application_number(&app_number) {
         Ok(n) => n,
-        Err(e) => return CommandResult::err(e.to_string()),
+        Err(e) => return Ok(CommandResult::err(e.to_string())),
     };
 
-    match client.get_application(&normalized).await {
+    Ok(match client.get_application(&normalized).await {
         Ok(data) => CommandResult::ok(serde_json::to_value(data).unwrap_or_default()),
         Err(e) => CommandResult::err(e.to_string()),
-    }
+    })
 }
 
 #[tauri::command]
 async fn fetch_transactions(
     app_number: String,
     state: tauri::State<'_, AppState>,
-) -> CommandResult {
+) -> Result<CommandResult, String> {
     let office = detect_office(&app_number);
     if !matches!(office, Some(PatentOffice::US)) {
-        return CommandResult::err("暂不支持该专利号所属专利局的查询".into());
+        return Ok(CommandResult::err("暂不支持该专利号所属专利局的查询"));
     }
 
     let client = match get_or_create_client(&state) {
         Ok(c) => c,
-        Err(e) => return CommandResult::err(e),
+        Err(e) => return Ok(CommandResult::err(e)),
     };
 
     let normalized = match normalize_us_application_number(&app_number) {
         Ok(n) => n,
-        Err(e) => return CommandResult::err(e.to_string()),
+        Err(e) => return Ok(CommandResult::err(e.to_string())),
     };
 
-    match client.get_transactions(&normalized).await {
+    Ok(match client.get_transactions(&normalized).await {
         Ok(data) => CommandResult::ok(serde_json::to_value(data).unwrap_or_default()),
         Err(e) => CommandResult::err(e.to_string()),
-    }
+    })
 }
 
 #[tauri::command]
 async fn fetch_documents(
     app_number: String,
     state: tauri::State<'_, AppState>,
-) -> CommandResult {
+) -> Result<CommandResult, String> {
     let office = detect_office(&app_number);
     if !matches!(office, Some(PatentOffice::US)) {
-        return CommandResult::err("暂不支持该专利号所属专利局的查询".into());
+        return Ok(CommandResult::err("暂不支持该专利号所属专利局的查询"));
     }
 
     let client = match get_or_create_client(&state) {
         Ok(c) => c,
-        Err(e) => return CommandResult::err(e),
+        Err(e) => return Ok(CommandResult::err(e)),
     };
 
     let normalized = match normalize_us_application_number(&app_number) {
         Ok(n) => n,
-        Err(e) => return CommandResult::err(e.to_string()),
+        Err(e) => return Ok(CommandResult::err(e.to_string())),
     };
 
-    match client.get_documents(&normalized).await {
+    Ok(match client.get_documents(&normalized).await {
         Ok(data) => CommandResult::ok(serde_json::to_value(data).unwrap_or_default()),
         Err(e) => CommandResult::err(e.to_string()),
-    }
+    })
 }
 
 #[tauri::command]
 async fn fetch_continuity(
     app_number: String,
     state: tauri::State<'_, AppState>,
-) -> CommandResult {
+) -> Result<CommandResult, String> {
     let office = detect_office(&app_number);
     if !matches!(office, Some(PatentOffice::US)) {
-        return CommandResult::err("暂不支持该专利号所属专利局的查询".into());
+        return Ok(CommandResult::err("暂不支持该专利号所属专利局的查询"));
     }
 
     let client = match get_or_create_client(&state) {
         Ok(c) => c,
-        Err(e) => return CommandResult::err(e),
+        Err(e) => return Ok(CommandResult::err(e)),
     };
 
     let normalized = match normalize_us_application_number(&app_number) {
         Ok(n) => n,
-        Err(e) => return CommandResult::err(e.to_string()),
+        Err(e) => return Ok(CommandResult::err(e.to_string())),
     };
 
-    match client.get_continuity(&normalized).await {
+    Ok(match client.get_continuity(&normalized).await {
         Ok(data) => CommandResult::ok(serde_json::to_value(data).unwrap_or_default()),
         Err(e) => CommandResult::err(e.to_string()),
-    }
+    })
 }
 
 #[tauri::command]
 async fn fetch_foreign_priority(
     app_number: String,
     state: tauri::State<'_, AppState>,
-) -> CommandResult {
+) -> Result<CommandResult, String> {
     let office = detect_office(&app_number);
     if !matches!(office, Some(PatentOffice::US)) {
-        return CommandResult::err("暂不支持该专利号所属专利局的查询".into());
+        return Ok(CommandResult::err("暂不支持该专利号所属专利局的查询"));
     }
 
     let client = match get_or_create_client(&state) {
         Ok(c) => c,
-        Err(e) => return CommandResult::err(e),
+        Err(e) => return Ok(CommandResult::err(e)),
     };
 
     let normalized = match normalize_us_application_number(&app_number) {
         Ok(n) => n,
-        Err(e) => return CommandResult::err(e.to_string()),
+        Err(e) => return Ok(CommandResult::err(e.to_string())),
     };
 
-    match client.get_foreign_priority(&normalized).await {
+    Ok(match client.get_foreign_priority(&normalized).await {
         Ok(data) => CommandResult::ok(serde_json::to_value(data).unwrap_or_default()),
         Err(e) => CommandResult::err(e.to_string()),
+    })
+}
+
+#[tauri::command]
+async fn download_document(
+    url: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<CommandResult, String> {
+    let client = match get_or_create_client(&state) {
+        Ok(c) => c,
+        Err(e) => return Ok(CommandResult::err(e)),
+    };
+
+    match client.download_file(&url).await {
+        Ok(data) => {
+            let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
+            Ok(CommandResult::ok(serde_json::json!({
+                "data": encoded,
+                "size": data.len(),
+            })))
+        }
+        Err(e) => Ok(CommandResult::err(e.to_string())),
     }
 }
 
@@ -370,6 +409,7 @@ pub fn run() {
             fetch_documents,
             fetch_continuity,
             fetch_foreign_priority,
+            download_document,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

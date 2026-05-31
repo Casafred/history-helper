@@ -192,6 +192,7 @@ impl UsptoClient {
         Ok(data)
     }
 
+    #[allow(dead_code)]
     pub async fn get_application_meta(
         &self,
         app_number: &str,
@@ -239,6 +240,24 @@ impl UsptoClient {
         let url = format!("{}/{}/foreign-priority", USPTO_API_BASE, app_number);
         let resp = self.get_with_retry(&url).await?;
         let data = resp.json::<PatentApplicationResponse>().await?;
+        Ok(data)
+    }
+
+    pub async fn download_file(&self, url: &str) -> Result<Vec<u8>, UsptoApiError> {
+        let resp = self
+            .client
+            .get(url)
+            .header("X-API-KEY", &self.api_key)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(UsptoApiError::ApiError { status, message: body });
+        }
+
+        let data = resp.bytes().await?.to_vec();
         Ok(data)
     }
 }
