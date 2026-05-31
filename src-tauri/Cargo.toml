@@ -27,6 +27,7 @@ dotenv = "0.15"
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 url = "2"
+rusqlite = { version = "0.31", features = ["bundled"] }
 base64 = "0.22"
 
 [profile.release]

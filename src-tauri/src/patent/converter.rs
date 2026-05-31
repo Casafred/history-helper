@@ -24,6 +24,32 @@ impl fmt::Display for PatentOffice {
     }
 }
 
+impl PatentOffice {
+    pub fn display_name(&self) -> &str {
+        match self {
+            PatentOffice::US => "美国 (USPTO)",
+            PatentOffice::CN => "中国 (CNIPA)",
+            PatentOffice::EP => "欧洲 (EPO)",
+            PatentOffice::JP => "日本 (JPO)",
+            PatentOffice::KR => "韩国 (KIPO)",
+            PatentOffice::WO => "世界知识产权组织 (WIPO/PCT)",
+        }
+    }
+
+    pub fn supports_examination_history(&self) -> bool {
+        matches!(self, PatentOffice::US | PatentOffice::EP | PatentOffice::WO)
+    }
+
+    pub fn api_unavailable_message(&self) -> Option<String> {
+        match self {
+            PatentOffice::CN => Some("中国国家知识产权局 (CNIPA) 暂无公开 API，请访问 cnipa.gov.cn 网站查询".to_string()),
+            PatentOffice::JP => Some("日本特许厅 (JPO) API 需单独注册，请访问 j-platpat.inpit.go.jp 网站查询".to_string()),
+            PatentOffice::KR => Some("韩国特许厅 (KIPO) KIPRIS API 需单独注册，请访问 kipris.or.kr 网站查询".to_string()),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatentNumber {
     pub office: PatentOffice,
@@ -98,6 +124,63 @@ pub fn normalize_cn_application_number(input: &str) -> Result<String, Conversion
     Ok(format!("CN{}", cleaned))
 }
 
+pub fn normalize_ep_application_number(input: &str) -> Result<String, ConversionError> {
+    let trimmed = input.trim().to_uppercase();
+    let cleaned = trimmed
+        .trim_start_matches("EP")
+        .replace(" ", "")
+        .replace(".", "");
+
+    if cleaned.is_empty() {
+        return Err(ConversionError::InvalidNumber(input.to_string()));
+    }
+
+    Ok(format!("EP{}", cleaned))
+}
+
+pub fn normalize_wo_application_number(input: &str) -> Result<String, ConversionError> {
+    let trimmed = input.trim().to_uppercase();
+    let cleaned = trimmed
+        .trim_start_matches("WO")
+        .trim_start_matches("PCT")
+        .replace(" ", "")
+        .replace("/", "");
+
+    if cleaned.is_empty() {
+        return Err(ConversionError::InvalidNumber(input.to_string()));
+    }
+
+    Ok(format!("WO{}", cleaned))
+}
+
+pub fn normalize_jp_application_number(input: &str) -> Result<String, ConversionError> {
+    let trimmed = input.trim().to_uppercase();
+    let cleaned = trimmed
+        .trim_start_matches("JP")
+        .replace(" ", "")
+        .replace("-", "");
+
+    if cleaned.is_empty() {
+        return Err(ConversionError::InvalidNumber(input.to_string()));
+    }
+
+    Ok(format!("JP{}", cleaned))
+}
+
+pub fn normalize_kr_application_number(input: &str) -> Result<String, ConversionError> {
+    let trimmed = input.trim().to_uppercase();
+    let cleaned = trimmed
+        .trim_start_matches("KR")
+        .replace(" ", "")
+        .replace("-", "");
+
+    if cleaned.is_empty() {
+        return Err(ConversionError::InvalidNumber(input.to_string()));
+    }
+
+    Ok(format!("KR{}", cleaned))
+}
+
 pub fn parse_patent_number(input: &str) -> Result<PatentNumber, ConversionError> {
     let trimmed = input.trim();
     let office = detect_office(trimmed)
@@ -106,7 +189,10 @@ pub fn parse_patent_number(input: &str) -> Result<PatentNumber, ConversionError>
     let application_number = match office {
         PatentOffice::US => Some(normalize_us_application_number(trimmed)?),
         PatentOffice::CN => Some(normalize_cn_application_number(trimmed)?),
-        _ => Some(trimmed.to_string()),
+        PatentOffice::EP => Some(normalize_ep_application_number(trimmed)?),
+        PatentOffice::JP => Some(normalize_jp_application_number(trimmed)?),
+        PatentOffice::KR => Some(normalize_kr_application_number(trimmed)?),
+        PatentOffice::WO => Some(normalize_wo_application_number(trimmed)?),
     };
 
     Ok(PatentNumber {
@@ -160,6 +246,30 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_ep_application_number() {
+        assert_eq!(
+            normalize_ep_application_number("EP1234567").unwrap(),
+            "EP1234567"
+        );
+        assert_eq!(
+            normalize_ep_application_number("EP 12 34567").unwrap(),
+            "EP1234567"
+        );
+    }
+
+    #[test]
+    fn test_normalize_wo_application_number() {
+        assert_eq!(
+            normalize_wo_application_number("WO2023/123456").unwrap(),
+            "WO2023123456"
+        );
+        assert_eq!(
+            normalize_wo_application_number("PCT/EP2023/123456").unwrap(),
+            "WOEP2023123456"
+        );
+    }
+
+    #[test]
     fn test_parse_patent_number() {
         let pn = parse_patent_number("US14412875").unwrap();
         assert_eq!(pn.office, PatentOffice::US);
@@ -174,5 +284,15 @@ mod tests {
     #[test]
     fn test_normalize_us_short_number() {
         assert!(normalize_us_application_number("123").is_err());
+    }
+
+    #[test]
+    fn test_office_supports_examination() {
+        assert!(PatentOffice::US.supports_examination_history());
+        assert!(PatentOffice::EP.supports_examination_history());
+        assert!(PatentOffice::WO.supports_examination_history());
+        assert!(!PatentOffice::CN.supports_examination_history());
+        assert!(!PatentOffice::JP.supports_examination_history());
+        assert!(!PatentOffice::KR.supports_examination_history());
     }
 }

@@ -1,4 +1,5 @@
 mod api;
+mod cache;
 #[allow(dead_code)]
 mod models;
 mod parser;
