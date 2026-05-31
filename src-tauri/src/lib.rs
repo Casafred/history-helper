@@ -4,7 +4,8 @@ mod parser;
 mod patent;
 
 use api::uspto::UsptoClient;
-use patent::converter::{detect_office, normalize_us_application_number, parse_patent_number};
+use patent::converter::{detect_office, normalize_us_application_number, parse_patent_number, PatentOffice};
+use parser::office_action::{build_timeline, EventCategory, OfficeActionType};
 use serde::Serialize;
 use std::sync::Mutex;
 
@@ -70,7 +71,150 @@ async fn detect_patent_office(input: String) -> CommandResult {
 }
 
 #[tauri::command]
+async fn fetch_examination_history(
+    app_number: String,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult {
+    let office = detect_office(&app_number);
+    match office {
+        Some(PatentOffice::US) => {}
+        Some(other) => {
+            return CommandResult::err(format!(
+                "暂不支持 {} 专利局的审查历史查询，目前仅支持美国 (US) 专利",
+                other
+            ));
+        }
+        None => {
+            return CommandResult::err(format!(
+                "无法识别专利号格式: {}，请输入有效的美国专利申请号（如 US14412875 或 14412875）",
+                app_number
+            ));
+        }
+    }
+
+    let client = match get_or_create_client(&state) {
+        Ok(c) => c,
+        Err(e) => return CommandResult::err(e),
+    };
+
+    let normalized = match normalize_us_application_number(&app_number) {
+        Ok(n) => n,
+        Err(e) => return CommandResult::err(e.to_string()),
+    };
+
+    let mut result = serde_json::Map::new();
+    result.insert("applicationNumber".into(), serde_json::Value::String(normalized.clone()));
+
+    match client.get_application(&normalized).await {
+        Ok(data) => {
+            result.insert("application".into(), serde_json::to_value(data).unwrap_or_default());
+        }
+        Err(e) => return CommandResult::err(e.to_string()),
+    }
+
+    match client.get_transactions(&normalized).await {
+        Ok(data) => {
+            let events = data
+                .patent_file_wrapper_data_bag
+                .and_then(|bag| bag.into_iter().next())
+                .and_then(|wrapper| wrapper.event_data_bag);
+
+            if let Some(ref event_list) = events {
+                let categorized: Vec<serde_json::Value> = event_list
+                    .iter()
+                    .map(|e| {
+                        let code = e.event_code.as_deref().unwrap_or("");
+                        let category = EventCategory::from_event_code(code);
+                        let mut map = serde_json::to_value(e).unwrap_or_default();
+                        if let Some(obj) = map.as_object_mut() {
+                            obj.insert(
+                                "eventCategory".into(),
+                                serde_json::Value::String(match category {
+                                    EventCategory::OfficeAction => "office_action",
+                                    EventCategory::ApplicantResponse => "applicant_response",
+                                    EventCategory::FeePayment => "fee_payment",
+                                    EventCategory::StatusChange => "status_change",
+                                    EventCategory::Publication => "publication",
+                                    EventCategory::Other => "other",
+                                }.into()),
+                            );
+                        }
+                        map
+                    })
+                    .collect();
+                result.insert("events".into(), serde_json::Value::Array(categorized));
+            }
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch transactions: {}", e);
+        }
+    }
+
+    match client.get_documents(&normalized).await {
+        Ok(data) => {
+            let docs = data.document_bag.unwrap_or_default();
+            let office_actions: Vec<serde_json::Value> = docs
+                .iter()
+                .filter(|d| {
+                    matches!(
+                        d.document_code.as_deref(),
+                        Some("CTNF" | "CTF" | "CTFR" | "REST" | "NTCE" | "EX.Q" | "EX.R")
+                    )
+                })
+                .map(|d| {
+                    let code = d.document_code.as_deref().unwrap_or("");
+                    let action_type = OfficeActionType::from_document_code(code);
+                    let mut map = serde_json::to_value(d).unwrap_or_default();
+                    if let Some(obj) = map.as_object_mut() {
+                        obj.insert(
+                            "officeActionType".into(),
+                            serde_json::Value::String(action_type.display_name().into()),
+                        );
+                    }
+                    map
+                })
+                .collect();
+            result.insert("documents".into(), serde_json::to_value(docs).unwrap_or_default());
+            result.insert("officeActions".into(), serde_json::Value::Array(office_actions));
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch documents: {}", e);
+        }
+    }
+
+    match client.get_continuity(&normalized).await {
+        Ok(data) => {
+            result.insert("continuity".into(), serde_json::to_value(data).unwrap_or_default());
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch continuity: {}", e);
+        }
+    }
+
+    match client.get_foreign_priority(&normalized).await {
+        Ok(data) => {
+            result.insert(
+                "foreignPriority".into(),
+                serde_json::to_value(data).unwrap_or_default(),
+            );
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch foreign priority: {}", e);
+        }
+    }
+
+    CommandResult::ok(serde_json::Value::Object(result))
+}
+
+#[tauri::command]
 async fn fetch_application(app_number: String, state: tauri::State<'_, AppState>) -> CommandResult {
+    let office = detect_office(&app_number);
+    if !matches!(office, Some(PatentOffice::US)) {
+        return CommandResult::err(format!(
+            "暂不支持该专利号所属专利局的查询，请输入美国专利申请号"
+        ));
+    }
+
     let client = match get_or_create_client(&state) {
         Ok(c) => c,
         Err(e) => return CommandResult::err(e),
@@ -92,6 +236,11 @@ async fn fetch_transactions(
     app_number: String,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult {
+    let office = detect_office(&app_number);
+    if !matches!(office, Some(PatentOffice::US)) {
+        return CommandResult::err("暂不支持该专利号所属专利局的查询".into());
+    }
+
     let client = match get_or_create_client(&state) {
         Ok(c) => c,
         Err(e) => return CommandResult::err(e),
@@ -113,6 +262,11 @@ async fn fetch_documents(
     app_number: String,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult {
+    let office = detect_office(&app_number);
+    if !matches!(office, Some(PatentOffice::US)) {
+        return CommandResult::err("暂不支持该专利号所属专利局的查询".into());
+    }
+
     let client = match get_or_create_client(&state) {
         Ok(c) => c,
         Err(e) => return CommandResult::err(e),
@@ -134,6 +288,11 @@ async fn fetch_continuity(
     app_number: String,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult {
+    let office = detect_office(&app_number);
+    if !matches!(office, Some(PatentOffice::US)) {
+        return CommandResult::err("暂不支持该专利号所属专利局的查询".into());
+    }
+
     let client = match get_or_create_client(&state) {
         Ok(c) => c,
         Err(e) => return CommandResult::err(e),
@@ -155,6 +314,11 @@ async fn fetch_foreign_priority(
     app_number: String,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult {
+    let office = detect_office(&app_number);
+    if !matches!(office, Some(PatentOffice::US)) {
+        return CommandResult::err("暂不支持该专利号所属专利局的查询".into());
+    }
+
     let client = match get_or_create_client(&state) {
         Ok(c) => c,
         Err(e) => return CommandResult::err(e),
@@ -173,6 +337,14 @@ async fn fetch_foreign_priority(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Ok(path) = std::env::current_exe() {
+        if let Some(dir) = path.parent() {
+            let env_path = dir.join(".env");
+            if env_path.exists() {
+                let _ = dotenv::from_path(&env_path);
+            }
+        }
+    }
     dotenv::dotenv().ok();
 
     tauri::Builder::default()
@@ -192,6 +364,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             convert_patent_number,
             detect_patent_office,
+            fetch_examination_history,
             fetch_application,
             fetch_transactions,
             fetch_documents,
