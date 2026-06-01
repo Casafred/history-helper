@@ -2,7 +2,7 @@ use reqwest::Client;
 use std::time::Duration;
 use thiserror::Error;
 
-const GD_API_BASE: &str = "https://gd-api2.uspto.gov";
+const GD_API_BASE: &str = "https://d1kazzu6rbodne.cloudfront.net";
 const REQUEST_TIMEOUT_SECS: u64 = 30;
 const MAX_RETRIES: u32 = 3;
 const RETRY_INTERVAL_MS: u64 = 1500;
@@ -44,6 +44,8 @@ impl GlobalDossierClient {
                 .client
                 .get(url)
                 .header("user-type", "external")
+                .header("Referer", "https://globaldossier.uspto.gov/")
+                .header("Origin", "https://globaldossier.uspto.gov")
                 .send()
                 .await;
 

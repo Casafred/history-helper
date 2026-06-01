@@ -15,6 +15,7 @@ let currentData = null;
 const patentInput = document.getElementById("patent-input");
 const searchBtn = document.getElementById("search-btn");
 const convertBtn = document.getElementById("convert-btn");
+const queryTypeSelect = document.getElementById("query-type");
 const officeBadge = document.getElementById("office-badge");
 const resultSection = document.getElementById("result-section");
 const convertSection = document.getElementById("convert-section");
@@ -74,6 +75,7 @@ function parsePatentNumber(input) {
   if (!office) return null;
 
   let stripped = trimmed;
+  let queryType = "application";
 
   const kindCodeMatch = stripped.match(/^(.*?[0-9])([A-Z]\d+)$/i);
   let kindCode = null;
@@ -89,9 +91,15 @@ function parsePatentNumber(input) {
       break;
     case "CN":
       appNum = stripped.replace(/^CN/i, "").replace(/\./g, "");
+      if (appNum.length <= 9 && !kindCode) {
+        queryType = "publication";
+      }
       break;
     case "EP":
       appNum = stripped.replace(/^EP/i, "").replace(/[\s.]/g, "");
+      if (appNum.length <= 8 && !kindCode) {
+        queryType = "publication";
+      }
       break;
     case "JP":
       appNum = stripped.replace(/^JP/i, "").replace(/[\s-]/g, "");
@@ -104,7 +112,7 @@ function parsePatentNumber(input) {
       break;
   }
 
-  return { office, raw: trimmed, applicationNumber: appNum, kindCode: kindCode };
+  return { office, raw: trimmed, applicationNumber: appNum, kindCode: kindCode, queryType };
 }
 
 async function gdFetch(urlPath) {
@@ -150,11 +158,13 @@ searchBtn.addEventListener("click", async () => {
 
   const office = pn.office;
   const docNum = pn.applicationNumber;
-  const result = { office, applicationNumber: docNum };
+  const selectedQueryType = queryTypeSelect ? queryTypeSelect.value : null;
+  const queryType = selectedQueryType || pn.queryType || "application";
+  const result = { office, applicationNumber: docNum, queryType };
   const warnings = [];
 
   try {
-    const familyData = await gdFetch(`/patent-family/svc/family/application/${office}/${docNum}`);
+    const familyData = await gdFetch(`/patent-family/svc/family/${queryType}/${office}/${docNum}`);
     result.family = familyData;
   } catch (e) {
     warnings.push("同族查询失败: " + e.message);
@@ -166,6 +176,9 @@ searchBtn.addEventListener("click", async () => {
   try {
     const docData = await gdFetch(`/doc-list/svc/doclist/${office}/${docNum}/A`);
     result.documents = docData;
+    if (docData && docData.docNumber) {
+      result.docNumber = docData.docNumber;
+    }
   } catch (e) {
     warnings.push("文档列表查询失败: " + e.message);
   }
@@ -200,9 +213,12 @@ function renderOverview(data) {
     title = data.family.list[0].title || "";
   }
 
+  const queryTypeLabel = data.queryType === "publication" ? "公开号/专利号" : "申请号";
+
   appInfo.innerHTML = `
     <div class="info-row"><span class="info-label">申请局</span><span class="info-value">${office}</span></div>
-    <div class="info-row"><span class="info-label">申请号</span><span class="info-value">${data.applicationNumber || "-"}</span></div>
+    <div class="info-row"><span class="info-label">${queryTypeLabel}</span><span class="info-value">${data.applicationNumber || "-"}</span></div>
+    ${data.documents && data.documents.docNumber ? '<div class="info-row"><span class="info-label">文档编号</span><span class="info-value">' + escapeHtml(data.documents.docNumber) + '</span></div>' : ''}
     ${title ? '<div class="info-row"><span class="info-label">标题</span><span class="info-value">' + escapeHtml(title) + '</span></div>' : ''}
   `;
 
@@ -322,12 +338,18 @@ function renderDocuments(data) {
     return;
   }
 
+  const docNumber = docs.docNumber || data.applicationNumber;
+  const isUS = data.office === "US";
+  const urlDocNum = isUS ? data.applicationNumber : encodeURIComponent(docNumber);
+
   let html = "";
   docList.forEach((d, idx) => {
     const docType = d.docCode || d.documentType || d.kindCode || d.type || "文档";
     const desc = d.docDesc || d.documentDescription || d.description || d.docId || "";
     const date = d.legalDateStr || d.documentDate || d.date || "";
     const docId = d.documentId || d.docId || "";
+    const numberOfPages = d.numberOfPages != null ? d.numberOfPages : 1;
+    const docFormat = d.docFormat || "PDF";
 
     let typeClass = "doc-type";
     const lowerDesc = desc.toLowerCase();
@@ -337,8 +359,9 @@ function renderDocuments(data) {
       typeClass += " allowance";
     }
 
-    const downloadUrl = docId ? `/api/gd/doc-content/svc/doccontent/${data.office}/${data.applicationNumber}/${docId}/1/PDF` : null;
-    const extractUrl = docId ? `/api/gd/extract-text/${data.office}/${data.applicationNumber}/${docId}` : null;
+    const encodedDocId = encodeURIComponent(docId);
+    const downloadUrl = docId ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
+    const extractUrl = docId ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
 
     html += `
       <div class="doc-item">
@@ -359,51 +382,49 @@ function renderDocuments(data) {
 }
 
 async function extractDocumentText(url, idx, docType) {
-  const container = document.getElementById(`doc-extracted-${idx}`);
+  const container = document.getElementById("doc-extracted-" + idx);
+  if (!container) return;
   container.classList.remove("hidden");
-  container.innerHTML = '<p class="placeholder">正在提取文本...</p>';
-  
+  container.innerHTML = '<p class="extracting">正在提取文档内容...</p>';
   try {
     const resp = await fetch(url);
-    if (!resp.ok) {
-      throw new Error(`提取失败: HTTP ${resp.status}`);
-    }
-    const result = await resp.json();
-    if (result.success) {
-      container.innerHTML = `
-        <div class="extracted-text-header">
-          <strong>提取完成 - ${docType}</strong>
-          <span>字符数: ${result.text ? result.text.length : 0}</span>
-        </div>
-        <pre class="extracted-text">${escapeHtml(result.text || "无文本内容")}</pre>
-      `;
+    if (!resp.ok) throw new Error("提取失败: HTTP " + resp.status);
+    const data = await resp.json();
+    const text = data.text || data.content || "";
+    if (!text || text.trim().length === 0) {
+      container.innerHTML = '<p class="extract-empty">该文档为图片型PDF，无法提取文本内容。建议下载后使用OCR工具处理。</p>';
     } else {
-      container.innerHTML = `<p class="placeholder">提取失败: ${result.error}</p>`;
+      container.innerHTML = '<pre class="extracted-text">' + escapeHtml(text) + '</pre>';
     }
   } catch (e) {
-    container.innerHTML = `<p class="placeholder">提取失败: ${e.message}</p>`;
+    container.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(e.message) + '</p>';
   }
 }
 
 async function downloadDocument(url, filename) {
   try {
-    const resp = await fetch(url);
-    if (!resp.ok) {
-      showError("文档下载失败: " + resp.status);
-      return;
+    const resp = await fetch(url, { headers: { "Accept": "application/pdf,*/*" } });
+    if (!resp.ok) throw new Error("下载失败: HTTP " + resp.status);
+    const contentType = resp.headers.get("content-type") || "";
+    if (contentType.includes("text/plain") || contentType.includes("text/html")) {
+      const text = await resp.text();
+      if (text.includes("Attachment Not Found") || text.includes("Not Found")) {
+        throw new Error("文档暂不可下载（Attachment Not Found），该文档可能尚未上传至 Global Dossier");
+      }
     }
-
     const blob = await resp.blob();
-    const downloadUrl = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = downloadUrl;
-    a.download = filename;
+    if (blob.size < 100) {
+      throw new Error("下载的文件过小，文档可能暂不可用");
+    }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename || "document.pdf";
     document.body.appendChild(a);
     a.click();
-    a.remove();
-    window.URL.revokeObjectURL(downloadUrl);
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
   } catch (e) {
-    showError("文档下载失败: " + e.message);
+    showError("下载失败: " + e.message);
   }
 }
 

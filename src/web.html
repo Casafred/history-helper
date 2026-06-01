@@ -16,13 +16,17 @@
     <main class="app-main">
       <section class="search-section">
         <div class="search-box">
-          <input type="text" id="patent-input" placeholder="输入申请号（如 US14412875, 201310346949, EP13776553）" autocomplete="off">
+          <input type="text" id="patent-input" placeholder="输入专利号（如 US14412875, CN202311065554, CN104227633B）" autocomplete="off">
+          <select id="query-type" class="query-type-select">
+            <option value="application">申请号</option>
+            <option value="publication">公开号/专利号</option>
+          </select>
           <button id="search-btn" class="btn-primary">查询</button>
           <button id="convert-btn" class="btn-secondary">格式转换</button>
           <button id="batch-btn" class="btn-secondary">批量查询</button>
           <button id="ai-settings-btn" class="btn-icon" title="AI 设置">⚙</button>
         </div>
-        <div class="search-hint">请输入申请号查询。中国专利请输入 CN + 13位申请号（如 CN202311065554），美国专利输入 US + 申请号（如 US14412875）。</div>
+        <div class="search-hint">申请号模式：中国 CN+13位（如 CN202311065554），美国 US+申请号（如 US14412875）。公开号模式：中国 CN+9位数字+类型码（如 CN104227633B），系统会自动去除 CN 前缀。</div>
         <div id="office-badge" class="office-badge hidden"></div>
       </section>
 

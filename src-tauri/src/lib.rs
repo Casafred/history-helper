@@ -59,6 +59,7 @@ async fn detect_patent_office(input: String) -> Result<CommandResult, String> {
 #[tauri::command]
 async fn fetch_patent(
     input: String,
+    query_type: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<CommandResult, String> {
     let pn = match parse_patent_number(&input) {
@@ -68,6 +69,7 @@ async fn fetch_patent(
 
     let office = pn.office.to_string();
     let doc_num = pn.application_number.unwrap_or_else(|| input.clone());
+    let qtype = query_type.unwrap_or_else(|| "application".to_string());
 
     let cache_key = CacheStore::make_cache_key(&office, &doc_num, "patent_data");
 
@@ -93,9 +95,10 @@ async fn fetch_patent(
     let mut result = serde_json::Map::new();
     result.insert("office".into(), serde_json::Value::String(office.clone()));
     result.insert("applicationNumber".into(), serde_json::Value::String(doc_num.clone()));
+    result.insert("queryType".into(), serde_json::Value::String(qtype.clone()));
     let mut warnings: Vec<String> = Vec::new();
 
-    match client.get_family("application", &office, &doc_num).await {
+    match client.get_family(&qtype, &office, &doc_num).await {
         Ok(data) => {
             result.insert("family".into(), data);
         }

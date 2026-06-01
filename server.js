@@ -39,6 +39,7 @@ function proxyGdApi(urlPath, res) {
       "-w", " HTTP_CODE_%{http_code}",
       "--max-time", "60",
       "-H", "user-type: external",
+      "-H", "Accept: application/pdf,*/*",
       "-H", "Referer: https://globaldossier.uspto.gov/",
       "-H", "Origin: https://globaldossier.uspto.gov",
       "-H", "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
@@ -73,13 +74,23 @@ function proxyGdApi(urlPath, res) {
         bodyBuffer = stdoutBuffer.slice(0, idx);
       }
 
+      const isPdf = bodyBuffer.length > 100 && bodyBuffer[0] === 0x25 && bodyBuffer[1] === 0x50;
+      const isAttachmentNotFound = bodyBuffer.length < 100 && bodyBuffer.toString("utf-8").includes("Attachment Not Found");
+
       const respHeaders = {
-        "Content-Type": "application/pdf",
+        "Content-Type": isPdf ? "application/pdf" : "application/octet-stream",
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type, user-type",
         "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Content-Disposition": `attachment; filename="document.pdf"`,
       };
+
+      if (isAttachmentNotFound) {
+        respHeaders["Content-Type"] = "text/plain";
+        respHeaders["X-Attachment-Not-Found"] = "true";
+      } else if (isPdf) {
+        respHeaders["Content-Disposition"] = 'attachment; filename="document.pdf"';
+      }
+
       res.writeHead(httpCode, respHeaders);
       res.end(bodyBuffer);
     });
@@ -156,40 +167,74 @@ const server = http.createServer((req, res) => {
 });
 
 async function extractPdfText(req, res) {
-  const segments = req.url.split("/");
-  const office = segments[4];
-  const appNum = segments[5];
-  const docId = segments[6];
-
-  const gdUrl = `${GD_API_BASE}/doc-content/svc/doccontent/${office}/${appNum}/${docId}/1/PDF`;
+  const urlPath = req.url.replace("/api/gd/extract-text", "");
+  const gdUrl = `${GD_API_BASE}/doc-content/svc/doccontent${urlPath}`;
 
   const args = [
     "-s",
-    gdUrl,
+    "-w", " HTTP_CODE_%{http_code}",
+    "--max-time", "60",
     "-H", "user-type: external",
+    "-H", "Accept: application/pdf,*/*",
     "-H", "Referer: https://globaldossier.uspto.gov/",
     "-H", "Origin: https://globaldossier.uspto.gov",
     "-H", "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    gdUrl,
   ];
 
   const tempDir = "/tmp";
   const pdfPath = path.join(tempDir, `patent_${Date.now()}.pdf`);
 
   try {
-    await new Promise((resolve, reject) => {
-      execFile("curl", args, { maxBuffer: 50 * 1024 * 1024, encoding: "buffer" }, (err, stdout, stderr) => {
+    const curlResult = await new Promise((resolve, reject) => {
+      execFile("curl", args, { maxBuffer: 50 * 1024 * 1024, encoding: "buffer" }, (err, stdoutBuffer) => {
         if (err) {
           reject(err);
           return;
         }
-        fs.writeFile(pdfPath, stdout, (writeErr) => {
-          if (writeErr) reject(writeErr);
-          else resolve();
-        });
+
+        const markerBuffer = Buffer.from(" HTTP_CODE_");
+        let idx = -1;
+        for (let i = Math.max(0, stdoutBuffer.length - 20); i < stdoutBuffer.length; i++) {
+          if (stdoutBuffer.slice(i, i + markerBuffer.length).equals(markerBuffer)) {
+            idx = i;
+            break;
+          }
+        }
+
+        let httpCode = 200;
+        let bodyBuffer = stdoutBuffer;
+        if (idx !== -1) {
+          const codeStr = stdoutBuffer.slice(idx + markerBuffer.length).toString().trim();
+          httpCode = parseInt(codeStr, 10);
+          bodyBuffer = stdoutBuffer.slice(0, idx);
+        }
+
+        resolve({ httpCode, body: bodyBuffer });
       });
     });
 
-    const text = await new Promise((resolve, reject) => {
+    if (curlResult.httpCode !== 200) {
+      throw new Error("PDF 下载失败: HTTP " + curlResult.httpCode);
+    }
+
+    const bodyText = curlResult.body.toString("utf-8");
+    if (bodyText.includes("Attachment Not Found")) {
+      throw new Error("文档暂不可下载（Attachment Not Found）");
+    }
+
+    if (curlResult.body.length < 100) {
+      throw new Error("下载的文件过小，文档可能暂不可用");
+    }
+
+    await new Promise((resolve, reject) => {
+      fs.writeFile(pdfPath, curlResult.body, (writeErr) => {
+        if (writeErr) reject(writeErr);
+        else resolve();
+      });
+    });
+
+    const text = await new Promise((resolve) => {
       execFile("python3", [path.join(__dirname, "extract_pdf.py"), pdfPath], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
           console.error("Python error:", stderr);
@@ -202,26 +247,18 @@ async function extractPdfText(req, res) {
 
     fs.unlink(pdfPath, () => {});
 
-    const response = {
-      success: true,
-      text: text || ""
-    };
-
     res.writeHead(200, {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*"
+      "Access-Control-Allow-Origin": "*",
     });
-    res.end(JSON.stringify(response));
+    res.end(JSON.stringify({ text: text || "" }));
   } catch (e) {
     console.error("Extract error:", e);
     res.writeHead(200, {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*"
+      "Access-Control-Allow-Origin": "*",
     });
-    res.end(JSON.stringify({
-      success: false,
-      error: e.message
-    }));
+    res.end(JSON.stringify({ text: "", error: e.message }));
   }
 }
 
