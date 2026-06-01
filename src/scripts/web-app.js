@@ -160,6 +160,9 @@ searchBtn.addEventListener("click", async () => {
     warnings.push("同族查询失败: " + e.message);
   }
 
+  loadingText.textContent = "正在查询审查文档...";
+  await new Promise(r => setTimeout(r, 1500));
+
   try {
     const docData = await gdFetch(`/doc-list/svc/doclist/${office}/${docNum}/A`);
     result.documents = docData;
