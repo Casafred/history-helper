@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>专利审查梳理工具 - Web版</title>
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <h1>专利审查梳理工具</h1>
+      <p class="subtitle">Patent Examination History Helper · Web</p>
+    </header>
+
+    <main class="app-main">
+      <section class="search-section">
+        <div class="search-box">
+          <select id="query-type" class="query-type-select">
+            <option value="application">申请号</option>
+            <option value="publication">公开号</option>
+            <option value="patent">专利号</option>
+          </select>
+          <input type="text" id="patent-input" placeholder="输入专利号（如 US14412875, CN104797293）" autocomplete="off">
+          <button id="search-btn" class="btn-primary">查询</button>
+          <button id="convert-btn" class="btn-secondary">格式转换</button>
+          <button id="batch-btn" class="btn-secondary">批量查询</button>
+          <button id="ai-settings-btn" class="btn-icon" title="AI 设置">⚙</button>
+        </div>
+        <div id="office-badge" class="office-badge hidden"></div>
+      </section>
+
+      <section id="batch-section" class="batch-section hidden">
+        <div class="info-card">
+          <div class="card-header">批量查询</div>
+          <div class="card-body">
+            <textarea id="batch-input" placeholder="每行一个专利号，如：&#10;US14412875&#10;EP1234567&#10;WO2023123456" rows="6"></textarea>
+            <div class="batch-actions">
+              <button id="batch-start-btn" class="btn-primary">开始批量查询</button>
+            </div>
+            <div id="batch-progress" class="batch-progress hidden">
+              <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+              <span id="progress-text">0/0</span>
+            </div>
+          </div>
+        </div>
+        <div id="batch-results" class="batch-results hidden">
+          <div class="info-card">
+            <div class="card-header">批量查询结果</div>
+            <div id="batch-results-list" class="card-body"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="result-section" class="result-section hidden">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="overview">概览</button>
+          <button class="tab-btn" data-tab="family">同族</button>
+          <button class="tab-btn" data-tab="documents">审查文档</button>
+          <button class="tab-btn" data-tab="ai-summary">AI 梳理</button>
+        </div>
+
+        <div id="tab-overview" class="tab-content active">
+          <div id="overview-content" class="card-grid">
+            <div class="info-card">
+              <div class="card-header">申请信息</div>
+              <div id="app-info" class="card-body"><p class="placeholder">请输入专利号进行查询</p></div>
+            </div>
+            <div class="info-card">
+              <div class="card-header">当前状态</div>
+              <div id="app-status" class="card-body"><p class="placeholder">-</p></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-family" class="tab-content">
+          <div id="family-content"><p class="placeholder">暂无同族信息</p></div>
+        </div>
+
+        <div id="tab-documents" class="tab-content">
+          <div id="documents-content"><p class="placeholder">暂无审查文档</p></div>
+        </div>
+
+        <div id="tab-ai-summary" class="tab-content">
+          <div id="ai-summary-content">
+            <div class="ai-summary-header">
+              <button id="ai-summarize-btn" class="btn-primary" disabled>开始 AI 梳理</button>
+              <span id="ai-status" class="ai-status"></span>
+            </div>
+            <div id="ai-summary-result" class="ai-summary-result">
+              <p class="placeholder">请先查询专利，然后点击"开始 AI 梳理"对审查历史进行智能分析</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="convert-section" class="convert-section hidden">
+        <div class="info-card">
+          <div class="card-header">格式转换结果</div>
+          <div id="convert-result" class="card-body"></div>
+        </div>
+      </section>
+
+      <div id="ai-settings-modal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>AI 服务设置</h2>
+            <button id="modal-close-btn" class="btn-icon">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label>AI 服务商</label>
+              <select id="ai-provider-select">
+                <option value="zhipu">智谱 (GLM)</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="openai">OpenAI</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>API Key</label>
+              <input type="password" id="ai-api-key-input" placeholder="输入 API Key">
+            </div>
+            <div class="form-group">
+              <label>Base URL</label>
+              <input type="text" id="ai-base-url-input" placeholder="API Base URL">
+            </div>
+            <div class="form-group">
+              <label>模型</label>
+              <select id="ai-model-select"></select>
+            </div>
+            <div class="form-actions">
+              <button id="ai-test-btn" class="btn-secondary">测试连接</button>
+              <button id="ai-save-btn" class="btn-primary">保存</button>
+            </div>
+            <div id="ai-test-result" class="test-result hidden"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <p id="loading-text">正在查询...</p>
+      </div>
+
+      <div id="error-toast" class="toast hidden"></div>
+    </main>
+  </div>
+
+  <script src="scripts/web-ai.js"></script>
+  <script src="scripts/web-app.js"></script>
+</body>
+</html>

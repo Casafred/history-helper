@@ -65,6 +65,22 @@ body {
   margin-bottom: 8px;
 }
 
+.query-type-select {
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.query-type-select:focus {
+  border-color: var(--accent);
+}
+
 .search-box input {
   flex: 1;
   padding: 10px 16px;
@@ -372,6 +388,73 @@ body {
 .doc-download:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.btn-small {
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-download {
+  background: var(--accent);
+  color: white;
+}
+
+.btn-download:hover {
+  background: var(--accent-hover);
+}
+
+.btn-extract {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.btn-extract:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.doc-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.doc-extracted {
+  margin-top: 8px;
+  margin-bottom: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.extracted-text-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.extracted-text {
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  padding: 10px;
+  border-radius: 4px;
 }
 
 .loading {
