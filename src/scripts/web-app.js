@@ -15,7 +15,6 @@ let currentData = null;
 const patentInput = document.getElementById("patent-input");
 const searchBtn = document.getElementById("search-btn");
 const convertBtn = document.getElementById("convert-btn");
-const queryTypeSelect = document.getElementById("query-type");
 const officeBadge = document.getElementById("office-badge");
 const resultSection = document.getElementById("result-section");
 const convertSection = document.getElementById("convert-section");
@@ -84,18 +83,15 @@ function parsePatentNumber(input) {
   }
 
   let appNum = stripped;
-  let pubNum = null;
   switch (office) {
     case "US":
       appNum = stripped.replace(/^US/i, "").replace(/[^0-9]/g, "");
       break;
     case "CN":
       appNum = stripped.replace(/^CN/i, "").replace(/\./g, "");
-      pubNum = stripped.replace(/^CN/i, "").replace(/\./g, "");
       break;
     case "EP":
       appNum = stripped.replace(/^EP/i, "").replace(/[\s.]/g, "");
-      pubNum = "EP" + stripped.replace(/^EP/i, "").replace(/[\s.]/g, "");
       break;
     case "JP":
       appNum = stripped.replace(/^JP/i, "").replace(/[\s-]/g, "");
@@ -108,7 +104,7 @@ function parsePatentNumber(input) {
       break;
   }
 
-  return { office, raw: trimmed, applicationNumber: appNum, publicationNumber: pubNum, kindCode: kindCode };
+  return { office, raw: trimmed, applicationNumber: appNum, kindCode: kindCode };
 }
 
 async function gdFetch(urlPath) {
@@ -141,7 +137,6 @@ searchBtn.addEventListener("click", async () => {
   const input = patentInput.value.trim();
   if (!input) return;
 
-  const queryType = queryTypeSelect.value;
   const pn = parsePatentNumber(input);
   if (!pn) { showError("无法识别专利号格式: " + input); return; }
 
@@ -154,49 +149,12 @@ searchBtn.addEventListener("click", async () => {
   hideError();
 
   const office = pn.office;
-  let docNum = pn.applicationNumber;
-  let effectiveQueryType = queryType;
-  const result = { office, applicationNumber: docNum, queryType };
+  const docNum = pn.applicationNumber;
+  const result = { office, applicationNumber: docNum };
   const warnings = [];
 
-  if (queryType !== "application" && office === "CN") {
-    loadingText.textContent = "正在通过公开号查找申请号...";
-    try {
-      const lookupResp = await fetch(`/api/gd/lookup-app-num/CN/${pn.publicationNumber || docNum}`);
-      if (lookupResp.ok) {
-        const lookupData = await lookupResp.json();
-        if (lookupData.applicationNumber) {
-          docNum = lookupData.applicationNumber;
-          effectiveQueryType = "application";
-          result.applicationNumber = docNum;
-          result.originalInput = pn.raw;
-          warnings.push("已通过公开号查找到申请号: " + docNum + "，自动使用申请号查询");
-        } else {
-          throw new Error(lookupData.error || "未找到对应申请号");
-        }
-      } else {
-        throw new Error("申请号查找服务不可用");
-      }
-    } catch (e) {
-      warnings.push("中国专利暂不支持通过公开号/专利号直接查询。请使用13位申请号查询（如 201310346949）。可在 Google Patents 查找对应申请号。错误: " + e.message);
-      searchBtn.disabled = false;
-      loading.classList.add("hidden");
-      warnings.forEach(w => showError("⚠️ " + w));
-      return;
-    }
-  }
-
-  loadingText.textContent = "正在查询专利信息...";
-
   try {
-    let familyData;
-    if (effectiveQueryType === "application") {
-      familyData = await gdFetch(`/patent-family/svc/family/application/${office}/${docNum}`);
-    } else if (effectiveQueryType === "publication") {
-      familyData = await gdFetch(`/patent-family/svc/family/publication/${office}/${docNum}`);
-    } else if (effectiveQueryType === "patent") {
-      familyData = await gdFetch(`/patent-family/svc/family/patent/${office}/${docNum}`);
-    }
+    const familyData = await gdFetch(`/patent-family/svc/family/application/${office}/${docNum}`);
     result.family = familyData;
   } catch (e) {
     warnings.push("同族查询失败: " + e.message);

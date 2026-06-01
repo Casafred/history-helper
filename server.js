@@ -2,7 +2,6 @@ const http = require("http");
 const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const { spawn } = require("child_process");
 
 const GD_API_BASE = "https://d1kazzu6rbodne.cloudfront.net";
 const PORT = 8080;
@@ -35,7 +34,6 @@ function proxyGdApi(urlPath, res) {
   const url = GD_API_BASE + urlPath;
 
   if (urlPath.includes("/doc-content/")) {
-    // 文档内容请求（二进制文件，如PDF）
     const args = [
       "-s",
       "-w", " HTTP_CODE_%{http_code}",
@@ -57,7 +55,6 @@ function proxyGdApi(urlPath, res) {
         return;
       }
 
-      // 寻找 HTTP 代码标记
       const markerBuffer = Buffer.from(" HTTP_CODE_");
       let idx = -1;
       for (let i = Math.max(0, stdoutBuffer.length - 20); i < stdoutBuffer.length; i++) {
@@ -87,7 +84,6 @@ function proxyGdApi(urlPath, res) {
       res.end(bodyBuffer);
     });
   } else {
-    // 普通 API 请求（JSON）
     const args = [
       "-s",
       "-w", "\n__HTTP_CODE__%{http_code}",
@@ -143,11 +139,6 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.url.startsWith("/api/gd/lookup-app-num/")) {
-    lookupAppNum(req, res);
-    return;
-  }
-
   if (req.url.startsWith("/api/gd/extract-text/")) {
     extractPdfText(req, res);
     return;
@@ -186,7 +177,7 @@ async function extractPdfText(req, res) {
 
   try {
     await new Promise((resolve, reject) => {
-      const curl = execFile("curl", args, { maxBuffer: 50 * 1024 * 1024, encoding: "buffer" }, (err, stdout, stderr) => {
+      execFile("curl", args, { maxBuffer: 50 * 1024 * 1024, encoding: "buffer" }, (err, stdout, stderr) => {
         if (err) {
           reject(err);
           return;
@@ -199,7 +190,7 @@ async function extractPdfText(req, res) {
     });
 
     const text = await new Promise((resolve, reject) => {
-      const python = execFile("python3", [path.join(__dirname, "extract_pdf.py"), pdfPath], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      execFile("python3", [path.join(__dirname, "extract_pdf.py"), pdfPath], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
           console.error("Python error:", stderr);
           resolve("");
@@ -238,87 +229,3 @@ server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}/`);
   console.log(`GD API proxy: /api/gd/* -> ${GD_API_BASE}/* (via curl)`);
 });
-
-async function lookupAppNum(req, res) {
-  const segments = req.url.split("/");
-  const office = segments[4];
-  const pubNum = decodeURIComponent(segments[5] || "");
-
-  const respond = (data) => {
-    res.writeHead(200, {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*"
-    });
-    res.end(JSON.stringify(data));
-  };
-
-  if (office === "CN") {
-    try {
-      const appNum = await lookupCnAppNum(pubNum);
-      if (appNum) {
-        respond({ applicationNumber: appNum, office: "CN" });
-      } else {
-        respond({ error: "未找到对应申请号", office: "CN" });
-      }
-    } catch (e) {
-      console.error("lookupAppNum error:", e);
-      respond({ error: e.message, office: "CN" });
-    }
-  } else {
-    respond({ error: "暂不支持 " + office + " 的公开号查询", office });
-  }
-}
-
-async function lookupCnAppNum(pubNum) {
-  let cleanNum = pubNum.replace(/^CN/i, "").replace(/\./g, "");
-  const kindMatch = cleanNum.match(/^(\d+)([A-Z]\d*)$/i);
-  let kindCode = "";
-  if (kindMatch) {
-    cleanNum = kindMatch[1];
-    kindCode = kindMatch[2].toUpperCase();
-  }
-
-  const opsUrl = `https://ops.epo.org/3.2/rest-services/published-data/publication/docdb/CN,${cleanNum},${kindCode || "A"}`;
-  const args = [
-    "-s",
-    "-w", "\n__HTTP_CODE__%{http_code}",
-    "--max-time", "15",
-    "-H", "Accept: application/json",
-    opsUrl
-  ];
-
-  const stdout = await new Promise((resolve, reject) => {
-    execFile("curl", args, { maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
-      if (err) { reject(err); return; }
-      resolve(stdout);
-    });
-  });
-
-  const marker = "\n__HTTP_CODE__";
-  const idx = stdout.lastIndexOf(marker);
-  let httpCode = 200;
-  let body = stdout;
-  if (idx !== -1) {
-    httpCode = parseInt(stdout.substring(idx + marker.length), 10);
-    body = stdout.substring(0, idx);
-  }
-
-  if (httpCode === 200 || httpCode === 303) {
-    try {
-      const data = JSON.parse(body);
-      const appRef = data?.["ops:world-patent-data"]?.["exchange-documents"]?.["exchange-document"]?.["bibliographic-data"]?.["application-reference"]?.["document-id"];
-      if (appRef) {
-        const appId = Array.isArray(appRef) ? appRef.find(d => d["@country"] === "CN") || appRef[0] : appRef;
-        if (appId && appId["doc-number"]) {
-          let appNum = appId["doc-number"]["$"] || appId["doc-number"];
-          appNum = String(appNum).replace(/^CN/i, "").replace(/\./g, "");
-          return appNum;
-        }
-      }
-    } catch (e) {
-      console.error("EPO OPS parse error:", e);
-    }
-  }
-
-  return null;
-}

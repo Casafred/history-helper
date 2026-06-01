@@ -101,6 +101,13 @@ body {
   color: var(--text-muted);
 }
 
+.search-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  padding-left: 4px;
+}
+
 .btn-primary,
 .btn-secondary {
   padding: 10px 20px;
