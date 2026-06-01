@@ -167,7 +167,10 @@ const server = http.createServer((req, res) => {
 });
 
 async function extractPdfText(req, res) {
-  const urlPath = req.url.replace("/api/gd/extract-text", "");
+  const urlObj = new URL(req.url, "http://localhost");
+  const urlPath = urlObj.pathname.replace("/api/gd/extract-text", "");
+  const engine = urlObj.searchParams.get("engine") || "auto";
+  const apiKey = urlObj.searchParams.get("api_key") || "";
   const gdUrl = `${GD_API_BASE}/doc-content/svc/doccontent${urlPath}`;
 
   const args = [
@@ -234,14 +237,21 @@ async function extractPdfText(req, res) {
       });
     });
 
-    const text = await new Promise((resolve) => {
-      execFile("python3", [path.join(__dirname, "extract_pdf.py"), pdfPath], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const pythonArgs = [path.join(__dirname, "extract_pdf.py"), pdfPath, engine];
+    if (apiKey) pythonArgs.push(apiKey);
+
+    const extractResult = await new Promise((resolve) => {
+      execFile("python3", pythonArgs, { maxBuffer: 50 * 1024 * 1024, timeout: 300000 }, (err, stdout, stderr) => {
         if (err) {
-          console.error("Python error:", stderr);
-          resolve("");
+          console.error("Python error:", stderr || err.message);
+          resolve({ text: "", markdown: "", engine: "none", error: stderr || err.message });
           return;
         }
-        resolve(stdout);
+        try {
+          resolve(JSON.parse(stdout));
+        } catch (parseErr) {
+          resolve({ text: stdout, markdown: "", engine: "unknown" });
+        }
       });
     });
 
@@ -251,14 +261,14 @@ async function extractPdfText(req, res) {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
     });
-    res.end(JSON.stringify({ text: text || "" }));
+    res.end(JSON.stringify(extractResult));
   } catch (e) {
     console.error("Extract error:", e);
     res.writeHead(200, {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
     });
-    res.end(JSON.stringify({ text: "", error: e.message }));
+    res.end(JSON.stringify({ text: "", markdown: "", engine: "none", error: e.message }));
   }
 }
 

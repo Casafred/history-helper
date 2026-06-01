@@ -371,6 +371,7 @@ function renderDocuments(data) {
           ${date ? '<div class="doc-date">' + escapeHtml(date) + '</div>' : ''}
         </div>
         <div class="doc-actions">
+          ${extractUrl ? `<select class="engine-select" data-idx="${idx}"><option value="auto">自动</option><option value="pypdf">文本提取</option><option value="paddle_ocr_vl">PaddleOCR</option><option value="glm_ocr">GLM OCR</option></select>` : ''}
           ${extractUrl ? `<button class="btn-small btn-extract" data-action="extract" data-url="${extractUrl}" data-idx="${idx}" data-doctype="${escapeHtml(docType)}">提取内容</button>` : ''}
           ${downloadUrl ? `<button class="btn-small btn-download" data-action="download" data-url="${downloadUrl}" data-filename="${escapeHtml(docType)}_${escapeHtml(date.replace(/\//g, '-'))}.pdf">下载</button>` : ''}
         </div>
@@ -385,19 +386,124 @@ async function extractDocumentText(url, idx, docType) {
   const container = document.getElementById("doc-extracted-" + idx);
   if (!container) return;
   container.classList.remove("hidden");
-  container.innerHTML = '<p class="extracting">正在提取文档内容...</p>';
+
+  const engineSelect = document.querySelector(`.engine-select[data-idx="${idx}"]`);
+  const engine = engineSelect ? engineSelect.value : "auto";
+
+  let extractUrl = url;
+  if (engine && engine !== "auto") {
+    const sep = url.includes("?") ? "&" : "?";
+    extractUrl = url + sep + "engine=" + engine;
+  }
+
+  const config = window.AI.loadAIConfig();
+  const provider = window.AI.getCurrentProvider(config);
+  if (engine === "glm_ocr" && provider && provider.type === "zhipu" && provider.apiKey) {
+    const sep = extractUrl.includes("?") ? "&" : "?";
+    extractUrl += sep + "api_key=" + encodeURIComponent(provider.apiKey);
+  }
+
+  container.innerHTML = '<p class="extracting">正在提取文档内容（引擎: ' + escapeHtml(engine === "auto" ? "自动" : engine) + '）...</p>';
+
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(extractUrl);
     if (!resp.ok) throw new Error("提取失败: HTTP " + resp.status);
     const data = await resp.json();
-    const text = data.text || data.content || "";
-    if (!text || text.trim().length === 0) {
-      container.innerHTML = '<p class="extract-empty">该文档为图片型PDF，无法提取文本内容。建议下载后使用OCR工具处理。</p>';
-    } else {
-      container.innerHTML = '<pre class="extracted-text">' + escapeHtml(text) + '</pre>';
+
+    if (data.error) {
+      container.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(data.error) + '</p>';
+      return;
     }
+
+    const text = data.text || "";
+    const markdown = data.markdown || "";
+    const usedEngine = data.engine || "unknown";
+
+    if (!text && !markdown) {
+      container.innerHTML = '<p class="extract-empty">未能提取到文本内容。可尝试切换 OCR 引擎（PaddleOCR 或 GLM OCR）后重新提取。</p>';
+      return;
+    }
+
+    const displayText = markdown || text;
+    const charCount = displayText.length;
+
+    container.innerHTML = `
+      <div class="extracted-header">
+        <span class="extracted-engine">引擎: ${escapeHtml(usedEngine)}</span>
+        <span class="extracted-chars">字符数: ${charCount}</span>
+        <button class="btn-small btn-ai-analyze" data-action="ai-analyze-doc" data-idx="${idx}" data-doctype="${escapeHtml(docType)}">AI 分析此文档</button>
+      </div>
+      <pre class="extracted-text">${escapeHtml(displayText)}</pre>
+    `;
+
+    container._extractedText = text;
+    container._extractedMarkdown = markdown;
+    container._docType = docType;
   } catch (e) {
     container.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(e.message) + '</p>';
+  }
+}
+
+async function aiAnalyzeDocument(idx, docType) {
+  const container = document.getElementById("doc-extracted-" + idx);
+  if (!container) return;
+
+  const extractedText = container._extractedText || "";
+  const extractedMarkdown = container._extractedMarkdown || "";
+  const content = extractedMarkdown || extractedText;
+
+  if (!content) {
+    showError("请先提取文档内容");
+    return;
+  }
+
+  const config = window.AI.loadAIConfig();
+  const provider = window.AI.getCurrentProvider(config);
+  if (!provider) {
+    showError("请先在 AI 设置中配置并选择一个 AI 服务商");
+    return;
+  }
+
+  const resultSection = document.getElementById("result-section");
+  const aiTab = resultSection.querySelector('[data-tab="ai-summary"]');
+  if (aiTab) aiTab.click();
+
+  aiSummarizeBtn.disabled = true;
+  aiStatus.textContent = "正在分析文档: " + docType + "...";
+  aiStatus.className = "ai-status ai-status-processing";
+  aiSummaryResult.classList.remove("hidden");
+
+  const truncatedContent = content.length > 30000 ? content.substring(0, 30000) + "\n\n[...内容过长已截断...]" : content;
+
+  const systemPrompt = "你是一位专业的专利审查分析师。请对以下专利审查文档内容进行详细分析，包括：1. 文档类型和性质 2. 核心内容摘要 3. 关键法律和技术要点 4. 对申请人/审查员的影响 5. 建议的应对策略。请用中文回答。";
+
+  try {
+    let fullText = "";
+    for await (const chunk of window.AI.streamChat(
+      provider.type, provider.apiKey, provider.baseUrl,
+      {
+        model: provider.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: "文档类型: " + docType + "\n\n文档内容:\n" + truncatedContent },
+        ],
+        temperature: 0.3,
+        maxTokens: 16384,
+      }
+    )) {
+      if (chunk.content) {
+        fullText += chunk.content;
+        aiSummaryResult.innerHTML = '<div class="ai-summary-content">' + escapeHtml(fullText).replace(/\n/g, "<br>") + "</div>";
+      }
+    }
+    aiStatus.textContent = "分析完成 ✓";
+    aiStatus.className = "ai-status ai-status-success";
+  } catch (e) {
+    aiSummaryResult.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
+    aiStatus.textContent = "分析失败 ✗";
+    aiStatus.className = "ai-status ai-status-error";
+  } finally {
+    aiSummarizeBtn.disabled = false;
   }
 }
 
@@ -645,6 +751,8 @@ document.addEventListener("DOMContentLoaded", () => {
       downloadDocument(btn.dataset.url, btn.dataset.filename);
     } else if (action === "extract") {
       extractDocumentText(btn.dataset.url, parseInt(btn.dataset.idx), btn.dataset.doctype);
+    } else if (action === "ai-analyze-doc") {
+      aiAnalyzeDocument(parseInt(btn.dataset.idx), btn.dataset.doctype);
     }
   });
 });
