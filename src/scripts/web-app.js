@@ -348,8 +348,8 @@ function renderDocuments(data) {
           ${date ? '<div class="doc-date">' + escapeHtml(date) + '</div>' : ''}
         </div>
         <div class="doc-actions">
-          ${extractUrl ? `<button class="btn-small btn-extract" onclick="extractDocumentText('${extractUrl}', ${idx}, '${escapeHtml(docType)}')">提取内容</button>` : ''}
-          ${downloadUrl ? `<button class="btn-small btn-download" onclick="downloadDocument('${downloadUrl}', '${escapeHtml(docType)}_${escapeHtml(date.replace(/\//g, '-'))}.pdf')">下载</button>` : ''}
+          ${extractUrl ? `<button class="btn-small btn-extract" data-action="extract" data-url="${extractUrl}" data-idx="${idx}" data-doctype="${escapeHtml(docType)}">提取内容</button>` : ''}
+          ${downloadUrl ? `<button class="btn-small btn-download" data-action="download" data-url="${downloadUrl}" data-filename="${escapeHtml(docType)}_${escapeHtml(date.replace(/\//g, '-'))}.pdf">下载</button>` : ''}
         </div>
       </div>
       <div id="doc-extracted-${idx}" class="doc-extracted hidden"></div>
@@ -615,4 +615,15 @@ function showTestResult(success, message) {
 
 document.addEventListener("DOMContentLoaded", () => {
   loadAISettingsToForm();
+
+  document.getElementById("documents-content").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    const action = btn.dataset.action;
+    if (action === "download") {
+      downloadDocument(btn.dataset.url, btn.dataset.filename);
+    } else if (action === "extract") {
+      extractDocumentText(btn.dataset.url, parseInt(btn.dataset.idx), btn.dataset.doctype);
+    }
+  });
 });
