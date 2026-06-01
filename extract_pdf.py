@@ -15,6 +15,7 @@ def pdf_to_images_base64(pdf_path, max_pages=30, dpi=200):
         import fitz
         doc = fitz.open(pdf_path)
         total = min(len(doc), max_pages)
+        print(f"[DEBUG] pdf_to_images_base64: pdf has {len(doc)} pages, extracting {total}", file=sys.stderr)
         for i in range(total):
             page = doc[i]
             mat = fitz.Matrix(dpi / 72, dpi / 72)
@@ -22,9 +23,14 @@ def pdf_to_images_base64(pdf_path, max_pages=30, dpi=200):
             img_bytes = pix.tobytes("png")
             b64 = base64.b64encode(img_bytes).decode("ascii")
             pages.append(b64)
+            print(f"[DEBUG] pdf_to_images_base64: page {i+1} b64 len={len(b64)}", file=sys.stderr)
         doc.close()
-    except ImportError:
-        pass
+    except ImportError as e:
+        print(f"[DEBUG] pdf_to_images_base64 ImportError: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"[DEBUG] pdf_to_images_base64 error: {type(e).__name__}: {e}", file=sys.stderr)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr)
     return pages
 
 
@@ -52,10 +58,16 @@ def ocr_with_paddle_vl(image_base64_list):
             "visualize": False,
         }
         try:
+            print(f"[DEBUG] PaddleOCR-VL calling page {i+1}, img_b64 len={len(img_b64)}", file=sys.stderr)
             resp = req.post(PADDLE_OCR_VL_URL, json=payload, headers=headers, timeout=180)
+            print(f"[DEBUG] PaddleOCR-VL response status={resp.status_code}", file=sys.stderr)
+            if resp.status_code != 200:
+                print(f"[DEBUG] PaddleOCR-VL response text={resp.text[:200]}", file=sys.stderr)
             data = resp.json()
+            print(f"[DEBUG] PaddleOCR-VL response data keys={list(data.keys())} errorCode={data.get('errorCode')}", file=sys.stderr)
             if data.get("errorCode") == 0:
                 results = data.get("result", {}).get("layoutParsingResults", [])
+                print(f"[DEBUG] PaddleOCR-VL layoutParsingResults count={len(results)}", file=sys.stderr)
                 for r in results:
                     md = r.get("markdown", {}).get("text", "")
                     if md:
@@ -68,10 +80,13 @@ def ocr_with_paddle_vl(image_base64_list):
                         if content and label in ("text", "title", "table", "formula"):
                             all_text.append(content)
         except Exception as e:
-            print(f"PaddleOCR-VL page {i+1} error: {e}", file=sys.stderr)
+            print(f"PaddleOCR-VL page {i+1} error: {type(e).__name__}: {e}", file=sys.stderr)
+            import traceback
+            print(traceback.format_exc(), file=sys.stderr)
 
     markdown = "\n\n---\n\n".join(all_markdown)
     plain_text = "\n".join(all_text)
+    print(f"[DEBUG] PaddleOCR-VL total plain_text chars={len(plain_text)}", file=sys.stderr)
     return markdown, plain_text
 
 
@@ -133,8 +148,11 @@ def main():
     markdown = ""
     used_engine = "none"
 
+    print(f"[DEBUG] main: engine={engine} pdf_path={pdf_path}", file=sys.stderr)
+
     if engine == "paddle_ocr_vl":
         images = pdf_to_images_base64(pdf_path)
+        print(f"[DEBUG] main: images extracted count={len(images)}", file=sys.stderr)
         if images:
             md, plain = ocr_with_paddle_vl(images)
             if plain.strip():
