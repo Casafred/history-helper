@@ -9,9 +9,6 @@ const RETRY_INTERVAL_MS: u64 = 1500;
 
 #[derive(Error, Debug)]
 pub enum GlobalDossierError {
-    #[error("GD token not set. Call set_gd_token first")]
-    #[allow(dead_code)]
-    MissingToken,
     #[error("HTTP request failed: {0}")]
     RequestFailed(#[from] reqwest::Error),
     #[error("Rate limited, retries exhausted")]
@@ -26,18 +23,17 @@ pub enum GlobalDossierError {
 #[derive(Debug, Clone)]
 pub struct GlobalDossierClient {
     client: Client,
-    token: String,
 }
 
 impl GlobalDossierClient {
-    pub fn new(token: String) -> Self {
+    pub fn new() -> Self {
         let client = Client::builder()
             .user_agent("PatentHistoryHelper/0.1.0")
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .build()
             .unwrap_or_default();
 
-        Self { client, token }
+        Self { client }
     }
 
     async fn get_with_retry(&self, url: &str) -> Result<reqwest::Response, GlobalDossierError> {
@@ -47,7 +43,6 @@ impl GlobalDossierClient {
             let resp = self
                 .client
                 .get(url)
-                .header("Authorization", format!("Bearer {}", self.token))
                 .header("user-type", "external")
                 .send()
                 .await;
@@ -157,5 +152,11 @@ impl GlobalDossierClient {
         let resp = self.get_with_retry(&url).await?;
         let data = resp.json::<serde_json::Value>().await?;
         Ok(data)
+    }
+}
+
+impl Default for GlobalDossierClient {
+    fn default() -> Self {
+        Self::new()
     }
 }

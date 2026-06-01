@@ -4,7 +4,6 @@ const patentInput = document.getElementById("patent-input");
 const searchBtn = document.getElementById("search-btn");
 const convertBtn = document.getElementById("convert-btn");
 const officeBadge = document.getElementById("office-badge");
-const gdStatus = document.getElementById("gd-status");
 const resultSection = document.getElementById("result-section");
 const convertSection = document.getElementById("convert-section");
 const batchSection = document.getElementById("batch-section");
@@ -26,12 +25,6 @@ const aiTestResult = document.getElementById("ai-test-result");
 const aiSummarizeBtn = document.getElementById("ai-summarize-btn");
 const aiStatus = document.getElementById("ai-status");
 const aiSummaryResult = document.getElementById("ai-summary-result");
-
-const gdLoginBtn = document.getElementById("gd-login-btn");
-const gdLoginModal = document.getElementById("gd-login-modal");
-const gdModalCloseBtn = document.getElementById("gd-modal-close-btn");
-const gdTokenInput = document.getElementById("gd-token-input");
-const gdSaveBtn = document.getElementById("gd-save-btn");
 
 const batchBtn = document.getElementById("batch-btn");
 const batchInput = document.getElementById("batch-input");
@@ -57,26 +50,6 @@ let currentData = null;
 let currentOffice = null;
 let aiAbortController = null;
 let batchAbortController = null;
-
-function loadGdToken() {
-  return localStorage.getItem("gd_token") || "";
-}
-
-function saveGdToken(token) {
-  localStorage.setItem("gd_token", token);
-}
-
-function updateGdStatus() {
-  const token = loadGdToken();
-  if (token) {
-    gdStatus.textContent = "GD 已登录 ✓";
-    gdStatus.className = "gd-status gd-logged-in";
-  } else {
-    gdStatus.textContent = "GD 未登录";
-    gdStatus.className = "gd-status gd-logged-out";
-  }
-  gdStatus.classList.remove("hidden");
-}
 
 function showError(msg) {
   errorToast.textContent = msg;
@@ -261,36 +234,6 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
   });
 });
 
-gdLoginBtn.addEventListener("click", () => {
-  gdTokenInput.value = loadGdToken();
-  gdLoginModal.classList.remove("hidden");
-});
-
-gdModalCloseBtn.addEventListener("click", () => {
-  gdLoginModal.classList.add("hidden");
-});
-
-document.querySelector("#gd-login-modal .modal-overlay").addEventListener("click", () => {
-  gdLoginModal.classList.add("hidden");
-});
-
-gdSaveBtn.addEventListener("click", async () => {
-  const token = gdTokenInput.value.trim();
-  if (!token) {
-    showError("请输入 Access Token");
-    return;
-  }
-
-  try {
-    await invoke("set_gd_token", { token });
-    saveGdToken(token);
-    updateGdStatus();
-    gdLoginModal.classList.add("hidden");
-  } catch (e) {
-    showError("保存 Token 失败: " + e.toString());
-  }
-});
-
 batchBtn.addEventListener("click", () => {
   batchSection.classList.toggle("hidden");
 });
@@ -334,14 +277,22 @@ batchStartBtn.addEventListener("click", async () => {
 
         item.innerHTML =
           '<div class="batch-item-header">' +
-          '<span class="batch-item-num">' + (OFFICE_NAMES[office] || office) + " " + appNum + "</span>" +
+          '<span class="batch-item-num">' +
+          (OFFICE_NAMES[office] || office) +
+          " " +
+          appNum +
+          "</span>" +
           '<span class="batch-item-status">✓ 成功</span>' +
           "</div>";
       } else {
         item.innerHTML =
           '<div class="batch-item-header">' +
-          '<span class="batch-item-num">' + numbers[completed - 1] + "</span>" +
-          '<span class="batch-item-error">' + (result.error || "查询失败") + "</span>" +
+          '<span class="batch-item-num">' +
+          numbers[completed - 1] +
+          "</span>" +
+          '<span class="batch-item-error">' +
+          (result.error || "查询失败") +
+          "</span>" +
           "</div>";
       }
 
@@ -445,11 +396,17 @@ aiSummarizeBtn.addEventListener("click", async () => {
     );
 
     if (result.success) {
-      aiSummaryResult.innerHTML = '<div class="ai-summary-content">' + result.summary.replace(/\n/g, "<br>") + "</div>";
+      aiSummaryResult.innerHTML =
+        '<div class="ai-summary-content">' +
+        result.summary.replace(/\n/g, "<br>") +
+        "</div>";
       aiStatus.textContent = "梳理完成 ✓";
       aiStatus.className = "ai-status ai-status-success";
     } else {
-      aiSummaryResult.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + result.error + "</p>";
+      aiSummaryResult.innerHTML =
+        '<p class="placeholder" style="color:var(--danger)">' +
+        result.error +
+        "</p>";
       aiStatus.textContent = "梳理失败 ✗";
       aiStatus.className = "ai-status ai-status-error";
     }
@@ -459,7 +416,8 @@ aiSummarizeBtn.addEventListener("click", async () => {
       aiStatus.className = "ai-status";
       aiSummaryResult.innerHTML = '<p class="placeholder">已取消梳理</p>';
     } else {
-      aiSummaryResult.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + e.toString() + "</p>";
+      aiSummaryResult.innerHTML =
+        '<p class="placeholder" style="color:var(--danger)">' + e.toString() + "</p>";
       aiStatus.textContent = "梳理失败 ✗";
       aiStatus.className = "ai-status ai-status-error";
     }
@@ -502,6 +460,5 @@ function showTestResult(success, message) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  updateGdStatus();
   loadAISettingsToForm();
 });

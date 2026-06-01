@@ -24,12 +24,10 @@
           >
           <button id="search-btn" class="btn-primary">查询</button>
           <button id="convert-btn" class="btn-secondary">格式转换</button>
-          <button id="gd-login-btn" class="btn-secondary" title="登录 Global Dossier">GD 登录</button>
           <button id="batch-btn" class="btn-secondary" title="批量查询">批量查询</button>
           <button id="ai-settings-btn" class="btn-icon" title="AI 设置">⚙</button>
         </div>
         <div id="office-badge" class="office-badge hidden"></div>
-        <div id="gd-status" class="gd-status hidden"></div>
       </section>
 
       <section id="batch-section" class="batch-section hidden">
@@ -60,7 +58,7 @@
       <section id="result-section" class="result-section hidden">
         <div class="tabs">
           <button class="tab-btn active" data-tab="overview">概览</button>
-          <button class="tab-btn" data-tab="family">GD 同族</button>
+          <button class="tab-btn" data-tab="family">同族</button>
           <button class="tab-btn" data-tab="documents">审查文档</button>
           <button class="tab-btn" data-tab="ai-summary">AI 梳理</button>
         </div>
@@ -84,13 +82,13 @@
 
         <div id="tab-family" class="tab-content">
           <div id="family-content">
-            <p class="placeholder">需要登录 Global Dossier 后查看同族专利信息</p>
+            <p class="placeholder">暂无同族信息</p>
           </div>
         </div>
 
         <div id="tab-documents" class="tab-content">
           <div id="documents-content">
-            <p class="placeholder">需要登录 Global Dossier 后查看审查文档</p>
+            <p class="placeholder">暂无审查文档</p>
           </div>
         </div>
 
@@ -113,27 +111,6 @@
           <div id="convert-result" class="card-body"></div>
         </div>
       </section>
-
-      <div id="gd-login-modal" class="modal hidden">
-        <div class="modal-overlay"></div>
-        <div class="modal-content">
-          <div class="modal-header">
-            <h2>Global Dossier 登录</h2>
-            <button id="gd-modal-close-btn" class="btn-icon">&times;</button>
-          </div>
-          <div class="modal-body">
-            <p class="gd-login-hint">登录 Global Dossier 后可查询 IP5 各国（US/CN/EP/JP/KR/WO）的专利信息。</p>
-            <div class="form-group">
-              <label>Access Token</label>
-              <input type="password" id="gd-token-input" placeholder="粘贴 Global Dossier Access Token">
-            </div>
-            <p class="gd-login-hint">获取方式：在浏览器中打开 <a href="https://globaldossier.uspto.gov" target="_blank" rel="noopener">globaldossier.uspto.gov</a>，登录后按 F12 打开开发者工具，在 Network 标签中找到任意 API 请求的 Authorization 头，复制 Bearer 后面的 Token。</p>
-            <div class="form-actions">
-              <button id="gd-save-btn" class="btn-primary">保存 Token</button>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <div id="ai-settings-modal" class="modal hidden">
         <div class="modal-overlay"></div>
