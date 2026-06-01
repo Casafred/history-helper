@@ -9,36 +9,6 @@ PADDLE_OCR_VL_TOKEN = "70b270c8275606a7a97f8c4e8617cdeb935ed74c"
 GLM_OCR_URL = "https://open.bigmodel.cn/api/paas/v4/layout_parsing"
 
 
-def extract_with_pypdf(pdf_path):
-    text = ""
-    try:
-        from pypdf import PdfReader
-        reader = PdfReader(pdf_path)
-        for page in reader.pages:
-            try:
-                t = page.extract_text() or ""
-                text += t
-            except Exception:
-                pass
-    except ImportError:
-        pass
-    return text.strip()
-
-
-def extract_with_pymupdf(pdf_path):
-    text = ""
-    try:
-        import fitz
-        doc = fitz.open(pdf_path)
-        for page in doc:
-            t = page.get_text() or ""
-            text += t
-        doc.close()
-    except ImportError:
-        pass
-    return text.strip()
-
-
 def pdf_to_images_base64(pdf_path, max_pages=30, dpi=200):
     pages = []
     try:
@@ -151,7 +121,7 @@ def main():
         sys.exit(1)
 
     pdf_path = sys.argv[1]
-    engine = sys.argv[2] if len(sys.argv) > 2 else "auto"
+    engine = sys.argv[2] if len(sys.argv) > 2 else "paddle_ocr_vl"
     api_key = sys.argv[3] if len(sys.argv) > 3 else ""
 
     if not os.path.exists(pdf_path):
@@ -163,17 +133,7 @@ def main():
     markdown = ""
     used_engine = "none"
 
-    if engine in ("auto", "pypdf"):
-        text = extract_with_pymupdf(pdf_path)
-        if not text:
-            text = extract_with_pypdf(pdf_path)
-        if text:
-            used_engine = "pypdf"
-            if len(text) < 50:
-                text = ""
-                used_engine = "none"
-
-    if not text and engine in ("auto", "paddle_ocr_vl"):
+    if engine == "paddle_ocr_vl":
         images = pdf_to_images_base64(pdf_path)
         if images:
             md, plain = ocr_with_paddle_vl(images)
@@ -182,7 +142,16 @@ def main():
                 markdown = md
                 used_engine = "paddle_ocr_vl"
 
-    if not text and engine in ("auto", "glm_ocr") and api_key:
+    if not text and engine == "glm_ocr" and api_key:
+        images = pdf_to_images_base64(pdf_path)
+        if images:
+            md, plain = ocr_with_glm(images, api_key)
+            if plain.strip():
+                text = plain
+                markdown = md
+                used_engine = "glm_ocr"
+
+    if not text and api_key:
         images = pdf_to_images_base64(pdf_path)
         if images:
             md, plain = ocr_with_glm(images, api_key)

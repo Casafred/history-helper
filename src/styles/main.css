@@ -905,3 +905,216 @@ body {
   color: var(--text-muted);
   margin-top: 4px;
 }
+
+.kanban-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.kanban-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.kanban-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.kanban-board {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.kanban-columns {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(180px, 1fr));
+  gap: 10px;
+  min-width: 1080px;
+}
+
+.kanban-column {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+}
+
+.kanban-column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: 6px 6px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kanban-column-title {
+  color: var(--text-primary);
+}
+
+.kanban-column-count {
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.kanban-col-oa .kanban-column-header { border-top: 3px solid var(--danger); }
+.kanban-col-response .kanban-column-header { border-top: 3px solid var(--accent); }
+.kanban-col-request .kanban-column-header { border-top: 3px solid var(--warning); }
+.kanban-col-allowance .kanban-column-header { border-top: 3px solid var(--success); }
+.kanban-col-notification .kanban-column-header { border-top: 3px solid #a78bfa; }
+.kanban-col-misc .kanban-column-header { border-top: 3px solid var(--text-muted); }
+
+.kanban-column-body {
+  flex: 1;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.kanban-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 20px 0;
+  font-style: italic;
+}
+
+.kanban-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  transition: border-color 0.2s;
+}
+
+.kanban-card:hover {
+  border-color: var(--accent);
+}
+
+.kanban-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.kanban-card-code {
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: monospace;
+}
+
+.kanban-col-oa .kanban-card-code { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
+.kanban-col-allowance .kanban-card-code { background: rgba(52, 211, 153, 0.15); color: var(--success); }
+
+.kanban-card-date {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.kanban-card-name {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.kanban-card-desc {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.kanban-card-stage {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.kanban-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.kanban-card-actions .btn-small {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.kanban-extracted {
+  margin-top: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.kanban-extracted .extracted-text {
+  max-height: 200px;
+  font-size: 11px;
+  padding: 6px;
+  margin-top: 4px;
+}
+
+.kanban-analysis {
+  margin-top: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+}
+
+.kanban-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.kanban-analysis-content {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-primary);
+}
+
+@media (max-width: 1200px) {
+  .kanban-columns {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .kanban-columns {
+    grid-template-columns: 1fr;
+  }
+}

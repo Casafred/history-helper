@@ -57,6 +57,7 @@
           <button class="tab-btn active" data-tab="overview">概览</button>
           <button class="tab-btn" data-tab="family">同族</button>
           <button class="tab-btn" data-tab="documents">审查文档</button>
+          <button class="tab-btn" data-tab="kanban">审查看板</button>
           <button class="tab-btn" data-tab="ai-summary">AI 梳理</button>
         </div>
 
@@ -79,6 +80,23 @@
 
         <div id="tab-documents" class="tab-content">
           <div id="documents-content"><p class="placeholder">暂无审查文档</p></div>
+        </div>
+
+        <div id="tab-kanban" class="tab-content">
+          <div id="kanban-content">
+            <div class="kanban-header">
+              <span class="kanban-title">审查状态看板</span>
+              <span id="kanban-status" class="kanban-status"></span>
+              <button id="kanban-auto-btn" class="btn-primary" disabled>自动梳理审查意见</button>
+            </div>
+            <div id="kanban-board" class="kanban-board">
+              <p class="placeholder">请先查询专利，审查文档加载后将自动归类到看板</p>
+            </div>
+            <div id="kanban-analysis" class="kanban-analysis hidden">
+              <h3 class="kanban-section-title">📊 审查历史综合分析</h3>
+              <div id="kanban-analysis-content"></div>
+            </div>
+          </div>
         </div>
 
         <div id="tab-ai-summary" class="tab-content">
@@ -105,10 +123,11 @@
         <div class="modal-overlay"></div>
         <div class="modal-content">
           <div class="modal-header">
-            <h2>AI 服务设置</h2>
+            <h2>AI & OCR 服务设置</h2>
             <button id="modal-close-btn" class="btn-icon">&times;</button>
           </div>
           <div class="modal-body">
+            <h3 class="settings-section-title">AI 服务</h3>
             <div class="form-group">
               <label>AI 服务商</label>
               <select id="ai-provider-select">
@@ -129,8 +148,24 @@
               <label>模型</label>
               <select id="ai-model-select"></select>
             </div>
+
+            <h3 class="settings-section-title">OCR 引擎（用于提取 PDF 内容）</h3>
+            <div class="form-group">
+              <label>OCR 引擎</label>
+              <select id="ocr-engine-select">
+                <option value="paddle_ocr_vl">PaddleOCR-VL-1.5（默认，无需 Key）</option>
+                <option value="glm_ocr">GLM OCR（需智谱 API Key）</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="ocr-auto-extract" checked>
+                查询后自动提取审查意见 PDF 内容
+              </label>
+            </div>
+
             <div class="form-actions">
-              <button id="ai-test-btn" class="btn-secondary">测试连接</button>
+              <button id="ai-test-btn" class="btn-secondary">测试 AI 连接</button>
               <button id="ai-save-btn" class="btn-primary">保存</button>
             </div>
             <div id="ai-test-result" class="test-result hidden"></div>
@@ -148,6 +183,7 @@
   </div>
 
   <script src="scripts/web-ai.js"></script>
+  <script src="scripts/patent-status.js"></script>
   <script src="scripts/web-app.js"></script>
 </body>
 </html>

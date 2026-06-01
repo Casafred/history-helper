@@ -32,12 +32,15 @@ const aiProviderSelect = document.getElementById("ai-provider-select");
 const aiApiKeyInput = document.getElementById("ai-api-key-input");
 const aiBaseUrlInput = document.getElementById("ai-base-url-input");
 const aiModelSelect = document.getElementById("ai-model-select");
+const ocrEngineSelect = document.getElementById("ocr-engine-select");
+const ocrAutoExtract = document.getElementById("ocr-auto-extract");
 const aiTestBtn = document.getElementById("ai-test-btn");
 const aiSaveBtn = document.getElementById("ai-save-btn");
 const aiTestResult = document.getElementById("ai-test-result");
 const aiSummarizeBtn = document.getElementById("ai-summarize-btn");
 const aiStatus = document.getElementById("ai-status");
 const aiSummaryResult = document.getElementById("ai-summary-result");
+const kanbanAutoBtn = document.getElementById("kanban-auto-btn");
 
 const batchBtn = document.getElementById("batch-btn");
 const batchInput = document.getElementById("batch-input");
@@ -190,16 +193,134 @@ searchBtn.addEventListener("click", async () => {
   try { renderOverview(result); } catch (e) { console.error("renderOverview:", e); }
   try { renderFamily(result); } catch (e) { console.error("renderFamily:", e); }
   try { renderDocuments(result); } catch (e) { console.error("renderDocuments:", e); }
+  try { renderKanban(result); } catch (e) { console.error("renderKanban:", e); }
 
   if (warnings.length > 0) {
     warnings.forEach(w => showError("⚠️ " + w));
   }
 
   aiSummarizeBtn.disabled = false;
+  kanbanAutoBtn.disabled = false;
   resultSection.classList.remove("hidden");
   searchBtn.disabled = false;
   loading.classList.add("hidden");
+
+  const config = window.AI.loadAIConfig();
+  const ocrConfig = window.AI.getOCRConfig(config);
+  if (ocrConfig.autoExtract && result.documents) {
+    autoExtractOfficeActions(result);
+  }
 });
+
+let kanbanState = {
+  documents: [],
+  extractions: {},
+  analysis: "",
+};
+
+function renderKanban(data) {
+  const board = document.getElementById("kanban-board");
+  const statusEl = document.getElementById("kanban-status");
+  if (!board) return;
+
+  const docs = data.documents ? extractDocuments(data.documents) : [];
+  if (!docs || docs.length === 0) {
+    board.innerHTML = '<p class="placeholder">未查询到审查文档</p>';
+    if (statusEl) statusEl.textContent = "";
+    kanbanState.documents = [];
+    return;
+  }
+
+  const office = data.office;
+  const items = docs.map((d, idx) => {
+    const docCode = d.docCode || d.documentType || d.kindCode || d.type || "";
+    const desc = d.docDesc || d.documentDescription || d.description || d.docId || "";
+    const date = d.legalDateStr || d.documentDate || d.date || "";
+    const docId = d.documentId || d.docId || "";
+    const numberOfPages = d.numberOfPages != null ? d.numberOfPages : 1;
+    const docFormat = d.docFormat || "PDF";
+    const status = getStatusInfo(office, docCode, desc);
+
+    return {
+      idx: idx,
+      docCode,
+      desc,
+      date,
+      docId,
+      numberOfPages,
+      docFormat,
+      name: status.name,
+      type: status.type,
+      stage: status.stage,
+    };
+  });
+
+  kanbanState.documents = items;
+  kanbanState.extractions = {};
+  kanbanState.analysis = "";
+
+  const columns = [
+    { key: "office_action", title: "📋 审查意见", color: "kanban-col-oa" },
+    { key: "response", title: "💬 申请人答复", color: "kanban-col-response" },
+    { key: "request", title: "📝 申请人请求", color: "kanban-col-request" },
+    { key: "allowance", title: "✅ 授权通知", color: "kanban-col-allowance" },
+    { key: "notification", title: "📢 通知", color: "kanban-col-notification" },
+    { key: "misc", title: "📦 其他文件", color: "kanban-col-misc" },
+  ];
+
+  let html = '<div class="kanban-columns">';
+  columns.forEach(col => {
+    const colItems = items.filter(it => it.type === col.key);
+    const count = colItems.length;
+    html += `
+      <div class="kanban-column ${col.color}">
+        <div class="kanban-column-header">
+          <span class="kanban-column-title">${col.title}</span>
+          <span class="kanban-column-count">${count}</span>
+        </div>
+        <div class="kanban-column-body">
+    `;
+    if (count === 0) {
+      html += '<p class="kanban-empty">无</p>';
+    } else {
+      colItems.forEach(it => {
+        const isUS = data.office === "US";
+        const urlDocNum = isUS ? data.applicationNumber : encodeURIComponent(data.docNumber || data.applicationNumber);
+        const encodedDocId = encodeURIComponent(it.docId);
+        const extractUrl = it.docId ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
+        const downloadUrl = it.docId ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
+        html += `
+          <div class="kanban-card" data-idx="${it.idx}">
+            <div class="kanban-card-header">
+              <span class="kanban-card-code">${escapeHtml(it.docCode)}</span>
+              ${it.date ? '<span class="kanban-card-date">' + escapeHtml(it.date) + '</span>' : ''}
+            </div>
+            <div class="kanban-card-name">${escapeHtml(it.name)}</div>
+            ${it.desc && it.desc !== it.name ? '<div class="kanban-card-desc">' + escapeHtml(it.desc) + '</div>' : ''}
+            <div class="kanban-card-stage">阶段: ${escapeHtml(it.stage)}</div>
+            <div class="kanban-card-actions">
+              ${extractUrl ? '<button class="btn-small btn-extract" data-action="kanban-extract" data-url="' + extractUrl + '" data-idx="' + it.idx + '" data-doctype="' + escapeHtml(it.docCode) + '">提取内容</button>' : ''}
+              ${downloadUrl ? '<button class="btn-small btn-download" data-action="kanban-download" data-url="' + downloadUrl + '" data-filename="' + escapeHtml(it.docCode) + '_' + escapeHtml(it.date.replace(/\//g, '-')) + '.pdf">下载</button>' : ''}
+            </div>
+            <div id="kanban-extracted-${it.idx}" class="kanban-extracted hidden"></div>
+          </div>
+        `;
+      });
+    }
+    html += `
+        </div>
+      </div>
+    `;
+  });
+  html += '</div>';
+
+  board.innerHTML = html;
+  if (statusEl) {
+    const oaCount = items.filter(it => it.type === "office_action").length;
+    const respCount = items.filter(it => it.type === "response").length;
+    statusEl.textContent = "共 " + items.length + " 份审查文档（审查意见 " + oaCount + " 份，答复 " + respCount + " 份）";
+  }
+}
 
 function renderOverview(data) {
   const appInfo = document.getElementById("app-info");
@@ -324,6 +445,68 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+async function autoExtractOfficeActions(data) {
+  const items = kanbanState.documents;
+  const oaItems = items.filter(it => it.type === "office_action" || it.type === "response");
+  if (oaItems.length === 0) return;
+
+  const config = window.AI.loadAIConfig();
+  const ocrConfig = window.AI.getOCRConfig(config);
+  const provider = window.AI.getCurrentProvider(config);
+  const engine = ocrConfig.engine || "paddle_ocr_vl";
+
+  const statusEl = document.getElementById("kanban-status");
+  for (let i = 0; i < oaItems.length; i++) {
+    const it = oaItems[i];
+    if (statusEl) statusEl.textContent = "自动提取中 (" + (i + 1) + "/" + oaItems.length + "): " + it.name;
+    const container = document.getElementById("kanban-extracted-" + it.idx);
+    if (!container) continue;
+    container.classList.remove("hidden");
+    container.innerHTML = '<p class="extracting">正在自动提取内容（引擎: ' + escapeHtml(engine) + '）...</p>';
+
+    const isUS = data.office === "US";
+    const urlDocNum = isUS ? data.applicationNumber : encodeURIComponent(data.docNumber || data.applicationNumber);
+    const encodedDocId = encodeURIComponent(it.docId);
+    const extractUrl = `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}?engine=${encodeURIComponent(engine)}`;
+    let finalUrl = extractUrl;
+    if (engine === "glm_ocr" && provider && provider.apiKey) {
+      finalUrl += "&api_key=" + encodeURIComponent(provider.apiKey);
+    }
+
+    try {
+      const resp = await fetch(finalUrl);
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const result = await resp.json();
+      if (result.error) {
+        container.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(result.error) + '</p>';
+        continue;
+      }
+      const text = result.text || "";
+      const markdown = result.markdown || "";
+      if (!text && !markdown) {
+        container.innerHTML = '<p class="extract-empty">未能提取到文本</p>';
+        continue;
+      }
+      const displayText = markdown || text;
+      kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine };
+      container.innerHTML = `
+        <div class="extracted-header">
+          <span class="extracted-engine">引擎: ${escapeHtml(result.engine)}</span>
+          <span class="extracted-chars">字符数: ${displayText.length}</span>
+          <button class="btn-small btn-ai-analyze" data-action="ai-analyze-doc" data-idx="${it.idx}" data-doctype="${escapeHtml(it.docCode)}">AI 分析</button>
+        </div>
+        <pre class="extracted-text">${escapeHtml(displayText.length > 8000 ? displayText.substring(0, 8000) + "\n\n[...已截断...]" : displayText)}</pre>
+      `;
+    } catch (e) {
+      container.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(e.message) + '</p>';
+    }
+  }
+  if (statusEl) {
+    const ok = Object.keys(kanbanState.extractions).length;
+    statusEl.textContent = "共 " + items.length + " 份审查文档，自动提取完成 " + ok + " 份";
+  }
+}
+
 function renderDocuments(data) {
   const container = document.getElementById("documents-content");
   const docs = data.documents;
@@ -445,11 +628,16 @@ async function extractDocumentText(url, idx, docType) {
 }
 
 async function aiAnalyzeDocument(idx, docType) {
-  const container = document.getElementById("doc-extracted-" + idx);
+  let container = document.getElementById("doc-extracted-" + idx);
+  if (!container) container = document.getElementById("kanban-extracted-" + idx);
   if (!container) return;
 
-  const extractedText = container._extractedText || "";
-  const extractedMarkdown = container._extractedMarkdown || "";
+  let extractedText = container._extractedText || "";
+  let extractedMarkdown = container._extractedMarkdown || "";
+  if (!extractedText && !extractedMarkdown && kanbanState.extractions[idx]) {
+    extractedText = kanbanState.extractions[idx].text || "";
+    extractedMarkdown = kanbanState.extractions[idx].markdown || "";
+  }
   const content = extractedMarkdown || extractedText;
 
   if (!content) {
@@ -653,10 +841,31 @@ aiSaveBtn.addEventListener("click", () => {
     config[type].apiKey = aiApiKeyInput.value.trim();
     config[type].baseUrl = aiBaseUrlInput.value.trim();
     config[type].model = aiModelSelect.value;
-    window.AI.saveAIConfig(config);
   }
+  const ocrConfig = window.AI.getOCRConfig(config);
+  ocrConfig.engine = ocrEngineSelect.value;
+  ocrConfig.autoExtract = ocrAutoExtract.checked;
+  window.AI.saveAIConfig(config);
   aiSettingsModal.classList.add("hidden");
 });
+
+function loadAISettingsToForm() {
+  const config = window.AI.loadAIConfig();
+  let type = aiProviderSelect.value;
+  if (!config[type]) type = Object.keys(config).find(k => k !== "ocr") || "zhipu";
+  if (config[type]) {
+    aiApiKeyInput.value = config[type].apiKey || "";
+    aiBaseUrlInput.value = config[type].baseUrl || "";
+    updateModelOptions(type);
+    if (config[type].model) aiModelSelect.value = config[type].model;
+  } else {
+    aiBaseUrlInput.value = window.AI.getDefaultBaseUrl(type);
+    updateModelOptions(type);
+  }
+  const ocrConfig = window.AI.getOCRConfig(config);
+  if (ocrEngineSelect) ocrEngineSelect.value = ocrConfig.engine || "paddle_ocr_vl";
+  if (ocrAutoExtract) ocrAutoExtract.checked = ocrConfig.autoExtract !== false;
+}
 
 aiSummarizeBtn.addEventListener("click", async () => {
   if (!currentData) return;
@@ -707,22 +916,6 @@ aiSummarizeBtn.addEventListener("click", async () => {
   }
 });
 
-function loadAISettingsToForm() {
-  const config = window.AI.loadAIConfig();
-  const provider = window.AI.getCurrentProvider(config);
-  if (provider) {
-    aiProviderSelect.value = provider.type;
-    aiBaseUrlInput.value = provider.baseUrl;
-    aiApiKeyInput.value = provider.apiKey;
-    updateModelOptions(provider.type);
-    aiModelSelect.value = provider.model;
-  } else {
-    const type = aiProviderSelect.value;
-    aiBaseUrlInput.value = window.AI.getDefaultBaseUrl(type);
-    updateModelOptions(type);
-  }
-}
-
 function updateModelOptions(type) {
   const models = window.AI.getAvailableModels(type);
   aiModelSelect.innerHTML = "";
@@ -740,6 +933,118 @@ function showTestResult(success, message) {
   aiTestResult.classList.remove("hidden");
 }
 
+kanbanAutoBtn.addEventListener("click", async () => {
+  if (!currentData) { showError("请先查询专利"); return; }
+  const config = window.AI.loadAIConfig();
+  const provider = window.AI.getCurrentProvider(config);
+  if (!provider) {
+    showError("请先在 AI 设置中配置并选择一个 AI 服务商");
+    aiSettingsBtn.click();
+    return;
+  }
+
+  const items = kanbanState.documents;
+  if (!items || items.length === 0) { showError("请先查询专利并加载审查文档"); return; }
+
+  kanbanAutoBtn.disabled = true;
+  const analysisSection = document.getElementById("kanban-analysis");
+  const analysisContent = document.getElementById("kanban-analysis-content");
+  analysisSection.classList.remove("hidden");
+  analysisContent.innerHTML = '<p class="extracting">正在准备审查意见和答复的提取内容...</p>';
+
+  const oaItems = items.filter(it => it.type === "office_action" || it.type === "response");
+  if (oaItems.length === 0) {
+    analysisContent.innerHTML = '<p class="placeholder">未找到审查意见或答复类文档</p>';
+    kanbanAutoBtn.disabled = false;
+    return;
+  }
+
+  const ocrConfig = window.AI.getOCRConfig(config);
+  const engine = ocrConfig.engine || "paddle_ocr_vl";
+  const statusEl = document.getElementById("kanban-status");
+
+  const missing = oaItems.filter(it => !kanbanState.extractions[it.idx]);
+  for (let i = 0; i < missing.length; i++) {
+    const it = missing[i];
+    if (statusEl) statusEl.textContent = "补提中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
+    const container = document.getElementById("kanban-extracted-" + it.idx);
+    if (!container) continue;
+    container.classList.remove("hidden");
+    container.innerHTML = '<p class="extracting">正在提取（' + escapeHtml(engine) + '）...</p>';
+    const isUS = currentData.office === "US";
+    const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+    const encodedDocId = encodeURIComponent(it.docId);
+    let extractUrl = `/api/gd/extract-text/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}?engine=${encodeURIComponent(engine)}`;
+    if (engine === "glm_ocr" && provider && provider.apiKey) {
+      extractUrl += "&api_key=" + encodeURIComponent(provider.apiKey);
+    }
+    try {
+      const resp = await fetch(extractUrl);
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const result = await resp.json();
+      if (result.error) { container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>'; continue; }
+      const text = result.text || "";
+      const markdown = result.markdown || "";
+      if (!text && !markdown) { container.innerHTML = '<p class="extract-empty">未能提取到文本</p>'; continue; }
+      kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine };
+      const displayText = markdown || text;
+      container.innerHTML = `
+        <div class="extracted-header">
+          <span class="extracted-engine">引擎: ${escapeHtml(result.engine)}</span>
+          <span class="extracted-chars">字符数: ${displayText.length}</span>
+        </div>
+        <pre class="extracted-text">${escapeHtml(displayText.length > 6000 ? displayText.substring(0, 6000) + "\n\n[...已截断...]" : displayText)}</pre>
+      `;
+    } catch (e) {
+      container.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
+    }
+  }
+
+  if (statusEl) statusEl.textContent = "正在用 AI 整理审查历史...";
+  analysisContent.innerHTML = '<p class="extracting">AI 正在整理审查意见和答复...</p>';
+
+  const lines = [];
+  oaItems.forEach((it, idx) => {
+    const ext = kanbanState.extractions[it.idx];
+    if (!ext) {
+      lines.push(`【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）\n[未能提取内容]`);
+      return;
+    }
+    const content = (ext.markdown || ext.text || "").substring(0, 12000);
+    lines.push(`【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）\n${content}`);
+  });
+
+  const systemPrompt = "你是一位专业的美国专利审查分析师。请根据以下从 Global Dossier 获取的审查意见（Office Action）和申请人答复（Response）的实际内容，整理出一份结构化的审查历史分析报告。报告需包含以下章节：\n1. 📌 案件概览（专利号、申请号、申请人、当前阶段）\n2. 📋 审查轮次（按时间倒序列出每一轮：日期、文件类型、核心要点）\n3. ⚠️ 驳回理由（每轮 OA 的核心驳回点 / 引用文献 / 法条）\n4. 💬 申请人答辩要点（针对每轮 OA 的修改、争辩、证据）\n5. 📊 审查趋势与风险评估（审查员立场、授权可能性、潜在风险）\n6. 🎯 建议的应对策略（修改权利要求、补充证据、RCE、上诉等）\n请用中文回答，使用清晰的层级结构（Markdown 格式）。";
+
+  try {
+    let fullText = "";
+    for await (const chunk of window.AI.streamChat(
+      provider.type, provider.apiKey, provider.baseUrl,
+      {
+        model: provider.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: lines.join("\n\n---\n\n") },
+        ],
+        temperature: 0.3,
+        maxTokens: 16384,
+      }
+    )) {
+      if (chunk.content) {
+        fullText += chunk.content;
+        analysisContent.innerHTML = '<div class="kanban-analysis-content">' + escapeHtml(fullText).replace(/\n/g, "<br>") + "</div>";
+      }
+    }
+    kanbanState.analysis = fullText;
+    if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份审查/答复文档";
+  } catch (e) {
+    analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
+    if (statusEl) statusEl.textContent = "AI 整理失败 ✗";
+  } finally {
+    kanbanAutoBtn.disabled = false;
+  }
+});
+
 document.addEventListener("DOMContentLoaded", () => {
   loadAISettingsToForm();
 
@@ -755,4 +1060,66 @@ document.addEventListener("DOMContentLoaded", () => {
       aiAnalyzeDocument(parseInt(btn.dataset.idx), btn.dataset.doctype);
     }
   });
+
+  const kanbanBoard = document.getElementById("kanban-board");
+  if (kanbanBoard) {
+    kanbanBoard.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-action]");
+      if (!btn) return;
+      const action = btn.dataset.action;
+      if (action === "kanban-download") {
+        downloadDocument(btn.dataset.url, btn.dataset.filename);
+      } else if (action === "kanban-extract") {
+        kanbanManualExtract(btn.dataset.url, parseInt(btn.dataset.idx), btn.dataset.doctype);
+      } else if (action === "ai-analyze-doc") {
+        aiAnalyzeDocument(parseInt(btn.dataset.idx), btn.dataset.doctype);
+      }
+    });
+  }
 });
+
+async function kanbanManualExtract(url, idx, docType) {
+  const container = document.getElementById("kanban-extracted-" + idx);
+  if (!container) return;
+  container.classList.remove("hidden");
+
+  const config = window.AI.loadAIConfig();
+  const ocrConfig = window.AI.getOCRConfig(config);
+  const provider = window.AI.getCurrentProvider(config);
+  const engine = ocrConfig.engine || "paddle_ocr_vl";
+
+  let extractUrl = url + (url.includes("?") ? "&" : "?") + "engine=" + encodeURIComponent(engine);
+  if (engine === "glm_ocr" && provider && provider.apiKey) {
+    extractUrl += "&api_key=" + encodeURIComponent(provider.apiKey);
+  }
+
+  container.innerHTML = '<p class="extracting">正在提取内容（引擎: ' + escapeHtml(engine) + '）...</p>';
+
+  try {
+    const resp = await fetch(extractUrl);
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const result = await resp.json();
+    if (result.error) {
+      container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>';
+      return;
+    }
+    const text = result.text || "";
+    const markdown = result.markdown || "";
+    if (!text && !markdown) {
+      container.innerHTML = '<p class="extract-empty">未能提取到文本</p>';
+      return;
+    }
+    const displayText = markdown || text;
+    kanbanState.extractions[idx] = { text, markdown, engine: result.engine };
+    container.innerHTML = `
+      <div class="extracted-header">
+        <span class="extracted-engine">引擎: ${escapeHtml(result.engine)}</span>
+        <span class="extracted-chars">字符数: ${displayText.length}</span>
+        <button class="btn-small btn-ai-analyze" data-action="ai-analyze-doc" data-idx="${idx}" data-doctype="${escapeHtml(docType)}">AI 分析</button>
+      </div>
+      <pre class="extracted-text">${escapeHtml(displayText.length > 8000 ? displayText.substring(0, 8000) + "\n\n[...已截断...]" : displayText)}</pre>
+    `;
+  } catch (e) {
+    container.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
+  }
+}

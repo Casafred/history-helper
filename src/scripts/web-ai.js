@@ -41,11 +41,18 @@ var AI = (function () {
       openai: createDefaultConfig("openai"),
       zhipu: createDefaultConfig("zhipu"),
       deepseek: createDefaultConfig("deepseek"),
+      ocr: { engine: "paddle_ocr_vl", autoExtract: true },
     };
   }
 
   function saveAIConfig(config) {
+    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl", autoExtract: true };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  }
+
+  function getOCRConfig(config) {
+    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl", autoExtract: true };
+    return config.ocr;
   }
 
   function getCurrentProvider(config) {
@@ -153,6 +160,7 @@ var AI = (function () {
     loadAIConfig: loadAIConfig,
     saveAIConfig: saveAIConfig,
     getCurrentProvider: getCurrentProvider,
+    getOCRConfig: getOCRConfig,
     streamChat: streamChat,
     testConnection: testConnection,
   };
