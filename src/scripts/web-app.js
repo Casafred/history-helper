@@ -1213,8 +1213,9 @@ async function kanbanManualExtract(url, idx, docType) {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+function initApp() {
   try {
+    console.log("[PatentHelper] initApp called, readyState=" + document.readyState);
     patentInput = document.getElementById("patent-input");
     searchBtn = document.getElementById("search-btn");
     convertBtn = document.getElementById("convert-btn");
@@ -1777,4 +1778,10 @@ document.addEventListener("DOMContentLoaded", () => {
   } catch (e) {
     console.error("[PatentHelper] Initialization failed:", e);
   }
-});
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initApp);
+} else {
+  initApp();
+}
