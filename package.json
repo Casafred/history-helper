@@ -21,13 +21,19 @@
     },
     "files": [
       "electron-main.js",
-      "src/**/*",
-      "extract_pdf.py"
-    ],
-    "extraResources": [
       {
-        "from": "extract_pdf.py",
-        "to": "extract_pdf.py"
+        "from": "src",
+        "to": "src",
+        "filter": [
+          "index.html",
+          "styles/**",
+          "scripts/marked.min.js",
+          "scripts/docx.umd.js",
+          "scripts/FileSaver.min.js",
+          "scripts/web-ai.js",
+          "scripts/patent-status.js",
+          "scripts/web-app.js"
+        ]
       }
     ],
     "win": {
@@ -47,7 +53,10 @@
       "perMachine": false,
       "allowElevation": false,
       "unicode": true,
-      "deleteAppDataOnUninstall": false
-    }
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "${productName}-${version}-setup.${ext}"
+    },
+    "asar": true,
+    "asarUnpack": []
   }
 }

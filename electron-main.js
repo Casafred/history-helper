@@ -1,15 +1,20 @@
 const { app, BrowserWindow } = require("electron");
 const http = require("http");
 const https = require("https");
-const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const url = require("url");
 
 const GD_API_BASE = "https://d1kazzu6rbodne.cloudfront.net";
 const PADDLE_OCR_VL_URL = "https://k2neb1qcy1u6g4k5.aistudio-app.com/layout-parsing";
 const PADDLE_OCR_VL_TOKEN = "70b270c8275606a7a97f8c4e8617cdeb935ed74c";
 const GLM_OCR_URL = "https://open.bigmodel.cn/api/paas/v4/layout_parsing";
+
+const GD_HEADERS = {
+  "user-type": "external",
+  "Referer": "https://globaldossier.uspto.gov/",
+  "Origin": "https://globaldossier.uspto.gov",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+};
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -39,110 +44,110 @@ function serveStatic(filePath, res) {
       res.end("Not Found");
       return;
     }
-    res.writeHead(200, {
-      "Content-Type": MIME_TYPES[ext] || "application/octet-stream",
-    });
+    res.writeHead(200, { "Content-Type": MIME_TYPES[ext] || "application/octet-stream" });
     res.end(data);
   });
 }
 
-function proxyGdApi(urlPath, res) {
-  const targetUrl = GD_API_BASE + urlPath;
-
-  if (urlPath.includes("/doc-content/")) {
-    const args = [
-      "-s",
-      "-w", " HTTP_CODE_%{http_code}",
-      "--max-time", "60",
-      "-H", "user-type: external",
-      "-H", "Accept: application/pdf,*/*",
-      "-H", "Referer: https://globaldossier.uspto.gov/",
-      "-H", "Origin: https://globaldossier.uspto.gov",
-      "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-      targetUrl,
-    ];
-
-    execFile("curl", args, { maxBuffer: 50 * 1024 * 1024, encoding: "buffer" }, (err, stdoutBuffer) => {
-      if (err) {
-        res.writeHead(502, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-        res.end(JSON.stringify({ error: err.message }));
-        return;
-      }
-
-      const markerBuffer = Buffer.from(" HTTP_CODE_");
-      let idx = -1;
-      for (let i = Math.max(0, stdoutBuffer.length - 20); i < stdoutBuffer.length; i++) {
-        if (stdoutBuffer.slice(i, i + markerBuffer.length).equals(markerBuffer)) {
-          idx = i;
-          break;
-        }
-      }
-
-      let httpCode = 200;
-      let bodyBuffer = stdoutBuffer;
-      if (idx !== -1) {
-        const codeStr = stdoutBuffer.slice(idx + markerBuffer.length).toString().trim();
-        httpCode = parseInt(codeStr, 10);
-        bodyBuffer = stdoutBuffer.slice(0, idx);
-      }
-
-      const isPdf = bodyBuffer.length > 100 && bodyBuffer[0] === 0x25 && bodyBuffer[1] === 0x50;
-      const isAttachmentNotFound = bodyBuffer.length < 100 && bodyBuffer.toString("utf-8").includes("Attachment Not Found");
-
-      const respHeaders = {
-        "Content-Type": isPdf ? "application/pdf" : "application/octet-stream",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type, user-type",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-      };
-
-      if (isAttachmentNotFound) {
-        respHeaders["Content-Type"] = "text/plain";
-        respHeaders["X-Attachment-Not-Found"] = "true";
-      } else if (isPdf) {
-        respHeaders["Content-Disposition"] = 'attachment; filename="document.pdf"';
-      }
-
-      res.writeHead(httpCode, respHeaders);
-      res.end(bodyBuffer);
-    });
-  } else {
-    const args = [
-      "-s",
-      "-w", "\n__HTTP_CODE__%{http_code}",
-      "--max-time", "30",
-      "-H", "user-type: external",
-      "-H", "Accept: application/json, text/plain, */*",
-      "-H", "Referer: https://globaldossier.uspto.gov/",
-      "-H", "Origin: https://globaldossier.uspto.gov",
-      "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-      targetUrl,
-    ];
-
-    execFile("curl", args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
-      if (err) {
-        res.writeHead(502, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-        res.end(JSON.stringify({ error: err.message }));
-        return;
-      }
-
-      const marker = "\n__HTTP_CODE__";
-      const idx = stdout.lastIndexOf(marker);
-      let httpCode = 200;
-      let body = stdout;
-      if (idx !== -1) {
-        httpCode = parseInt(stdout.substring(idx + marker.length), 10);
-        body = stdout.substring(0, idx);
-      }
-
-      res.writeHead(httpCode, {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type, user-type",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
+function httpsGet(targetUrl, headers, timeout) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(targetUrl);
+    const options = {
+      hostname: urlObj.hostname,
+      port: 443,
+      path: urlObj.pathname + urlObj.search,
+      method: "GET",
+      headers: { ...GD_HEADERS, ...headers },
+      timeout: timeout || 30000,
+    };
+    const req = https.request(options, (resp) => {
+      const chunks = [];
+      resp.on("data", (chunk) => chunks.push(chunk));
+      resp.on("end", () => {
+        const body = Buffer.concat(chunks);
+        resolve({ statusCode: resp.statusCode, headers: resp.headers, body });
       });
-      res.end(body);
     });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("Request timeout")); });
+    req.end();
+  });
+}
+
+function httpsPost(targetUrl, headers, payload, timeout) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(targetUrl);
+    const bodyData = typeof payload === "string" ? payload : JSON.stringify(payload);
+    const options = {
+      hostname: urlObj.hostname,
+      port: 443,
+      path: urlObj.pathname + urlObj.search,
+      method: "POST",
+      headers: {
+        ...headers,
+        "Content-Length": Buffer.byteLength(bodyData),
+      },
+      timeout: timeout || 180000,
+    };
+    const req = https.request(options, (resp) => {
+      const chunks = [];
+      resp.on("data", (chunk) => chunks.push(chunk));
+      resp.on("end", () => {
+        const body = Buffer.concat(chunks);
+        resolve({ statusCode: resp.statusCode, headers: resp.headers, body });
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("Request timeout")); });
+    req.write(bodyData);
+    req.end();
+  });
+}
+
+async function proxyGdApi(urlPath, res) {
+  const targetUrl = GD_API_BASE + urlPath;
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type, user-type",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+  };
+
+  try {
+    const isDocContent = urlPath.includes("/doc-content/");
+    const acceptHeader = isDocContent ? "application/pdf,*/*" : "application/json, text/plain, */*";
+    const timeout = isDocContent ? 60000 : 30000;
+
+    const result = await httpsGet(targetUrl, { Accept: acceptHeader }, timeout);
+
+    if (result.statusCode !== 200) {
+      corsHeaders["Content-Type"] = "application/json";
+      res.writeHead(result.statusCode, corsHeaders);
+      res.end(JSON.stringify({ error: `HTTP ${result.statusCode}` }));
+      return;
+    }
+
+    const bodyText = result.body.toString("utf-8");
+    const isAttachmentNotFound = result.body.length < 100 && bodyText.includes("Attachment Not Found");
+    const isPdf = result.body.length > 100 && result.body[0] === 0x25 && result.body[1] === 0x50;
+
+    if (isDocContent) {
+      corsHeaders["Content-Type"] = isPdf ? "application/pdf" : "application/octet-stream";
+      if (isAttachmentNotFound) {
+        corsHeaders["Content-Type"] = "text/plain";
+        corsHeaders["X-Attachment-Not-Found"] = "true";
+      } else if (isPdf) {
+        corsHeaders["Content-Disposition"] = 'attachment; filename="document.pdf"';
+      }
+    } else {
+      corsHeaders["Content-Type"] = "application/json";
+    }
+
+    res.writeHead(200, corsHeaders);
+    res.end(result.body);
+  } catch (e) {
+    corsHeaders["Content-Type"] = "application/json";
+    res.writeHead(502, corsHeaders);
+    res.end(JSON.stringify({ error: e.message }));
   }
 }
 
@@ -176,10 +181,11 @@ function ocrWithPaddleVl(pdfBase64) {
     };
 
     const req = https.request(options, (resp) => {
-      let data = "";
-      resp.on("data", (chunk) => { data += chunk; });
+      const chunks = [];
+      resp.on("data", (chunk) => chunks.push(chunk));
       resp.on("end", () => {
         try {
+          const data = Buffer.concat(chunks).toString("utf-8");
           const parsed = JSON.parse(data);
           const allMarkdown = [];
           const allText = [];
@@ -203,10 +209,7 @@ function ocrWithPaddleVl(pdfBase64) {
                 const bbox = block.block_bbox || null;
                 allBlocks.push({
                   block_id: `B_p${pageNum}_${block.block_id || allBlocks.length}`,
-                  page: pageNum,
-                  label,
-                  content,
-                  bbox,
+                  page: pageNum, label, content, bbox,
                   order: block.block_order || 0,
                   group_id: block.group_id || 0,
                 });
@@ -261,10 +264,11 @@ function ocrWithGlm(pdfBase64, apiKey) {
     };
 
     const req = https.request(options, (resp) => {
-      let data = "";
-      resp.on("data", (chunk) => { data += chunk; });
+      const chunks = [];
+      resp.on("data", (chunk) => chunks.push(chunk));
       resp.on("end", () => {
         try {
+          const data = Buffer.concat(chunks).toString("utf-8");
           const parsed = JSON.parse(data);
           const allMarkdown = [];
           const allText = [];
@@ -295,20 +299,14 @@ function ocrWithGlm(pdfBase64, apiKey) {
                 let pixelBbox = null;
                 if (bbox2d && bbox2d.length === 4 && pw && ph) {
                   pixelBbox = [
-                    Math.round(bbox2d[0] * pw),
-                    Math.round(bbox2d[1] * ph),
-                    Math.round(bbox2d[2] * pw),
-                    Math.round(bbox2d[3] * ph),
+                    Math.round(bbox2d[0] * pw), Math.round(bbox2d[1] * ph),
+                    Math.round(bbox2d[2] * pw), Math.round(bbox2d[3] * ph),
                   ];
                 }
                 allBlocks.push({
                   block_id: `B_p${pageNum}_${blockIdx}`,
-                  page: pageNum,
-                  label,
-                  content,
-                  bbox: pixelBbox,
-                  order: block.index || blockIdx,
-                  group_id: 0,
+                  page: pageNum, label, content, bbox: pixelBbox,
+                  order: block.index || blockIdx, group_id: 0,
                 });
                 if (content && ["text", "title", "table", "formula"].includes(label)) {
                   allText.push(content);
@@ -343,50 +341,19 @@ async function extractPdfText(req, res) {
   const apiKey = urlObj.searchParams.get("api_key") || "";
   const gdUrl = `${GD_API_BASE}/doc-content/svc/doccontent${urlPath}`;
 
-  const corsHeaders = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-  };
+  const corsHeaders = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
 
   try {
-    const curlArgs = [
-      "-s",
-      "-w", " HTTP_CODE_%{http_code}",
-      "--max-time", "60",
-      "-H", "user-type: external",
-      "-H", "Accept: application/pdf,*/*",
-      "-H", "Referer: https://globaldossier.uspto.gov/",
-      "-H", "Origin: https://globaldossier.uspto.gov",
-      "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      gdUrl,
-    ];
+    const result = await httpsGet(gdUrl, { Accept: "application/pdf,*/*" }, 60000);
 
-    const curlResult = await new Promise((resolve, reject) => {
-      execFile("curl", curlArgs, { maxBuffer: 50 * 1024 * 1024, encoding: "buffer" }, (err, stdoutBuffer) => {
-        if (err) { reject(err); return; }
-        const markerBuffer = Buffer.from(" HTTP_CODE_");
-        let idx = -1;
-        for (let i = Math.max(0, stdoutBuffer.length - 20); i < stdoutBuffer.length; i++) {
-          if (stdoutBuffer.slice(i, i + markerBuffer.length).equals(markerBuffer)) { idx = i; break; }
-        }
-        let httpCode = 200;
-        let bodyBuffer = stdoutBuffer;
-        if (idx !== -1) {
-          httpCode = parseInt(stdoutBuffer.slice(idx + markerBuffer.length).toString().trim(), 10);
-          bodyBuffer = stdoutBuffer.slice(0, idx);
-        }
-        resolve({ httpCode, body: bodyBuffer });
-      });
-    });
-
-    if (curlResult.httpCode !== 200) {
-      throw new Error("PDF 下载失败: HTTP " + curlResult.httpCode);
+    if (result.statusCode !== 200) {
+      throw new Error("PDF 下载失败: HTTP " + result.statusCode);
     }
-    if (curlResult.body.length < 100) {
+    if (result.body.length < 100) {
       throw new Error("下载的文件过小，文档可能暂不可用");
     }
 
-    const pdfBase64 = curlResult.body.toString("base64");
+    const pdfBase64 = result.body.toString("base64");
     let text = "";
     let markdown = "";
     let usedEngine = "none";
@@ -396,46 +363,32 @@ async function extractPdfText(req, res) {
     if (engine === "paddle_ocr_vl" || engine === "auto") {
       const r = await ocrWithPaddleVl(pdfBase64);
       if (r.text.trim() || r.markdown.trim()) {
-        text = r.text;
-        markdown = r.markdown;
-        blocks = r.blocks;
-        pageDimensions = r.pageDimensions;
-        usedEngine = "paddle_ocr_vl";
+        text = r.text; markdown = r.markdown; blocks = r.blocks;
+        pageDimensions = r.pageDimensions; usedEngine = "paddle_ocr_vl";
       }
     }
 
     if (!text && !markdown && (engine === "glm_ocr" || (engine === "auto" && apiKey))) {
       const r = await ocrWithGlm(pdfBase64, apiKey);
       if (r.text.trim() || r.markdown.trim()) {
-        text = r.text;
-        markdown = r.markdown;
-        blocks = r.blocks;
-        pageDimensions = r.pageDimensions;
-        usedEngine = "glm_ocr";
+        text = r.text; markdown = r.markdown; blocks = r.blocks;
+        pageDimensions = r.pageDimensions; usedEngine = "glm_ocr";
       }
     }
 
     if (!text && !markdown && engine !== "paddle_ocr_vl") {
       const r = await ocrWithPaddleVl(pdfBase64);
       if (r.text.trim() || r.markdown.trim()) {
-        text = r.text;
-        markdown = r.markdown;
-        blocks = r.blocks;
-        pageDimensions = r.pageDimensions;
-        usedEngine = "paddle_ocr_vl";
+        text = r.text; markdown = r.markdown; blocks = r.blocks;
+        pageDimensions = r.pageDimensions; usedEngine = "paddle_ocr_vl";
       }
     }
 
-    const result = {
-      text,
-      markdown,
-      engine: usedEngine,
-      char_count: text.length,
-      blocks,
-      page_dimensions: pageDimensions,
-    };
     res.writeHead(200, corsHeaders);
-    res.end(JSON.stringify(result));
+    res.end(JSON.stringify({
+      text, markdown, engine: usedEngine, char_count: text.length,
+      blocks, page_dimensions: pageDimensions,
+    }));
   } catch (e) {
     console.error("Extract error:", e);
     res.writeHead(200, corsHeaders);
