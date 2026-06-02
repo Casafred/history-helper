@@ -1086,6 +1086,187 @@ body {
   margin-top: 4px;
 }
 
+.trace-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.trace-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.trace-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(79, 143, 247, 0.12);
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.2s;
+  border: 1px solid rgba(79, 143, 247, 0.2);
+  font-family: monospace;
+}
+
+.trace-link:hover {
+  background: rgba(79, 143, 247, 0.25);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.trace-link.trace-highlight {
+  background: rgba(251, 191, 36, 0.3);
+  border-color: var(--warning);
+  color: var(--warning);
+  animation: trace-pulse 0.6s ease-in-out 3;
+}
+
+@keyframes trace-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+  50% { box-shadow: 0 0 8px 2px rgba(251, 191, 36, 0.4); }
+}
+
+.trace-unavailable {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.reader-blocks-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reader-block {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.reader-block:hover {
+  border-color: var(--accent);
+}
+
+.reader-block.trace-highlight {
+  border-color: var(--warning);
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.3);
+  animation: trace-pulse 0.6s ease-in-out 3;
+}
+
+.reader-block-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.reader-block-id {
+  font-family: monospace;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.reader-block-label {
+  color: var(--text-muted);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(148, 152, 173, 0.1);
+}
+
+.reader-block-page {
+  color: var(--text-muted);
+  margin-left: auto;
+  font-family: monospace;
+  font-size: 10px;
+}
+
+.reader-block-content {
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.reader-block-content p {
+  margin: 4px 0;
+}
+
+.trace-locator {
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 6px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.trace-locator-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(251, 191, 36, 0.12);
+  border-bottom: 1px solid rgba(251, 191, 36, 0.2);
+  font-size: 12px;
+}
+
+.trace-locator-id {
+  font-family: monospace;
+  font-weight: 700;
+  color: var(--warning);
+}
+
+.trace-locator-page {
+  color: var(--text-secondary);
+}
+
+.trace-locator-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.trace-locator-close:hover {
+  color: var(--text-primary);
+}
+
+.trace-locator-content {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.trace-locator-bbox {
+  padding: 4px 12px 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
 .kanban-analysis {
   margin-top: 20px;
   background: var(--bg-card);

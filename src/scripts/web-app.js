@@ -218,6 +218,7 @@ let kanbanState = {
   documents: [],
   extractions: {},
   analysis: "",
+  traceIndex: {},
 };
 
 function renderKanban(data) {
@@ -260,6 +261,7 @@ function renderKanban(data) {
   kanbanState.documents = items;
   kanbanState.extractions = {};
   kanbanState.analysis = "";
+  kanbanState.traceIndex = {};
 
   const columns = [
     { key: "office_action", title: "📋 审查意见", color: "kanban-col-oa" },
@@ -921,12 +923,27 @@ kanbanAutoBtn.addEventListener("click", async () => {
       const text = result.text || "";
       const markdown = result.markdown || "";
       if (!text && !markdown) { container.innerHTML = '<p class="extract-empty">未能提取到文本</p>'; continue; }
-      kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine };
+      const blocks = result.blocks || [];
+      const pageDimensions = result.page_dimensions || {};
+      kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
+      if (blocks.length > 0) {
+        blocks.forEach(b => {
+          kanbanState.traceIndex[b.block_id] = {
+            docIdx: it.idx,
+            page: b.page,
+            bbox: b.bbox,
+            content: b.content,
+            label: b.label,
+            pageDimensions: pageDimensions[b.page] || null,
+          };
+        });
+      }
       const displayText = markdown || text;
+      const blocksInfo = blocks.length > 0 ? ` · ${blocks.length} blocks` : "";
       container.innerHTML = `
         <div class="extracted-header">
           <span class="extracted-engine">引擎: ${escapeHtml(result.engine)}</span>
-          <span class="extracted-chars">字符数: ${displayText.length}</span>
+          <span class="extracted-chars">字符数: ${displayText.length}${blocksInfo}</span>
         </div>
         <pre class="extracted-text">${escapeHtml(displayText.length > 6000 ? displayText.substring(0, 6000) + "\n\n[...已截断...]" : displayText)}</pre>
       `;
@@ -938,18 +955,64 @@ kanbanAutoBtn.addEventListener("click", async () => {
   if (statusEl) statusEl.textContent = "正在用 AI 整理审查历史...";
   analysisContent.innerHTML = '<p class="extracting">AI 正在整理审查意见和答复...</p>';
 
-  const lines = [];
+  const hasBlocks = oaItems.some(it => {
+    const ext = kanbanState.extractions[it.idx];
+    return ext && ext.blocks && ext.blocks.length > 0;
+  });
+
+  const annotatedLines = [];
   oaItems.forEach((it, idx) => {
     const ext = kanbanState.extractions[it.idx];
     if (!ext) {
-      lines.push(`【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）\n[未能提取内容]`);
+      annotatedLines.push(`【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）\n[未能提取内容]`);
       return;
     }
-    const content = (ext.markdown || ext.text || "").substring(0, 12000);
-    lines.push(`【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）\n${content}`);
+    const header = `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）`;
+    if (hasBlocks && ext.blocks && ext.blocks.length > 0) {
+      const blockParts = ext.blocks
+        .filter(b => b.content && b.content.trim())
+        .map(b => `[ref:${b.block_id}]${b.content}[/ref:${b.block_id}]`)
+        .join("\n\n");
+      annotatedLines.push(header + "\n" + blockParts);
+    } else {
+      const content = (ext.markdown || ext.text || "").substring(0, 12000);
+      annotatedLines.push(header + "\n" + content);
+    }
   });
 
-  const systemPrompt = "你是一位专业的美国专利审查分析师。请根据以下从 Global Dossier 获取的审查意见（Office Action）和申请人答复（Response）的实际内容，整理出一份结构化的审查历史分析报告。报告需包含以下章节：\n1. 📌 案件概览（专利号、申请号、申请人、当前阶段）\n2. 📋 审查轮次（按时间倒序列出每一轮：日期、文件类型、核心要点）\n3. ⚠️ 驳回理由（每轮 OA 的核心驳回点 / 引用文献 / 法条）\n4. 💬 申请人答辩要点（针对每轮 OA 的修改、争辩、证据）\n5. 📊 审查趋势与风险评估（审查员立场、授权可能性、潜在风险）\n6. 🎯 建议的应对策略（修改权利要求、补充证据、RCE、上诉等）\n请用中文回答，使用清晰的层级结构（Markdown 格式）。";
+  const systemPrompt = hasBlocks
+    ? `你是一位专业的美国专利审查分析师。请根据以下从 Global Dossier 获取的审查意见（Office Action）和申请人答复（Response）的实际内容，整理出一份结构化的审查历史分析报告。
+
+## 关键规则
+
+1. **必须引用来源**：你的每一段分析都必须标注来源，使用 【来源: block_id1, block_id2】 格式。
+   - 在总结的每一段末尾，用 【来源: B_p1_0, B_p1_1】 标注该段分析依据的原文块
+   - block_id 格式为 B_p{页码}_{块序号}，如 B_p1_0、B_p3_5
+   - 可以引用多个来源块
+
+2. **报告结构**（使用 Markdown 格式）：
+   - 📌 案件概览（专利号、申请号、申请人、当前阶段）
+   - 📋 审查轮次（按时间倒序列出每一轮：日期、文件类型、核心要点）
+   - ⚠️ 驳回理由（每轮 OA 的核心驳回点 / 引用文献 / 法条）
+   - 💬 申请人答辩要点（针对每轮 OA 的修改、争辩、证据）
+   - 📊 审查趋势与风险评估（审查员立场、授权可能性、潜在风险）
+   - 🎯 建议的应对策略（修改权利要求、补充证据、RCE、上诉等）
+
+3. **输出示例**：
+
+### 第一轮审查意见（2023-03-15）
+
+审查员根据 35 U.S.C. 103 条款发出了最终驳回，认为权利要求 1-10 显而易见。主要引用了 Smith 等人的 US 6,123,456 专利作为对比文献。【来源: B_p1_0, B_p1_1】
+
+审查员指出权利要求 1 相对于 Smith 的区别特征在于...但认为该区别是常规设计选择。【来源: B_p1_2】
+
+4. **注意事项**：
+   - 不要编造文档中没有的内容
+   - 如果某段分析综合了多个来源，全部列出
+   - 保持来源标注的准确性，不要张冠李戴
+   - 每段分析都必须有来源标注，无来源的内容不可信
+   - 请用中文回答`
+    : "你是一位专业的美国专利审查分析师。请根据以下从 Global Dossier 获取的审查意见（Office Action）和申请人答复（Response）的实际内容，整理出一份结构化的审查历史分析报告。报告需包含以下章节：\n1. 📌 案件概览（专利号、申请号、申请人、当前阶段）\n2. 📋 审查轮次（按时间倒序列出每一轮：日期、文件类型、核心要点）\n3. ⚠️ 驳回理由（每轮 OA 的核心驳回点 / 引用文献 / 法条）\n4. 💬 申请人答辩要点（针对每轮 OA 的修改、争辩、证据）\n5. 📊 审查趋势与风险评估（审查员立场、授权可能性、潜在风险）\n6. 🎯 建议的应对策略（修改权利要求、补充证据、RCE、上诉等）\n请用中文回答，使用清晰的层级结构（Markdown 格式）。";
 
   try {
     let fullText = "";
@@ -959,7 +1022,7 @@ kanbanAutoBtn.addEventListener("click", async () => {
         model: provider.model,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: lines.join("\n\n---\n\n") },
+          { role: "user", content: annotatedLines.join("\n\n---\n\n") },
         ],
         temperature: 0.3,
         maxTokens: 32768,
@@ -967,11 +1030,11 @@ kanbanAutoBtn.addEventListener("click", async () => {
     )) {
       if (chunk.content) {
         fullText += chunk.content;
-        analysisContent.innerHTML = '<div class="kanban-analysis-content markdown-body">' + renderMarkdown(fullText) + "</div>";
+        analysisContent.innerHTML = '<div class="kanban-analysis-content markdown-body">' + renderMarkdownWithTrace(fullText) + "</div>";
       }
     }
     kanbanState.analysis = fullText;
-    if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份审查/答复文档";
+    if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份审查/答复文档" + (hasBlocks ? "（含溯源标记）" : "");
   } catch (e) {
     analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
     if (statusEl) statusEl.textContent = "AI 整理失败 ✗";
@@ -990,6 +1053,74 @@ function renderMarkdown(text) {
     }
   }
   return escapeHtml(text).replace(/\n/g, "<br>");
+}
+
+function renderMarkdownWithTrace(text) {
+  if (!text) return "";
+  const processed = text.replace(/【来源:\s*([^\】]+)】/g, (match, refsStr) => {
+    const refs = refsStr.split(",").map(r => r.trim()).filter(r => r.startsWith("B_"));
+    if (refs.length === 0) return "";
+    const validRefs = refs.filter(r => kanbanState.traceIndex[r]);
+    if (validRefs.length === 0) {
+      return '<span class="trace-links"><span class="trace-label">溯源:</span> <span class="trace-unavailable">引用块未找到</span></span>';
+    }
+    const refLinks = validRefs.map(ref => {
+      const info = kanbanState.traceIndex[ref];
+      const pageLabel = info ? `第${info.page}页` : ref;
+      return `<a class="trace-link" data-block-id="${escapeHtml(ref)}" title="跳转到原文 ${pageLabel}">📄 ${escapeHtml(ref)}</a>`;
+    }).join(" ");
+    return `<span class="trace-links"><span class="trace-label">溯源:</span> ${refLinks}</span>`;
+  });
+  if (typeof marked !== "undefined" && marked.parse) {
+    try {
+      return marked.parse(processed);
+    } catch (e) {
+      return escapeHtml(processed).replace(/\n/g, "<br>");
+    }
+  }
+  return escapeHtml(processed).replace(/\n/g, "<br>");
+}
+
+function onTraceClick(blockId) {
+  const info = kanbanState.traceIndex[blockId];
+  if (!info) {
+    showError("溯源信息不存在: " + blockId);
+    return;
+  }
+  if (readerModal.classList.contains("hidden")) {
+    openReader();
+  }
+  selectReaderDoc(info.docIdx);
+  setTimeout(() => {
+    const md = kanbanState.extractions[info.docIdx];
+    if (!md) return;
+    const content = md.markdown || md.text || "";
+    const blocks = md.blocks || [];
+    const targetBlock = blocks.find(b => b.block_id === blockId);
+    if (targetBlock && targetBlock.content) {
+      const snippet = targetBlock.content.substring(0, 80);
+      const el = readerContent.querySelector(`[data-block-id="${blockId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("trace-highlight");
+        setTimeout(() => el.classList.remove("trace-highlight"), 3000);
+        return;
+      }
+    }
+    const traceEl = document.createElement("div");
+    traceEl.className = "trace-locator";
+    traceEl.innerHTML = `
+      <div class="trace-locator-header">
+        <span class="trace-locator-id">📄 ${escapeHtml(blockId)}</span>
+        <span class="trace-locator-page">第 ${info.page} 页</span>
+        <button class="trace-locator-close" onclick="this.parentElement.parentElement.remove()">×</button>
+      </div>
+      <div class="trace-locator-content">${escapeHtml((info.content || "").substring(0, 300))}${info.content && info.content.length > 300 ? "..." : ""}</div>
+      ${info.bbox ? '<div class="trace-locator-bbox">区域坐标: [' + info.bbox.join(", ") + "]</div>" : ""}
+    `;
+    readerContent.insertBefore(traceEl, readerContent.firstChild);
+    traceEl.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 300);
 }
 
 function renderTimeline(data) {
@@ -1128,8 +1259,27 @@ function selectReaderDoc(idx) {
   const ext = kanbanState.extractions[idx];
   if (ext) {
     const md = ext.markdown || ext.text || "";
+    const blocks = ext.blocks || [];
     if (md) {
-      readerContent.innerHTML = '<div class="markdown-body">' + renderMarkdown(md) + '</div>';
+      if (blocks.length > 0) {
+        const blocksHtml = blocks
+          .filter(b => b.content && b.content.trim())
+          .map(b => {
+            const pageLabel = `第${b.page}页`;
+            const bboxLabel = b.bbox ? ` [${b.bbox.join(",")}]` : "";
+            return `<div class="reader-block" data-block-id="${escapeHtml(b.block_id)}">
+              <div class="reader-block-header">
+                <span class="reader-block-id">${escapeHtml(b.block_id)}</span>
+                <span class="reader-block-label">${escapeHtml(b.label)}</span>
+                <span class="reader-block-page">${pageLabel}${bboxLabel}</span>
+              </div>
+              <div class="reader-block-content">${renderMarkdown(b.content)}</div>
+            </div>`;
+          }).join("\n");
+        readerContent.innerHTML = '<div class="markdown-body reader-blocks-view">' + blocksHtml + '</div>';
+      } else {
+        readerContent.innerHTML = '<div class="markdown-body">' + renderMarkdown(md) + '</div>';
+      }
     } else {
       readerContent.innerHTML = '<p class="placeholder">该文档未提取到内容</p>';
     }
@@ -1144,7 +1294,7 @@ function selectReaderAnalysis() {
   if (activeEl) activeEl.classList.add("active");
 
   if (kanbanState.analysis) {
-    readerContent.innerHTML = '<div class="markdown-body">' + renderMarkdown(kanbanState.analysis) + '</div>';
+    readerContent.innerHTML = '<div class="markdown-body">' + renderMarkdownWithTrace(kanbanState.analysis) + '</div>';
   } else {
     readerContent.innerHTML = '<p class="placeholder">尚未生成 AI 分析报告</p>';
   }
@@ -1341,6 +1491,14 @@ document.addEventListener("DOMContentLoaded", () => {
   if (readerExportBtn) {
     readerExportBtn.addEventListener("click", exportToWord);
   }
+
+  document.addEventListener("click", (e) => {
+    const traceLink = e.target.closest(".trace-link");
+    if (traceLink) {
+      const blockId = traceLink.dataset.blockId;
+      if (blockId) onTraceClick(blockId);
+    }
+  });
 });
 
 async function kanbanManualExtract(url, idx, docType) {
@@ -1375,11 +1533,26 @@ async function kanbanManualExtract(url, idx, docType) {
       return;
     }
     const displayText = markdown || text;
-    kanbanState.extractions[idx] = { text, markdown, engine: result.engine };
+    const blocks = result.blocks || [];
+    const pageDimensions = result.page_dimensions || {};
+    kanbanState.extractions[idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
+    if (blocks.length > 0) {
+      blocks.forEach(b => {
+        kanbanState.traceIndex[b.block_id] = {
+          docIdx: idx,
+          page: b.page,
+          bbox: b.bbox,
+          content: b.content,
+          label: b.label,
+          pageDimensions: pageDimensions[b.page] || null,
+        };
+      });
+    }
+    const blocksInfo = blocks.length > 0 ? ` · ${blocks.length} blocks` : "";
     container.innerHTML = `
       <div class="extracted-header">
         <span class="extracted-engine">引擎: ${escapeHtml(result.engine)}</span>
-        <span class="extracted-chars">字符数: ${displayText.length}</span>
+        <span class="extracted-chars">字符数: ${displayText.length}${blocksInfo}</span>
         <button class="btn-small btn-ai-analyze" data-action="ai-analyze-doc" data-idx="${idx}" data-doctype="${escapeHtml(docType)}">AI 分析</button>
       </div>
       <pre class="extracted-text">${escapeHtml(displayText.length > 8000 ? displayText.substring(0, 8000) + "\n\n[...已截断...]" : displayText)}</pre>
