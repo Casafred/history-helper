@@ -12,9 +12,10 @@ const OFFICE_NAMES = {
 
 let currentData = null;
 
-const isTauri = !!(window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
+const isElectron = !!(window && window.process && window.process.type);
+const isTauri = false;
 
-console.log("[PatentHelper] Script loaded, isTauri=" + isTauri);
+console.log("[PatentHelper] Script loaded, isElectron=" + isElectron);
 
 let patentInput;
 let searchBtn;

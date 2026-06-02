@@ -1,28 +1,3 @@
-# 环境变量 - 包含 API 密钥等敏感信息，禁止提交
-.env
-.env.local
-.env.production
-
-# 编译输出
-target/
-dist/
-
-# Node
 node_modules/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# 操作系统
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# 日志
-*.log
-
-# Tauri 生成
-src-tauri/gen/
+dist-electron/
+src-tauri/target/

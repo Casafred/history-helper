@@ -2,12 +2,52 @@
   "name": "history-helper",
   "version": "0.1.0",
   "private": true,
+  "main": "electron-main.js",
   "scripts": {
-    "tauri": "tauri",
-    "dev": "tauri dev",
-    "build": "tauri build"
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "build": "electron-builder",
+    "dev": "electron ."
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "electron": "^35",
+    "electron-builder": "^26"
+  },
+  "build": {
+    "appId": "com.history-helper.app",
+    "productName": "专利审查梳理工具",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron-main.js",
+      "src/**/*",
+      "extract_pdf.py"
+    ],
+    "extraResources": [
+      {
+        "from": "extract_pdf.py",
+        "to": "extract_pdf.py"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "src-tauri/icons/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": ["zh-CN"],
+      "language": 2052,
+      "perMachine": false,
+      "allowElevation": false,
+      "unicode": true,
+      "deleteAppDataOnUninstall": false
+    }
   }
 }
