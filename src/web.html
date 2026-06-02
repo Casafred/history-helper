@@ -58,6 +58,7 @@
           <button class="tab-btn" data-tab="family">同族</button>
           <button class="tab-btn" data-tab="documents">审查文档</button>
           <button class="tab-btn" data-tab="kanban">审查看板</button>
+          <button class="tab-btn" data-tab="timeline">时间线</button>
           <button class="tab-btn" data-tab="ai-summary">AI 梳理</button>
         </div>
 
@@ -93,8 +94,27 @@
               <p class="placeholder">请先查询专利，审查文档加载后将自动归类到看板</p>
             </div>
             <div id="kanban-analysis" class="kanban-analysis hidden">
-              <h3 class="kanban-section-title">📊 审查历史综合分析</h3>
-              <div id="kanban-analysis-content"></div>
+              <div class="kanban-section-header">
+                <h3 class="kanban-section-title">📊 审查历史综合分析</h3>
+                <div class="kanban-section-actions">
+                  <button id="reader-btn" class="btn-secondary" title="在阅读器中查看">📖 阅读器</button>
+                  <button id="export-word-btn" class="btn-secondary" title="导出为 Word 文档">📄 导出 Word</button>
+                </div>
+              </div>
+              <div id="kanban-analysis-content" class="markdown-body"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-timeline" class="tab-content">
+          <div id="timeline-content">
+            <div class="timeline-header">
+              <span class="timeline-title">📅 审查时间线</span>
+              <span id="timeline-status" class="timeline-status"></span>
+              <button id="timeline-generate-btn" class="btn-primary" disabled>生成时间线</button>
+            </div>
+            <div id="timeline-board" class="timeline-board">
+              <p class="placeholder">请先查询专利，审查文档加载后可生成时间线</p>
             </div>
           </div>
         </div>
@@ -118,6 +138,30 @@
           <div id="convert-result" class="card-body"></div>
         </div>
       </section>
+
+      <div id="reader-modal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content reader-modal-content">
+          <div class="modal-header reader-header">
+            <h2>📖 审查意见阅读器</h2>
+            <div class="reader-header-actions">
+              <button id="reader-export-btn" class="btn-secondary">📄 导出 Word</button>
+              <button id="reader-close-btn" class="btn-icon">&times;</button>
+            </div>
+          </div>
+          <div class="reader-body">
+            <div id="reader-sidebar" class="reader-sidebar">
+              <div class="reader-sidebar-title">审查文档列表</div>
+              <div id="reader-doc-list" class="reader-doc-list"></div>
+            </div>
+            <div class="reader-main">
+              <div id="reader-content" class="reader-content markdown-body">
+                <p class="placeholder">请从左侧选择文档查看内容</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div id="ai-settings-modal" class="modal hidden">
         <div class="modal-overlay"></div>
@@ -157,12 +201,6 @@
                 <option value="glm_ocr">GLM OCR（需智谱 API Key）</option>
               </select>
             </div>
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input type="checkbox" id="ocr-auto-extract" checked>
-                查询后自动提取审查意见 PDF 内容
-              </label>
-            </div>
 
             <div class="form-actions">
               <button id="ai-test-btn" class="btn-secondary">测试 AI 连接</button>
@@ -182,6 +220,9 @@
     </main>
   </div>
 
+  <script src="scripts/marked.min.js"></script>
+  <script src="scripts/docx.umd.js"></script>
+  <script src="scripts/FileSaver.min.js"></script>
   <script src="scripts/web-ai.js"></script>
   <script src="scripts/patent-status.js"></script>
   <script src="scripts/web-app.js"></script>

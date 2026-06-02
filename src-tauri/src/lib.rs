@@ -2,10 +2,12 @@ mod api;
 mod cache;
 #[allow(dead_code)]
 mod models;
+mod ocr;
 mod patent;
 
 use api::global_dossier::GlobalDossierClient;
 use cache::{CacheStore, DB_FILENAME, DEFAULT_TTL_SECS};
+use ocr::OcrClient;
 use patent::converter::{detect_office, parse_patent_number};
 use serde::Serialize;
 use std::sync::Mutex;
@@ -213,10 +215,47 @@ async fn batch_fetch_patents(
 ) -> Result<Vec<CommandResult>, String> {
     let mut results = Vec::with_capacity(inputs.len());
     for input in inputs {
-        let result = fetch_patent(input, state.clone()).await?;
+        let result = fetch_patent(input, None, state.clone()).await?;
         results.push(result);
     }
     Ok(results)
+}
+
+#[tauri::command]
+async fn extract_text(
+    country: String,
+    doc_number: String,
+    doc_id: String,
+    pages: String,
+    format: String,
+    engine: String,
+    api_key: String,
+) -> Result<CommandResult, String> {
+    let client = GlobalDossierClient::new();
+    let pdf_bytes = match client
+        .get_document(&country, &doc_number, &doc_id, &pages, &format)
+        .await
+    {
+        Ok(data) => data,
+        Err(e) => return Ok(CommandResult::err(e.to_string())),
+    };
+
+    if pdf_bytes.len() < 100 {
+        return Ok(CommandResult::err("下载的文件过小，文档可能暂不可用"));
+    }
+
+    let pdf_base64 = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        &pdf_bytes,
+    );
+
+    let ocr_client = OcrClient::new();
+    let result = ocr_client.extract(&pdf_base64, &engine, &api_key).await;
+
+    match serde_json::to_value(&result) {
+        Ok(val) => Ok(CommandResult::ok(val)),
+        Err(e) => Ok(CommandResult::err(format!("序列化结果失败: {}", e))),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -266,6 +305,7 @@ pub fn run() {
             fetch_documents,
             download_document,
             batch_fetch_patents,
+            extract_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

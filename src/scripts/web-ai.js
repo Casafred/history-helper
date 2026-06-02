@@ -12,8 +12,8 @@ var AI = (function () {
   function getDefaultModels(type) {
     switch (type) {
       case "openai": return ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"];
-      case "zhipu": return ["glm-5.1", "glm-5", "glm-4-plus", "glm-4-flash", "glm-4-air", "glm-4"];
-      case "deepseek": return ["deepseek-v4-flash", "deepseek-v4-pro"];
+      case "zhipu": return ["glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4.7-flashx", "glm-4.5-air", "glm-4-plus", "glm-4-flash", "glm-4-air"];
+      case "deepseek": return ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"];
     }
   }
 
@@ -41,17 +41,17 @@ var AI = (function () {
       openai: createDefaultConfig("openai"),
       zhipu: createDefaultConfig("zhipu"),
       deepseek: createDefaultConfig("deepseek"),
-      ocr: { engine: "paddle_ocr_vl", autoExtract: true },
+      ocr: { engine: "paddle_ocr_vl" },
     };
   }
 
   function saveAIConfig(config) {
-    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl", autoExtract: true };
+    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl" };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
   }
 
   function getOCRConfig(config) {
-    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl", autoExtract: true };
+    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl" };
     return config.ocr;
   }
 
@@ -64,21 +64,41 @@ var AI = (function () {
     return null;
   }
 
-  function buildUrl(baseUrl) {
+  function buildUrl(providerType, baseUrl) {
     var base = baseUrl.replace(/\/+$/, "");
-    if (!base.endsWith("/v1")) base += "/v1";
+    if (providerType === "zhipu") {
+      if (!base.endsWith("/v4")) base += "/v4";
+    } else {
+      if (!base.endsWith("/v1")) base += "/v1";
+    }
     return base;
   }
 
   async function* streamChat(providerType, apiKey, baseUrl, params, signal) {
-    var url = buildUrl(baseUrl) + "/chat/completions";
+    var url = buildUrl(providerType, baseUrl) + "/chat/completions";
+
     var body = {
       model: params.model,
       messages: params.messages,
-      temperature: params.temperature || 0.1,
-      max_tokens: params.maxTokens || 16384,
+      max_tokens: params.maxTokens || 32768,
       stream: true,
     };
+
+    if (providerType === "deepseek") {
+      if (params.thinking && params.thinking.type === "enabled") {
+        body.thinking = { type: "enabled" };
+        if (params.thinking.budgetTokens) {
+          body.thinking.budget_tokens = params.thinking.budgetTokens;
+        }
+      } else {
+        body.temperature = params.temperature != null ? params.temperature : 0.1;
+      }
+      body.stream_options = { include_usage: true };
+    } else if (providerType === "zhipu") {
+      body.temperature = params.temperature != null ? params.temperature : 0.1;
+    } else {
+      body.temperature = params.temperature != null ? params.temperature : 0.1;
+    }
 
     var response = await fetch(url, {
       method: "POST",
@@ -118,8 +138,12 @@ var AI = (function () {
         }
         try {
           var parsed = JSON.parse(data);
-          var content = (parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content) || "";
-          if (content) yield { content: content, done: false };
+          var delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
+          var content = (delta && delta.content) || "";
+          var reasoningContent = (delta && delta.reasoning_content) || "";
+          if (content || reasoningContent) {
+            yield { content: content, reasoningContent: reasoningContent, done: false };
+          }
         } catch (e) { continue; }
       }
     }
@@ -130,7 +154,7 @@ var AI = (function () {
   async function testConnection(providerType, apiKey, baseUrl, model) {
     var start = performance.now();
     try {
-      var url = buildUrl(baseUrl) + "/chat/completions";
+      var url = buildUrl(providerType, baseUrl) + "/chat/completions";
       var response = await fetch(url, {
         method: "POST",
         headers: {
