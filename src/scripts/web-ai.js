@@ -3,17 +3,17 @@ var AI = (function () {
 
   function getDefaultBaseUrl(type) {
     switch (type) {
-      case "openai": return "https://api.openai.com";
-      case "zhipu": return "https://open.bigmodel.cn/api/paas";
-      case "deepseek": return "https://api.deepseek.com";
+      case "openai": return "https://api.openai.com/v1";
+      case "zhipu": return "https://open.bigmodel.cn/api/paas/v4";
+      case "deepseek": return "https://api.deepseek.com/v1";
     }
   }
 
   function getDefaultModels(type) {
     switch (type) {
       case "openai": return ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"];
-      case "zhipu": return ["glm-5.1", "glm-5", "glm-4-plus", "glm-4-flash", "glm-4-air", "glm-4"];
-      case "deepseek": return ["deepseek-v4-flash", "deepseek-v4-pro"];
+      case "zhipu": return ["glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4.7-flashx", "glm-4.5-air", "glm-4-plus", "glm-4-flash", "glm-4-air"];
+      case "deepseek": return ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"];
     }
   }
 
@@ -41,17 +41,17 @@ var AI = (function () {
       openai: createDefaultConfig("openai"),
       zhipu: createDefaultConfig("zhipu"),
       deepseek: createDefaultConfig("deepseek"),
-      ocr: { engine: "paddle_ocr_vl", autoExtract: true },
+      ocr: { engine: "paddle_ocr_vl", autoExtract: false },
     };
   }
 
   function saveAIConfig(config) {
-    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl", autoExtract: true };
+    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl", autoExtract: false };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
   }
 
   function getOCRConfig(config) {
-    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl", autoExtract: true };
+    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl", autoExtract: false };
     return config.ocr;
   }
 
@@ -65,9 +65,7 @@ var AI = (function () {
   }
 
   function buildUrl(baseUrl) {
-    var base = baseUrl.replace(/\/+$/, "");
-    if (!base.endsWith("/v1")) base += "/v1";
-    return base;
+    return baseUrl.replace(/\/+$/, "");
   }
 
   async function* streamChat(providerType, apiKey, baseUrl, params, signal) {

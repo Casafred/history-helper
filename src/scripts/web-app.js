@@ -447,7 +447,7 @@ function escapeHtml(str) {
 
 async function autoExtractOfficeActions(data) {
   const items = kanbanState.documents;
-  const oaItems = items.filter(it => it.type === "office_action" || it.type === "response");
+  const oaItems = items.filter(it => shouldIncludeInAIAnalysis(data.office, it.type));
   if (oaItems.length === 0) return;
 
   const config = window.AI.loadAIConfig();
@@ -949,7 +949,7 @@ kanbanAutoBtn.addEventListener("click", async () => {
   analysisSection.classList.remove("hidden");
   analysisContent.innerHTML = '<p class="extracting">正在准备审查意见和答复的提取内容...</p>';
 
-  const oaItems = items.filter(it => it.type === "office_action" || it.type === "response");
+  const oaItems = items.filter(it => shouldIncludeInAIAnalysis(currentData.office, it.type));
   if (oaItems.length === 0) {
     analysisContent.innerHTML = '<p class="placeholder">未找到审查意见或答复类文档</p>';
     kanbanAutoBtn.disabled = false;
