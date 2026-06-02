@@ -12,7 +12,7 @@ const OFFICE_NAMES = {
 
 let currentData = null;
 
-const isTauri = !!(window.__TAURI_INTERNALS__);
+const isTauri = !!(window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
 
 async function tauriInvoke(cmd, args) {
   if (!isTauri) return null;
@@ -143,19 +143,29 @@ async function gdFetch(urlPath) {
     const docListMatch = urlPath.match(/\/doc-list\/svc\/doclist\/([^/]+)\/([^/]+)\/([^/]+)/);
 
     if (familyMatch) {
-      const result = await tauriInvoke("fetch_family", {
-        input: familyMatch[2].startsWith("US") ? familyMatch[3] : familyMatch[3],
-      });
-      if (result && result.success && result.data) return result.data;
-      throw new Error(result?.error || "Tauri family fetch failed");
+      const office = familyMatch[2];
+      const docNum = familyMatch[3];
+      const input = office + docNum;
+      try {
+        const result = await tauriInvoke("fetch_family", { input });
+        if (result && result.success && result.data) return result.data;
+        throw new Error(result?.error || "Tauri family fetch failed");
+      } catch (e) {
+        console.warn("Tauri fetch_family failed, falling back to fetch:", e);
+      }
     }
 
     if (docListMatch) {
-      const result = await tauriInvoke("fetch_documents", {
-        input: docListMatch[2].startsWith("US") ? docListMatch[3] : docListMatch[3],
-      });
-      if (result && result.success && result.data) return result.data;
-      throw new Error(result?.error || "Tauri documents fetch failed");
+      const office = docListMatch[2];
+      const docNum = docListMatch[3];
+      const input = office + docNum;
+      try {
+        const result = await tauriInvoke("fetch_documents", { input });
+        if (result && result.success && result.data) return result.data;
+        throw new Error(result?.error || "Tauri documents fetch failed");
+      } catch (e) {
+        console.warn("Tauri fetch_documents failed, falling back to fetch:", e);
+      }
     }
   }
 
@@ -696,29 +706,33 @@ async function aiAnalyzeDocument(idx, docType) {
 async function downloadDocument(url, filename) {
   try {
     if (isTauri && currentData) {
-      const docContentMatch = url.match(/doc-content\/svc\/doccontent\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)/);
-      if (docContentMatch) {
-        const result = await tauriInvoke("download_document", {
-          country: docContentMatch[1],
-          docNumber: docContentMatch[2],
-          docId: docContentMatch[3],
-          pages: docContentMatch[4],
-          format: docContentMatch[5],
-        });
-        if (result && result.success && result.data) {
-          const binaryStr = atob(result.data.data);
-          const bytes = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-          const blob = new Blob([bytes], { type: "application/pdf" });
-          const a = document.createElement("a");
-          a.href = URL.createObjectURL(blob);
-          a.download = filename || "document.pdf";
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(a.href);
-          return;
+      try {
+        const docContentMatch = url.match(/doc-content\/svc\/doccontent\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)/);
+        if (docContentMatch) {
+          const result = await tauriInvoke("download_document", {
+            country: docContentMatch[1],
+            docNumber: docContentMatch[2],
+            docId: docContentMatch[3],
+            pages: docContentMatch[4],
+            format: docContentMatch[5],
+          });
+          if (result && result.success && result.data) {
+            const binaryStr = atob(result.data.data);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+            const blob = new Blob([bytes], { type: "application/pdf" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = filename || "document.pdf";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+            return;
+          }
         }
+      } catch (e) {
+        console.warn("Tauri download_document failed, falling back to fetch:", e);
       }
     }
 
@@ -958,27 +972,30 @@ function showTestResult(success, message) {
 
 async function doExtractText(office, docNum, docId, pages, docFormat, engine, apiKey) {
   if (isTauri) {
-    const result = await tauriInvoke("extract_text", {
-      country: office,
-      docNumber: docNum,
-      docId: docId,
-      pages: pages,
-      format: docFormat,
-      engine: engine,
-      apiKey: apiKey || "",
-    });
-    if (result && result.success && result.data) {
-      const d = result.data;
-      return {
-        text: d.text || "",
-        markdown: d.markdown || "",
-        engine: d.engine || "none",
-        blocks: d.blocks || [],
-        page_dimensions: d.page_dimensions || {},
-        error: d.error || null,
-      };
+    try {
+      const result = await tauriInvoke("extract_text", {
+        country: office,
+        docNumber: docNum,
+        docId: docId,
+        pages: pages,
+        format: docFormat,
+        engine: engine,
+        apiKey: apiKey || "",
+      });
+      if (result && result.success && result.data) {
+        const d = result.data;
+        return {
+          text: d.text || "",
+          markdown: d.markdown || "",
+          engine: d.engine || "none",
+          blocks: d.blocks || [],
+          page_dimensions: d.page_dimensions || {},
+          error: d.error || null,
+        };
+      }
+    } catch (e) {
+      console.warn("Tauri extract_text failed, falling back to fetch:", e);
     }
-    throw new Error(result?.error || "Tauri extract_text failed");
   }
 
   let extractUrl = `/api/gd/extract-text/${office}/${docNum}/${encodeURIComponent(docId)}/${pages}/${docFormat}?engine=${encodeURIComponent(engine)}`;
