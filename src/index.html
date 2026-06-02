@@ -16,17 +16,17 @@
     <main class="app-main">
       <section class="search-section">
         <div class="search-box">
-          <input
-            type="text"
-            id="patent-input"
-            placeholder="输入专利号（如 US14412875, EP1234567, WO2023123456）"
-            autocomplete="off"
-          >
+          <input type="text" id="patent-input" placeholder="输入专利号（如 US14412875, CN202311065554, CN104227633B）" autocomplete="off">
+          <select id="query-type" class="query-type-select">
+            <option value="application">申请号</option>
+            <option value="publication">公开号/专利号</option>
+          </select>
           <button id="search-btn" class="btn-primary">查询</button>
           <button id="convert-btn" class="btn-secondary">格式转换</button>
-          <button id="batch-btn" class="btn-secondary" title="批量查询">批量查询</button>
+          <button id="batch-btn" class="btn-secondary">批量查询</button>
           <button id="ai-settings-btn" class="btn-icon" title="AI 设置">⚙</button>
         </div>
+        <div class="search-hint">申请号模式：中国 CN+13位（如 CN202311065554），美国 US+申请号（如 US14412875）。公开号模式：中国 CN+9位数字+类型码（如 CN104227633B），系统会自动去除 CN 前缀。</div>
         <div id="office-badge" class="office-badge hidden"></div>
       </section>
 
@@ -37,12 +37,9 @@
             <textarea id="batch-input" placeholder="每行一个专利号，如：&#10;US14412875&#10;EP1234567&#10;WO2023123456" rows="6"></textarea>
             <div class="batch-actions">
               <button id="batch-start-btn" class="btn-primary">开始批量查询</button>
-              <button id="batch-cancel-btn" class="btn-secondary hidden">取消</button>
             </div>
             <div id="batch-progress" class="batch-progress hidden">
-              <div class="progress-bar">
-                <div id="progress-fill" class="progress-fill"></div>
-              </div>
+              <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
               <span id="progress-text">0/0</span>
             </div>
           </div>
@@ -60,6 +57,8 @@
           <button class="tab-btn active" data-tab="overview">概览</button>
           <button class="tab-btn" data-tab="family">同族</button>
           <button class="tab-btn" data-tab="documents">审查文档</button>
+          <button class="tab-btn" data-tab="kanban">审查看板</button>
+          <button class="tab-btn" data-tab="timeline">时间线</button>
           <button class="tab-btn" data-tab="ai-summary">AI 梳理</button>
         </div>
 
@@ -67,28 +66,56 @@
           <div id="overview-content" class="card-grid">
             <div class="info-card">
               <div class="card-header">申请信息</div>
-              <div id="app-info" class="card-body">
-                <p class="placeholder">请输入专利号进行查询</p>
-              </div>
+              <div id="app-info" class="card-body"><p class="placeholder">请输入专利号进行查询</p></div>
             </div>
             <div class="info-card">
               <div class="card-header">当前状态</div>
-              <div id="app-status" class="card-body">
-                <p class="placeholder">-</p>
-              </div>
+              <div id="app-status" class="card-body"><p class="placeholder">-</p></div>
             </div>
           </div>
         </div>
 
         <div id="tab-family" class="tab-content">
-          <div id="family-content">
-            <p class="placeholder">暂无同族信息</p>
-          </div>
+          <div id="family-content"><p class="placeholder">暂无同族信息</p></div>
         </div>
 
         <div id="tab-documents" class="tab-content">
-          <div id="documents-content">
-            <p class="placeholder">暂无审查文档</p>
+          <div id="documents-content"><p class="placeholder">暂无审查文档</p></div>
+        </div>
+
+        <div id="tab-kanban" class="tab-content">
+          <div id="kanban-content">
+            <div class="kanban-header">
+              <span class="kanban-title">审查状态看板</span>
+              <span id="kanban-status" class="kanban-status"></span>
+              <button id="kanban-auto-btn" class="btn-primary" disabled>自动梳理审查意见</button>
+            </div>
+            <div id="kanban-board" class="kanban-board">
+              <p class="placeholder">请先查询专利，审查文档加载后将自动归类到看板</p>
+            </div>
+            <div id="kanban-analysis" class="kanban-analysis hidden">
+              <div class="kanban-section-header">
+                <h3 class="kanban-section-title">📊 审查历史综合分析</h3>
+                <div class="kanban-section-actions">
+                  <button id="reader-btn" class="btn-secondary" title="在阅读器中查看">📖 阅读器</button>
+                  <button id="export-word-btn" class="btn-secondary" title="导出为 Word 文档">📄 导出 Word</button>
+                </div>
+              </div>
+              <div id="kanban-analysis-content" class="markdown-body"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-timeline" class="tab-content">
+          <div id="timeline-content">
+            <div class="timeline-header">
+              <span class="timeline-title">📅 审查时间线</span>
+              <span id="timeline-status" class="timeline-status"></span>
+              <button id="timeline-generate-btn" class="btn-primary" disabled>生成时间线</button>
+            </div>
+            <div id="timeline-board" class="timeline-board">
+              <p class="placeholder">请先查询专利，审查文档加载后可生成时间线</p>
+            </div>
           </div>
         </div>
 
@@ -112,14 +139,39 @@
         </div>
       </section>
 
+      <div id="reader-modal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content reader-modal-content">
+          <div class="modal-header reader-header">
+            <h2>📖 审查意见阅读器</h2>
+            <div class="reader-header-actions">
+              <button id="reader-export-btn" class="btn-secondary">📄 导出 Word</button>
+              <button id="reader-close-btn" class="btn-icon">&times;</button>
+            </div>
+          </div>
+          <div class="reader-body">
+            <div id="reader-sidebar" class="reader-sidebar">
+              <div class="reader-sidebar-title">审查文档列表</div>
+              <div id="reader-doc-list" class="reader-doc-list"></div>
+            </div>
+            <div class="reader-main">
+              <div id="reader-content" class="reader-content markdown-body">
+                <p class="placeholder">请从左侧选择文档查看内容</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="ai-settings-modal" class="modal hidden">
         <div class="modal-overlay"></div>
         <div class="modal-content">
           <div class="modal-header">
-            <h2>AI 服务设置</h2>
+            <h2>AI & OCR 服务设置</h2>
             <button id="modal-close-btn" class="btn-icon">&times;</button>
           </div>
           <div class="modal-body">
+            <h3 class="settings-section-title">AI 服务</h3>
             <div class="form-group">
               <label>AI 服务商</label>
               <select id="ai-provider-select">
@@ -140,8 +192,18 @@
               <label>模型</label>
               <select id="ai-model-select"></select>
             </div>
+
+            <h3 class="settings-section-title">OCR 引擎（用于提取 PDF 内容）</h3>
+            <div class="form-group">
+              <label>OCR 引擎</label>
+              <select id="ocr-engine-select">
+                <option value="paddle_ocr_vl">PaddleOCR-VL-1.5（默认，无需 Key）</option>
+                <option value="glm_ocr">GLM OCR（需智谱 API Key）</option>
+              </select>
+            </div>
+
             <div class="form-actions">
-              <button id="ai-test-btn" class="btn-secondary">测试连接</button>
+              <button id="ai-test-btn" class="btn-secondary">测试 AI 连接</button>
               <button id="ai-save-btn" class="btn-primary">保存</button>
             </div>
             <div id="ai-test-result" class="test-result hidden"></div>
@@ -158,7 +220,11 @@
     </main>
   </div>
 
-  <script src="scripts/ai.js"></script>
-  <script src="scripts/app.js"></script>
+  <script src="scripts/marked.min.js"></script>
+  <script src="scripts/docx.umd.js"></script>
+  <script src="scripts/FileSaver.min.js"></script>
+  <script src="scripts/web-ai.js"></script>
+  <script src="scripts/patent-status.js"></script>
+  <script src="scripts/web-app.js"></script>
 </body>
 </html>
