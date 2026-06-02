@@ -554,7 +554,7 @@ function renderDocuments(data) {
           ${date ? '<div class="doc-date">' + escapeHtml(date) + '</div>' : ''}
         </div>
         <div class="doc-actions">
-          ${extractUrl ? `<select class="engine-select" data-idx="${idx}"><option value="auto">自动</option><option value="pypdf">文本提取</option><option value="paddle_ocr_vl">PaddleOCR</option><option value="glm_ocr">GLM OCR</option></select>` : ''}
+          ${extractUrl ? `<select class="engine-select" data-idx="${idx}"><option value="auto">自动</option><option value="paddle_ocr_vl">PaddleOCR</option><option value="glm_ocr">GLM OCR</option></select>` : ''}
           ${extractUrl ? `<button class="btn-small btn-extract" data-action="extract" data-url="${extractUrl}" data-idx="${idx}" data-doctype="${escapeHtml(docType)}">提取内容</button>` : ''}
           ${downloadUrl ? `<button class="btn-small btn-download" data-action="download" data-url="${downloadUrl}" data-filename="${escapeHtml(docType)}_${escapeHtml(date.replace(/\//g, '-'))}.pdf">下载</button>` : ''}
         </div>
@@ -571,19 +571,16 @@ async function extractDocumentText(url, idx, docType) {
   container.classList.remove("hidden");
 
   const engineSelect = document.querySelector(`.engine-select[data-idx="${idx}"]`);
-  const engine = engineSelect ? engineSelect.value : "auto";
+  const selectedEngine = engineSelect ? engineSelect.value : "auto";
+  const engine = selectedEngine === "auto" ? (ocrEngineSelect ? ocrEngineSelect.value : "paddle_ocr_vl") : selectedEngine;
 
-  let extractUrl = url;
-  if (engine && engine !== "auto") {
-    const sep = url.includes("?") ? "&" : "?";
-    extractUrl = url + sep + "engine=" + engine;
-  }
+  const sep = url.includes("?") ? "&" : "?";
+  let extractUrl = url + sep + "engine=" + encodeURIComponent(engine);
 
   const config = window.AI.loadAIConfig();
   const provider = window.AI.getCurrentProvider(config);
-  if (engine === "glm_ocr" && provider && provider.type === "zhipu" && provider.apiKey) {
-    const sep = extractUrl.includes("?") ? "&" : "?";
-    extractUrl += sep + "api_key=" + encodeURIComponent(provider.apiKey);
+  if (engine === "glm_ocr" && provider && provider.apiKey) {
+    extractUrl += "&api_key=" + encodeURIComponent(provider.apiKey);
   }
 
   container.innerHTML = '<p class="extracting">正在提取文档内容（引擎: ' + escapeHtml(engine === "auto" ? "自动" : engine) + '）...</p>';
