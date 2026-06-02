@@ -604,7 +604,7 @@ async function aiAnalyzeDocument(idx, docType) {
           { role: "user", content: "文档类型: " + docType + "\n\n文档内容:\n" + truncatedContent },
         ],
         temperature: 0.3,
-        maxTokens: 16384,
+        maxTokens: 32768,
       }
     )) {
       if (chunk.content) {
@@ -822,7 +822,7 @@ aiSummarizeBtn.addEventListener("click", async () => {
           { role: "user", content: JSON.stringify(currentData, null, 2) },
         ],
         temperature: 0.3,
-        maxTokens: 16384,
+        maxTokens: 32768,
       }
     )) {
       if (chunk.content) {
@@ -953,7 +953,7 @@ kanbanAutoBtn.addEventListener("click", async () => {
           { role: "user", content: lines.join("\n\n---\n\n") },
         ],
         temperature: 0.3,
-        maxTokens: 16384,
+        maxTokens: 32768,
       }
     )) {
       if (chunk.content) {

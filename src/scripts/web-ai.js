@@ -3,9 +3,9 @@ var AI = (function () {
 
   function getDefaultBaseUrl(type) {
     switch (type) {
-      case "openai": return "https://api.openai.com/v1";
-      case "zhipu": return "https://open.bigmodel.cn/api/paas/v4";
-      case "deepseek": return "https://api.deepseek.com/v1";
+      case "openai": return "https://api.openai.com";
+      case "zhipu": return "https://open.bigmodel.cn/api/paas";
+      case "deepseek": return "https://api.deepseek.com";
     }
   }
 
@@ -64,19 +64,41 @@ var AI = (function () {
     return null;
   }
 
-  function buildUrl(baseUrl) {
-    return baseUrl.replace(/\/+$/, "");
+  function buildUrl(providerType, baseUrl) {
+    var base = baseUrl.replace(/\/+$/, "");
+    if (providerType === "zhipu") {
+      if (!base.endsWith("/v4")) base += "/v4";
+    } else {
+      if (!base.endsWith("/v1")) base += "/v1";
+    }
+    return base;
   }
 
   async function* streamChat(providerType, apiKey, baseUrl, params, signal) {
-    var url = buildUrl(baseUrl) + "/chat/completions";
+    var url = buildUrl(providerType, baseUrl) + "/chat/completions";
+
     var body = {
       model: params.model,
       messages: params.messages,
-      temperature: params.temperature || 0.1,
-      max_tokens: params.maxTokens || 16384,
+      max_tokens: params.maxTokens || 32768,
       stream: true,
     };
+
+    if (providerType === "deepseek") {
+      if (params.thinking && params.thinking.type === "enabled") {
+        body.thinking = { type: "enabled" };
+        if (params.thinking.budgetTokens) {
+          body.thinking.budget_tokens = params.thinking.budgetTokens;
+        }
+      } else {
+        body.temperature = params.temperature != null ? params.temperature : 0.1;
+      }
+      body.stream_options = { include_usage: true };
+    } else if (providerType === "zhipu") {
+      body.temperature = params.temperature != null ? params.temperature : 0.1;
+    } else {
+      body.temperature = params.temperature != null ? params.temperature : 0.1;
+    }
 
     var response = await fetch(url, {
       method: "POST",
@@ -116,8 +138,12 @@ var AI = (function () {
         }
         try {
           var parsed = JSON.parse(data);
-          var content = (parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content) || "";
-          if (content) yield { content: content, done: false };
+          var delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
+          var content = (delta && delta.content) || "";
+          var reasoningContent = (delta && delta.reasoning_content) || "";
+          if (content || reasoningContent) {
+            yield { content: content, reasoningContent: reasoningContent, done: false };
+          }
         } catch (e) { continue; }
       }
     }
@@ -128,7 +154,7 @@ var AI = (function () {
   async function testConnection(providerType, apiKey, baseUrl, model) {
     var start = performance.now();
     try {
-      var url = buildUrl(baseUrl) + "/chat/completions";
+      var url = buildUrl(providerType, baseUrl) + "/chat/completions";
       var response = await fetch(url, {
         method: "POST",
         headers: {
