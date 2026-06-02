@@ -12,6 +12,18 @@ const OFFICE_NAMES = {
 
 let currentData = null;
 
+const isTauri = !!(window.__TAURI_INTERNALS__);
+
+async function tauriInvoke(cmd, args) {
+  if (!isTauri) return null;
+  try {
+    return await window.__TAURI_INTERNALS__.invoke(cmd, args);
+  } catch (e) {
+    console.error("Tauri invoke error:", cmd, e);
+    throw e;
+  }
+}
+
 const patentInput = document.getElementById("patent-input");
 const searchBtn = document.getElementById("search-btn");
 const convertBtn = document.getElementById("convert-btn");
@@ -126,6 +138,27 @@ function parsePatentNumber(input) {
 }
 
 async function gdFetch(urlPath) {
+  if (isTauri) {
+    const familyMatch = urlPath.match(/\/patent-family\/svc\/family\/([^/]+)\/([^/]+)\/([^/]+)/);
+    const docListMatch = urlPath.match(/\/doc-list\/svc\/doclist\/([^/]+)\/([^/]+)\/([^/]+)/);
+
+    if (familyMatch) {
+      const result = await tauriInvoke("fetch_family", {
+        input: familyMatch[2].startsWith("US") ? familyMatch[3] : familyMatch[3],
+      });
+      if (result && result.success && result.data) return result.data;
+      throw new Error(result?.error || "Tauri family fetch failed");
+    }
+
+    if (docListMatch) {
+      const result = await tauriInvoke("fetch_documents", {
+        input: docListMatch[2].startsWith("US") ? docListMatch[3] : docListMatch[3],
+      });
+      if (result && result.success && result.data) return result.data;
+      throw new Error(result?.error || "Tauri documents fetch failed");
+    }
+  }
+
   const url = GD_API_BASE + urlPath;
   const resp = await fetch(url);
   if (!resp.ok) {
@@ -516,21 +549,30 @@ async function extractDocumentText(url, idx, docType) {
   const selectedEngine = engineSelect ? engineSelect.value : "auto";
   const engine = selectedEngine === "auto" ? (ocrEngineSelect ? ocrEngineSelect.value : "paddle_ocr_vl") : selectedEngine;
 
-  const sep = url.includes("?") ? "&" : "?";
-  let extractUrl = url + sep + "engine=" + encodeURIComponent(engine);
-
   const config = window.AI.loadAIConfig();
   const provider = window.AI.getCurrentProvider(config);
-  if (engine === "glm_ocr" && provider && provider.apiKey) {
-    extractUrl += "&api_key=" + encodeURIComponent(provider.apiKey);
-  }
+  const apiKey = provider?.apiKey || "";
 
   container.innerHTML = '<p class="extracting">正在提取文档内容（引擎: ' + escapeHtml(engine === "auto" ? "自动" : engine) + '）...</p>';
 
   try {
-    const resp = await fetch(extractUrl);
-    if (!resp.ok) throw new Error("提取失败: HTTP " + resp.status);
-    const data = await resp.json();
+    let data;
+    if (isTauri && currentData) {
+      const isUS = currentData.office === "US";
+      const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+      const it = kanbanState.documents.find(d => d.idx === idx) || currentData._allDocs?.[idx];
+      if (!it) throw new Error("找不到文档信息");
+      data = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, apiKey);
+    } else {
+      const sep = url.includes("?") ? "&" : "?";
+      let extractUrl = url + sep + "engine=" + encodeURIComponent(engine);
+      if (engine === "glm_ocr" && apiKey) {
+        extractUrl += "&api_key=" + encodeURIComponent(apiKey);
+      }
+      const resp = await fetch(extractUrl);
+      if (!resp.ok) throw new Error("提取失败: HTTP " + resp.status);
+      data = await resp.json();
+    }
 
     if (data.error) {
       container.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(data.error) + '</p>';
@@ -540,6 +582,8 @@ async function extractDocumentText(url, idx, docType) {
     const text = data.text || "";
     const markdown = data.markdown || "";
     const usedEngine = data.engine || "unknown";
+    const blocks = data.blocks || [];
+    const pageDimensions = data.page_dimensions || {};
 
     if (!text && !markdown) {
       container.innerHTML = '<p class="extract-empty">未能提取到文本内容。可尝试切换 OCR 引擎（PaddleOCR 或 GLM OCR）后重新提取。</p>';
@@ -548,11 +592,12 @@ async function extractDocumentText(url, idx, docType) {
 
     const displayText = markdown || text;
     const charCount = displayText.length;
+    const blocksInfo = blocks.length > 0 ? ` · ${blocks.length} blocks` : "";
 
     container.innerHTML = `
       <div class="extracted-header">
         <span class="extracted-engine">引擎: ${escapeHtml(usedEngine)}</span>
-        <span class="extracted-chars">字符数: ${charCount}</span>
+        <span class="extracted-chars">字符数: ${charCount}${blocksInfo}</span>
         <button class="btn-small btn-ai-analyze" data-action="ai-analyze-doc" data-idx="${idx}" data-doctype="${escapeHtml(docType)}">AI 分析此文档</button>
       </div>
       <pre class="extracted-text">${escapeHtml(displayText)}</pre>
@@ -561,6 +606,20 @@ async function extractDocumentText(url, idx, docType) {
     container._extractedText = text;
     container._extractedMarkdown = markdown;
     container._docType = docType;
+
+    kanbanState.extractions[idx] = { text, markdown, engine: usedEngine, blocks, pageDimensions };
+    if (blocks.length > 0) {
+      blocks.forEach(b => {
+        kanbanState.traceIndex[b.block_id] = {
+          docIdx: idx,
+          page: b.page,
+          bbox: b.bbox,
+          content: b.content,
+          label: b.label,
+          pageDimensions: pageDimensions[b.page] || null,
+        };
+      });
+    }
   } catch (e) {
     container.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(e.message) + '</p>';
   }
@@ -636,6 +695,33 @@ async function aiAnalyzeDocument(idx, docType) {
 
 async function downloadDocument(url, filename) {
   try {
+    if (isTauri && currentData) {
+      const docContentMatch = url.match(/doc-content\/svc\/doccontent\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)/);
+      if (docContentMatch) {
+        const result = await tauriInvoke("download_document", {
+          country: docContentMatch[1],
+          docNumber: docContentMatch[2],
+          docId: docContentMatch[3],
+          pages: docContentMatch[4],
+          format: docContentMatch[5],
+        });
+        if (result && result.success && result.data) {
+          const binaryStr = atob(result.data.data);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+          const blob = new Blob([bytes], { type: "application/pdf" });
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = filename || "document.pdf";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(a.href);
+          return;
+        }
+      }
+    }
+
     const resp = await fetch(url, { headers: { "Accept": "application/pdf,*/*" } });
     if (!resp.ok) throw new Error("下载失败: HTTP " + resp.status);
     const contentType = resp.headers.get("content-type") || "";
@@ -870,6 +956,40 @@ function showTestResult(success, message) {
   aiTestResult.classList.remove("hidden");
 }
 
+async function doExtractText(office, docNum, docId, pages, docFormat, engine, apiKey) {
+  if (isTauri) {
+    const result = await tauriInvoke("extract_text", {
+      country: office,
+      docNumber: docNum,
+      docId: docId,
+      pages: pages,
+      format: docFormat,
+      engine: engine,
+      apiKey: apiKey || "",
+    });
+    if (result && result.success && result.data) {
+      const d = result.data;
+      return {
+        text: d.text || "",
+        markdown: d.markdown || "",
+        engine: d.engine || "none",
+        blocks: d.blocks || [],
+        page_dimensions: d.page_dimensions || {},
+        error: d.error || null,
+      };
+    }
+    throw new Error(result?.error || "Tauri extract_text failed");
+  }
+
+  let extractUrl = `/api/gd/extract-text/${office}/${docNum}/${encodeURIComponent(docId)}/${pages}/${docFormat}?engine=${encodeURIComponent(engine)}`;
+  if (engine === "glm_ocr" && apiKey) {
+    extractUrl += "&api_key=" + encodeURIComponent(apiKey);
+  }
+  const resp = await fetch(extractUrl);
+  if (!resp.ok) throw new Error("HTTP " + resp.status);
+  return await resp.json();
+}
+
 kanbanAutoBtn.addEventListener("click", async () => {
   if (!currentData) { showError("请先查询专利"); return; }
   const config = window.AI.loadAIConfig();
@@ -910,15 +1030,8 @@ kanbanAutoBtn.addEventListener("click", async () => {
     container.innerHTML = '<p class="extracting">正在提取（' + escapeHtml(engine) + '）...</p>';
     const isUS = currentData.office === "US";
     const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
-    const encodedDocId = encodeURIComponent(it.docId);
-    let extractUrl = `/api/gd/extract-text/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}?engine=${encodeURIComponent(engine)}`;
-    if (engine === "glm_ocr" && provider && provider.apiKey) {
-      extractUrl += "&api_key=" + encodeURIComponent(provider.apiKey);
-    }
     try {
-      const resp = await fetch(extractUrl);
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
-      const result = await resp.json();
+      const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, provider?.apiKey || "");
       if (result.error) { container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>'; continue; }
       const text = result.text || "";
       const markdown = result.markdown || "";
@@ -1510,18 +1623,28 @@ async function kanbanManualExtract(url, idx, docType) {
   const ocrConfig = window.AI.getOCRConfig(config);
   const provider = window.AI.getCurrentProvider(config);
   const engine = ocrConfig.engine || "paddle_ocr_vl";
-
-  let extractUrl = url + (url.includes("?") ? "&" : "?") + "engine=" + encodeURIComponent(engine);
-  if (engine === "glm_ocr" && provider && provider.apiKey) {
-    extractUrl += "&api_key=" + encodeURIComponent(provider.apiKey);
-  }
+  const apiKey = provider?.apiKey || "";
 
   container.innerHTML = '<p class="extracting">正在提取内容（引擎: ' + escapeHtml(engine) + '）...</p>';
 
   try {
-    const resp = await fetch(extractUrl);
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
-    const result = await resp.json();
+    let result;
+    if (isTauri && currentData) {
+      const isUS = currentData.office === "US";
+      const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+      const it = kanbanState.documents.find(d => d.idx === idx);
+      if (!it) throw new Error("找不到文档信息");
+      result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, apiKey);
+    } else {
+      let extractUrl = url + (url.includes("?") ? "&" : "?") + "engine=" + encodeURIComponent(engine);
+      if (engine === "glm_ocr" && apiKey) {
+        extractUrl += "&api_key=" + encodeURIComponent(apiKey);
+      }
+      const resp = await fetch(extractUrl);
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      result = await resp.json();
+    }
+
     if (result.error) {
       container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>';
       return;
