@@ -41,17 +41,17 @@ var AI = (function () {
       openai: createDefaultConfig("openai"),
       zhipu: createDefaultConfig("zhipu"),
       deepseek: createDefaultConfig("deepseek"),
-      ocr: { engine: "paddle_ocr_vl", autoExtract: false },
+      ocr: { engine: "paddle_ocr_vl" },
     };
   }
 
   function saveAIConfig(config) {
-    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl", autoExtract: false };
+    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl" };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
   }
 
   function getOCRConfig(config) {
-    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl", autoExtract: false };
+    if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl" };
     return config.ocr;
   }
 

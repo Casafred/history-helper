@@ -33,7 +33,6 @@ const aiApiKeyInput = document.getElementById("ai-api-key-input");
 const aiBaseUrlInput = document.getElementById("ai-base-url-input");
 const aiModelSelect = document.getElementById("ai-model-select");
 const ocrEngineSelect = document.getElementById("ocr-engine-select");
-const ocrAutoExtract = document.getElementById("ocr-auto-extract");
 const aiTestBtn = document.getElementById("ai-test-btn");
 const aiSaveBtn = document.getElementById("ai-save-btn");
 const aiTestResult = document.getElementById("ai-test-result");
@@ -204,12 +203,6 @@ searchBtn.addEventListener("click", async () => {
   resultSection.classList.remove("hidden");
   searchBtn.disabled = false;
   loading.classList.add("hidden");
-
-  const config = window.AI.loadAIConfig();
-  const ocrConfig = window.AI.getOCRConfig(config);
-  if (ocrConfig.autoExtract && result.documents) {
-    autoExtractOfficeActions(result);
-  }
 });
 
 let kanbanState = {
@@ -443,68 +436,6 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
-}
-
-async function autoExtractOfficeActions(data) {
-  const items = kanbanState.documents;
-  const oaItems = items.filter(it => shouldIncludeInAIAnalysis(data.office, it.type));
-  if (oaItems.length === 0) return;
-
-  const config = window.AI.loadAIConfig();
-  const ocrConfig = window.AI.getOCRConfig(config);
-  const provider = window.AI.getCurrentProvider(config);
-  const engine = ocrConfig.engine || "paddle_ocr_vl";
-
-  const statusEl = document.getElementById("kanban-status");
-  for (let i = 0; i < oaItems.length; i++) {
-    const it = oaItems[i];
-    if (statusEl) statusEl.textContent = "自动提取中 (" + (i + 1) + "/" + oaItems.length + "): " + it.name;
-    const container = document.getElementById("kanban-extracted-" + it.idx);
-    if (!container) continue;
-    container.classList.remove("hidden");
-    container.innerHTML = '<p class="extracting">正在自动提取内容（引擎: ' + escapeHtml(engine) + '）...</p>';
-
-    const isUS = data.office === "US";
-    const urlDocNum = isUS ? data.applicationNumber : encodeURIComponent(data.docNumber || data.applicationNumber);
-    const encodedDocId = encodeURIComponent(it.docId);
-    const extractUrl = `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}?engine=${encodeURIComponent(engine)}`;
-    let finalUrl = extractUrl;
-    if (engine === "glm_ocr" && provider && provider.apiKey) {
-      finalUrl += "&api_key=" + encodeURIComponent(provider.apiKey);
-    }
-
-    try {
-      const resp = await fetch(finalUrl);
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
-      const result = await resp.json();
-      if (result.error) {
-        container.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(result.error) + '</p>';
-        continue;
-      }
-      const text = result.text || "";
-      const markdown = result.markdown || "";
-      if (!text && !markdown) {
-        container.innerHTML = '<p class="extract-empty">未能提取到文本</p>';
-        continue;
-      }
-      const displayText = markdown || text;
-      kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine };
-      container.innerHTML = `
-        <div class="extracted-header">
-          <span class="extracted-engine">引擎: ${escapeHtml(result.engine)}</span>
-          <span class="extracted-chars">字符数: ${displayText.length}</span>
-          <button class="btn-small btn-ai-analyze" data-action="ai-analyze-doc" data-idx="${it.idx}" data-doctype="${escapeHtml(it.docCode)}">AI 分析</button>
-        </div>
-        <pre class="extracted-text">${escapeHtml(displayText.length > 8000 ? displayText.substring(0, 8000) + "\n\n[...已截断...]" : displayText)}</pre>
-      `;
-    } catch (e) {
-      container.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(e.message) + '</p>';
-    }
-  }
-  if (statusEl) {
-    const ok = Object.keys(kanbanState.extractions).length;
-    statusEl.textContent = "共 " + items.length + " 份审查文档，自动提取完成 " + ok + " 份";
-  }
 }
 
 function renderDocuments(data) {
@@ -841,7 +772,6 @@ aiSaveBtn.addEventListener("click", () => {
   }
   const ocrConfig = window.AI.getOCRConfig(config);
   ocrConfig.engine = ocrEngineSelect.value;
-  ocrConfig.autoExtract = ocrAutoExtract.checked;
   window.AI.saveAIConfig(config);
   aiSettingsModal.classList.add("hidden");
 });
@@ -861,7 +791,6 @@ function loadAISettingsToForm() {
   }
   const ocrConfig = window.AI.getOCRConfig(config);
   if (ocrEngineSelect) ocrEngineSelect.value = ocrConfig.engine || "paddle_ocr_vl";
-  if (ocrAutoExtract) ocrAutoExtract.checked = ocrConfig.autoExtract !== false;
 }
 
 aiSummarizeBtn.addEventListener("click", async () => {
