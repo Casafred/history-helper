@@ -262,8 +262,8 @@ searchBtn.addEventListener("click", async () => {
     warnings.forEach(w => showError("警告: " + w));
   }
 
-  aiSummarizeBtn.disabled = false;
-  kanbanAutoBtn.disabled = false;
+  if (aiSummarizeBtn) aiSummarizeBtn.disabled = false;
+  if (kanbanAutoBtn) kanbanAutoBtn.disabled = false;
   resultSection.classList.remove("hidden");
   searchBtn.disabled = false;
   loading.classList.add("hidden");
@@ -825,7 +825,7 @@ async function aiAnalyzeDocument(idx, docType) {
   const aiTab = resultSection.querySelector('[data-tab="ai-summary"]');
   if (aiTab) aiTab.click();
 
-  aiSummarizeBtn.disabled = true;
+  if (aiSummarizeBtn) aiSummarizeBtn.disabled = true;
   aiStatus.textContent = "正在分析文档: " + docType + "...";
   aiStatus.className = "ai-status ai-status-processing";
   aiSummaryResult.classList.remove("hidden");
@@ -860,7 +860,7 @@ async function aiAnalyzeDocument(idx, docType) {
     aiStatus.textContent = "分析失败 ✗";
     aiStatus.className = "ai-status ai-status-error";
   } finally {
-    aiSummarizeBtn.disabled = false;
+    if (aiSummarizeBtn) aiSummarizeBtn.disabled = false;
   }
 }
 
@@ -1074,7 +1074,7 @@ document.querySelectorAll("[id^='reset-prompt-']").forEach(btn => {
   });
 });
 
-aiSummarizeBtn.addEventListener("click", async () => {
+if (aiSummarizeBtn) aiSummarizeBtn.addEventListener("click", async () => {
   if (!currentData) return;
   const config = window.AI.loadAIConfig();
   const provider = window.AI.getCurrentProvider(config);
@@ -1084,7 +1084,7 @@ aiSummarizeBtn.addEventListener("click", async () => {
     return;
   }
 
-  aiSummarizeBtn.disabled = true;
+  if (aiSummarizeBtn) aiSummarizeBtn.disabled = true;
   aiStatus.textContent = "正在生成梳理...";
   aiStatus.className = "ai-status ai-status-processing";
   aiSummaryResult.classList.remove("hidden");
@@ -1119,7 +1119,7 @@ aiSummarizeBtn.addEventListener("click", async () => {
     aiStatus.textContent = "梳理失败 ✗";
     aiStatus.className = "ai-status ai-status-error";
   } finally {
-    aiSummarizeBtn.disabled = false;
+    if (aiSummarizeBtn) aiSummarizeBtn.disabled = false;
   }
 });
 
@@ -1187,7 +1187,7 @@ if (kanbanAutoBtn) kanbanAutoBtn.addEventListener("click", async () => {
   const items = kanbanState.documents;
   if (!items || items.length === 0) { showError("请先查询专利并加载审查文档"); return; }
 
-  kanbanAutoBtn.disabled = true;
+  if (kanbanAutoBtn) kanbanAutoBtn.disabled = true;
   const analysisSection = document.getElementById("kanban-analysis");
   const analysisContent = document.getElementById("kanban-analysis-content");
   analysisSection.classList.remove("hidden");
@@ -1196,7 +1196,7 @@ if (kanbanAutoBtn) kanbanAutoBtn.addEventListener("click", async () => {
   const oaItems = items.filter(it => shouldIncludeInAIAnalysis(currentData.office, it.type));
   if (oaItems.length === 0) {
     analysisContent.innerHTML = '<p class="placeholder">未找到审查意见或答复类文档</p>';
-    kanbanAutoBtn.disabled = false;
+    if (kanbanAutoBtn) kanbanAutoBtn.disabled = false;
     return;
   }
 
@@ -1313,7 +1313,7 @@ if (kanbanAutoBtn) kanbanAutoBtn.addEventListener("click", async () => {
 
   if (successCount === 0) {
     analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有文档提取均失败，无法进行 AI 分析。请检查网络连接或尝试切换 OCR 引擎。</p>';
-    kanbanAutoBtn.disabled = false;
+    if (kanbanAutoBtn) kanbanAutoBtn.disabled = false;
     return;
   }
 
@@ -1391,7 +1391,7 @@ if (kanbanAutoBtn) kanbanAutoBtn.addEventListener("click", async () => {
     analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
     if (statusEl) statusEl.textContent = "AI 整理失败 ✗";
   } finally {
-    kanbanAutoBtn.disabled = false;
+    if (kanbanAutoBtn) kanbanAutoBtn.disabled = false;
   }
 });
 
@@ -1439,6 +1439,7 @@ function onTraceClick(blockId) {
     showError("溯源信息不存在: " + blockId);
     return;
   }
+  if (!readerModal) return;
   if (readerModal.classList.contains("hidden")) {
     openReader();
   }
@@ -1600,6 +1601,7 @@ function openReader() {
 }
 
 function selectReaderDoc(idx) {
+  if (!readerDocList || !readerContent) return;
   const items = kanbanState.documents;
   const it = items.find(d => d.idx === idx);
   if (!it) return;
