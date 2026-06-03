@@ -55,6 +55,12 @@ var AI = (function () {
     return config.ocr;
   }
 
+  function getGlmOcrApiKey(config) {
+    if (config.ocr && config.ocr.glmKey) return config.ocr.glmKey;
+    if (config.zhipu && config.zhipu.apiKey) return config.zhipu.apiKey;
+    return "";
+  }
+
   function getCurrentProvider(config) {
     var keys = Object.keys(config);
     for (var i = 0; i < keys.length; i++) {
@@ -185,6 +191,7 @@ var AI = (function () {
     saveAIConfig: saveAIConfig,
     getCurrentProvider: getCurrentProvider,
     getOCRConfig: getOCRConfig,
+    getGlmOcrApiKey: getGlmOcrApiKey,
     streamChat: streamChat,
     testConnection: testConnection,
   };

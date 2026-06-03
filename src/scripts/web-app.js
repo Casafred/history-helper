@@ -45,6 +45,8 @@ const aiApiKeyInput = document.getElementById("ai-api-key-input");
 const aiBaseUrlInput = document.getElementById("ai-base-url-input");
 const aiModelSelect = document.getElementById("ai-model-select");
 const ocrEngineSelect = document.getElementById("ocr-engine-select");
+const ocrGlmKeyGroup = document.getElementById("ocr-glm-key-group");
+const ocrGlmKeyInput = document.getElementById("ocr-glm-key-input");
 const aiTestBtn = document.getElementById("ai-test-btn");
 const aiSaveBtn = document.getElementById("ai-save-btn");
 const aiTestResult = document.getElementById("ai-test-result");
@@ -550,8 +552,7 @@ async function extractDocumentText(url, idx, docType) {
   const engine = selectedEngine === "auto" ? (ocrEngineSelect ? ocrEngineSelect.value : "paddle_ocr_vl") : selectedEngine;
 
   const config = window.AI.loadAIConfig();
-  const provider = window.AI.getCurrentProvider(config);
-  const apiKey = provider?.apiKey || "";
+  const glmApiKey = window.AI.getGlmOcrApiKey(config);
 
   container.innerHTML = '<p class="extracting">正在提取文档内容（引擎: ' + escapeHtml(engine === "auto" ? "自动" : engine) + '）...</p>';
 
@@ -562,12 +563,12 @@ async function extractDocumentText(url, idx, docType) {
       const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
       const it = kanbanState.documents.find(d => d.idx === idx) || currentData._allDocs?.[idx];
       if (!it) throw new Error("找不到文档信息");
-      data = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, apiKey);
+      data = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, engine === "glm_ocr" ? glmApiKey : "");
     } else {
       const sep = url.includes("?") ? "&" : "?";
       let extractUrl = url + sep + "engine=" + encodeURIComponent(engine);
-      if (engine === "glm_ocr" && apiKey) {
-        extractUrl += "&api_key=" + encodeURIComponent(apiKey);
+      if (engine === "glm_ocr" && glmApiKey) {
+        extractUrl += "&api_key=" + encodeURIComponent(glmApiKey);
       }
       const resp = await fetch(extractUrl);
       if (!resp.ok) throw new Error("提取失败: HTTP " + resp.status);
@@ -842,6 +843,10 @@ aiProviderSelect.addEventListener("change", () => {
   updateModelOptions(type);
 });
 
+if (ocrEngineSelect) {
+  ocrEngineSelect.addEventListener("change", toggleOcrGlmKeyVisibility);
+}
+
 aiTestBtn.addEventListener("click", async () => {
   const type = aiProviderSelect.value;
   const apiKey = aiApiKeyInput.value.trim();
@@ -869,6 +874,7 @@ aiSaveBtn.addEventListener("click", () => {
   }
   const ocrConfig = window.AI.getOCRConfig(config);
   ocrConfig.engine = ocrEngineSelect.value;
+  ocrConfig.glmKey = ocrGlmKeyInput.value.trim();
   window.AI.saveAIConfig(config);
   aiSettingsModal.classList.add("hidden");
 });
@@ -888,6 +894,13 @@ function loadAISettingsToForm() {
   }
   const ocrConfig = window.AI.getOCRConfig(config);
   if (ocrEngineSelect) ocrEngineSelect.value = ocrConfig.engine || "paddle_ocr_vl";
+  if (ocrGlmKeyInput) ocrGlmKeyInput.value = ocrConfig.glmKey || "";
+  toggleOcrGlmKeyVisibility();
+}
+
+function toggleOcrGlmKeyVisibility() {
+  if (!ocrGlmKeyGroup) return;
+  ocrGlmKeyGroup.style.display = (ocrEngineSelect && ocrEngineSelect.value === "glm_ocr") ? "" : "none";
 }
 
 aiSummarizeBtn.addEventListener("click", async () => {
@@ -1018,7 +1031,7 @@ kanbanAutoBtn.addEventListener("click", async () => {
 
   const ocrConfig = window.AI.getOCRConfig(config);
   const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
-  const apiKey = provider?.apiKey || "";
+  const glmApiKey = window.AI.getGlmOcrApiKey(config);
   const statusEl = document.getElementById("kanban-status");
   const isUS = currentData.office === "US";
   const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
@@ -1034,10 +1047,17 @@ kanbanAutoBtn.addEventListener("click", async () => {
       container.innerHTML = '<p class="extracting">正在提取（' + escapeHtml(engine) + '）' + (attemptNum > 1 ? '第' + attemptNum + '次尝试' : '') + '...</p>';
     }
     try {
-      const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, apiKey);
+      const useApiKey = engine === "glm_ocr" ? glmApiKey : "";
+      const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, useApiKey);
       if (result.error) {
         if (retriesLeft > 0) {
           const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
+          if (fallbackEngine === "glm_ocr" && !glmApiKey) {
+            if (statusEl) statusEl.textContent = it.name + " 提取失败，无 GLM Key 无法切换 GLM OCR";
+            extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: result.error + "（无 GLM Key，无法降级）" });
+            if (container) container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>';
+            return false;
+          }
           if (statusEl) statusEl.textContent = it.name + " 提取失败，切换引擎重试...";
           return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
         }
@@ -1050,6 +1070,12 @@ kanbanAutoBtn.addEventListener("click", async () => {
       if (!text && !markdown) {
         if (retriesLeft > 0) {
           const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
+          if (fallbackEngine === "glm_ocr" && !glmApiKey) {
+            if (statusEl) statusEl.textContent = it.name + " 内容为空，无 GLM Key 无法切换 GLM OCR";
+            extractReport.empty.push({ name: it.name, docCode: it.docCode });
+            if (container) container.innerHTML = '<p class="extract-empty">未能提取到文本（无 GLM Key，无法降级）</p>';
+            return false;
+          }
           if (statusEl) statusEl.textContent = it.name + " 内容为空，切换引擎重试...";
           return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
         }
@@ -1692,9 +1718,8 @@ async function kanbanManualExtract(url, idx, docType) {
 
   const config = window.AI.loadAIConfig();
   const ocrConfig = window.AI.getOCRConfig(config);
-  const provider = window.AI.getCurrentProvider(config);
   const engine = ocrConfig.engine || "paddle_ocr_vl";
-  const apiKey = provider?.apiKey || "";
+  const glmApiKey = window.AI.getGlmOcrApiKey(config);
 
   container.innerHTML = '<p class="extracting">正在提取内容（引擎: ' + escapeHtml(engine) + '）...</p>';
 
@@ -1705,11 +1730,11 @@ async function kanbanManualExtract(url, idx, docType) {
       const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
       const it = kanbanState.documents.find(d => d.idx === idx);
       if (!it) throw new Error("找不到文档信息");
-      result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, apiKey);
+      result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, engine === "glm_ocr" ? glmApiKey : "");
     } else {
       let extractUrl = url + (url.includes("?") ? "&" : "?") + "engine=" + encodeURIComponent(engine);
-      if (engine === "glm_ocr" && apiKey) {
-        extractUrl += "&api_key=" + encodeURIComponent(apiKey);
+      if (engine === "glm_ocr" && glmApiKey) {
+        extractUrl += "&api_key=" + encodeURIComponent(glmApiKey);
       }
       const resp = await fetch(extractUrl);
       if (!resp.ok) throw new Error("HTTP " + resp.status);
