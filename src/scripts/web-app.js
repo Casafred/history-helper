@@ -11,12 +11,13 @@ const OFFICE_NAMES = {
 
 let currentData = null;
 
-const isTauri = !!(window.__TAURI_INTERNALS__);
+const isElectron = !!(window && window.process && window.process.type);
+const isTauri = !!(window.__TAURI__);
 
 async function tauriInvoke(cmd, args) {
   if (!isTauri) return null;
   try {
-    return await window.__TAURI_INTERNALS__.invoke(cmd, args);
+    return await window.__TAURI__.core.invoke(cmd, args);
   } catch (e) {
     console.error("Tauri invoke error:", cmd, e);
     throw e;
@@ -154,16 +155,22 @@ async function gdFetch(urlPath) {
     const docListMatch = urlPath.match(/\/doc-list\/svc\/doclist\/([^/]+)\/([^/]+)\/([^/]+)/);
 
     if (familyMatch) {
+      const queryType = familyMatch[1];
+      const office = familyMatch[2];
+      const docNum = familyMatch[3];
       const result = await tauriInvoke("fetch_family", {
-        input: familyMatch[2].startsWith("US") ? familyMatch[3] : familyMatch[3],
+        input: office + docNum,
+        queryType: queryType,
       });
       if (result && result.success && result.data) return result.data;
       throw new Error(result?.error || "Tauri family fetch failed");
     }
 
     if (docListMatch) {
+      const office = docListMatch[1];
+      const docNum = docListMatch[2];
       const result = await tauriInvoke("fetch_documents", {
-        input: docListMatch[2].startsWith("US") ? docListMatch[3] : docListMatch[3],
+        input: office + docNum,
       });
       if (result && result.success && result.data) return result.data;
       throw new Error(result?.error || "Tauri documents fetch failed");
@@ -1167,7 +1174,7 @@ async function doExtractText(office, docNum, docId, pages, docFormat, engine, ap
   return await resp.json();
 }
 
-kanbanAutoBtn.addEventListener("click", async () => {
+if (kanbanAutoBtn) kanbanAutoBtn.addEventListener("click", async () => {
   if (!currentData) { showError("请先查询专利"); return; }
   const config = window.AI.loadAIConfig();
   const provider = window.AI.getCurrentProvider(config);
