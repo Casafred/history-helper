@@ -64,9 +64,9 @@ const ocrGlmKeyInput = document.getElementById("ocr-glm-key-input");
 const aiTestBtn = document.getElementById("ai-test-btn");
 const aiSaveBtn = document.getElementById("ai-save-btn");
 const aiTestResult = document.getElementById("ai-test-result");
-const aiSummarizeBtn = document.getElementById("ai-summarize-btn");
-const aiStatus = document.getElementById("ai-status");
-const aiSummaryResult = document.getElementById("ai-summary-result");
+const aiSummarizeBtn = null; // removed: AI summary tab merged into kanban
+const aiStatus = null;
+const aiSummaryResult = null;
 const kanbanAutoBtn = document.getElementById("kanban-auto-btn");
 const readerBtn = document.getElementById("reader-btn");
 const readerModal = document.getElementById("reader-modal");
@@ -252,7 +252,6 @@ searchBtn.addEventListener("click", async () => {
     warnings.forEach(w => showError("警告: " + w));
   }
 
-  aiSummarizeBtn.disabled = false;
   kanbanAutoBtn.disabled = false;
   resultSection.classList.remove("hidden");
   searchBtn.disabled = false;
@@ -800,13 +799,15 @@ async function aiAnalyzeDocument(idx, docType) {
   }
 
   const resultSection = document.getElementById("result-section");
-  const aiTab = resultSection.querySelector('[data-tab="ai-summary"]');
-  if (aiTab) aiTab.click();
+  const kanbanTab = resultSection.querySelector('[data-tab="kanban"]');
+  if (kanbanTab) kanbanTab.click();
 
-  aiSummarizeBtn.disabled = true;
-  aiStatus.textContent = "正在分析文档: " + docType + "...";
-  aiStatus.className = "ai-status ai-status-processing";
-  aiSummaryResult.classList.remove("hidden");
+  const compareSection = document.getElementById("kanban-compare");
+  if (compareSection) compareSection.classList.remove("hidden");
+  const compareAiContent = document.getElementById("compare-ai-content");
+  if (compareAiContent) {
+    compareAiContent.innerHTML = '<p class="extracting">正在分析文档: ' + escapeHtml(docType) + '...</p>';
+  }
 
   const truncatedContent = content.length > 30000 ? content.substring(0, 30000) + "\n\n[...内容过长已截断...]" : content;
 
@@ -828,17 +829,15 @@ async function aiAnalyzeDocument(idx, docType) {
     )) {
       if (chunk.content) {
         fullText += chunk.content;
-        aiSummaryResult.innerHTML = '<div class="ai-summary-content markdown-body">' + renderMarkdown(fullText) + "</div>";
+        if (compareAiContent) {
+          compareAiContent.innerHTML = '<div class="markdown-body">' + renderMarkdown(fullText) + "</div>";
+        }
       }
     }
-    aiStatus.textContent = "分析完成 ✓";
-    aiStatus.className = "ai-status ai-status-success";
   } catch (e) {
-    aiSummaryResult.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
-    aiStatus.textContent = "分析失败 ✗";
-    aiStatus.className = "ai-status ai-status-error";
-  } finally {
-    aiSummarizeBtn.disabled = false;
+    if (compareAiContent) {
+      compareAiContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
+    }
   }
 }
 
@@ -978,7 +977,6 @@ aiSaveBtn.addEventListener("click", () => {
     { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
     { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
     { id: "prompt-doc-analysis", key: "docAnalysis" },
-    { id: "prompt-history-summary", key: "historySummary" },
   ];
   promptKeys.forEach(p => {
     const el = document.getElementById(p.id);
@@ -1020,7 +1018,6 @@ function loadAISettingsToForm() {
     { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
     { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
     { id: "prompt-doc-analysis", key: "docAnalysis" },
-    { id: "prompt-history-summary", key: "historySummary" },
   ];
   promptKeys.forEach(p => {
     const el = document.getElementById(p.id);
@@ -1041,7 +1038,6 @@ document.querySelectorAll("[id^='reset-prompt-']").forEach(btn => {
       "kanban-analysis": "kanbanAnalysis",
       "kanban-simple": "kanbanAnalysisSimple",
       "doc-analysis": "docAnalysis",
-      "history-summary": "historySummary",
     };
     const key = keyMap[promptId];
     if (!key) return;
@@ -1050,55 +1046,6 @@ document.querySelectorAll("[id^='reset-prompt-']").forEach(btn => {
       textarea.value = window.AI.getDefaultPrompt(key);
     }
   });
-});
-
-aiSummarizeBtn.addEventListener("click", async () => {
-  if (!currentData) return;
-  const config = window.AI.loadAIConfig();
-  const provider = window.AI.getCurrentProvider(config);
-  if (!provider) {
-    showError("请先在 AI 设置中配置并选择一个 AI 服务商");
-    aiSettingsBtn.click();
-    return;
-  }
-
-  aiSummarizeBtn.disabled = true;
-  aiStatus.textContent = "正在生成梳理...";
-  aiStatus.className = "ai-status ai-status-processing";
-  aiSummaryResult.classList.remove("hidden");
-  aiSummaryResult.innerHTML = '<p class="placeholder">AI 正在分析审查历史，请稍候...</p>';
-
-  try {
-    let fullText = "";
-    const systemPrompt = window.AI.getCustomPrompt(window.AI.loadAIConfig(), "historySummary");
-
-    for await (const chunk of window.AI.streamChat(
-      provider.type, provider.apiKey, provider.baseUrl,
-      {
-        model: provider.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: JSON.stringify(currentData, null, 2) },
-        ],
-        temperature: 0.3,
-        maxTokens: 32768,
-      }
-    )) {
-      if (chunk.content) {
-        fullText += chunk.content;
-        aiSummaryResult.innerHTML = '<div class="ai-summary-content markdown-body">' + renderMarkdown(fullText) + "</div>";
-      }
-    }
-
-    aiStatus.textContent = "梳理完成 ✓";
-    aiStatus.className = "ai-status ai-status-success";
-  } catch (e) {
-    aiSummaryResult.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
-    aiStatus.textContent = "梳理失败 ✗";
-    aiStatus.className = "ai-status ai-status-error";
-  } finally {
-    aiSummarizeBtn.disabled = false;
-  }
 });
 
 function updateModelOptions(type) {

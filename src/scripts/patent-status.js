@@ -77,6 +77,8 @@ var PATENT_STATUS = {
       "DO.EO.MISS": { name: "指定局/选定局缺失要求通知 (Notice of DO/EO Missing Requirements Mailed)", type: "notification", stage: "审查中" },
       "DO.EO.ACPT": { name: "指定局/选定局受理通知 (Notice of Designated Office/Elected Office Acceptance Mailed)", type: "notification", stage: "审查中" },
       "RES.ER": { name: "选举/限制答复 (Response to Election / Restriction Filed)", type: "response", stage: "审查中" },
+      "PEFN": { name: "审查前正式要求通知 (Pre-Exam Formalities Notice)", type: "office_action", stage: "审查前" },
+      "ERSP": { name: "选举/限制答复 (Response to Election / Restriction Filed)", type: "response", stage: "审查中" },
       "EGRN": { name: "电子授权当日通知 (eGrant day-of Notification)", type: "allowance", stage: "授权" },
       "NTC.EGRN": { name: "电子授权当日通知 (eGrant day-of Notification)", type: "allowance", stage: "授权" },
       "EGRT": { name: "电子授权通知 (eGrant Notification)", type: "allowance", stage: "授权" },
@@ -198,7 +200,8 @@ function classifyDocCode(code, desc) {
   if (/egrant|e-grant/.test(text)) return "allowance";
   if (/abandonment/.test(text)) return "notification";
   if (/preliminary amendment/.test(text)) return "request";
-  if (/pre.?exam formalities/.test(text)) return "response";
+  if (/pre.?exam formalities notice/.test(text)) return "office_action";
+  if (/response.*pre.?exam formalities/.test(text)) return "response";
   if (/election.*restriction.*filed/.test(text)) return "response";
   if (/notice of publication/.test(text)) return "notification";
   if (/transmittal of new application/.test(text)) return "misc";
