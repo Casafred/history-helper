@@ -86,7 +86,8 @@ function parsePatentNumber(input) {
   let stripped = trimmed;
   let queryType = "application";
 
-  const kindCodeMatch = stripped.match(/^(.*?[0-9])([A-Z]\d+)$/i);
+  // Extract kind code (e.g. B2, A1, B1, A9 from US12030161B2)
+  const kindCodeMatch = stripped.match(/^(.*?[0-9])([A-Z]\d*)$/i);
   let kindCode = null;
   if (kindCodeMatch) {
     stripped = kindCodeMatch[1];
@@ -97,6 +98,30 @@ function parsePatentNumber(input) {
   switch (office) {
     case "US":
       appNum = stripped.replace(/^US/i, "").replace(/[^0-9]/g, "");
+      // Determine query type based on number format and kind code
+      if (kindCode) {
+        const kc = kindCode.toUpperCase();
+        if (/^B\d*$/.test(kc)) {
+          // B1, B2 etc. → granted patent number
+          queryType = "patent";
+        } else if (/^A\d*$/.test(kc)) {
+          // A1, A2, A9 etc. → pre-grant publication number
+          queryType = "publication";
+        } else if (/^S\d*$/.test(kc)) {
+          // Design patent
+          queryType = "patent";
+        } else if (/^P\d*$/.test(kc)) {
+          // Plant patent
+          queryType = "patent";
+        }
+      } else if (appNum.length === 11 && /^20\d{9}$/.test(appNum)) {
+        // 11-digit number starting with 20 → pre-grant publication (e.g. 20220301610)
+        queryType = "publication";
+      } else if (appNum.length >= 7 && appNum.length <= 8 && !/^\d{2}\d{6}$/.test(appNum)) {
+        // 7-8 digit number that doesn't look like series+serial application number
+        // Could be a patent number, but default to application for safety
+        queryType = "application";
+      }
       break;
     case "EP":
       appNum = stripped.replace(/^EP/i, "").replace(/[\s.]/g, "");
@@ -182,12 +207,16 @@ searchBtn.addEventListener("click", async () => {
   const docNum = pn.applicationNumber;
   const selectedQueryType = queryTypeSelect ? queryTypeSelect.value : null;
   const queryType = selectedQueryType || pn.queryType || "application";
-  const result = { office, applicationNumber: docNum, queryType };
+  const result = { office, applicationNumber: docNum, queryType, kindCode: pn.kindCode };
   const warnings = [];
 
   try {
     const familyData = await gdFetch(`/patent-family/svc/family/${queryType}/${office}/${docNum}`);
     result.family = familyData;
+    // Extract the corresponding application number from family response
+    if (familyData && familyData.corrAppNum) {
+      result.corrAppNum = familyData.corrAppNum;
+    }
   } catch (e) {
     warnings.push("同族查询失败: " + e.message);
   }
@@ -195,8 +224,10 @@ searchBtn.addEventListener("click", async () => {
   loadingText.textContent = "正在查询审查文档...";
   await new Promise(r => setTimeout(r, 1500));
 
+  // Use corrAppNum for doc-list query if available (needed for patent/publication type queries)
+  const docListNum = result.corrAppNum || docNum;
   try {
-    const docData = await gdFetch(`/doc-list/svc/doclist/${office}/${docNum}/A`);
+    const docData = await gdFetch(`/doc-list/svc/doclist/${office}/${docListNum}/A`);
     result.documents = docData;
     if (docData && docData.docNumber) {
       result.docNumber = docData.docNumber;
@@ -301,7 +332,7 @@ function renderKanban(data) {
     } else {
       colItems.forEach(it => {
         const isUS = data.office === "US";
-        const urlDocNum = isUS ? data.applicationNumber : encodeURIComponent(data.docNumber || data.applicationNumber);
+        const urlDocNum = isUS ? (data.corrAppNum || data.applicationNumber) : encodeURIComponent(data.docNumber || data.applicationNumber);
         const encodedDocId = encodeURIComponent(it.docId);
         const extractUrl = it.docId ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
         const downloadUrl = it.docId ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
@@ -347,16 +378,98 @@ function renderOverview(data) {
   if (data.documents && data.documents.title) {
     title = data.documents.title;
   } else if (data.family && data.family.list && data.family.list.length > 0) {
-    title = data.family.list[0].title || "";
+    // Find the US family member with a title
+    const usMember = data.family.list.find(m => m.countryCode === "US" || m.countryCode === data.office);
+    title = (usMember && usMember.docList && usMember.docList.title) ? usMember.docList.title : "";
+    if (!title) {
+      for (const m of data.family.list) {
+        if (m.docList && m.docList.title) { title = m.docList.title; break; }
+      }
+    }
   }
 
-  const queryTypeLabel = data.queryType === "publication" ? "公开号/专利号" : "申请号";
+  const queryTypeLabels = {
+    application: "申请号",
+    publication: "公开号",
+    patent: "专利号",
+  };
+  const queryTypeLabel = queryTypeLabels[data.queryType] || "申请号";
+
+  // Determine current status from documents
+  let currentStatus = "未知";
+  let statusClass = "";
+  if (data.documents) {
+    const docs = extractDocuments(data.documents);
+    if (docs.length > 0) {
+      const latestDoc = docs[docs.length - 1];
+      const docCode = latestDoc.docCode || latestDoc.documentType || latestDoc.kindCode || latestDoc.type || "";
+      const desc = latestDoc.docDesc || latestDoc.documentDescription || latestDoc.description || "";
+      const statusInfo = getStatusInfo(data.office, docCode, desc);
+      if (statusInfo.stage === "授权") {
+        currentStatus = "已授权";
+        statusClass = "status-allowed";
+      } else if (statusInfo.stage === "复审") {
+        currentStatus = "复审中";
+        statusClass = "status-appeal";
+      } else if (statusInfo.type === "office_action") {
+        currentStatus = "审查中（待答复）";
+        statusClass = "status-pending";
+      } else if (statusInfo.type === "response") {
+        currentStatus = "审查中（已答复）";
+        statusClass = "status-response";
+      } else if (statusInfo.type === "allowance") {
+        currentStatus = "已授权";
+        statusClass = "status-allowed";
+      } else {
+        currentStatus = statusInfo.stage || "审查中";
+        statusClass = "status-pending";
+      }
+    }
+  }
+
+  // Get publication numbers from family data
+  let pubNumbers = [];
+  let appDateStr = "";
+  let applicantNames = [];
+  let priorityClaims = [];
+  if (data.family && data.family.list) {
+    data.family.list.forEach(m => {
+      if (m.countryCode === data.office) {
+        if (m.pubList) {
+          m.pubList.forEach(p => {
+            pubNumbers.push((p.pubCountry || "") + p.pubNum + (p.kindCode ? p.kindCode : ""));
+          });
+        }
+        if (m.appDateStr) appDateStr = m.appDateStr;
+        if (m.applicantNames && m.applicantNames.length > 0) applicantNames = m.applicantNames;
+        if (m.priorityClaimList && m.priorityClaimList.length > 0) priorityClaims = m.priorityClaimList;
+      }
+    });
+    // Fallback: get from any member if US member doesn't have the data
+    if (!appDateStr || applicantNames.length === 0) {
+      const firstMember = data.family.list.find(m => m.appDateStr || (m.applicantNames && m.applicantNames.length > 0));
+      if (firstMember) {
+        if (!appDateStr && firstMember.appDateStr) appDateStr = firstMember.appDateStr;
+        if (applicantNames.length === 0 && firstMember.applicantNames) applicantNames = firstMember.applicantNames;
+      }
+    }
+  }
+  // Also check doc-list response for applicant names
+  if (applicantNames.length === 0 && data.documents && data.documents.applicantNames) {
+    applicantNames = data.documents.applicantNames;
+  }
+
+  const oaCount = (data.documents && data.documents.oaIndCount) ? data.documents.oaIndCount : 0;
 
   appInfo.innerHTML = `
     <div class="info-row"><span class="info-label">申请局</span><span class="info-value">${office}</span></div>
     <div class="info-row"><span class="info-label">${queryTypeLabel}</span><span class="info-value">${data.applicationNumber || "-"}</span></div>
-    ${data.documents && data.documents.docNumber ? '<div class="info-row"><span class="info-label">文档编号</span><span class="info-value">' + escapeHtml(data.documents.docNumber) + '</span></div>' : ''}
+    ${data.corrAppNum && data.corrAppNum !== data.applicationNumber ? '<div class="info-row"><span class="info-label">申请号</span><span class="info-value">' + escapeHtml(data.corrAppNum) + '</span></div>' : ''}
+    ${appDateStr ? '<div class="info-row"><span class="info-label">申请日</span><span class="info-value">' + escapeHtml(appDateStr) + '</span></div>' : ''}
+    ${pubNumbers.length > 0 ? '<div class="info-row"><span class="info-label">公开/专利号</span><span class="info-value">' + pubNumbers.map(p => escapeHtml(p)).join('、') + '</span></div>' : ''}
     ${title ? '<div class="info-row"><span class="info-label">标题</span><span class="info-value">' + escapeHtml(title) + '</span></div>' : ''}
+    ${applicantNames.length > 0 ? '<div class="info-row"><span class="info-label">发明人</span><span class="info-value">' + applicantNames.map(n => escapeHtml(n)).join('、') + '</span></div>' : ''}
+    ${priorityClaims.length > 0 ? '<div class="info-row"><span class="info-label">优先权</span><span class="info-value">' + priorityClaims.map(function(p) { return escapeHtml((p.country || "") + (p.docNumber || "") + (p.kindCode ? " " + p.kindCode : "")); }).join('；') + '</span></div>' : ''}
   `;
 
   const family = data.family;
@@ -364,8 +477,15 @@ function renderOverview(data) {
     const famCount = countFamilyMembers(family);
     const docCount = countDocuments(data.documents);
     appStatus.innerHTML = `
+      <div class="info-row"><span class="info-label">当前状态</span><span class="info-value ${statusClass}">${currentStatus}</span></div>
+      <div class="info-row"><span class="info-label">审查文档</span><span class="info-value">${docCount} 份${oaCount > 0 ? '（审查意见 ' + oaCount + ' 份）' : ''}</span></div>
       <div class="info-row"><span class="info-label">同族成员</span><span class="info-value">${famCount} 个</span></div>
-      <div class="info-row"><span class="info-label">审查文档</span><span class="info-value">${docCount} 份</span></div>
+    `;
+  } else if (data.documents) {
+    const docCount = countDocuments(data.documents);
+    appStatus.innerHTML = `
+      <div class="info-row"><span class="info-label">当前状态</span><span class="info-value ${statusClass}">${currentStatus}</span></div>
+      <div class="info-row"><span class="info-label">审查文档</span><span class="info-value">${docCount} 份${oaCount > 0 ? '（审查意见 ' + oaCount + ' 份）' : ''}</span></div>
     `;
   } else {
     appStatus.innerHTML = '<p class="placeholder">暂无状态信息</p>';
@@ -478,7 +598,7 @@ function renderDocuments(data) {
   const office = data.office;
   const docNumber = docs.docNumber || data.applicationNumber;
   const isUS = data.office === "US";
-  const urlDocNum = isUS ? data.applicationNumber : encodeURIComponent(docNumber);
+  const urlDocNum = isUS ? (data.corrAppNum || data.applicationNumber) : encodeURIComponent(docNumber);
 
   // Build type counts for filter chips
   const typeCounts = {};
@@ -598,7 +718,7 @@ async function extractDocumentText(url, idx, docType) {
     let data;
     if (isTauri && currentData) {
       const isUS = currentData.office === "US";
-      const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+      const urlDocNum = isUS ? (currentData.corrAppNum || currentData.applicationNumber) : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
       const it = kanbanState.documents.find(d => d.idx === idx) || currentData._allDocs?.[idx];
       if (!it) throw new Error("找不到文档信息");
       data = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, engine === "glm_ocr" ? glmApiKey : "");
@@ -1073,7 +1193,7 @@ kanbanAutoBtn.addEventListener("click", async () => {
   const glmApiKey = window.AI.getGlmOcrApiKey(config);
   const statusEl = document.getElementById("kanban-status");
   const isUS = currentData.office === "US";
-  const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+  const urlDocNum = isUS ? (currentData.corrAppNum || currentData.applicationNumber) : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
 
   const MAX_RETRIES = 2;
   const extractReport = { success: [], empty: [], failed: [] };
@@ -1731,7 +1851,7 @@ async function kanbanManualExtract(url, idx, docType) {
     let result;
     if (isTauri && currentData) {
       const isUS = currentData.office === "US";
-      const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+      const urlDocNum = isUS ? (currentData.corrAppNum || currentData.applicationNumber) : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
       const it = kanbanState.documents.find(d => d.idx === idx);
       if (!it) throw new Error("找不到文档信息");
       result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, engine === "glm_ocr" ? glmApiKey : "");
