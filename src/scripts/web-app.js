@@ -32,6 +32,8 @@ const OFFICE_NAMES = {
   US: "美国 (USPTO)",
   EP: "欧洲 (EPO)",
   JP: "日本 (JPO)",
+  CN: "中国 (CNIPA)",
+  DE: "德国 (DPMA)",
   KR: "韩国 (KIPO)",
   WO: "WIPO (PCT)",
   WIPO: "WIPO (PCT)",
@@ -90,6 +92,8 @@ function detectOffice(number) {
   if (upper.startsWith("US") || (upper.startsWith("1") && upper.length === 8)) return "US";
   if (upper.startsWith("EP")) return "EP";
   if (upper.startsWith("JP")) return "JP";
+  if (upper.startsWith("CN")) return "CN";
+  if (upper.startsWith("DE")) return "DE";
   if (upper.startsWith("KR")) return "KR";
   if (upper.startsWith("WO") || upper.startsWith("PCT")) return "WO";
   return null;
@@ -152,6 +156,20 @@ function parsePatentNumber(input) {
       break;
     case "JP":
       appNum = stripped.replace(/^JP/i, "").replace(/[\s-]/g, "");
+      if (kindCode) queryType = "publication";
+      else queryType = "publication";
+      break;
+    case "CN":
+      appNum = stripped.replace(/^CN/i, "").replace(/[\s.]/g, "");
+      // CN numbers with kind code (A, B) are publication numbers
+      if (kindCode) queryType = "publication";
+      else queryType = "publication";
+      break;
+    case "DE":
+      appNum = stripped.replace(/^DE/i, "").replace(/[\s.]/g, "");
+      // DE numbers with kind code (A1, B3 etc.) are publication numbers
+      if (kindCode) queryType = "publication";
+      else queryType = "publication";
       break;
     case "KR":
       appNum = stripped.replace(/^KR/i, "").replace(/[\s-]/g, "");
