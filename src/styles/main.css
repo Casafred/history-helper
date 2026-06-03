@@ -70,22 +70,6 @@ body {
   margin-bottom: 8px;
 }
 
-.query-type-select {
-  padding: 10px 12px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-primary);
-  font-size: 14px;
-  outline: none;
-  cursor: pointer;
-  transition: border-color 0.2s;
-}
-
-.query-type-select:focus {
-  border-color: var(--accent);
-}
-
 .search-box input {
   flex: 1;
   padding: 10px 16px;

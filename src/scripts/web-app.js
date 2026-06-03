@@ -43,7 +43,6 @@ let currentData = null;
 
 const patentInput = document.getElementById("patent-input");
 const searchBtn = document.getElementById("search-btn");
-const queryTypeSelect = document.getElementById("query-type");
 const officeBadge = document.getElementById("office-badge");
 const resultSection = document.getElementById("result-section");
 const loading = document.getElementById("loading");
@@ -207,16 +206,7 @@ searchBtn.addEventListener("click", async () => {
 
   const office = pn.office;
   const docNum = pn.applicationNumber;
-  // Auto-detected queryType takes priority; dropdown only used when auto-detection returns "application" (ambiguous)
-  const selectedQueryType = queryTypeSelect ? queryTypeSelect.value : null;
-  let queryType;
-  if (pn.queryType !== "application" || !selectedQueryType || selectedQueryType === "application") {
-    // Auto-detected type is specific (patent/publication), or no explicit user override
-    queryType = pn.queryType;
-  } else {
-    // User explicitly selected a different type via dropdown
-    queryType = selectedQueryType;
-  }
+  const queryType = pn.queryType;
   const result = { office, applicationNumber: docNum, queryType, kindCode: pn.kindCode };
   const warnings = [];
 
