@@ -238,7 +238,7 @@ searchBtn.addEventListener("click", async () => {
   try { renderKanban(result); } catch (e) { console.error("renderKanban:", e); }
 
   if (warnings.length > 0) {
-    warnings.forEach(w => showError("⚠️ " + w));
+    warnings.forEach(w => showError("警告: " + w));
   }
 
   aiSummarizeBtn.disabled = false;
@@ -299,12 +299,12 @@ function renderKanban(data) {
   kanbanState.traceIndex = {};
 
   const columns = [
-    { key: "office_action", title: "📋 审查意见", color: "kanban-col-oa" },
-    { key: "response", title: "💬 申请人答复", color: "kanban-col-response" },
-    { key: "request", title: "📝 申请人请求", color: "kanban-col-request" },
-    { key: "allowance", title: "✅ 授权通知", color: "kanban-col-allowance" },
-    { key: "notification", title: "📢 通知", color: "kanban-col-notification" },
-    { key: "misc", title: "📦 其他文件", color: "kanban-col-misc" },
+    { key: "office_action", title: "审查意见", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg>', color: "kanban-col-oa" },
+    { key: "response", title: "申请人答复", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>', color: "kanban-col-response" },
+    { key: "request", title: "申请人请求", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>', color: "kanban-col-request" },
+    { key: "allowance", title: "授权通知", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>', color: "kanban-col-allowance" },
+    { key: "notification", title: "通知", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>', color: "kanban-col-notification" },
+    { key: "misc", title: "其他文件", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>', color: "kanban-col-misc" },
   ];
 
   let html = '<div class="kanban-columns">';
@@ -314,7 +314,7 @@ function renderKanban(data) {
     html += `
       <div class="kanban-column ${col.color}">
         <div class="kanban-column-header">
-          <span class="kanban-column-title">${col.title}</span>
+          <span class="kanban-column-title">${col.icon}${col.title}</span>
           <span class="kanban-column-count">${count}</span>
         </div>
         <div class="kanban-column-body">
@@ -498,11 +498,37 @@ function renderDocuments(data) {
     return;
   }
 
+  const office = data.office;
   const docNumber = docs.docNumber || data.applicationNumber;
   const isUS = data.office === "US";
   const urlDocNum = isUS ? data.applicationNumber : encodeURIComponent(docNumber);
 
-  let html = "";
+  // Build type counts for filter chips
+  const typeCounts = {};
+  docList.forEach(d => {
+    const docCode = d.docCode || d.documentType || d.kindCode || d.type || "";
+    const desc = d.docDesc || d.documentDescription || d.description || d.docId || "";
+    const status = getStatusInfo(office, docCode, desc);
+    const t = status.type;
+    typeCounts[t] = (typeCounts[t] || 0) + 1;
+  });
+
+  const typeNames = (PATENT_STATUS[office] && PATENT_STATUS[office].typeNames) || {
+    "office_action": "审查意见", "response": "答复", "request": "请求",
+    "allowance": "授权", "notification": "通知", "misc": "其他"
+  };
+
+  let filterHtml = '<div class="doc-filter-bar">';
+  filterHtml += '<input type="text" id="doc-filter-input" class="doc-filter-input" placeholder="搜索文档名称、代码、描述...">';
+  filterHtml += '<button class="doc-filter-chip active" data-filter-type="all">全部 <span class="chip-count">' + docList.length + '</span></button>';
+  Object.keys(typeNames).forEach(t => {
+    if (typeCounts[t]) {
+      filterHtml += '<button class="doc-filter-chip" data-filter-type="' + t + '">' + typeNames[t] + ' <span class="chip-count">' + typeCounts[t] + '</span></button>';
+    }
+  });
+  filterHtml += '</div>';
+
+  let html = filterHtml;
   docList.forEach((d, idx) => {
     const docType = d.docCode || d.documentType || d.kindCode || d.type || "文档";
     const desc = d.docDesc || d.documentDescription || d.description || d.docId || "";
@@ -510,6 +536,9 @@ function renderDocuments(data) {
     const docId = d.documentId || d.docId || "";
     const numberOfPages = d.numberOfPages != null ? d.numberOfPages : 1;
     const docFormat = d.docFormat || "PDF";
+
+    const status = getStatusInfo(office, docType, desc);
+    const filterType = status.type;
 
     let typeClass = "doc-type";
     const lowerDesc = desc.toLowerCase();
@@ -524,7 +553,7 @@ function renderDocuments(data) {
     const extractUrl = docId ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
 
     html += `
-      <div class="doc-item">
+      <div class="doc-item" data-filter-type="${filterType}" data-search-text="${escapeHtml((docType + ' ' + desc + ' ' + date + ' ' + status.name).toLowerCase())}">
         <span class="${typeClass}">${escapeHtml(docType)}</span>
         <div class="doc-info">
           <div class="doc-desc">${escapeHtml(desc)}</div>
@@ -540,6 +569,38 @@ function renderDocuments(data) {
     `;
   });
   container.innerHTML = html;
+
+  // Bind filter events
+  const filterInput = document.getElementById("doc-filter-input");
+  const filterChips = container.querySelectorAll(".doc-filter-chip");
+  let activeFilter = "all";
+
+  function applyDocFilter() {
+    const keyword = filterInput ? filterInput.value.trim().toLowerCase() : "";
+    container.querySelectorAll(".doc-item").forEach(el => {
+      const matchType = activeFilter === "all" || el.dataset.filterType === activeFilter;
+      const matchKeyword = !keyword || el.dataset.searchText.includes(keyword);
+      el.style.display = (matchType && matchKeyword) ? "" : "none";
+      // Also show/hide the following extracted div
+      const next = el.nextElementSibling;
+      if (next && next.classList.contains("doc-extracted")) {
+        next.style.display = (matchType && matchKeyword) ? "" : "none";
+      }
+    });
+  }
+
+  filterChips.forEach(chip => {
+    chip.addEventListener("click", () => {
+      filterChips.forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      activeFilter = chip.dataset.filterType;
+      applyDocFilter();
+    });
+  });
+
+  if (filterInput) {
+    filterInput.addEventListener("input", applyDocFilter);
+  }
 }
 
 async function extractDocumentText(url, idx, docType) {
@@ -778,6 +839,13 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
     document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+    const app = document.getElementById("app");
+    const wideTabs = ["kanban", "timeline"];
+    if (wideTabs.includes(btn.dataset.tab)) {
+      app.classList.add("wide-layout");
+    } else {
+      app.classList.remove("wide-layout");
+    }
   });
 });
 
@@ -1237,7 +1305,7 @@ kanbanAutoBtn.addEventListener("click", async () => {
         reportHtml += '<div class="report-success">✓ 成功: ' + extractReport.success.map(s => escapeHtml(s.name) + ' (' + s.chars + '字/' + s.engine + ')').join('、') + '</div>';
       }
       if (emptyCount > 0) {
-        reportHtml += '<div class="report-warning">⚠ 内容为空: ' + extractReport.empty.map(s => escapeHtml(s.name)).join('、') + '</div>';
+        reportHtml += '<div class="report-warning">内容为空: ' + extractReport.empty.map(s => escapeHtml(s.name)).join('、') + '</div>';
       }
       if (failedCount > 0) {
         reportHtml += '<div class="report-error">✗ 提取失败: ' + extractReport.failed.map(s => escapeHtml(s.name) + ' (' + escapeHtml(s.reason) + ')').join('、') + '</div>';
@@ -1277,7 +1345,7 @@ function renderMarkdownWithTrace(text) {
     const refLinks = validRefs.map(ref => {
       const info = kanbanState.traceIndex[ref];
       const pageLabel = info ? `第${info.page}页` : ref;
-      return `<a class="trace-link" data-block-id="${escapeHtml(ref)}" title="跳转到原文 ${pageLabel}">📄 ${escapeHtml(ref)}</a>`;
+      return `<a class="trace-link" data-block-id="${escapeHtml(ref)}" title="跳转到原文 ${pageLabel}">${escapeHtml(ref)}</a>`;
     }).join(" ");
     return `<span class="trace-links"><span class="trace-label">溯源:</span> ${refLinks}</span>`;
   });
@@ -1321,7 +1389,7 @@ function onTraceClick(blockId) {
     traceEl.className = "trace-locator";
     traceEl.innerHTML = `
       <div class="trace-locator-header">
-        <span class="trace-locator-id">📄 ${escapeHtml(blockId)}</span>
+        <span class="trace-locator-id">${escapeHtml(blockId)}</span>
         <span class="trace-locator-page">第 ${info.page} 页</span>
         <button class="trace-locator-close" onclick="this.parentElement.parentElement.remove()">×</button>
       </div>
@@ -1447,7 +1515,7 @@ function openReader() {
   if (kanbanState.analysis) {
     listHtml += `
       <div class="reader-doc-item" data-action="reader-select-analysis">
-        <div class="doc-item-code">📊 AI 分析报告</div>
+        <div class="doc-item-code"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> AI 分析报告</div>
         <div class="doc-item-name">审查历史综合分析</div>
       </div>
     `;

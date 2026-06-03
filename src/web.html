@@ -24,7 +24,7 @@
           <button id="search-btn" class="btn-primary">查询</button>
           <button id="convert-btn" class="btn-secondary">格式转换</button>
           <button id="batch-btn" class="btn-secondary">批量查询</button>
-          <button id="ai-settings-btn" class="btn-icon" title="AI 设置">⚙</button>
+          <button id="ai-settings-btn" class="btn-icon" title="AI 设置"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
         </div>
         <div class="search-hint">申请号模式：中国 CN+13位（如 CN202311065554），美国 US+申请号（如 US14412875）。公开号模式：中国 CN+9位数字+类型码（如 CN104227633B），系统会自动去除 CN 前缀。</div>
         <div id="office-badge" class="office-badge hidden"></div>
@@ -95,10 +95,10 @@
             </div>
             <div id="kanban-analysis" class="kanban-analysis hidden">
               <div class="kanban-section-header">
-                <h3 class="kanban-section-title">📊 审查历史综合分析</h3>
+                <h3 class="kanban-section-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> 审查历史综合分析</h3>
                 <div class="kanban-section-actions">
-                  <button id="reader-btn" class="btn-secondary" title="在阅读器中查看">📖 阅读器</button>
-                  <button id="export-word-btn" class="btn-secondary" title="导出为 Word 文档">📄 导出 Word</button>
+                  <button id="reader-btn" class="btn-secondary" title="在阅读器中查看"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> 阅读器</button>
+                  <button id="export-word-btn" class="btn-secondary" title="导出为 Word 文档"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> 导出 Word</button>
                 </div>
               </div>
               <div id="kanban-analysis-content" class="markdown-body"></div>
@@ -109,7 +109,7 @@
         <div id="tab-timeline" class="tab-content">
           <div id="timeline-content">
             <div class="timeline-header">
-              <span class="timeline-title">📅 审查时间线</span>
+              <span class="timeline-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 审查时间线</span>
               <span id="timeline-status" class="timeline-status"></span>
               <button id="timeline-generate-btn" class="btn-primary" disabled>生成时间线</button>
             </div>
@@ -143,9 +143,9 @@
         <div class="modal-overlay"></div>
         <div class="modal-content reader-modal-content">
           <div class="modal-header reader-header">
-            <h2>📖 审查意见阅读器</h2>
+            <h2><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> 审查意见阅读器</h2>
             <div class="reader-header-actions">
-              <button id="reader-export-btn" class="btn-secondary">📄 导出 Word</button>
+              <button id="reader-export-btn" class="btn-secondary"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> 导出 Word</button>
               <button id="reader-close-btn" class="btn-icon">&times;</button>
             </div>
           </div>
@@ -224,6 +224,10 @@
 
       <div id="error-toast" class="toast hidden"></div>
     </main>
+
+    <footer class="app-footer">
+      Developed by Alfred Shi
+    </footer>
   </div>
 
   <script src="scripts/marked.min.js"></script>
