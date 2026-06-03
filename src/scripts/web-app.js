@@ -1,4 +1,4 @@
-const GD_API_BASE = "/api/gd";
+const GD_API_BASE = window.__GD_API_BASE__ || "/api/gd";
 
 const OFFICE_NAMES = {
   US: "美国 (USPTO)",

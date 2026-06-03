@@ -8,7 +8,7 @@ mod proxy;
 
 use cache::{CacheStore, DB_FILENAME, DEFAULT_TTL_SECS};
 use std::sync::Mutex;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::Manager;
 
 struct AppState {
     cache: Mutex<Option<CacheStore>>,
@@ -53,22 +53,19 @@ pub fn run() {
                 )?;
             }
 
-            // Start local HTTP proxy server (same as Electron's startServer)
-            let src_dir = app.path().resolve("../src", tauri::path::BaseDirectory::Resource)
-                .unwrap_or_else(|_| std::path::PathBuf::from("../src"));
+            // Start local API proxy server (only /api/gd/* routes)
+            let port = proxy::start_api_proxy();
+            log::info!("[Tauri] API proxy server started on port {}", port);
 
-            let port = proxy::start_proxy_server(src_dir);
-            log::info!("[Tauri] Local proxy server started on port {}", port);
-
-            // Create main window pointing to local server
-            let url = format!("http://127.0.0.1:{}/", port);
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse().unwrap()))
-                .title("专利审查梳理工具")
-                .inner_size(1280.0, 900.0)
-                .min_inner_size(800.0, 600.0)
-                .center()
-                .resizable(true)
-                .build()?;
+            // Inject the API base URL into the frontend
+            // Frontend loads from Tauri asset protocol, API calls go to local server
+            if let Some(window) = app.get_webview_window("main") {
+                let inject_js = format!(
+                    "window.__GD_API_BASE__ = 'http://127.0.0.1:{}/api/gd';",
+                    port
+                );
+                let _ = window.eval(&inject_js);
+            }
 
             Ok(())
         })
