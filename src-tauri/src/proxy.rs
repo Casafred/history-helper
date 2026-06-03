@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::State,
+    extract::{Path, State},
     http::{header, Request, Response, StatusCode},
     Router,
 };
@@ -29,7 +29,7 @@ pub fn start_api_proxy() -> u16 {
         .allow_headers(Any);
 
     let app = Router::new()
-        .fallback(api_handler)
+        .route("/*path", axum::routing::any(api_handler))
         .layer(cors)
         .with_state(state);
 
@@ -54,18 +54,19 @@ pub fn start_api_proxy() -> u16 {
 
 async fn api_handler(
     State(state): State<ProxyState>,
+    Path(path): Path<String>,
     req: Request<Body>,
 ) -> Response<Body> {
-    let path = req.uri().path().to_string();
+    let full_path = format!("/{}", path);
 
     // Handle extract-text API
-    if path.starts_with("/api/gd/extract-text/") {
-        return handle_extract_text(&state, &path, &req).await;
+    if full_path.starts_with("/api/gd/extract-text/") {
+        return handle_extract_text(&state, &full_path, &req).await;
     }
 
     // Handle GD API proxy
-    if path.starts_with("/api/gd/") {
-        return handle_gd_proxy(&state, &path).await;
+    if full_path.starts_with("/api/gd/") {
+        return handle_gd_proxy(&state, &full_path).await;
     }
 
     // Everything else: 404
