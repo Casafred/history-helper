@@ -10,19 +10,8 @@
     "beforeBuildCommand": ""
   },
   "app": {
-    "withGlobalTauri": true,
-    "windows": [
-      {
-        "title": "专利审查梳理工具",
-        "width": 1280,
-        "height": 900,
-        "resizable": true,
-        "fullscreen": false,
-        "center": true,
-        "minWidth": 800,
-        "minHeight": 600
-      }
-    ],
+    "withGlobalTauri": false,
+    "windows": [],
     "security": {
       "csp": null
     }
@@ -37,7 +26,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [],
+    "resources": [
+      "../src/**"
+    ],
     "windows": {
       "nsis": {
         "installMode": "currentUser",

@@ -12,17 +12,7 @@ const OFFICE_NAMES = {
 let currentData = null;
 
 const isElectron = !!(window && window.process && window.process.type);
-const isTauri = !!(window.__TAURI__);
-
-async function tauriInvoke(cmd, args) {
-  if (!isTauri) return null;
-  try {
-    return await window.__TAURI__.core.invoke(cmd, args);
-  } catch (e) {
-    console.error("Tauri invoke error:", cmd, e);
-    throw e;
-  }
-}
+const isTauri = !!window.__TAURI__;
 
 const patentInput = document.getElementById("patent-input");
 const searchBtn = document.getElementById("search-btn");
@@ -150,33 +140,6 @@ function parsePatentNumber(input) {
 }
 
 async function gdFetch(urlPath) {
-  if (isTauri) {
-    const familyMatch = urlPath.match(/\/patent-family\/svc\/family\/([^/]+)\/([^/]+)\/([^/]+)/);
-    const docListMatch = urlPath.match(/\/doc-list\/svc\/doclist\/([^/]+)\/([^/]+)\/([^/]+)/);
-
-    if (familyMatch) {
-      const queryType = familyMatch[1];
-      const office = familyMatch[2];
-      const docNum = familyMatch[3];
-      const result = await tauriInvoke("fetch_family", {
-        input: office + docNum,
-        queryType: queryType,
-      });
-      if (result && result.success && result.data) return result.data;
-      throw new Error(result?.error || "Tauri family fetch failed");
-    }
-
-    if (docListMatch) {
-      const office = docListMatch[1];
-      const docNum = docListMatch[2];
-      const result = await tauriInvoke("fetch_documents", {
-        input: office + docNum,
-      });
-      if (result && result.success && result.data) return result.data;
-      throw new Error(result?.error || "Tauri documents fetch failed");
-    }
-  }
-
   const url = GD_API_BASE + urlPath;
   const resp = await fetch(url);
   if (!resp.ok) {
