@@ -2,8 +2,6 @@ use axum::{
     body::Body,
     extract::State,
     http::{header, Request, Response, StatusCode},
-    response::IntoResponse,
-    routing::any,
     Router,
 };
 use reqwest::Client;
@@ -11,6 +9,7 @@ use tower_http::cors::{Any, CorsLayer};
 
 const GD_API_BASE: &str = "https://d1kazzu6rbodne.cloudfront.net";
 
+#[derive(Clone)]
 struct ProxyState {
     http_client: Client,
 }
@@ -30,9 +29,9 @@ pub fn start_api_proxy() -> u16 {
         .allow_headers(Any);
 
     let app = Router::new()
-        .fallback(any(api_handler))
+        .fallback(api_handler)
         .layer(cors)
-        .with_state(std::sync::Arc::new(state));
+        .with_state(state);
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
     let listener = rt.block_on(async {
@@ -54,7 +53,7 @@ pub fn start_api_proxy() -> u16 {
 }
 
 async fn api_handler(
-    State(state): State<std::sync::Arc<ProxyState>>,
+    State(state): State<ProxyState>,
     req: Request<Body>,
 ) -> Response<Body> {
     let path = req.uri().path().to_string();

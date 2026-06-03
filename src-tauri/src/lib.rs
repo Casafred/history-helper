@@ -6,7 +6,7 @@ mod ocr;
 mod patent;
 mod proxy;
 
-use cache::{CacheStore, DB_FILENAME, DEFAULT_TTL_SECS};
+use cache::{CacheStore, DB_FILENAME};
 use std::sync::Mutex;
 use tauri::Manager;
 
