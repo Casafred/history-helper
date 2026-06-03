@@ -503,6 +503,23 @@ body {
   padding: 8px;
 }
 
+.extract-report {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.extract-report h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.report-success { color: var(--success); margin: 4px 0; }
+.report-warning { color: var(--warning); margin: 4px 0; }
+.report-error { color: var(--danger); margin: 4px 0; }
+
 .engine-select {
   padding: 4px 6px;
   background: var(--bg-secondary);

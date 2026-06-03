@@ -1017,52 +1017,107 @@ kanbanAutoBtn.addEventListener("click", async () => {
   }
 
   const ocrConfig = window.AI.getOCRConfig(config);
-  const engine = ocrConfig.engine || "paddle_ocr_vl";
+  const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
+  const apiKey = provider?.apiKey || "";
   const statusEl = document.getElementById("kanban-status");
+  const isUS = currentData.office === "US";
+  const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
 
-  const missing = oaItems.filter(it => !kanbanState.extractions[it.idx]);
-  for (let i = 0; i < missing.length; i++) {
-    const it = missing[i];
-    if (statusEl) statusEl.textContent = "补提中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
+  const MAX_RETRIES = 2;
+  const extractReport = { success: [], empty: [], failed: [] };
+
+  async function extractWithRetry(it, engine, retriesLeft) {
     const container = document.getElementById("kanban-extracted-" + it.idx);
-    if (!container) continue;
-    container.classList.remove("hidden");
-    container.innerHTML = '<p class="extracting">正在提取（' + escapeHtml(engine) + '）...</p>';
-    const isUS = currentData.office === "US";
-    const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+    if (container) {
+      container.classList.remove("hidden");
+      const attemptNum = MAX_RETRIES - retriesLeft + 1;
+      container.innerHTML = '<p class="extracting">正在提取（' + escapeHtml(engine) + '）' + (attemptNum > 1 ? '第' + attemptNum + '次尝试' : '') + '...</p>';
+    }
     try {
-      const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, provider?.apiKey || "");
-      if (result.error) { container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>'; continue; }
+      const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, apiKey);
+      if (result.error) {
+        if (retriesLeft > 0) {
+          const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
+          if (statusEl) statusEl.textContent = it.name + " 提取失败，切换引擎重试...";
+          return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
+        }
+        extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: result.error });
+        if (container) container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>';
+        return false;
+      }
       const text = result.text || "";
       const markdown = result.markdown || "";
-      if (!text && !markdown) { container.innerHTML = '<p class="extract-empty">未能提取到文本</p>'; continue; }
+      if (!text && !markdown) {
+        if (retriesLeft > 0) {
+          const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
+          if (statusEl) statusEl.textContent = it.name + " 内容为空，切换引擎重试...";
+          return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
+        }
+        extractReport.empty.push({ name: it.name, docCode: it.docCode });
+        if (container) container.innerHTML = '<p class="extract-empty">未能提取到文本（已尝试 ' + MAX_RETRIES + ' 次）</p>';
+        return false;
+      }
       const blocks = result.blocks || [];
       const pageDimensions = result.page_dimensions || {};
       kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
       if (blocks.length > 0) {
         blocks.forEach(b => {
           kanbanState.traceIndex[b.block_id] = {
-            docIdx: it.idx,
-            page: b.page,
-            bbox: b.bbox,
-            content: b.content,
-            label: b.label,
+            docIdx: it.idx, page: b.page, bbox: b.bbox,
+            content: b.content, label: b.label,
             pageDimensions: pageDimensions[b.page] || null,
           };
         });
       }
-      const displayText = markdown || text;
-      const blocksInfo = blocks.length > 0 ? ` · ${blocks.length} blocks` : "";
-      container.innerHTML = `
-        <div class="extracted-header">
-          <span class="extracted-engine">引擎: ${escapeHtml(result.engine)}</span>
-          <span class="extracted-chars">字符数: ${displayText.length}${blocksInfo}</span>
-        </div>
-        <pre class="extracted-text">${escapeHtml(displayText.length > 6000 ? displayText.substring(0, 6000) + "\n\n[...已截断...]" : displayText)}</pre>
-      `;
+      extractReport.success.push({ name: it.name, docCode: it.docCode, chars: (markdown || text).length, engine: result.engine });
+      if (container) {
+        const displayText = markdown || text;
+        const blocksInfo = blocks.length > 0 ? ` · ${blocks.length} blocks` : "";
+        container.innerHTML = `
+          <div class="extracted-header">
+            <span class="extracted-engine">引擎: ${escapeHtml(result.engine)}</span>
+            <span class="extracted-chars">字符数: ${displayText.length}${blocksInfo}</span>
+          </div>
+          <pre class="extracted-text">${escapeHtml(displayText.length > 6000 ? displayText.substring(0, 6000) + "\n\n[...已截断...]" : displayText)}</pre>
+        `;
+      }
+      return true;
     } catch (e) {
-      container.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
+      if (retriesLeft > 0) {
+        if (statusEl) statusEl.textContent = it.name + " 提取异常，重试中...";
+        await new Promise(r => setTimeout(r, 2000));
+        return await extractWithRetry(it, engine, retriesLeft - 1);
+      }
+      extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: e.message });
+      const container = document.getElementById("kanban-extracted-" + it.idx);
+      if (container) container.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
+      return false;
     }
+  }
+
+  const missing = oaItems.filter(it => !kanbanState.extractions[it.idx]);
+  for (let i = 0; i < missing.length; i++) {
+    const it = missing[i];
+    if (statusEl) statusEl.textContent = "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
+    await extractWithRetry(it, primaryEngine, MAX_RETRIES);
+  }
+
+  const successCount = extractReport.success.length;
+  const emptyCount = extractReport.empty.length;
+  const failedCount = extractReport.failed.length;
+  const totalCount = oaItems.length;
+
+  if (statusEl) {
+    let statusText = "提取完成: " + successCount + "/" + totalCount + " 成功";
+    if (emptyCount > 0) statusText += ", " + emptyCount + " 为空";
+    if (failedCount > 0) statusText += ", " + failedCount + " 失败";
+    statusEl.textContent = statusText;
+  }
+
+  if (successCount === 0) {
+    analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有文档提取均失败，无法进行 AI 分析。请检查网络连接或尝试切换 OCR 引擎。</p>';
+    kanbanAutoBtn.disabled = false;
+    return;
   }
 
   if (statusEl) statusEl.textContent = "正在用 AI 整理审查历史...";
@@ -1148,6 +1203,22 @@ kanbanAutoBtn.addEventListener("click", async () => {
     }
     kanbanState.analysis = fullText;
     if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份审查/答复文档" + (hasBlocks ? "（含溯源标记）" : "");
+
+    let reportHtml = "";
+    if (emptyCount > 0 || failedCount > 0) {
+      reportHtml = '<div class="extract-report"><h4>提取完整性报告</h4>';
+      if (extractReport.success.length > 0) {
+        reportHtml += '<div class="report-success">✓ 成功: ' + extractReport.success.map(s => escapeHtml(s.name) + ' (' + s.chars + '字/' + s.engine + ')').join('、') + '</div>';
+      }
+      if (emptyCount > 0) {
+        reportHtml += '<div class="report-warning">⚠ 内容为空: ' + extractReport.empty.map(s => escapeHtml(s.name)).join('、') + '</div>';
+      }
+      if (failedCount > 0) {
+        reportHtml += '<div class="report-error">✗ 提取失败: ' + extractReport.failed.map(s => escapeHtml(s.name) + ' (' + escapeHtml(s.reason) + ')').join('、') + '</div>';
+      }
+      reportHtml += '</div>';
+      analysisContent.innerHTML = reportHtml + '<div class="kanban-analysis-content markdown-body">' + renderMarkdownWithTrace(fullText) + "</div>";
+    }
   } catch (e) {
     analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
     if (statusEl) statusEl.textContent = "AI 整理失败 ✗";
