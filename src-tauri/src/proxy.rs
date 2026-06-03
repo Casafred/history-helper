@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
-    extract::{Path, State},
-    http::{header, Request, Response, StatusCode},
+    extract::{Path, Query, State},
+    http::{header, Response, StatusCode},
     Router,
 };
 use reqwest::Client;
@@ -29,7 +29,7 @@ pub fn start_api_proxy() -> u16 {
         .allow_headers(Any);
 
     let app = Router::new()
-        .route("/*path", axum::routing::any(api_handler))
+        .route("/api/gd/{*path}", axum::routing::any(api_handler))
         .layer(cors)
         .with_state(state);
 
@@ -52,29 +52,22 @@ pub fn start_api_proxy() -> u16 {
     port
 }
 
+type QueryParams = std::collections::HashMap<String, String>;
+
 async fn api_handler(
     State(state): State<ProxyState>,
     Path(path): Path<String>,
-    req: Request<Body>,
+    Query(params): Query<QueryParams>,
 ) -> Response<Body> {
-    let full_path = format!("/{}", path);
+    let full_path = format!("/api/gd/{}", path);
 
     // Handle extract-text API
     if full_path.starts_with("/api/gd/extract-text/") {
-        return handle_extract_text(&state, &full_path, &req).await;
+        return handle_extract_text(&state, &full_path, &params).await;
     }
 
     // Handle GD API proxy
-    if full_path.starts_with("/api/gd/") {
-        return handle_gd_proxy(&state, &full_path).await;
-    }
-
-    // Everything else: 404
-    Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .header(header::CONTENT_TYPE, "text/plain")
-        .body(Body::from("Not Found"))
-        .unwrap()
+    handle_gd_proxy(&state, &full_path).await
 }
 
 async fn handle_gd_proxy(state: &ProxyState, path: &str) -> Response<Body> {
@@ -150,14 +143,9 @@ async fn handle_gd_proxy(state: &ProxyState, path: &str) -> Response<Body> {
 async fn handle_extract_text(
     state: &ProxyState,
     path: &str,
-    req: &Request<Body>,
+    params: &QueryParams,
 ) -> Response<Body> {
     let gd_path = path.replace("/api/gd/extract-text", "");
-    let query_string = req.uri().query().unwrap_or("");
-    let params: std::collections::HashMap<String, String> =
-        url::form_urlencoded::parse(query_string.as_bytes())
-            .into_owned()
-            .collect();
 
     let engine = params.get("engine").map(|s| s.as_str()).unwrap_or("auto");
     let api_key = params.get("api_key").map(|s| s.as_str()).unwrap_or("");
