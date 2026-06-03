@@ -639,12 +639,15 @@ body {
 
 .modal-content {
   position: relative;
-  width: 480px;
+  width: 560px;
   max-width: 90vw;
+  max-height: 85vh;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .modal-header {
@@ -662,6 +665,9 @@ body {
 
 .modal-body {
   padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .form-group {
@@ -1014,6 +1020,89 @@ body {
   font-size: 11px;
   padding: 6px;
   margin-top: 4px;
+}
+
+/* 对照阅读布局 */
+.kanban-compare {
+  margin-top: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+}
+
+.compare-body {
+  display: flex;
+  gap: 0;
+  min-height: 400px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.compare-left,
+.compare-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.compare-divider {
+  width: 1px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.compare-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.compare-doc-select {
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  max-width: 220px;
+}
+
+.compare-doc-select:focus {
+  border-color: var(--accent);
+}
+
+.compare-content {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* 审查文档 tab 的文档卡片点击样式 */
+.doc-column-card {
+  cursor: pointer;
+}
+
+.doc-column-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.doc-column-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .trace-links {

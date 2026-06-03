@@ -10,7 +10,7 @@
     "beforeBuildCommand": ""
   },
   "app": {
-    "withGlobalTauri": false,
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "专利审查梳理工具",

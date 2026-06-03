@@ -34,20 +34,39 @@ pub fn start_api_proxy() -> u16 {
         .with_state(state);
 
     // Bind synchronously using std::net - no tokio needed at this point
-    let std_listener = std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("Failed to bind port");
-    let port = std_listener.local_addr().unwrap().port();
+    let std_listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[Tauri] Failed to bind port: {}", e);
+            return 0;
+        }
+    };
+    let port = std_listener.local_addr().map(|a| a.port()).unwrap_or(0);
     // Set non-blocking before converting to tokio listener
-    std_listener.set_nonblocking(true).expect("Failed to set nonblocking");
+    if let Err(e) = std_listener.set_nonblocking(true) {
+        eprintln!("[Tauri] Failed to set nonblocking: {}", e);
+        return port;
+    }
 
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("[Tauri] Failed to create tokio runtime: {}", e);
+                return;
+            }
+        };
         rt.block_on(async {
-            let listener = tokio::net::TcpListener::from_std(std_listener)
-                .expect("Failed to convert std listener to tokio listener");
-            axum::serve(listener, app)
-                .await
-                .expect("API proxy server error");
+            let listener = match tokio::net::TcpListener::from_std(std_listener) {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("[Tauri] Failed to convert std listener to tokio listener: {}", e);
+                    return;
+                }
+            };
+            if let Err(e) = axum::serve(listener, app).await {
+                eprintln!("[Tauri] API proxy server error: {}", e);
+            }
         });
     });
 

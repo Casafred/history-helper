@@ -76,6 +76,6 @@ pub fn run() {
 struct ApiPort(u16);
 
 #[tauri::command]
-fn get_api_port(api_port: tauri::State<ApiPort>) -> u16 {
-    api_port.0
+fn get_api_port(api_port: tauri::State<ApiPort>) -> Result<u16, String> {
+    Ok(api_port.0)
 }

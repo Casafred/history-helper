@@ -2,8 +2,9 @@ const GD_API_BASE_DEFAULT = "/api/gd";
 let GD_API_BASE = GD_API_BASE_DEFAULT;
 
 // In Tauri environment, get the API port from the backend
+let tauriApiReady = Promise.resolve();
 if (isTauri) {
-  (async () => {
+  tauriApiReady = (async () => {
     try {
       const port = await tauriInvoke("get_api_port", {});
       if (port) {
@@ -190,6 +191,7 @@ patentInput.addEventListener("keydown", (e) => {
 });
 
 searchBtn.addEventListener("click", async () => {
+  await tauriApiReady;
   const input = patentInput.value.trim();
   if (!input) return;
 
@@ -264,13 +266,9 @@ let kanbanState = {
 };
 
 function renderKanban(data) {
-  const board = document.getElementById("kanban-board");
   const statusEl = document.getElementById("kanban-status");
-  if (!board) return;
-
   const docs = data.documents ? extractDocuments(data.documents) : [];
   if (!docs || docs.length === 0) {
-    board.innerHTML = '<p class="placeholder">未查询到审查文档</p>';
     if (statusEl) statusEl.textContent = "";
     kanbanState.documents = [];
     return;
@@ -305,66 +303,22 @@ function renderKanban(data) {
   kanbanState.analysis = "";
   kanbanState.traceIndex = {};
 
-  const columns = [
-    { key: "office_action", title: "审查意见", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg>', color: "kanban-col-oa" },
-    { key: "response", title: "申请人答复", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>', color: "kanban-col-response" },
-    { key: "request", title: "申请人请求", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>', color: "kanban-col-request" },
-    { key: "allowance", title: "授权通知", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>', color: "kanban-col-allowance" },
-    { key: "notification", title: "通知", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>', color: "kanban-col-notification" },
-    { key: "misc", title: "其他文件", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>', color: "kanban-col-misc" },
-  ];
-
-  let html = '<div class="kanban-columns">';
-  columns.forEach(col => {
-    const colItems = items.filter(it => it.type === col.key);
-    const count = colItems.length;
-    html += `
-      <div class="kanban-column ${col.color}">
-        <div class="kanban-column-header">
-          <span class="kanban-column-title">${col.icon}${col.title}</span>
-          <span class="kanban-column-count">${count}</span>
-        </div>
-        <div class="kanban-column-body">
-    `;
-    if (count === 0) {
-      html += '<p class="kanban-empty">无</p>';
-    } else {
-      colItems.forEach(it => {
-        const isUS = data.office === "US";
-        const urlDocNum = isUS ? (data.corrAppNum || data.applicationNumber) : encodeURIComponent(data.corrAppNum || data.docNumber || data.applicationNumber);
-        const encodedDocId = encodeURIComponent(it.docId);
-        const extractUrl = it.docId ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
-        const downloadUrl = it.docId ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
-        html += `
-          <div class="kanban-card" data-idx="${it.idx}">
-            <div class="kanban-card-header">
-              <span class="kanban-card-code">${escapeHtml(it.docCode)}</span>
-              ${it.date ? '<span class="kanban-card-date">' + escapeHtml(it.date) + '</span>' : ''}
-            </div>
-            <div class="kanban-card-name">${escapeHtml(it.name)}</div>
-            ${it.desc && it.desc !== it.name ? '<div class="kanban-card-desc">' + escapeHtml(it.desc) + '</div>' : ''}
-            <div class="kanban-card-stage">阶段: ${escapeHtml(it.stage)}</div>
-            <div class="kanban-card-actions">
-              ${extractUrl ? '<button class="btn-small btn-extract" data-action="kanban-extract" data-url="' + extractUrl + '" data-idx="' + it.idx + '" data-doctype="' + escapeHtml(it.docCode) + '">提取内容</button>' : ''}
-              ${downloadUrl ? '<button class="btn-small btn-download" data-action="kanban-download" data-url="' + downloadUrl + '" data-filename="' + escapeHtml(it.docCode) + '_' + escapeHtml(it.date.replace(/\//g, '-')) + '.pdf">下载</button>' : ''}
-            </div>
-            <div id="kanban-extracted-${it.idx}" class="kanban-extracted hidden"></div>
-          </div>
-        `;
-      });
-    }
-    html += `
-        </div>
-      </div>
-    `;
-  });
-  html += '</div>';
-
-  board.innerHTML = html;
   if (statusEl) {
     const oaCount = items.filter(it => it.type === "office_action").length;
     const respCount = items.filter(it => it.type === "response").length;
     statusEl.textContent = "共 " + items.length + " 份审查文档（审查意见 " + oaCount + " 份，答复 " + respCount + " 份）";
+  }
+
+  // Populate comparison reading doc selector
+  const compareSelect = document.getElementById("compare-doc-select");
+  if (compareSelect) {
+    const importantTypes = ["office_action", "response", "allowance"];
+    const readerItems = items.filter(it => importantTypes.indexOf(it.type) !== -1);
+    let optionsHtml = '<option value="">选择文档...</option>';
+    readerItems.forEach(it => {
+      optionsHtml += '<option value="' + it.idx + '">' + escapeHtml(it.docCode) + ' - ' + escapeHtml(it.name) + ' (' + escapeHtml(it.date) + ')</option>';
+    });
+    compareSelect.innerHTML = optionsHtml;
   }
 }
 
@@ -614,6 +568,30 @@ function renderDocuments(data) {
     "allowance": "授权", "notification": "通知", "misc": "其他"
   };
 
+  // Build items with status info
+  const items = docList.map((d, idx) => {
+    const docCode = d.docCode || d.documentType || d.kindCode || d.type || "";
+    const desc = d.docDesc || d.documentDescription || d.description || d.docId || "";
+    const date = d.legalDateStr || d.documentDate || d.date || "";
+    const docId = d.documentId || d.docId || "";
+    const numberOfPages = d.numberOfPages != null ? d.numberOfPages : 1;
+    const docFormat = d.docFormat || "PDF";
+    const status = getStatusInfo(office, docCode, desc);
+    return {
+      idx: idx,
+      docCode,
+      desc,
+      date,
+      docId,
+      numberOfPages,
+      docFormat,
+      name: status.name,
+      type: status.type,
+      stage: status.stage,
+    };
+  });
+
+  // Filter bar HTML
   let filterHtml = '<div class="doc-filter-bar">';
   filterHtml += '<input type="text" id="doc-filter-input" class="doc-filter-input" placeholder="搜索文档名称、代码、描述...">';
   filterHtml += '<button class="doc-filter-chip active" data-filter-type="all">全部 <span class="chip-count">' + docList.length + '</span></button>';
@@ -624,47 +602,61 @@ function renderDocuments(data) {
   });
   filterHtml += '</div>';
 
-  let html = filterHtml;
-  docList.forEach((d, idx) => {
-    const docType = d.docCode || d.documentType || d.kindCode || d.type || "文档";
-    const desc = d.docDesc || d.documentDescription || d.description || d.docId || "";
-    const date = d.legalDateStr || d.documentDate || d.date || "";
-    const docId = d.documentId || d.docId || "";
-    const numberOfPages = d.numberOfPages != null ? d.numberOfPages : 1;
-    const docFormat = d.docFormat || "PDF";
+  // Six-column layout (same as kanban)
+  const columns = [
+    { key: "office_action", title: "审查意见", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg>', color: "kanban-col-oa" },
+    { key: "response", title: "申请人答复", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>', color: "kanban-col-response" },
+    { key: "allowance", title: "授权通知", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>', color: "kanban-col-allowance" },
+    { key: "request", title: "申请人请求", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>', color: "kanban-col-request" },
+    { key: "notification", title: "通知", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>', color: "kanban-col-notification" },
+    { key: "misc", title: "其他文件", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>', color: "kanban-col-misc" },
+  ];
 
-    const status = getStatusInfo(office, docType, desc);
-    const filterType = status.type;
-
-    let typeClass = "doc-type";
-    const lowerDesc = desc.toLowerCase();
-    if (lowerDesc.includes("rejection") || lowerDesc.includes("拒绝") || lowerDesc.includes("驳回")) {
-      typeClass += " rejection";
-    } else if (lowerDesc.includes("allowance") || lowerDesc.includes("准予") || lowerDesc.includes("授权")) {
-      typeClass += " allowance";
-    }
-
-    const encodedDocId = encodeURIComponent(docId);
-    const downloadUrl = docId ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
-    const extractUrl = docId ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
-
-    html += `
-      <div class="doc-item" data-filter-type="${filterType}" data-search-text="${escapeHtml((docType + ' ' + desc + ' ' + date + ' ' + status.name).toLowerCase())}">
-        <span class="${typeClass}">${escapeHtml(docType)}</span>
-        <div class="doc-info">
-          <div class="doc-desc">${escapeHtml(desc)}</div>
-          ${date ? '<div class="doc-date">' + escapeHtml(date) + '</div>' : ''}
+  let columnsHtml = '<div class="kanban-columns">';
+  columns.forEach(col => {
+    const colItems = items.filter(it => it.type === col.key);
+    const count = colItems.length;
+    columnsHtml += `
+      <div class="kanban-column ${col.color}">
+        <div class="kanban-column-header">
+          <span class="kanban-column-title">${col.icon}${col.title}</span>
+          <span class="kanban-column-count">${count}</span>
         </div>
-        <div class="doc-actions">
-          ${extractUrl ? `<select class="engine-select" data-idx="${idx}"><option value="auto">自动</option><option value="paddle_ocr_vl">PaddleOCR</option><option value="glm_ocr">GLM OCR</option></select>` : ''}
-          ${extractUrl ? `<button class="btn-small btn-extract" data-action="extract" data-url="${extractUrl}" data-idx="${idx}" data-doctype="${escapeHtml(docType)}">提取内容</button>` : ''}
-          ${downloadUrl ? `<button class="btn-small btn-download" data-action="download" data-url="${downloadUrl}" data-filename="${escapeHtml(docType)}_${escapeHtml(date.replace(/\//g, '-'))}.pdf">下载</button>` : ''}
+        <div class="kanban-column-body">
+    `;
+    if (count === 0) {
+      columnsHtml += '<p class="kanban-empty">无</p>';
+    } else {
+      colItems.forEach(it => {
+        const encodedDocId = encodeURIComponent(it.docId);
+        const extractUrl = it.docId ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
+        const downloadUrl = it.docId ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
+        columnsHtml += `
+          <div class="kanban-card doc-column-card" data-idx="${it.idx}" data-filter-type="${it.type}" data-search-text="${escapeHtml((it.docCode + ' ' + it.desc + ' ' + it.date + ' ' + it.name).toLowerCase())}">
+            <div class="kanban-card-header">
+              <span class="kanban-card-code">${escapeHtml(it.docCode)}</span>
+              ${it.date ? '<span class="kanban-card-date">' + escapeHtml(it.date) + '</span>' : ''}
+            </div>
+            <div class="kanban-card-name">${escapeHtml(it.name)}</div>
+            ${it.desc && it.desc !== it.name ? '<div class="kanban-card-desc">' + escapeHtml(it.desc) + '</div>' : ''}
+            <div class="kanban-card-stage">阶段: ${escapeHtml(it.stage)}</div>
+            <div class="kanban-card-actions">
+              ${extractUrl ? '<button class="btn-small btn-extract" data-action="doc-col-extract" data-url="' + extractUrl + '" data-idx="' + it.idx + '" data-doctype="' + escapeHtml(it.docCode) + '">提取内容</button>' : ''}
+              ${downloadUrl ? '<button class="btn-small btn-download" data-action="doc-col-download" data-url="' + downloadUrl + '" data-filename="' + escapeHtml(it.docCode) + '_' + escapeHtml(it.date.replace(/\//g, '-')) + '.pdf">下载</button>' : ''}
+            </div>
+            <div id="doc-col-extracted-${it.idx}" class="kanban-extracted hidden"></div>
+          </div>
+        `;
+      });
+    }
+    columnsHtml += `
         </div>
       </div>
-      <div id="doc-extracted-${idx}" class="doc-extracted hidden"></div>
     `;
   });
-  container.innerHTML = html;
+  columnsHtml += '</div>';
+
+  container.innerHTML = filterHtml + columnsHtml;
 
   // Bind filter events
   const filterInput = document.getElementById("doc-filter-input");
@@ -673,15 +665,10 @@ function renderDocuments(data) {
 
   function applyDocFilter() {
     const keyword = filterInput ? filterInput.value.trim().toLowerCase() : "";
-    container.querySelectorAll(".doc-item").forEach(el => {
+    container.querySelectorAll(".doc-column-card").forEach(el => {
       const matchType = activeFilter === "all" || el.dataset.filterType === activeFilter;
       const matchKeyword = !keyword || el.dataset.searchText.includes(keyword);
       el.style.display = (matchType && matchKeyword) ? "" : "none";
-      // Also show/hide the following extracted div
-      const next = el.nextElementSibling;
-      if (next && next.classList.contains("doc-extracted")) {
-        next.style.display = (matchType && matchKeyword) ? "" : "none";
-      }
     });
   }
 
@@ -700,7 +687,9 @@ function renderDocuments(data) {
 }
 
 async function extractDocumentText(url, idx, docType) {
-  const container = document.getElementById("doc-extracted-" + idx);
+  let container = document.getElementById("doc-extracted-" + idx);
+  if (!container) container = document.getElementById("doc-col-extracted-" + idx);
+  if (!container) container = document.getElementById("kanban-extracted-" + idx);
   if (!container) return;
   container.classList.remove("hidden");
 
@@ -785,6 +774,7 @@ async function extractDocumentText(url, idx, docType) {
 
 async function aiAnalyzeDocument(idx, docType) {
   let container = document.getElementById("doc-extracted-" + idx);
+  if (!container) container = document.getElementById("doc-col-extracted-" + idx);
   if (!container) container = document.getElementById("kanban-extracted-" + idx);
   if (!container) return;
 
@@ -926,7 +916,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.classList.add("active");
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
     const app = document.getElementById("app");
-    const wideTabs = ["kanban", "timeline"];
+    const wideTabs = ["documents", "kanban", "timeline"];
     if (wideTabs.includes(btn.dataset.tab)) {
       app.classList.add("wide-layout");
     } else {
@@ -1359,6 +1349,14 @@ kanbanAutoBtn.addEventListener("click", async () => {
     kanbanState.analysis = fullText;
     if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份审查/答复文档" + (hasBlocks ? "（含溯源标记）" : "");
 
+    // Show comparison section and populate AI analysis
+    const compareSection = document.getElementById("kanban-compare");
+    if (compareSection) compareSection.classList.remove("hidden");
+    const compareAiContent = document.getElementById("compare-ai-content");
+    if (compareAiContent) {
+      compareAiContent.innerHTML = '<div class="markdown-body">' + renderMarkdownWithTrace(fullText) + '</div>';
+    }
+
     let reportHtml = "";
     if (emptyCount > 0 || failedCount > 0) {
       reportHtml = '<div class="extract-report"><h4>提取完整性报告</h4>';
@@ -1764,18 +1762,18 @@ document.addEventListener("DOMContentLoaded", () => {
     const btn = e.target.closest("[data-action]");
     if (!btn) return;
     const action = btn.dataset.action;
-    if (action === "download") {
+    if (action === "doc-col-download") {
       downloadDocument(btn.dataset.url, btn.dataset.filename);
-    } else if (action === "extract") {
+    } else if (action === "doc-col-extract") {
       extractDocumentText(btn.dataset.url, parseInt(btn.dataset.idx), btn.dataset.doctype);
     } else if (action === "ai-analyze-doc") {
       aiAnalyzeDocument(parseInt(btn.dataset.idx), btn.dataset.doctype);
     }
   });
 
-  const kanbanBoard = document.getElementById("kanban-board");
-  if (kanbanBoard) {
-    kanbanBoard.addEventListener("click", (e) => {
+  const kanbanContent = document.getElementById("kanban-content");
+  if (kanbanContent) {
+    kanbanContent.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-action]");
       if (!btn) return;
       const action = btn.dataset.action;
@@ -1823,6 +1821,73 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (readerExportBtn) {
     readerExportBtn.addEventListener("click", exportToWord);
+  }
+
+  // Comparison reading: document selector
+  const compareDocSelect = document.getElementById("compare-doc-select");
+  if (compareDocSelect) {
+    compareDocSelect.addEventListener("change", () => {
+      const idx = parseInt(compareDocSelect.value);
+      const compareDocContent = document.getElementById("compare-doc-content");
+      if (!compareDocContent) return;
+      if (isNaN(idx)) {
+        compareDocContent.innerHTML = '<p class="placeholder">请选择一份文档查看原文</p>';
+        return;
+      }
+      const ext = kanbanState.extractions[idx];
+      if (ext) {
+        const md = ext.markdown || ext.text || "";
+        if (md) {
+          compareDocContent.innerHTML = '<div class="markdown-body">' + renderMarkdown(md) + '</div>';
+        } else {
+          compareDocContent.innerHTML = '<p class="placeholder">该文档未提取到内容</p>';
+        }
+      } else {
+        // Try to extract on demand
+        const it = kanbanState.documents.find(d => d.idx === idx);
+        if (it && it.docId && currentData) {
+          compareDocContent.innerHTML = '<p class="extracting">正在提取文档内容...</p>';
+          const config = window.AI.loadAIConfig();
+          const ocrConfig = window.AI.getOCRConfig(config);
+          const engine = ocrConfig.engine || "paddle_ocr_vl";
+          const glmApiKey = window.AI.getGlmOcrApiKey(config);
+          const isUS = currentData.office === "US";
+          const urlDocNum = isUS ? (currentData.corrAppNum || currentData.applicationNumber) : encodeURIComponent(currentData.corrAppNum || currentData.docNumber || currentData.applicationNumber);
+          doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, engine === "glm_ocr" ? glmApiKey : "")
+            .then(result => {
+              if (result.error) {
+                compareDocContent.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(result.error) + '</p>';
+                return;
+              }
+              const text = result.text || "";
+              const markdown = result.markdown || "";
+              if (!text && !markdown) {
+                compareDocContent.innerHTML = '<p class="extract-empty">未能提取到文本内容</p>';
+                return;
+              }
+              const blocks = result.blocks || [];
+              const pageDimensions = result.page_dimensions || {};
+              kanbanState.extractions[idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
+              if (blocks.length > 0) {
+                blocks.forEach(b => {
+                  kanbanState.traceIndex[b.block_id] = {
+                    docIdx: idx, page: b.page, bbox: b.bbox,
+                    content: b.content, label: b.label,
+                    pageDimensions: pageDimensions[b.page] || null,
+                  };
+                });
+              }
+              const displayMd = markdown || text;
+              compareDocContent.innerHTML = '<div class="markdown-body">' + renderMarkdown(displayMd) + '</div>';
+            })
+            .catch(e => {
+              compareDocContent.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(e.message) + '</p>';
+            });
+        } else {
+          compareDocContent.innerHTML = '<p class="placeholder">该文档尚未提取内容</p>';
+        }
+      }
+    });
   }
 
   document.addEventListener("click", (e) => {

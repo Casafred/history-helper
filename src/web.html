@@ -34,7 +34,7 @@
           <button class="tab-btn active" data-tab="overview">概览</button>
           <button class="tab-btn" data-tab="family">同族</button>
           <button class="tab-btn" data-tab="documents">审查文档</button>
-          <button class="tab-btn" data-tab="kanban">审查看板</button>
+          <button class="tab-btn" data-tab="kanban">AI 审查梳理</button>
           <button class="tab-btn" data-tab="timeline">时间线</button>
           <button class="tab-btn" data-tab="ai-summary">AI 梳理</button>
         </div>
@@ -57,18 +57,22 @@
         </div>
 
         <div id="tab-documents" class="tab-content">
-          <div id="documents-content"><p class="placeholder">暂无审查文档</p></div>
+          <div id="documents-content">
+            <div class="doc-filter-bar" id="doc-filter-bar">
+              <input type="text" id="doc-filter-input" class="doc-filter-input" placeholder="搜索文档名称、代码、描述...">
+            </div>
+            <div id="doc-columns-board" class="kanban-board">
+              <p class="placeholder">请先查询专利，审查文档加载后将自动归类到各栏</p>
+            </div>
+          </div>
         </div>
 
         <div id="tab-kanban" class="tab-content">
           <div id="kanban-content">
             <div class="kanban-header">
-              <span class="kanban-title">审查状态看板</span>
+              <span class="kanban-title">AI 审查梳理</span>
               <span id="kanban-status" class="kanban-status"></span>
-              <button id="kanban-auto-btn" class="btn-primary" disabled>自动梳理审查意见</button>
-            </div>
-            <div id="kanban-board" class="kanban-board">
-              <p class="placeholder">请先查询专利，审查文档加载后将自动归类到看板</p>
+              <button id="kanban-auto-btn" class="btn-primary" disabled>AI 梳理审查意见</button>
             </div>
             <div id="kanban-analysis" class="kanban-analysis hidden">
               <div class="kanban-section-header">
@@ -79,6 +83,31 @@
                 </div>
               </div>
               <div id="kanban-analysis-content" class="markdown-body"></div>
+            </div>
+            <div id="kanban-compare" class="kanban-compare hidden">
+              <div class="kanban-section-header">
+                <h3 class="kanban-section-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> 对照阅读</h3>
+              </div>
+              <div class="compare-body">
+                <div class="compare-left">
+                  <div class="compare-panel-header">
+                    <span>原始文档</span>
+                    <select id="compare-doc-select" class="compare-doc-select"><option value="">选择文档...</option></select>
+                  </div>
+                  <div id="compare-doc-content" class="compare-content markdown-body">
+                    <p class="placeholder">请选择一份文档查看原文</p>
+                  </div>
+                </div>
+                <div class="compare-divider"></div>
+                <div class="compare-right">
+                  <div class="compare-panel-header">
+                    <span>AI 分析结果</span>
+                  </div>
+                  <div id="compare-ai-content" class="compare-content markdown-body">
+                    <p class="placeholder">请先运行 AI 分析</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
