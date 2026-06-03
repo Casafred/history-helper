@@ -125,7 +125,12 @@ function parsePatentNumber(input) {
       break;
     case "EP":
       appNum = stripped.replace(/^EP/i, "").replace(/[\s.]/g, "");
-      if (appNum.length <= 8 && !kindCode) {
+      // EP numbers: 7-8 digit publication numbers, 8-digit application numbers (2-digit year + 6-digit serial)
+      if (kindCode) {
+        // Any kind code (A1, B1, etc.) means it's a publication number
+        queryType = "publication";
+      } else if (appNum.length <= 8) {
+        // Without kind code, short numbers are likely publication numbers
         queryType = "publication";
       }
       break;
@@ -332,7 +337,7 @@ function renderKanban(data) {
     } else {
       colItems.forEach(it => {
         const isUS = data.office === "US";
-        const urlDocNum = isUS ? (data.corrAppNum || data.applicationNumber) : encodeURIComponent(data.docNumber || data.applicationNumber);
+        const urlDocNum = isUS ? (data.corrAppNum || data.applicationNumber) : encodeURIComponent(data.corrAppNum || data.docNumber || data.applicationNumber);
         const encodedDocId = encodeURIComponent(it.docId);
         const extractUrl = it.docId ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
         const downloadUrl = it.docId ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
@@ -598,7 +603,7 @@ function renderDocuments(data) {
   const office = data.office;
   const docNumber = docs.docNumber || data.applicationNumber;
   const isUS = data.office === "US";
-  const urlDocNum = isUS ? (data.corrAppNum || data.applicationNumber) : encodeURIComponent(docNumber);
+  const urlDocNum = isUS ? (data.corrAppNum || data.applicationNumber) : encodeURIComponent(data.corrAppNum || docNumber);
 
   // Build type counts for filter chips
   const typeCounts = {};
@@ -718,7 +723,7 @@ async function extractDocumentText(url, idx, docType) {
     let data;
     if (isTauri && currentData) {
       const isUS = currentData.office === "US";
-      const urlDocNum = isUS ? (currentData.corrAppNum || currentData.applicationNumber) : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+      const urlDocNum = isUS ? (currentData.corrAppNum || currentData.applicationNumber) : encodeURIComponent(currentData.corrAppNum || currentData.docNumber || currentData.applicationNumber);
       const it = kanbanState.documents.find(d => d.idx === idx) || currentData._allDocs?.[idx];
       if (!it) throw new Error("找不到文档信息");
       data = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, engine === "glm_ocr" ? glmApiKey : "");
@@ -1193,7 +1198,7 @@ kanbanAutoBtn.addEventListener("click", async () => {
   const glmApiKey = window.AI.getGlmOcrApiKey(config);
   const statusEl = document.getElementById("kanban-status");
   const isUS = currentData.office === "US";
-  const urlDocNum = isUS ? (currentData.corrAppNum || currentData.applicationNumber) : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+  const urlDocNum = isUS ? (currentData.corrAppNum || currentData.applicationNumber) : encodeURIComponent(currentData.corrAppNum || currentData.docNumber || currentData.applicationNumber);
 
   const MAX_RETRIES = 2;
   const extractReport = { success: [], empty: [], failed: [] };
@@ -1851,7 +1856,7 @@ async function kanbanManualExtract(url, idx, docType) {
     let result;
     if (isTauri && currentData) {
       const isUS = currentData.office === "US";
-      const urlDocNum = isUS ? (currentData.corrAppNum || currentData.applicationNumber) : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+      const urlDocNum = isUS ? (currentData.corrAppNum || currentData.applicationNumber) : encodeURIComponent(currentData.corrAppNum || currentData.docNumber || currentData.applicationNumber);
       const it = kanbanState.documents.find(d => d.idx === idx);
       if (!it) throw new Error("找不到文档信息");
       result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, engine === "glm_ocr" ? glmApiKey : "");

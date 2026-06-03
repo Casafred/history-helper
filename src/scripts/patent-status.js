@@ -108,12 +108,93 @@ var PATENT_STATUS = {
     },
     aiAnalysisTypes: ["office_action", "response"],
   },
+  EP: {
+    codeMap: {
+      "1001P": { name: "欧洲专利授权请求 (Request for Grant)", type: "request", stage: "审查前" },
+      "1001": { name: "欧洲专利授权请求 (Request for Grant)", type: "request", stage: "审查前" },
+      "1002": { name: "发明人指定 (Designation of Inventor)", type: "misc", stage: "审查前" },
+      "1001-6E": { name: "电子提交确认回执 (Acknowledgement of Receipt)", type: "notification", stage: "审查前" },
+      "DESC": { name: "说明书 (Description)", type: "misc", stage: "审查中" },
+      "CLMS": { name: "权利要求 (Claims)", type: "misc", stage: "审查中" },
+      "ABST": { name: "摘要 (Abstract)", type: "misc", stage: "审查中" },
+      "DRAW": { name: "附图 (Drawings)", type: "misc", stage: "审查中" },
+      "PRIODOC-X": { name: "优先权文件 (Priority Document)", type: "misc", stage: "审查前" },
+      "SRCH-START": { name: "检索开始 (Search Started)", type: "notification", stage: "审查中" },
+      "1503": { name: "欧洲检索报告 (European Search Report)", type: "office_action", stage: "审查中" },
+      "1507": { name: "检索报告传输通知 (Communication re Search Report Transmission)", type: "notification", stage: "审查中" },
+      "1703": { name: "欧洲检索意见 (European Search Opinion)", type: "office_action", stage: "审查中" },
+      "SRCHSTRAEP": { name: "检索策略信息 (Search Strategy Information)", type: "misc", stage: "审查中" },
+      "FEES": { name: "费用通知 (Letter Concerning Fees)", type: "notification", stage: "审查中" },
+      "ABEX": { name: "检索后修改 (Amendments Before Examination)", type: "response", stage: "审查中" },
+      "CLMSABEX": { name: "检索后修改权利要求 (Amended Claims After Search)", type: "response", stage: "审查中" },
+      "CLMS-HWA": { name: "标注修改权利要求 (Amended Claims with Annotations)", type: "response", stage: "审查中" },
+      "RECEIPT-OLF": { name: "电子回执 (Electronic Receipt)", type: "notification", stage: "审查中" },
+      "2901": { name: "程序参与方通知 (Communication for Party)", type: "notification", stage: "审查中" },
+      "1133": { name: "即将公开通知 (Notification of Forthcoming Publication)", type: "notification", stage: "审查中" },
+      "1083": { name: "公开及指定费通知 (Information about Publication)", type: "notification", stage: "审查中" },
+      "EX-START": { name: "实质审查开始 (Examination Started)", type: "notification", stage: "审查中" },
+      "2004": { name: "授权意向通知 (Communication about Intention to Grant)", type: "allowance", stage: "授权" },
+      "2056": { name: "书目数据 (Bibliographic Data)", type: "misc", stage: "授权" },
+      "2906I": { name: "授权意向附件 (Annex to Intention to Grant)", type: "allowance", stage: "授权" },
+      "2035-4": { name: "授权意向签名 (Intention to Grant - Signatures)", type: "allowance", stage: "授权" },
+      "EDREXFINAL": { name: "授权文本定稿 (Text Intended for Grant - Clean)", type: "allowance", stage: "授权" },
+      "EDREX": { name: "授权文本审批版 (Text Intended for Grant - Draft)", type: "allowance", stage: "授权" },
+      "1038": { name: "后续提交附函 (Letter Accompanying Subsequently Filed Items)", type: "misc", stage: "审查中" },
+      "CLMSTRAN-DE": { name: "德文权利要求翻译 (German Translation of Claims)", type: "misc", stage: "授权" },
+      "CLMSTRAN-FR": { name: "法文权利要求翻译 (French Translation of Claims)", type: "misc", stage: "授权" },
+      "2006A": { name: "授权决定 (Decision to Grant)", type: "allowance", stage: "授权" },
+      "2047": { name: "欧洲专利证书 (Certificate for European Patent)", type: "allowance", stage: "授权" },
+      "2057": { name: "异议期届满通知 (Communication re Expiry of Opposition Period)", type: "notification", stage: "授权" },
+      "WDP": { name: "撤回 (Withdrawal)", type: "notification", stage: "审查中" },
+      "REEX": { name: "限缩修改 (Amendments in Examination)", type: "response", stage: "审查中" },
+      "CLMSREEX": { name: "审查中修改权利要求 (Amended Claims in Examination)", type: "response", stage: "审查中" },
+      "BREVET": { name: "授权专利 (Granted Patent)", type: "allowance", stage: "授权" },
+    },
+    typeNames: {
+      "office_action": "审查意见",
+      "response": "申请人答复",
+      "request": "申请人请求",
+      "allowance": "授权通知",
+      "notification": "通知",
+      "misc": "其他文件",
+    },
+    stageNames: {
+      "审查前": "审查前",
+      "审查中": "审查中",
+      "授权": "已授权",
+      "复审": "复审阶段",
+      "完成": "已结案",
+    },
+    abstract: {
+      "office_action": "审查员发出审查意见",
+      "response": "申请人提交答复",
+      "request": "申请人提出请求",
+      "allowance": "审查员同意授权",
+      "notification": "官方通知",
+      "misc": "其他往来文件",
+    },
+    aiAnalysisTypes: ["office_action", "response"],
+  },
 };
 
 function classifyDocCode(code, desc) {
   if (!code && !desc) return "misc";
   const text = ((code || "") + " " + (desc || "")).toLowerCase();
 
+  // EP-specific patterns
+  if (/intention to grant|decision to grant|text intended for grant/.test(text)) return "allowance";
+  if (/certificate for.*european patent/.test(text)) return "allowance";
+  if (/european search report/.test(text)) return "office_action";
+  if (/european search opinion/.test(text)) return "office_action";
+  if (/communication.*intention to grant/.test(text)) return "allowance";
+  if (/examination started/.test(text)) return "notification";
+  if (/search started/.test(text)) return "notification";
+  if (/amendments?.*(?:before|in) examination|amended claims/.test(text)) return "response";
+  if (/request for grant/.test(text)) return "request";
+  if (/withdrawal/.test(text)) return "notification";
+  if (/opposition/.test(text)) return "notification";
+
+  // US-specific patterns
   if (/notice of allowance|allowed|allowance/.test(text)) return "allowance";
   if (/egrant|e-grant/.test(text)) return "allowance";
   if (/abandonment/.test(text)) return "notification";
