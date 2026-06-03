@@ -10,10 +10,20 @@ on:
 
 jobs:
   build-windows:
-    name: Build Windows Installer
+    name: Build Windows NSIS Installer
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workdir: src-tauri
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -23,23 +33,26 @@ jobs:
       - name: Install npm dependencies
         run: npm install
 
-      - name: Build Electron app
-        run: npx electron-builder --win --x64
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: npx tauri
+          args: --target x86_64-pc-windows-msvc
 
-      - name: Upload installer
+      - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
         with:
           name: patent-helper-windows-installer
           path: |
-            dist-electron/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
 
       - name: Create Release on tag
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist-electron/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

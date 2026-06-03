@@ -66,6 +66,22 @@ var PATENT_STATUS = {
       "SCORE": { name: "补充内容占位页 (Supplemental Complex Repository for Examiners)", type: "misc", stage: "审查中" },
       "DRW.NONBW": { name: "非黑白线条图 (Drawings - Other than Black and White Line Drawings)", type: "misc", stage: "审查中" },
       "SES.LOSS": { name: "小实体资格丧失通知 (Notification of Loss of Entitlement to Small Entity Status)", type: "notification", stage: "审查中" },
+      "PA": { name: "初步修改 (Preliminary Amendment)", type: "request", stage: "审查前" },
+      "WDR": { name: "审查前正式通知答复 (Applicant Response to Pre-Exam Formalities Notice)", type: "response", stage: "审查前" },
+      "DRW": { name: "黑白线条图 (Drawings - Black and White Line Drawings)", type: "misc", stage: "审查中" },
+      "SEQ": { name: "序列表 (Sequence Listing)", type: "misc", stage: "审查中" },
+      "ABN": { name: "放弃 (Abandonment)", type: "notification", stage: "审查中" },
+      "TRN": { name: "新申请传送 (Transmittal of New Application)", type: "misc", stage: "审查前" },
+      "CFP": { name: "外国优先权认证副本 (Certified Copy of Foreign Priority Application)", type: "misc", stage: "审查前" },
+      "NTC.PUB": { name: "公开通知 (Notice of Publication)", type: "notification", stage: "审查中" },
+      "DO.EO.MISS": { name: "指定局/选定局缺失要求通知 (Notice of DO/EO Missing Requirements Mailed)", type: "notification", stage: "审查中" },
+      "DO.EO.ACPT": { name: "指定局/选定局受理通知 (Notice of Designated Office/Elected Office Acceptance Mailed)", type: "notification", stage: "审查中" },
+      "RES.ER": { name: "选举/限制答复 (Response to Election / Restriction Filed)", type: "response", stage: "审查中" },
+      "EGRN": { name: "电子授权当日通知 (eGrant day-of Notification)", type: "allowance", stage: "授权" },
+      "NTC.EGRN": { name: "电子授权当日通知 (eGrant day-of Notification)", type: "allowance", stage: "授权" },
+      "EGRT": { name: "电子授权通知 (eGrant Notification)", type: "allowance", stage: "授权" },
+      "ISS.NTF": { name: "授权公告通知 (Issue Notification)", type: "allowance", stage: "授权" },
+      "PTO.FEE": { name: "专利局费用通知 (PTO Fee Notification)", type: "notification", stage: "授权" },
     },
     typeNames: {
       "office_action": "审查意见",
@@ -99,7 +115,16 @@ function classifyDocCode(code, desc) {
   const text = ((code || "") + " " + (desc || "")).toLowerCase();
 
   if (/notice of allowance|allowed|allowance/.test(text)) return "allowance";
+  if (/egrant|e-grant/.test(text)) return "allowance";
   if (/abandonment/.test(text)) return "notification";
+  if (/preliminary amendment/.test(text)) return "request";
+  if (/pre.?exam formalities/.test(text)) return "response";
+  if (/election.*restriction.*filed/.test(text)) return "response";
+  if (/notice of publication/.test(text)) return "notification";
+  if (/transmittal of new application/.test(text)) return "misc";
+  if (/sequence listing/.test(text)) return "misc";
+  if (/certified copy/.test(text)) return "misc";
+  if (/black and white line drawings?/.test(text)) return "misc";
   if (/restriction|election of species/.test(text)) return "office_action";
   if (/final rejection/.test(text)) return "office_action";
   if (/non.?final rejection/.test(text)) return "office_action";

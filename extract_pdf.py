@@ -212,7 +212,11 @@ def main():
             page_dimensions = pdims
             used_engine = "paddle_ocr_vl"
 
-    if not text and engine == "glm_ocr" and api_key:
+    if not text and engine == "glm_ocr":
+        if not api_key:
+            result = {"text": "", "markdown": "", "engine": "none", "error": "GLM OCR 需要智谱 API Key，请在 AI 设置中配置"}
+            print(json.dumps(result, ensure_ascii=False))
+            return
         md, plain, blks, pdims = ocr_with_glm(pdf_base64, api_key)
         if plain.strip():
             text = plain
