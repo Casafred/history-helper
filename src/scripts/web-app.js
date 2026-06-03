@@ -1,4 +1,20 @@
-const GD_API_BASE = "/api/gd";
+const GD_API_BASE_DEFAULT = "/api/gd";
+let GD_API_BASE = GD_API_BASE_DEFAULT;
+
+// In Tauri environment, get the API port from the backend
+if (isTauri) {
+  (async () => {
+    try {
+      const port = await tauriInvoke("get_api_port", {});
+      if (port) {
+        GD_API_BASE = `http://127.0.0.1:${port}/api/gd`;
+        console.log("[Tauri] API base set to:", GD_API_BASE);
+      }
+    } catch (e) {
+      console.warn("[Tauri] Failed to get API port, using default:", e);
+    }
+  })();
+}
 
 const OFFICE_NAMES = {
   US: "美国 (USPTO)",
@@ -148,27 +164,6 @@ function parsePatentNumber(input) {
 }
 
 async function gdFetch(urlPath) {
-  if (isTauri) {
-    const familyMatch = urlPath.match(/\/patent-family\/svc\/family\/([^/]+)\/([^/]+)\/([^/]+)/);
-    const docListMatch = urlPath.match(/\/doc-list\/svc\/doclist\/([^/]+)\/([^/]+)\/([^/]+)/);
-
-    if (familyMatch) {
-      const result = await tauriInvoke("fetch_family", {
-        input: familyMatch[2].startsWith("US") ? familyMatch[3] : familyMatch[3],
-      });
-      if (result && result.success && result.data) return result.data;
-      throw new Error(result?.error || "Tauri family fetch failed");
-    }
-
-    if (docListMatch) {
-      const result = await tauriInvoke("fetch_documents", {
-        input: docListMatch[2].startsWith("US") ? docListMatch[3] : docListMatch[3],
-      });
-      if (result && result.success && result.data) return result.data;
-      throw new Error(result?.error || "Tauri documents fetch failed");
-    }
-  }
-
   const url = GD_API_BASE + urlPath;
   const resp = await fetch(url);
   if (!resp.ok) {
