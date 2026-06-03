@@ -567,6 +567,8 @@ function renderDocuments(data) {
   const office = data.office;
   const docNumber = docs.docNumber || data.applicationNumber;
   const isUS = data.office === "US";
+  const isEP = data.office === "EP";
+  const canDownload = isUS || isEP;
   const urlDocNum = isUS ? (data.corrAppNum || data.applicationNumber) : encodeURIComponent(data.corrAppNum || docNumber);
 
   // Build type counts for filter chips
@@ -645,8 +647,8 @@ function renderDocuments(data) {
     } else {
       colItems.forEach(it => {
         const encodedDocId = encodeURIComponent(it.docId);
-        const extractUrl = it.docId ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
-        const downloadUrl = it.docId ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
+        const extractUrl = (it.docId && canDownload) ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
+        const downloadUrl = (it.docId && canDownload) ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
         columnsHtml += `
           <div class="kanban-card doc-column-card" data-idx="${it.idx}" data-filter-type="${it.type}" data-search-text="${escapeHtml((it.docCode + ' ' + it.desc + ' ' + it.date + ' ' + it.name).toLowerCase())}">
             <div class="kanban-card-header">
@@ -659,6 +661,7 @@ function renderDocuments(data) {
             <div class="kanban-card-actions">
               ${extractUrl ? '<button class="btn-small btn-extract" data-action="doc-col-extract" data-url="' + extractUrl + '" data-idx="' + it.idx + '" data-doctype="' + escapeHtml(it.docCode) + '">提取内容</button>' : ''}
               ${downloadUrl ? '<button class="btn-small btn-download" data-action="doc-col-download" data-url="' + downloadUrl + '" data-filename="' + escapeHtml(it.docCode) + '_' + escapeHtml(it.date.replace(/\//g, '-')) + '.pdf">下载</button>' : ''}
+              ${!canDownload ? '<span class="doc-readonly-hint">仅提供状态信息，暂不支持下载原文</span>' : ''}
             </div>
             <div id="doc-col-extracted-${it.idx}" class="kanban-extracted hidden"></div>
           </div>
@@ -1127,6 +1130,14 @@ kanbanAutoBtn.addEventListener("click", async () => {
 
   const items = kanbanState.documents;
   if (!items || items.length === 0) { showError("请先查询专利并加载审查文档"); return; }
+
+  const canDownload = currentData.office === "US" || currentData.office === "EP";
+  if (!canDownload) {
+    analysisSection.classList.remove("hidden");
+    analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">CN / DE / JP 专利暂不支持文档下载与提取，无法进行 AI 梳理。仅 US / EP 专利支持审查文档原文获取。</p>';
+    kanbanAutoBtn.disabled = false;
+    return;
+  }
 
   kanbanAutoBtn.disabled = true;
   const analysisSection = document.getElementById("kanban-analysis");
@@ -1809,7 +1820,8 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         // Try to extract on demand
         const it = kanbanState.documents.find(d => d.idx === idx);
-        if (it && it.docId && currentData) {
+        const canDl = currentData && (currentData.office === "US" || currentData.office === "EP");
+        if (it && it.docId && currentData && canDl) {
           compareDocContent.innerHTML = '<p class="extracting">正在提取文档内容...</p>';
           const config = window.AI.loadAIConfig();
           const ocrConfig = window.AI.getOCRConfig(config);
@@ -1847,6 +1859,8 @@ document.addEventListener("DOMContentLoaded", () => {
             .catch(e => {
               compareDocContent.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(e.message) + '</p>';
             });
+        } else if (!canDl) {
+          compareDocContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">CN / DE / JP 专利暂不支持文档下载与提取</p>';
         } else {
           compareDocContent.innerHTML = '<p class="placeholder">该文档尚未提取内容</p>';
         }
