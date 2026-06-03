@@ -8,7 +8,7 @@ mod proxy;
 
 use cache::{CacheStore, DB_FILENAME};
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 struct AppState {
     cache: Mutex<Option<CacheStore>>,
@@ -63,17 +63,22 @@ pub fn run() {
             let port = proxy::start_api_proxy();
             eprintln!("[Tauri] API proxy server started on port {}", port);
 
-            // Inject the API base URL into the frontend after page loads
+            // Inject the API base URL into the frontend
+            // Use eval to set the variable; the frontend also listens for the 'gd-api-ready' event
             if let Some(window) = app.get_webview_window("main") {
-                let port_clone = port;
-                window.on_page_load(move |window, _payload| {
-                    let inject_js = format!(
-                        "window.__GD_API_BASE__ = 'http://127.0.0.1:{}/api/gd';",
-                        port_clone
-                    );
-                    let _ = window.eval(&inject_js);
-                });
+                let inject_js = format!(
+                    "window.__GD_API_BASE__ = 'http://127.0.0.1:{}/api/gd'; if(window.onGDApiReady) window.onGDApiReady();",
+                    port
+                );
+                let _ = window.eval(&inject_js);
             }
+
+            // Also emit an event so the frontend can pick it up even if eval ran before JS loaded
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let _ = app_handle.emit("gd-api-ready", serde_json::json!({ "port": port }));
+            });
 
             Ok(())
         })
