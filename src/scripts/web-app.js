@@ -1,5 +1,16 @@
 const GD_API_BASE_DEFAULT = "/api/gd";
 let GD_API_BASE = GD_API_BASE_DEFAULT;
+const isTauri = !!(window.__TAURI_INTERNALS__);
+
+async function tauriInvoke(cmd, args) {
+  if (!isTauri) return null;
+  try {
+    return await window.__TAURI_INTERNALS__.invoke(cmd, args);
+  } catch (e) {
+    console.error("Tauri invoke error:", cmd, e);
+    throw e;
+  }
+}
 
 // In Tauri environment, get the API port from the backend
 let tauriApiReady = Promise.resolve();
@@ -28,17 +39,7 @@ const OFFICE_NAMES = {
 
 let currentData = null;
 
-const isTauri = !!(window.__TAURI_INTERNALS__);
-
-async function tauriInvoke(cmd, args) {
-  if (!isTauri) return null;
-  try {
-    return await window.__TAURI_INTERNALS__.invoke(cmd, args);
-  } catch (e) {
-    console.error("Tauri invoke error:", cmd, e);
-    throw e;
-  }
-}
+// isTauri and tauriInvoke are defined at the top of the file
 
 const patentInput = document.getElementById("patent-input");
 const searchBtn = document.getElementById("search-btn");
