@@ -260,6 +260,11 @@ body {
   word-break: break-all;
 }
 
+.info-value.status-allowed { color: var(--success); font-weight: 600; }
+.info-value.status-pending { color: var(--warning); font-weight: 600; }
+.info-value.status-response { color: var(--accent); font-weight: 600; }
+.info-value.status-appeal { color: var(--danger); font-weight: 600; }
+
 .timeline-item {
   display: flex;
   gap: 12px;
