@@ -181,6 +181,119 @@ var PATENT_STATUS = {
     },
     aiAnalysisTypes: ["office_action", "response"],
   },
+  CN: {
+    codeMap: {
+      "100001-CN": { name: "权利要求书 (Claims)", type: "misc", stage: "审查前" },
+      "100002-CN": { name: "说明书 (Description)", type: "misc", stage: "审查前" },
+      "100003-CN": { name: "说明书附图 (Drawings)", type: "misc", stage: "审查前" },
+      "100004-CN": { name: "说明书摘要 (Abstract)", type: "misc", stage: "审查前" },
+      "110401-CN": { name: "实质审查请求 (Request for Substantive Examination)", type: "request", stage: "审查中" },
+      "200103-CN": { name: "申请费缴纳通知 (Notice of Payment of Application Fee)", type: "notification", stage: "审查前" },
+      "200021-CN": { name: "费用减免审批通知 (Notice of Approval for Fee Reduction)", type: "notification", stage: "审查前" },
+      "210304-CN": { name: "初步审查合格通知 (Notification of Qualification of Preliminary Examination)", type: "notification", stage: "审查中" },
+      "210305-CN": { name: "申请公布通知 (Notice of Publication of Invention Patent Application)", type: "notification", stage: "审查中" },
+      "210307-CN": { name: "进入实质审查阶段通知 (Notice of Entering Substantive Examination Stage)", type: "notification", stage: "审查中" },
+      "210401": { name: "第一次审查意见通知书 (First Notice of Examination Opinions)", type: "office_action", stage: "审查中" },
+      "210401-CN": { name: "第一次审查意见通知书-原文 (First Notice of Examination Opinions - Original)", type: "office_action", stage: "审查中" },
+      "210402": { name: "第二次审查意见通知书 (Second Notice of Examination Opinions)", type: "office_action", stage: "审查中" },
+      "210402-CN": { name: "第二次审查意见通知书-原文 (Second Notice of Examination Opinions - Original)", type: "office_action", stage: "审查中" },
+      "210403": { name: "第三次审查意见通知书 (Third Notice of Examination Opinions)", type: "office_action", stage: "审查中" },
+      "0-CN": { name: "检索报告 (First Search)", type: "misc", stage: "审查中" },
+    },
+    typeNames: {
+      "office_action": "审查意见",
+      "response": "申请人答复",
+      "request": "申请人请求",
+      "allowance": "授权通知",
+      "notification": "通知",
+      "misc": "其他文件",
+    },
+    stageNames: {
+      "审查前": "审查前",
+      "审查中": "审查中",
+      "授权": "已授权",
+      "复审": "复审阶段",
+      "完成": "已结案",
+    },
+    abstract: {
+      "office_action": "审查员发出审查意见",
+      "response": "申请人提交答复",
+      "request": "申请人提出请求",
+      "allowance": "审查员同意授权",
+      "notification": "官方通知",
+      "misc": "其他往来文件",
+    },
+    aiAnalysisTypes: ["office_action", "response"],
+  },
+  DE: {
+    codeMap: {},
+    typeNames: {
+      "office_action": "审查意见",
+      "response": "申请人答复",
+      "request": "申请人请求",
+      "allowance": "授权通知",
+      "notification": "通知",
+      "misc": "其他文件",
+    },
+    stageNames: {
+      "审查前": "审查前",
+      "审查中": "审查中",
+      "授权": "已授权",
+      "复审": "复审阶段",
+      "完成": "已结案",
+    },
+    abstract: {
+      "office_action": "审查员发出审查意见",
+      "response": "申请人提交答复",
+      "request": "申请人提出请求",
+      "allowance": "审查员同意授权",
+      "notification": "官方通知",
+      "misc": "其他往来文件",
+    },
+    aiAnalysisTypes: ["office_action", "response"],
+  },
+  JP: {
+    codeMap: {
+      "A63": { name: "专利申请文件 (Request for a Patent)", type: "misc", stage: "审查前" },
+      "A63-JP": { name: "专利申请文件-原文 (Request for a Patent - Original)", type: "misc", stage: "审查前" },
+      "A621": { name: "实质审查请求 (Request for Examination)", type: "request", stage: "审查中" },
+      "A621-JP": { name: "实质审查请求-原文 (Request for Examination - Original)", type: "request", stage: "审查中" },
+      "A131": { name: "驳回理由通知书 (Notice of Reasons for Refusal)", type: "office_action", stage: "审查中" },
+      "A131-JP": { name: "驳回理由通知书-原文 (Notice of Reasons for Refusal - Original)", type: "office_action", stage: "审查中" },
+      "A523": { name: "自愿修改 (Written Amendment - Voluntary)", type: "response", stage: "审查中" },
+      "A523-JP": { name: "自愿修改-原文 (Written Amendment - Voluntary - Original)", type: "response", stage: "审查中" },
+      "A53": { name: "意见书 (Written Opinion)", type: "response", stage: "审查中" },
+      "A53-JP": { name: "意见书-原文 (Written Opinion - Original)", type: "response", stage: "审查中" },
+      "A01": { name: "授权决定 (Decision to Grant a Patent)", type: "allowance", stage: "授权" },
+      "A01-JP": { name: "授权决定-原文 (Decision to Grant a Patent - Original)", type: "allowance", stage: "授权" },
+      "A971007": { name: "检索报告 (Search Report by Registered Search Organization)", type: "misc", stage: "审查中" },
+      "A971007-JP": { name: "检索报告-原文 (Search Report - Original)", type: "misc", stage: "审查中" },
+    },
+    typeNames: {
+      "office_action": "审查意见",
+      "response": "申请人答复",
+      "request": "申请人请求",
+      "allowance": "授权通知",
+      "notification": "通知",
+      "misc": "其他文件",
+    },
+    stageNames: {
+      "审查前": "审查前",
+      "审查中": "审查中",
+      "授权": "已授权",
+      "复审": "复审阶段",
+      "完成": "已结案",
+    },
+    abstract: {
+      "office_action": "审查员发出审查意见",
+      "response": "申请人提交答复",
+      "request": "申请人提出请求",
+      "allowance": "审查员同意授权",
+      "notification": "官方通知",
+      "misc": "其他往来文件",
+    },
+    aiAnalysisTypes: ["office_action", "response"],
+  },
 };
 
 function classifyDocCode(code, desc) {
@@ -199,6 +312,51 @@ function classifyDocCode(code, desc) {
   if (/request for grant/.test(text)) return "request";
   if (/withdrawal/.test(text)) return "notification";
   if (/opposition/.test(text)) return "notification";
+
+  // CN-specific patterns (desc is in English from GD API)
+  if (/notice of examination opinions/.test(text)) return "office_action";
+  if (/request for substantive examination/.test(text)) return "request";
+  if (/qualification of preliminary examination/.test(text)) return "notification";
+  if (/publication of invention patent application/.test(text)) return "notification";
+  if (/entering the substantive examination stage/.test(text)) return "notification";
+  if (/payment of application fee/.test(text)) return "notification";
+  if (/fee reduction/.test(text)) return "notification";
+  if (/right.?claiming document/.test(text)) return "misc";
+  if (/specification summary|instructions|attached drawings/.test(text)) return "misc";
+  if (/first search/.test(text)) return "misc";
+
+  // JP-specific patterns (desc is in English from GD API)
+  if (/notice of reasons for refusal/.test(text)) return "office_action";
+  if (/written opinion/.test(text)) return "response";
+  if (/written amendment.*voluntary/.test(text)) return "response";
+  if (/request for a patent/.test(text)) return "misc";
+  if (/request for examination/.test(text)) return "request";
+  if (/decision to grant a patent/.test(text)) return "allowance";
+  if (/search report by registered/.test(text)) return "misc";
+  if (/appeal against decision of refusal/.test(text)) return "office_action";
+  if (/trial decision/.test(text)) return "office_action";
+  if (/claims|description|abstract|drawings/.test(text) && /translated|original/.test(text)) return "misc";
+
+  // DE-specific patterns (desc is in German from GD API, no docCode)
+  if (/beschreibung/.test(text)) return "misc";
+  if (/ansprüche/.test(text)) return "misc";
+  if (/zusammenfassung/.test(text)) return "misc";
+  if (/zeichnung/.test(text)) return "misc";
+  if (/anschreiben/.test(text)) return "misc";
+  if (/antrag.*erteilung|request for patent/.test(text)) return "request";
+  if (/erfinderbenennung/.test(text)) return "misc";
+  if (/empfangsbestätigung/.test(text)) return "notification";
+  if (/bibliografie|bibliographiemitteilung/.test(text)) return "notification";
+  if (/prüfungsbescheid/.test(text)) return "office_action";
+  if (/recherchebericht/.test(text)) return "office_action";
+  if (/erteilungsbescheid/.test(text)) return "allowance";
+  if (/patentschrift/.test(text)) return "allowance";
+  if (/offenlegungsschrift/.test(text)) return "notification";
+  if (/eingabe/.test(text)) return "response";
+  if (/prüfungsantrag/.test(text)) return "request";
+  if (/einspruch/.test(text)) return "notification";
+  if (/zurücknahme/.test(text)) return "notification";
+  if (/bescheid/.test(text)) return "office_action";
 
   // US-specific patterns (order matters: specific before general)
   // Allowance
