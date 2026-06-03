@@ -33,16 +33,18 @@ pub fn start_api_proxy() -> u16 {
         .layer(cors)
         .with_state(state);
 
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-    let listener = rt.block_on(async {
-        tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("Failed to bind port")
-    });
-    let port = listener.local_addr().unwrap().port();
+    // Bind synchronously using std::net - no tokio needed at this point
+    let std_listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("Failed to bind port");
+    let port = std_listener.local_addr().unwrap().port();
+    // Set non-blocking before converting to tokio listener
+    std_listener.set_nonblocking(true).expect("Failed to set nonblocking");
 
     std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
         rt.block_on(async {
+            let listener = tokio::net::TcpListener::from_std(std_listener)
+                .expect("Failed to convert std listener to tokio listener");
             axum::serve(listener, app)
                 .await
                 .expect("API proxy server error");

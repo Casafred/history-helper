@@ -32,7 +32,13 @@ pub fn run() {
         })
         .setup(|app| {
             // Initialize cache
-            let app_data_dir = app.path().app_data_dir()?;
+            let app_data_dir = match app.path().app_data_dir() {
+                Ok(dir) => dir,
+                Err(e) => {
+                    eprintln!("[Tauri] Failed to get app data dir: {}", e);
+                    return Ok(());
+                }
+            };
             let db_path = app_data_dir.join(DB_FILENAME);
             match CacheStore::new(&db_path) {
                 Ok(cache_store) => {
@@ -41,30 +47,32 @@ pub fn run() {
                     *guard = Some(cache_store);
                 }
                 Err(e) => {
-                    log::error!("Failed to initialize cache: {}", e);
+                    eprintln!("[Tauri] Failed to initialize cache: {}", e);
                 }
             }
 
             if cfg!(debug_assertions) {
-                app.handle().plugin(
+                let _ = app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
                         .build(),
-                )?;
+                );
             }
 
             // Start local API proxy server (only /api/gd/* routes)
             let port = proxy::start_api_proxy();
-            log::info!("[Tauri] API proxy server started on port {}", port);
+            eprintln!("[Tauri] API proxy server started on port {}", port);
 
-            // Inject the API base URL into the frontend
-            // Frontend loads from Tauri asset protocol, API calls go to local server
+            // Inject the API base URL into the frontend after page loads
             if let Some(window) = app.get_webview_window("main") {
-                let inject_js = format!(
-                    "window.__GD_API_BASE__ = 'http://127.0.0.1:{}/api/gd';",
-                    port
-                );
-                let _ = window.eval(&inject_js);
+                let port_clone = port;
+                window.on_page_load(move |window, _payload| {
+                    let inject_js = format!(
+                        "window.__GD_API_BASE__ = 'http://127.0.0.1:{}/api/gd';",
+                        port_clone
+                    );
+                    let _ = window.eval(&inject_js);
+                });
             }
 
             Ok(())
