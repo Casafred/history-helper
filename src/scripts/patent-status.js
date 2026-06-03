@@ -227,6 +227,31 @@ var PATENT_STATUS = {
   },
   DE: {
     codeMap: {},
+    descMap: {
+      "beschreibung": "说明书",
+      "ansprüche": "权利要求书",
+      "zusammenfassung": "摘要",
+      "zeichnung": "附图",
+      "anschreiben": "申请信函",
+      "antrag: erteilung eines patents": "专利授权申请",
+      "erfinderbenennung": "发明人声明",
+      "empfangsbestätigung für eine patentanmeldung": "专利申请受理确认",
+      "empfangsbestätigung": "受理确认",
+      "bibliografie-mitteilung standard": "标准书目通知",
+      "bibliographiemitteilung": "书目通知",
+      "bibliografie": "书目通知",
+      "anschreiben zur bibliografie-mitteilung": "书目通知信函",
+      "einleitung der nationalen phase eines patents": "国家阶段进入",
+      "prüfungsbescheid": "审查意见通知书",
+      "recherchebericht": "检索报告",
+      "erteilungsbescheid": "授权通知",
+      "patentschrift": "专利说明书",
+      "offenlegungsschrift": "公开说明书",
+      "eingabe": "申请人意见陈述",
+      "prüfungsantrag": "实质审查请求",
+      "einspruch": "异议",
+      "zurücknahme": "撤回",
+    },
     typeNames: {
       "office_action": "审查意见",
       "response": "申请人答复",
@@ -420,7 +445,22 @@ function getStatusInfo(office, code, desc) {
 
   const type = classifyDocCode(code, desc);
   const typeName = officeMap.typeNames[type] || "其他文件";
-  return { name: desc || code || typeName, type: type, stage: "审查中" };
+
+  // Try descMap for translation (e.g., DE documents have no docCode)
+  let translatedName = desc || code || typeName;
+  if (officeMap.descMap && desc) {
+    const descLower = desc.toLowerCase();
+    // Try matching from longest key to shortest for best match
+    const sortedKeys = Object.keys(officeMap.descMap).sort((a, b) => b.length - a.length);
+    for (const key of sortedKeys) {
+      if (descLower.includes(key)) {
+        translatedName = officeMap.descMap[key];
+        break;
+      }
+    }
+  }
+
+  return { name: translatedName, type: type, stage: "审查中" };
 }
 
 function shouldIncludeInAIAnalysis(office, type) {
