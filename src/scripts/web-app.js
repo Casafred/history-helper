@@ -207,8 +207,16 @@ searchBtn.addEventListener("click", async () => {
 
   const office = pn.office;
   const docNum = pn.applicationNumber;
+  // Auto-detected queryType takes priority; dropdown only used when auto-detection returns "application" (ambiguous)
   const selectedQueryType = queryTypeSelect ? queryTypeSelect.value : null;
-  const queryType = selectedQueryType || pn.queryType || "application";
+  let queryType;
+  if (pn.queryType !== "application" || !selectedQueryType || selectedQueryType === "application") {
+    // Auto-detected type is specific (patent/publication), or no explicit user override
+    queryType = pn.queryType;
+  } else {
+    // User explicitly selected a different type via dropdown
+    queryType = selectedQueryType;
+  }
   const result = { office, applicationNumber: docNum, queryType, kindCode: pn.kindCode };
   const warnings = [];
 

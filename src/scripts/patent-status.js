@@ -84,6 +84,10 @@ var PATENT_STATUS = {
       "EGRT": { name: "电子授权通知 (eGrant Notification)", type: "allowance", stage: "授权" },
       "ISS.NTF": { name: "授权公告通知 (Issue Notification)", type: "allowance", stage: "授权" },
       "PTO.FEE": { name: "专利局费用通知 (PTO Fee Notification)", type: "notification", stage: "授权" },
+      "MIL": { name: "杂项来函 (Miscellaneous Incoming Letter)", type: "misc", stage: "审查中" },
+      "LRI": { name: "面谈请求函 (Letter Requesting Interview with Examiner)", type: "request", stage: "审查中" },
+      "PDOC": { name: "优先权文件电子获取 (Priority Documents electronically retrieved by USPTO from a participating IP Office)", type: "misc", stage: "审查前" },
+      "ERSP2": { name: "选举/限制答复 (Response to Election / Restriction Filed)", type: "response", stage: "审查中" },
     },
     typeNames: {
       "office_action": "审查意见",
@@ -183,7 +187,7 @@ function classifyDocCode(code, desc) {
   if (!code && !desc) return "misc";
   const text = ((code || "") + " " + (desc || "")).toLowerCase();
 
-  // EP-specific patterns
+  // EP-specific patterns (check first)
   if (/intention to grant|decision to grant|text intended for grant/.test(text)) return "allowance";
   if (/certificate for.*european patent/.test(text)) return "allowance";
   if (/european search report/.test(text)) return "office_action";
@@ -196,31 +200,52 @@ function classifyDocCode(code, desc) {
   if (/withdrawal/.test(text)) return "notification";
   if (/opposition/.test(text)) return "notification";
 
+  // US-specific patterns (order matters: specific before general)
+  // Allowance
   if (/notice of allowance|allowed|allowance/.test(text)) return "allowance";
   if (/egrant|e-grant/.test(text)) return "allowance";
-  if (/abandonment/.test(text)) return "notification";
-  if (/preliminary amendment/.test(text)) return "request";
+
+  // Office actions (examiner-initiated)
   if (/pre.?exam formalities notice/.test(text)) return "office_action";
-  if (/response.*pre.?exam formalities/.test(text)) return "response";
-  if (/election.*restriction.*filed/.test(text)) return "response";
-  if (/notice of publication/.test(text)) return "notification";
-  if (/transmittal of new application/.test(text)) return "misc";
-  if (/sequence listing/.test(text)) return "misc";
-  if (/certified copy/.test(text)) return "misc";
-  if (/black and white line drawings?/.test(text)) return "misc";
-  if (/restriction|election of species/.test(text)) return "office_action";
+  if (/restriction requirement|election of species requirement/.test(text)) return "office_action";
   if (/final rejection/.test(text)) return "office_action";
   if (/non.?final rejection/.test(text)) return "office_action";
   if (/office action/.test(text)) return "office_action";
+  if (/examiner's answer/.test(text)) return "office_action";
   if (/rejection/.test(text)) return "office_action";
+
+  // Responses (applicant-initiated replies)
+  if (/response.*pre.?exam formalities/.test(text)) return "response";
+  if (/election.*restriction.*filed|response to election/.test(text)) return "response";
   if (/amendment.*after.*non.?final|reconsideration.*after.*non.?final/.test(text)) return "response";
   if (/response after final|after final consideration/.test(text)) return "response";
   if (/amendment.*after.*notice of allowance/.test(text)) return "response";
   if (/applicant argument|applicant remark|remarks made in an amendment/.test(text)) return "response";
-  if (/response|amendment|reply|remand/.test(text)) return "response";
-  if (/rce|continued examination|request for/.test(text)) return "request";
+
+  // Requests (applicant-initiated procedural)
+  if (/preliminary amendment/.test(text)) return "request";
+  if (/letter requesting interview/.test(text)) return "request";
+  if (/rce|continued examination/.test(text)) return "request";
+  if (/request for continued examination/.test(text)) return "request";
+  if (/request for/.test(text)) return "request";
+
+  // Notifications (official notices)
+  if (/abandonment/.test(text)) return "notification";
+  if (/notice of publication/.test(text)) return "notification";
   if (/notice|notification/.test(text)) return "notification";
-  if (/appeal|examiner's answer/.test(text)) return "office_action";
+
+  // Misc documents
+  if (/miscellaneous incoming letter/.test(text)) return "misc";
+  if (/priority documents? electronically retrieved/.test(text)) return "misc";
+  if (/transmittal of new application/.test(text)) return "misc";
+  if (/sequence listing/.test(text)) return "misc";
+  if (/certified copy/.test(text)) return "misc";
+  if (/black and white line drawings?/.test(text)) return "misc";
+  if (/information disclosure statement/.test(text)) return "misc";
+
+  // General fallbacks (broadest patterns last)
+  if (/response|amendment|reply|remand/.test(text)) return "response";
+  if (/appeal/.test(text)) return "office_action";
 
   return "misc";
 }
