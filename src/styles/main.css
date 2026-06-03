@@ -601,10 +601,6 @@ body {
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
-.convert-section {
-  margin-top: 16px;
-}
-
 .btn-icon {
   padding: 8px 12px;
   border: 1px solid var(--border);
@@ -782,96 +778,6 @@ body {
 
 .gd-login-hint a:hover {
   text-decoration: underline;
-}
-
-.batch-section {
-  margin-bottom: 24px;
-}
-
-.batch-section textarea {
-  width: 100%;
-  padding: 10px 12px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-family: monospace;
-  outline: none;
-  resize: vertical;
-  margin-bottom: 12px;
-}
-
-.batch-section textarea:focus {
-  border-color: var(--accent);
-}
-
-.batch-actions {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.batch-progress {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.progress-bar {
-  flex: 1;
-  height: 6px;
-  background: var(--bg-primary);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 3px;
-  transition: width 0.3s ease;
-  width: 0%;
-}
-
-.batch-results {
-  margin-top: 16px;
-}
-
-.batch-item {
-  padding: 10px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 8px;
-  background: var(--bg-card);
-}
-
-.batch-item-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 4px;
-}
-
-.batch-item-num {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--accent);
-}
-
-.batch-item-status {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.batch-item-title {
-  font-size: 13px;
-  color: var(--text-primary);
-}
-
-.batch-item-error {
-  font-size: 12px;
-  color: var(--danger);
 }
 
 .family-list {
@@ -1407,6 +1313,35 @@ body {
   height: 14px;
   fill: currentColor;
   vertical-align: middle;
+}
+
+.prompt-textarea {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: monospace;
+  line-height: 1.5;
+  outline: none;
+  resize: vertical;
+  min-height: 60px;
+  transition: border-color 0.2s;
+}
+
+.prompt-textarea:focus {
+  border-color: var(--accent);
+}
+
+.prompt-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.prompt-actions {
+  margin-top: 6px;
+  text-align: right;
 }
 
 .timeline-header {

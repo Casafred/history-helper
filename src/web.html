@@ -16,40 +16,16 @@
     <main class="app-main">
       <section class="search-section">
         <div class="search-box">
-          <input type="text" id="patent-input" placeholder="输入专利号（如 US14412875, CN202311065554, CN104227633B）" autocomplete="off">
+          <input type="text" id="patent-input" placeholder="输入专利号（如 US14412875, EP1234567, WO2023123456）" autocomplete="off">
           <select id="query-type" class="query-type-select">
             <option value="application">申请号</option>
             <option value="publication">公开号/专利号</option>
           </select>
           <button id="search-btn" class="btn-primary">查询</button>
-          <button id="convert-btn" class="btn-secondary">格式转换</button>
-          <button id="batch-btn" class="btn-secondary">批量查询</button>
           <button id="ai-settings-btn" class="btn-icon" title="AI 设置"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
         </div>
-        <div class="search-hint">申请号模式：中国 CN+13位（如 CN202311065554），美国 US+申请号（如 US14412875）。公开号模式：中国 CN+9位数字+类型码（如 CN104227633B），系统会自动去除 CN 前缀。</div>
+        <div class="search-hint">支持美国 (US)、欧洲 (EP)、日本 (JP)、韩国 (KR)、WIPO (WO/PCT) 专利号查询。美国输入 US+申请号（如 US14412875），欧洲输入 EP+号码。</div>
         <div id="office-badge" class="office-badge hidden"></div>
-      </section>
-
-      <section id="batch-section" class="batch-section hidden">
-        <div class="info-card">
-          <div class="card-header">批量查询</div>
-          <div class="card-body">
-            <textarea id="batch-input" placeholder="每行一个专利号，如：&#10;US14412875&#10;EP1234567&#10;WO2023123456" rows="6"></textarea>
-            <div class="batch-actions">
-              <button id="batch-start-btn" class="btn-primary">开始批量查询</button>
-            </div>
-            <div id="batch-progress" class="batch-progress hidden">
-              <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
-              <span id="progress-text">0/0</span>
-            </div>
-          </div>
-        </div>
-        <div id="batch-results" class="batch-results hidden">
-          <div class="info-card">
-            <div class="card-header">批量查询结果</div>
-            <div id="batch-results-list" class="card-body"></div>
-          </div>
-        </div>
       </section>
 
       <section id="result-section" class="result-section hidden">
@@ -111,7 +87,6 @@
             <div class="timeline-header">
               <span class="timeline-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 审查时间线</span>
               <span id="timeline-status" class="timeline-status"></span>
-              <button id="timeline-generate-btn" class="btn-primary" disabled>生成时间线</button>
             </div>
             <div id="timeline-board" class="timeline-board">
               <p class="placeholder">请先查询专利，审查文档加载后可生成时间线</p>
@@ -212,6 +187,37 @@
               <label>GLM OCR API Key</label>
               <input type="password" id="ocr-glm-key-input" placeholder="智谱 API Key（用于 GLM OCR）">
               <small style="color:var(--text-secondary);margin-top:4px;display:block">如已配置智谱 AI 服务商，可留空自动复用其 Key</small>
+            </div>
+
+            <hr style="border-color:var(--border);margin:20px 0 16px">
+            <h3 style="margin:0 0 12px;font-size:15px;color:var(--text-secondary)">AI 提示词自定义</h3>
+            <div class="form-group">
+              <label>审查意见梳理提示词（含溯源版）</label>
+              <textarea id="prompt-kanban-analysis" class="prompt-textarea" rows="6" placeholder="审查意见梳理提示词（含 OCR 溯源信息时使用）"></textarea>
+              <div class="prompt-actions">
+                <button id="reset-prompt-kanban-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>审查意见梳理提示词（简化版）</label>
+              <textarea id="prompt-kanban-simple" class="prompt-textarea" rows="4" placeholder="审查意见梳理提示词（无溯源信息时使用）"></textarea>
+              <div class="prompt-actions">
+                <button id="reset-prompt-kanban-simple" class="btn-secondary btn-small" type="button">恢复默认</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>单文档分析提示词</label>
+              <textarea id="prompt-doc-analysis" class="prompt-textarea" rows="3" placeholder="单篇文档 AI 分析提示词"></textarea>
+              <div class="prompt-actions">
+                <button id="reset-prompt-doc-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>审查历史梳理提示词</label>
+              <textarea id="prompt-history-summary" class="prompt-textarea" rows="3" placeholder="审查历史整体梳理提示词"></textarea>
+              <div class="prompt-actions">
+                <button id="reset-prompt-history-summary" class="btn-secondary btn-small" type="button">恢复默认</button>
+              </div>
             </div>
           </div>
         </div>

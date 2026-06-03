@@ -2,7 +2,6 @@ const GD_API_BASE = "/api/gd";
 
 const OFFICE_NAMES = {
   US: "美国 (USPTO)",
-  CN: "中国 (CNIPA)",
   EP: "欧洲 (EPO)",
   JP: "日本 (JPO)",
   KR: "韩国 (KIPO)",
@@ -26,12 +25,9 @@ async function tauriInvoke(cmd, args) {
 
 const patentInput = document.getElementById("patent-input");
 const searchBtn = document.getElementById("search-btn");
-const convertBtn = document.getElementById("convert-btn");
 const queryTypeSelect = document.getElementById("query-type");
 const officeBadge = document.getElementById("office-badge");
 const resultSection = document.getElementById("result-section");
-const convertSection = document.getElementById("convert-section");
-const batchSection = document.getElementById("batch-section");
 const loading = document.getElementById("loading");
 const loadingText = document.getElementById("loading-text");
 const errorToast = document.getElementById("error-toast");
@@ -54,7 +50,6 @@ const aiSummarizeBtn = document.getElementById("ai-summarize-btn");
 const aiStatus = document.getElementById("ai-status");
 const aiSummaryResult = document.getElementById("ai-summary-result");
 const kanbanAutoBtn = document.getElementById("kanban-auto-btn");
-const timelineGenerateBtn = document.getElementById("timeline-generate-btn");
 const readerBtn = document.getElementById("reader-btn");
 const readerModal = document.getElementById("reader-modal");
 const readerCloseBtn = document.getElementById("reader-close-btn");
@@ -62,15 +57,6 @@ const readerDocList = document.getElementById("reader-doc-list");
 const readerContent = document.getElementById("reader-content");
 const readerExportBtn = document.getElementById("reader-export-btn");
 const exportWordBtn = document.getElementById("export-word-btn");
-
-const batchBtn = document.getElementById("batch-btn");
-const batchInput = document.getElementById("batch-input");
-const batchStartBtn = document.getElementById("batch-start-btn");
-const batchProgress = document.getElementById("batch-progress");
-const progressFill = document.getElementById("progress-fill");
-const progressText = document.getElementById("progress-text");
-const batchResults = document.getElementById("batch-results");
-const batchResultsList = document.getElementById("batch-results-list");
 
 function showError(msg) {
   errorToast.textContent = msg;
@@ -85,7 +71,6 @@ function hideError() {
 function detectOffice(number) {
   const upper = number.trim().toUpperCase();
   if (upper.startsWith("US") || (upper.startsWith("1") && upper.length === 8)) return "US";
-  if (upper.startsWith("CN")) return "CN";
   if (upper.startsWith("EP")) return "EP";
   if (upper.startsWith("JP")) return "JP";
   if (upper.startsWith("KR")) return "KR";
@@ -112,12 +97,6 @@ function parsePatentNumber(input) {
   switch (office) {
     case "US":
       appNum = stripped.replace(/^US/i, "").replace(/[^0-9]/g, "");
-      break;
-    case "CN":
-      appNum = stripped.replace(/^CN/i, "").replace(/\./g, "");
-      if (appNum.length <= 9 && !kindCode) {
-        queryType = "publication";
-      }
       break;
     case "EP":
       appNum = stripped.replace(/^EP/i, "").replace(/[\s.]/g, "");
@@ -197,8 +176,6 @@ searchBtn.addEventListener("click", async () => {
   loadingText.textContent = "正在查询专利信息...";
   loading.classList.remove("hidden");
   resultSection.classList.add("hidden");
-  convertSection.classList.add("hidden");
-  batchSection.classList.add("hidden");
   hideError();
 
   const office = pn.office;
@@ -236,6 +213,7 @@ searchBtn.addEventListener("click", async () => {
   try { renderFamily(result); } catch (e) { console.error("renderFamily:", e); }
   try { renderDocuments(result); } catch (e) { console.error("renderDocuments:", e); }
   try { renderKanban(result); } catch (e) { console.error("renderKanban:", e); }
+  try { renderTimeline(result); } catch (e) { console.error("renderTimeline:", e); }
 
   if (warnings.length > 0) {
     warnings.forEach(w => showError("警告: " + w));
@@ -243,7 +221,6 @@ searchBtn.addEventListener("click", async () => {
 
   aiSummarizeBtn.disabled = false;
   kanbanAutoBtn.disabled = false;
-  timelineGenerateBtn.disabled = false;
   resultSection.classList.remove("hidden");
   searchBtn.disabled = false;
   loading.classList.add("hidden");
@@ -723,7 +700,7 @@ async function aiAnalyzeDocument(idx, docType) {
 
   const truncatedContent = content.length > 30000 ? content.substring(0, 30000) + "\n\n[...内容过长已截断...]" : content;
 
-  const systemPrompt = "你是一位专业的专利审查分析师。请对以下专利审查文档内容进行详细分析，包括：1. 文档类型和性质 2. 核心内容摘要 3. 关键法律和技术要点 4. 对申请人/审查员的影响 5. 建议的应对策略。请用中文回答。";
+  const systemPrompt = window.AI.getCustomPrompt(window.AI.loadAIConfig(), "docAnalysis");
 
   try {
     let fullText = "";
@@ -823,16 +800,6 @@ function extractDocuments(docs) {
   return [docs];
 }
 
-convertBtn.addEventListener("click", () => {
-  const input = patentInput.value.trim();
-  if (!input) return;
-  const pn = parsePatentNumber(input);
-  if (!pn) { showError("无法识别专利号格式"); return; }
-  document.getElementById("convert-result").innerHTML =
-    '<pre class="json-preview">' + JSON.stringify(pn, null, 2) + '</pre>';
-  convertSection.classList.remove("hidden");
-});
-
 document.querySelectorAll(".tab-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
@@ -847,54 +814,6 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
       app.classList.remove("wide-layout");
     }
   });
-});
-
-batchBtn.addEventListener("click", () => {
-  batchSection.classList.toggle("hidden");
-});
-
-batchStartBtn.addEventListener("click", async () => {
-  const text = batchInput.value.trim();
-  if (!text) return;
-  const numbers = text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-  if (numbers.length === 0) return;
-
-  batchStartBtn.disabled = true;
-  batchProgress.classList.remove("hidden");
-  batchResults.classList.remove("hidden");
-  batchResultsList.innerHTML = "";
-  let completed = 0;
-  progressFill.style.width = "0%";
-  progressText.textContent = `0/${numbers.length}`;
-
-  for (const num of numbers) {
-    completed++;
-    progressFill.style.width = `${(completed / numbers.length) * 100}%`;
-    progressText.textContent = `${completed}/${numbers.length}`;
-
-    const item = document.createElement("div");
-    item.className = "batch-item";
-
-    const pn = parsePatentNumber(num);
-    if (!pn) {
-      item.innerHTML = `<div class="batch-item-header"><span class="batch-item-num">${escapeHtml(num)}</span><span class="batch-item-error">无法识别格式</span></div>`;
-      batchResultsList.appendChild(item);
-      continue;
-    }
-
-    try {
-      const familyData = await gdFetch(`/patent-family/svc/family/application/${pn.office}/${pn.applicationNumber}`);
-      const famCount = countFamilyMembers(familyData);
-      const officeName = OFFICE_NAMES[pn.office] || pn.office;
-      item.innerHTML = `<div class="batch-item-header"><span class="batch-item-num">${officeName} ${pn.applicationNumber}</span><span class="batch-item-status">✓ ${famCount} 个同族</span></div>`;
-    } catch (e) {
-      item.innerHTML = `<div class="batch-item-header"><span class="batch-item-num">${escapeHtml(num)}</span><span class="batch-item-error">${escapeHtml(e.message)}</span></div>`;
-    }
-
-    batchResultsList.appendChild(item);
-  }
-
-  batchStartBtn.disabled = false;
 });
 
 aiSettingsBtn.addEventListener("click", () => {
@@ -943,6 +862,27 @@ aiSaveBtn.addEventListener("click", () => {
   const ocrConfig = window.AI.getOCRConfig(config);
   ocrConfig.engine = ocrEngineSelect.value;
   ocrConfig.glmKey = ocrGlmKeyInput.value.trim();
+
+  // Save custom prompts
+  const promptKeys = [
+    { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
+    { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
+    { id: "prompt-doc-analysis", key: "docAnalysis" },
+    { id: "prompt-history-summary", key: "historySummary" },
+  ];
+  promptKeys.forEach(p => {
+    const el = document.getElementById(p.id);
+    if (el) {
+      const val = el.value.trim();
+      const defaultVal = window.AI.getDefaultPrompt(p.key);
+      if (val && val !== defaultVal) {
+        window.AI.saveCustomPrompt(config, p.key, val);
+      } else {
+        window.AI.resetPrompt(config, p.key);
+      }
+    }
+  });
+
   window.AI.saveAIConfig(config);
   aiSettingsModal.classList.add("hidden");
 });
@@ -950,7 +890,7 @@ aiSaveBtn.addEventListener("click", () => {
 function loadAISettingsToForm() {
   const config = window.AI.loadAIConfig();
   let type = aiProviderSelect.value;
-  if (!config[type]) type = Object.keys(config).find(k => k !== "ocr") || "zhipu";
+  if (!config[type]) type = Object.keys(config).find(k => k !== "ocr" && k !== "prompts") || "zhipu";
   if (config[type]) {
     aiApiKeyInput.value = config[type].apiKey || "";
     aiBaseUrlInput.value = config[type].baseUrl || "";
@@ -964,12 +904,43 @@ function loadAISettingsToForm() {
   if (ocrEngineSelect) ocrEngineSelect.value = ocrConfig.engine || "paddle_ocr_vl";
   if (ocrGlmKeyInput) ocrGlmKeyInput.value = ocrConfig.glmKey || "";
   toggleOcrGlmKeyVisibility();
+
+  // Load custom prompts
+  const promptKeys = [
+    { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
+    { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
+    { id: "prompt-doc-analysis", key: "docAnalysis" },
+    { id: "prompt-history-summary", key: "historySummary" },
+  ];
+  promptKeys.forEach(p => {
+    const el = document.getElementById(p.id);
+    if (el) el.value = window.AI.getCustomPrompt(config, p.key);
+  });
 }
 
 function toggleOcrGlmKeyVisibility() {
   if (!ocrGlmKeyGroup) return;
   ocrGlmKeyGroup.style.display = (ocrEngineSelect && ocrEngineSelect.value === "glm_ocr") ? "" : "none";
 }
+
+// Reset prompt buttons
+document.querySelectorAll("[id^='reset-prompt-']").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const promptId = btn.id.replace("reset-prompt-", "");
+    const keyMap = {
+      "kanban-analysis": "kanbanAnalysis",
+      "kanban-simple": "kanbanAnalysisSimple",
+      "doc-analysis": "docAnalysis",
+      "history-summary": "historySummary",
+    };
+    const key = keyMap[promptId];
+    if (!key) return;
+    const textarea = document.getElementById("prompt-" + promptId);
+    if (textarea) {
+      textarea.value = window.AI.getDefaultPrompt(key);
+    }
+  });
+});
 
 aiSummarizeBtn.addEventListener("click", async () => {
   if (!currentData) return;
@@ -989,7 +960,7 @@ aiSummarizeBtn.addEventListener("click", async () => {
 
   try {
     let fullText = "";
-    const systemPrompt = "你是一位专业的专利审查分析师。请根据以下专利数据，对审查历史进行梳理分析，包括：1. 专利基本信息 2. 同族专利概况 3. 审查文档分析 4. 关键时间节点 5. 风险评估与建议。请用中文回答。";
+    const systemPrompt = window.AI.getCustomPrompt(window.AI.loadAIConfig(), "historySummary");
 
     for await (const chunk of window.AI.streamChat(
       provider.type, provider.apiKey, provider.baseUrl,
@@ -1242,39 +1213,10 @@ kanbanAutoBtn.addEventListener("click", async () => {
     }
   });
 
+  const promptConfig = window.AI.loadAIConfig();
   const systemPrompt = hasBlocks
-    ? `你是一位专业的美国专利审查分析师。请根据以下从 Global Dossier 获取的审查意见（Office Action）和申请人答复（Response）的实际内容，整理出一份结构化的审查历史分析报告。
-
-## 关键规则
-
-1. **必须引用来源**：你的每一段分析都必须标注来源，使用 【来源: block_id1, block_id2】 格式。
-   - 在总结的每一段末尾，用 【来源: B_p1_0, B_p1_1】 标注该段分析依据的原文块
-   - block_id 格式为 B_p{页码}_{块序号}，如 B_p1_0、B_p3_5
-   - 可以引用多个来源块
-
-2. **报告结构**（使用 Markdown 格式）：
-   - 📌 案件概览（专利号、申请号、申请人、当前阶段）
-   - 📋 审查轮次（按时间倒序列出每一轮：日期、文件类型、核心要点）
-   - ⚠️ 驳回理由（每轮 OA 的核心驳回点 / 引用文献 / 法条）
-   - 💬 申请人答辩要点（针对每轮 OA 的修改、争辩、证据）
-   - 📊 审查趋势与风险评估（审查员立场、授权可能性、潜在风险）
-   - 🎯 建议的应对策略（修改权利要求、补充证据、RCE、上诉等）
-
-3. **输出示例**：
-
-### 第一轮审查意见（2023-03-15）
-
-审查员根据 35 U.S.C. 103 条款发出了最终驳回，认为权利要求 1-10 显而易见。主要引用了 Smith 等人的 US 6,123,456 专利作为对比文献。【来源: B_p1_0, B_p1_1】
-
-审查员指出权利要求 1 相对于 Smith 的区别特征在于...但认为该区别是常规设计选择。【来源: B_p1_2】
-
-4. **注意事项**：
-   - 不要编造文档中没有的内容
-   - 如果某段分析综合了多个来源，全部列出
-   - 保持来源标注的准确性，不要张冠李戴
-   - 每段分析都必须有来源标注，无来源的内容不可信
-   - 请用中文回答`
-    : "你是一位专业的美国专利审查分析师。请根据以下从 Global Dossier 获取的审查意见（Office Action）和申请人答复（Response）的实际内容，整理出一份结构化的审查历史分析报告。报告需包含以下章节：\n1. 📌 案件概览（专利号、申请号、申请人、当前阶段）\n2. 📋 审查轮次（按时间倒序列出每一轮：日期、文件类型、核心要点）\n3. ⚠️ 驳回理由（每轮 OA 的核心驳回点 / 引用文献 / 法条）\n4. 💬 申请人答辩要点（针对每轮 OA 的修改、争辩、证据）\n5. 📊 审查趋势与风险评估（审查员立场、授权可能性、潜在风险）\n6. 🎯 建议的应对策略（修改权利要求、补充证据、RCE、上诉等）\n请用中文回答，使用清晰的层级结构（Markdown 格式）。";
+    ? window.AI.getCustomPrompt(promptConfig, "kanbanAnalysis")
+    : window.AI.getCustomPrompt(promptConfig, "kanbanAnalysisSimple");
 
   try {
     let fullText = "";
@@ -1725,12 +1667,6 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (action === "ai-analyze-doc") {
         aiAnalyzeDocument(parseInt(btn.dataset.idx), btn.dataset.doctype);
       }
-    });
-  }
-
-  if (timelineGenerateBtn) {
-    timelineGenerateBtn.addEventListener("click", () => {
-      renderTimeline(currentData);
     });
   }
 

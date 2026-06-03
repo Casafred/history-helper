@@ -77,6 +77,11 @@ var PATENT_STATUS = {
       "DO.EO.MISS": { name: "指定局/选定局缺失要求通知 (Notice of DO/EO Missing Requirements Mailed)", type: "notification", stage: "审查中" },
       "DO.EO.ACPT": { name: "指定局/选定局受理通知 (Notice of Designated Office/Elected Office Acceptance Mailed)", type: "notification", stage: "审查中" },
       "RES.ER": { name: "选举/限制答复 (Response to Election / Restriction Filed)", type: "response", stage: "审查中" },
+      "EGRN": { name: "电子授权当日通知 (eGrant day-of Notification)", type: "allowance", stage: "授权" },
+      "NTC.EGRN": { name: "电子授权当日通知 (eGrant day-of Notification)", type: "allowance", stage: "授权" },
+      "EGRT": { name: "电子授权通知 (eGrant Notification)", type: "allowance", stage: "授权" },
+      "ISS.NTF": { name: "授权公告通知 (Issue Notification)", type: "allowance", stage: "授权" },
+      "PTO.FEE": { name: "专利局费用通知 (PTO Fee Notification)", type: "notification", stage: "授权" },
     },
     typeNames: {
       "office_action": "审查意见",
@@ -110,6 +115,7 @@ function classifyDocCode(code, desc) {
   const text = ((code || "") + " " + (desc || "")).toLowerCase();
 
   if (/notice of allowance|allowed|allowance/.test(text)) return "allowance";
+  if (/egrant|e-grant/.test(text)) return "allowance";
   if (/abandonment/.test(text)) return "notification";
   if (/preliminary amendment/.test(text)) return "request";
   if (/pre.?exam formalities/.test(text)) return "response";
