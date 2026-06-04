@@ -130,7 +130,7 @@ function parsePatentNumber(input) {
   let stripped = trimmed;
   let queryType = "application";
 
-  const kindCodeMatch = stripped.match(/^(.*?[0-9])([A-Z]\d+)$/i);
+  const kindCodeMatch = stripped.match(/^(.*?[0-9])([A-Z]\d*)$/i);
   let kindCode = null;
   if (kindCodeMatch) {
     stripped = kindCodeMatch[1];
@@ -141,15 +141,42 @@ function parsePatentNumber(input) {
   switch (office) {
     case "US":
       appNum = stripped.replace(/^US/i, "").replace(/[^0-9]/g, "");
+      // Determine query type based on number format and kind code
+      if (kindCode) {
+        const kc = kindCode.toUpperCase();
+        if (/^B\d*$/.test(kc)) {
+          // B1, B2 etc. → granted patent number
+          queryType = "patent";
+        } else if (/^A\d*$/.test(kc)) {
+          // A1, A2, A9 etc. → pre-grant publication number
+          queryType = "publication";
+        } else if (/^S\d*$/.test(kc)) {
+          // Design patent
+          queryType = "patent";
+        } else if (/^P\d*$/.test(kc)) {
+          // Plant patent
+          queryType = "patent";
+        }
+      } else if (appNum.length === 11 && /^20\d{9}$/.test(appNum)) {
+        // 11-digit number starting with 20 → pre-grant publication (e.g. 20220301610)
+        queryType = "publication";
+      } else if (appNum.length >= 7 && appNum.length <= 8 && !/^\d{2}\d{6}$/.test(appNum)) {
+        // 7-8 digit number that doesn't look like series+serial application number
+        queryType = "application";
+      }
       break;
     case "EP":
       appNum = stripped.replace(/^EP/i, "").replace(/[\s.]/g, "");
-      if (appNum.length <= 8 && !kindCode) {
+      if (kindCode) {
+        queryType = "publication";
+      } else if (appNum.length <= 8) {
         queryType = "publication";
       }
       break;
     case "JP":
       appNum = stripped.replace(/^JP/i, "").replace(/[\s-]/g, "");
+      if (kindCode) queryType = "publication";
+      else queryType = "publication";
       break;
     case "KR":
       appNum = stripped.replace(/^KR/i, "").replace(/[\s-]/g, "");
