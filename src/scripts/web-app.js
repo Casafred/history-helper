@@ -1460,10 +1460,8 @@ if (citedRefsBtn) {
   citedRefsBtn.addEventListener("click", async () => {
     if (!currentData || !kanbanState.documents.length) return;
     citedRefsBtn.disabled = true;
-    citedRefsBtn.textContent = "分析中...";
 
     try {
-      // Collect cited reference documents (FOR, 892, 1449, IDS, SRNT, SRFW)
       const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
       const citedDocs = kanbanState.documents.filter(d => CITED_DOC_CODES.includes(d.docCode));
 
@@ -1472,18 +1470,104 @@ if (citedRefsBtn) {
         return;
       }
 
-      // Build content from extracted cited reference documents
+      const analysisSection = document.getElementById("kanban-analysis");
+      const analysisContent = document.getElementById("kanban-analysis-content");
+      if (!analysisSection || !analysisContent) {
+        showError("分析区域未找到");
+        return;
+      }
+      analysisSection.classList.remove("hidden");
+      analysisContent.innerHTML = '<p class="extracting">正在提取引用文献内容并分析...</p>';
+
+      // 先提取引用文献文档内容（如果尚未提取）
+      const config = window.AI.loadAIConfig();
+      const ocrConfig = window.AI.getOCRConfig(config);
+      const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
+      const glmApiKey = window.AI.getGlmOcrApiKey(config);
+      const isUS = currentData.office === "US";
+      const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+
+      for (const doc of citedDocs) {
+        if (kanbanState.extractions[doc.idx] && kanbanState.extractions[doc.idx].text) continue;
+
+        // 需要先提取此文档
+        const extractUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${doc.docId}/${doc.numberOfPages}/${doc.docFormat}`;
+        try {
+          analysisContent.innerHTML = `<p class="extracting">正在提取 ${doc.docCode} - ${doc.name}...</p>`;
+          const resp = await fetch(extractUrl);
+          if (!resp.ok) {
+            kanbanState.extractions[doc.idx] = { text: "", error: `HTTP ${resp.status}` };
+            continue;
+          }
+          const arrayBuf = await resp.arrayBuffer();
+          const b64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
+
+          const ocrResp = await fetch("/api/gd/extract-text/ocr", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pdf_base64: b64, engine: primaryEngine }),
+          });
+          if (!ocrResp.ok) {
+            kanbanState.extractions[doc.idx] = { text: "", error: `OCR HTTP ${ocrResp.status}` };
+            continue;
+          }
+          const ocrResult = await ocrResp.json();
+          if (ocrResult.error) {
+            // 降级尝试 GLM OCR
+            if (glmApiKey && primaryEngine !== "glm_ocr") {
+              try {
+                const glmResp = await fetch("/api/gd/extract-text/ocr", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ pdf_base64: b64, engine: "glm_ocr", glm_api_key: glmApiKey }),
+                });
+                const glmResult = await glmResp.json();
+                if (!glmResult.error && glmResult.text) {
+                  kanbanState.extractions[doc.idx] = {
+                    markdown: glmResult.markdown || "",
+                    text: glmResult.text || "",
+                    blocks: glmResult.blocks || [],
+                    pageDims: glmResult.pageDims || {},
+                    engine: "glm_ocr",
+                  };
+                  continue;
+                }
+              } catch {}
+            }
+            kanbanState.extractions[doc.idx] = { text: "", error: ocrResult.error };
+            continue;
+          }
+          kanbanState.extractions[doc.idx] = {
+            markdown: ocrResult.markdown || "",
+            text: ocrResult.text || "",
+            blocks: ocrResult.blocks || [],
+            pageDims: ocrResult.pageDims || {},
+            engine: ocrResult.engine || primaryEngine,
+          };
+        } catch (e) {
+          kanbanState.extractions[doc.idx] = { text: "", error: e.message };
+        }
+      }
+
+      // 构建分析内容
       const lines = [];
       lines.push(`# 引用文献梳理\n\n专利号: ${currentData.applicationNumber}\n\n`);
       lines.push("## 引用文献相关文档\n");
 
+      let hasContent = false;
       for (const doc of citedDocs) {
         const extraction = kanbanState.extractions[doc.idx];
         if (extraction && extraction.text) {
           lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n${extraction.text}\n`);
+          hasContent = true;
         } else {
-          lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n[未提取内容]\n`);
+          lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n[未能提取内容]\n`);
         }
+      }
+
+      if (!hasContent) {
+        analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有引用文献文档均未能提取到内容</p>';
+        return;
       }
 
       lines.push("\n## 分析要求\n");
@@ -1494,11 +1578,9 @@ if (citedRefsBtn) {
       lines.push("4. 引用文献对本专利权利要求的影响评估");
       lines.push("5. 建议关注的引用文献和潜在风险");
 
-      // Use AI to analyze
-      const config = window.AI.loadAIConfig();
       const provider = window.AI.getCurrentProvider(config);
       if (!provider) {
-        showError("请先配置 AI 服务（设置 → AI 配置）");
+        analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">请先配置 AI 服务（设置 → AI 配置）</p>';
         return;
       }
 
@@ -1506,39 +1588,34 @@ if (citedRefsBtn) {
 
 ${lines.join("\n")}`;
 
-      const resultDiv = document.getElementById("kanban-analysis");
-      if (resultDiv) {
-        resultDiv.classList.remove("hidden");
-        resultDiv.innerHTML = "<h3>引用文献梳理</h3><div class='analysis-content markdown-body'></div>";
-        const contentDiv = resultDiv.querySelector(".analysis-content");
-
-        let fullText = "";
-        for await (const chunk of window.AI.streamChat(
-          provider.type, provider.apiKey, provider.baseUrl,
-          {
-            model: provider.model,
-            messages: [
-              { role: "system", content: "你是一位资深专利分析师，专注于引用文献分析。" },
-              { role: "user", content: prompt },
-            ],
-            temperature: 0.3,
-            maxTokens: 32768,
-          }
-        )) {
-          if (chunk.content) {
-            fullText += chunk.content;
-            contentDiv.innerHTML = marked.parse(fullText);
-            resultDiv.scrollTop = resultDiv.scrollHeight;
-          }
+      analysisContent.innerHTML = '';
+      let fullText = "";
+      for await (const chunk of window.AI.streamChat(
+        provider.type, provider.apiKey, provider.baseUrl,
+        {
+          model: provider.model,
+          messages: [
+            { role: "system", content: "你是一位资深专利分析师，专注于引用文献分析。" },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0.3,
+          maxTokens: 32768,
         }
-
-        kanbanState.citedRefsAnalysis = fullText;
+      )) {
+        if (chunk.content) {
+          fullText += chunk.content;
+          analysisContent.innerHTML = marked.parse(fullText);
+          analysisSection.scrollTop = analysisSection.scrollHeight;
+        }
       }
+
+      kanbanState.citedRefsAnalysis = fullText;
     } catch (e) {
+      const analysisContent = document.getElementById("kanban-analysis-content");
+      if (analysisContent) analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + '</p>';
       showError("引用文献梳理失败: " + e.message);
     } finally {
       citedRefsBtn.disabled = false;
-      citedRefsBtn.textContent = "引用文献梳理";
     }
   });
 }
