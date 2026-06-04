@@ -996,6 +996,13 @@ body {
   font-size: 11px;
 }
 
+.doc-readonly-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.4;
+}
+
 .kanban-extracted {
   margin-top: 6px;
   background: var(--bg-secondary);

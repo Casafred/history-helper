@@ -161,8 +161,10 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  let filePath = req.url === "/" ? "/web.html" : req.url;
-  filePath = path.join(__dirname, "src", filePath);
+  let urlPath = req.url === "/" ? "/web.html" : req.url;
+  const qIdx = urlPath.indexOf("?");
+  if (qIdx !== -1) urlPath = urlPath.substring(0, qIdx);
+  let filePath = path.join(__dirname, "src", urlPath);
   serveStatic(filePath, res);
 });
 

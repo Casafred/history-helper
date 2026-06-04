@@ -7,6 +7,8 @@ const OFFICE_NAMES = {
   KR: "韩国 (KIPO)",
   WO: "WIPO (PCT)",
   WIPO: "WIPO (PCT)",
+  CN: "中国 (CNIPA)",
+  DE: "德国 (DPMA)",
 };
 
 let currentData = null;
@@ -46,9 +48,9 @@ const ocrGlmKeyInput = document.getElementById("ocr-glm-key-input");
 const aiTestBtn = document.getElementById("ai-test-btn");
 const aiSaveBtn = document.getElementById("ai-save-btn");
 const aiTestResult = document.getElementById("ai-test-result");
-const aiSummarizeBtn = document.getElementById("ai-summarize-btn");
-const aiStatus = document.getElementById("ai-status");
-const aiSummaryResult = document.getElementById("ai-summary-result");
+const aiSummarizeBtn = null;
+const aiStatus = null;
+const aiSummaryResult = null;
 const kanbanAutoBtn = document.getElementById("kanban-auto-btn");
 const readerBtn = document.getElementById("reader-btn");
 const readerModal = document.getElementById("reader-modal");
@@ -75,6 +77,8 @@ function detectOffice(number) {
   if (upper.startsWith("JP")) return "JP";
   if (upper.startsWith("KR")) return "KR";
   if (upper.startsWith("WO") || upper.startsWith("PCT")) return "WO";
+  if (upper.startsWith("CN")) return "CN";
+  if (upper.startsWith("DE")) return "DE";
   return null;
 }
 
@@ -112,6 +116,16 @@ function parsePatentNumber(input) {
       break;
     case "WO":
       appNum = stripped.replace(/^(WO|PCT)/i, "").replace(/[\s\/]/g, "");
+      break;
+    case "CN":
+      appNum = stripped.replace(/^CN/i, "").replace(/[\s.]/g, "");
+      if (kindCode) queryType = "publication";
+      else queryType = "publication";
+      break;
+    case "DE":
+      appNum = stripped.replace(/^DE/i, "").replace(/[\s.]/g, "");
+      if (kindCode) queryType = "publication";
+      else queryType = "publication";
       break;
   }
 
@@ -219,7 +233,7 @@ searchBtn.addEventListener("click", async () => {
     warnings.forEach(w => showError("警告: " + w));
   }
 
-  aiSummarizeBtn.disabled = false;
+  if (aiSummarizeBtn) aiSummarizeBtn.disabled = false;
   kanbanAutoBtn.disabled = false;
   resultSection.classList.remove("hidden");
   searchBtn.disabled = false;
@@ -478,6 +492,8 @@ function renderDocuments(data) {
   const office = data.office;
   const docNumber = docs.docNumber || data.applicationNumber;
   const isUS = data.office === "US";
+  const isEP = data.office === "EP";
+  const canDownload = isUS || isEP;
   const urlDocNum = isUS ? data.applicationNumber : encodeURIComponent(docNumber);
 
   // Build type counts for filter chips
@@ -526,8 +542,8 @@ function renderDocuments(data) {
     }
 
     const encodedDocId = encodeURIComponent(docId);
-    const downloadUrl = docId ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
-    const extractUrl = docId ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
+    const downloadUrl = (docId && canDownload) ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
+    const extractUrl = (docId && canDownload) ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
 
     html += `
       <div class="doc-item" data-filter-type="${filterType}" data-search-text="${escapeHtml((docType + ' ' + desc + ' ' + date + ' ' + status.name).toLowerCase())}">
@@ -540,6 +556,7 @@ function renderDocuments(data) {
           ${extractUrl ? `<select class="engine-select" data-idx="${idx}"><option value="auto">自动</option><option value="paddle_ocr_vl">PaddleOCR</option><option value="glm_ocr">GLM OCR</option></select>` : ''}
           ${extractUrl ? `<button class="btn-small btn-extract" data-action="extract" data-url="${extractUrl}" data-idx="${idx}" data-doctype="${escapeHtml(docType)}">提取内容</button>` : ''}
           ${downloadUrl ? `<button class="btn-small btn-download" data-action="download" data-url="${downloadUrl}" data-filename="${escapeHtml(docType)}_${escapeHtml(date.replace(/\//g, '-'))}.pdf">下载</button>` : ''}
+          ${!canDownload ? '<span class="doc-readonly-hint">仅提供状态信息，暂不支持下载原文</span>' : ''}
         </div>
       </div>
       <div id="doc-extracted-${idx}" class="doc-extracted hidden"></div>
@@ -693,10 +710,12 @@ async function aiAnalyzeDocument(idx, docType) {
   const aiTab = resultSection.querySelector('[data-tab="ai-summary"]');
   if (aiTab) aiTab.click();
 
-  aiSummarizeBtn.disabled = true;
-  aiStatus.textContent = "正在分析文档: " + docType + "...";
-  aiStatus.className = "ai-status ai-status-processing";
-  aiSummaryResult.classList.remove("hidden");
+  if (aiSummarizeBtn) aiSummarizeBtn.disabled = true;
+  if (aiStatus) {
+    aiStatus.textContent = "正在分析文档: " + docType + "...";
+    aiStatus.className = "ai-status ai-status-processing";
+  }
+  if (aiSummaryResult) aiSummaryResult.classList.remove("hidden");
 
   const truncatedContent = content.length > 30000 ? content.substring(0, 30000) + "\n\n[...内容过长已截断...]" : content;
 
@@ -718,17 +737,21 @@ async function aiAnalyzeDocument(idx, docType) {
     )) {
       if (chunk.content) {
         fullText += chunk.content;
-        aiSummaryResult.innerHTML = '<div class="ai-summary-content markdown-body">' + renderMarkdown(fullText) + "</div>";
+        if (aiSummaryResult) aiSummaryResult.innerHTML = '<div class="ai-summary-content markdown-body">' + renderMarkdown(fullText) + "</div>";
       }
     }
-    aiStatus.textContent = "分析完成 ✓";
-    aiStatus.className = "ai-status ai-status-success";
+    if (aiStatus) {
+      aiStatus.textContent = "分析完成 ✓";
+      aiStatus.className = "ai-status ai-status-success";
+    }
   } catch (e) {
-    aiSummaryResult.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
-    aiStatus.textContent = "分析失败 ✗";
-    aiStatus.className = "ai-status ai-status-error";
+    if (aiSummaryResult) aiSummaryResult.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
+    if (aiStatus) {
+      aiStatus.textContent = "分析失败 ✗";
+      aiStatus.className = "ai-status ai-status-error";
+    }
   } finally {
-    aiSummarizeBtn.disabled = false;
+    if (aiSummarizeBtn) aiSummarizeBtn.disabled = false;
   }
 }
 
@@ -942,55 +965,6 @@ document.querySelectorAll("[id^='reset-prompt-']").forEach(btn => {
   });
 });
 
-aiSummarizeBtn.addEventListener("click", async () => {
-  if (!currentData) return;
-  const config = window.AI.loadAIConfig();
-  const provider = window.AI.getCurrentProvider(config);
-  if (!provider) {
-    showError("请先在 AI 设置中配置并选择一个 AI 服务商");
-    aiSettingsBtn.click();
-    return;
-  }
-
-  aiSummarizeBtn.disabled = true;
-  aiStatus.textContent = "正在生成梳理...";
-  aiStatus.className = "ai-status ai-status-processing";
-  aiSummaryResult.classList.remove("hidden");
-  aiSummaryResult.innerHTML = '<p class="placeholder">AI 正在分析审查历史，请稍候...</p>';
-
-  try {
-    let fullText = "";
-    const systemPrompt = window.AI.getCustomPrompt(window.AI.loadAIConfig(), "historySummary");
-
-    for await (const chunk of window.AI.streamChat(
-      provider.type, provider.apiKey, provider.baseUrl,
-      {
-        model: provider.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: JSON.stringify(currentData, null, 2) },
-        ],
-        temperature: 0.3,
-        maxTokens: 32768,
-      }
-    )) {
-      if (chunk.content) {
-        fullText += chunk.content;
-        aiSummaryResult.innerHTML = '<div class="ai-summary-content markdown-body">' + renderMarkdown(fullText) + "</div>";
-      }
-    }
-
-    aiStatus.textContent = "梳理完成 ✓";
-    aiStatus.className = "ai-status ai-status-success";
-  } catch (e) {
-    aiSummaryResult.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
-    aiStatus.textContent = "梳理失败 ✗";
-    aiStatus.className = "ai-status ai-status-error";
-  } finally {
-    aiSummarizeBtn.disabled = false;
-  }
-});
-
 function updateModelOptions(type) {
   const models = window.AI.getAvailableModels(type);
   aiModelSelect.innerHTML = "";
@@ -1058,6 +1032,15 @@ kanbanAutoBtn.addEventListener("click", async () => {
   kanbanAutoBtn.disabled = true;
   const analysisSection = document.getElementById("kanban-analysis");
   const analysisContent = document.getElementById("kanban-analysis-content");
+
+  const canDownload = currentData.office === "US" || currentData.office === "EP";
+  if (!canDownload) {
+    analysisSection.classList.remove("hidden");
+    analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">CN / DE / JP 专利暂不支持文档下载与提取，无法进行 AI 梳理。仅 US / EP 专利支持审查文档原文获取。</p>';
+    kanbanAutoBtn.disabled = false;
+    return;
+  }
+
   analysisSection.classList.remove("hidden");
   analysisContent.innerHTML = '<p class="extracting">正在准备审查意见和答复的提取内容...</p>';
 

@@ -108,12 +108,172 @@ var PATENT_STATUS = {
     },
     aiAnalysisTypes: ["office_action", "response"],
   },
+  CN: {
+    codeMap: {
+      "100001-CN": { name: "权利要求书", type: "misc", stage: "申请" },
+      "100002-CN": { name: "说明书", type: "misc", stage: "申请" },
+      "100003-CN": { name: "说明书附图", type: "misc", stage: "申请" },
+      "100004-CN": { name: "说明书摘要", type: "misc", stage: "申请" },
+      "200103-CN": { name: "审查意见通知书", type: "office_action", stage: "审查中" },
+      "200104-CN": { name: "意见陈述书", type: "response", stage: "审查中" },
+      "200105-CN": { name: "补正书", type: "response", stage: "审查中" },
+      "200106-CN": { name: "修改替换页", type: "response", stage: "审查中" },
+      "200201-CN": { name: "授权通知书", type: "allowance", stage: "授权" },
+      "200202-CN": { name: "办理登记手续通知书", type: "notification", stage: "授权" },
+      "0-CN": { name: "检索报告", type: "misc", stage: "审查中" },
+      "100005-CN": { name: "摘要附图", type: "misc", stage: "申请" },
+      "200107-CN": { name: "复审请求书", type: "request", stage: "复审" },
+      "200108-CN": { name: "无效宣告请求书", type: "request", stage: "复审" },
+    },
+    descMap: {
+      "right-claiming document": "权利要求书",
+      "instructions": "说明书",
+      "first search": "首次检索报告",
+    },
+    typeNames: {
+      "office_action": "审查意见", "response": "答复", "request": "请求",
+      "allowance": "授权", "notification": "通知", "misc": "其他"
+    },
+    stageNames: {
+      "申请": "申请", "审查中": "审查中", "授权": "授权", "复审": "复审", "未知": "未知"
+    },
+    abstract: "中国专利审查",
+    aiAnalysisTypes: ["office_action", "response", "allowance"],
+  },
+  DE: {
+    codeMap: {},
+    descMap: {
+      "beschreibung": "说明书",
+      "ansprüche": "权利要求书",
+      "zusammenfassung": "摘要",
+      "zeichnung": "附图",
+      "anschreiben": " cover letter",
+      "antrag: erteilung eines patents": "专利授权申请",
+      "erfinderbenennung": "发明人声明",
+      "empfangsbestätigung für eine patentanmeldung": "专利申请受理通知书",
+      "bibliographiemitteilung": "书目信息通知",
+      "bibliografie-mitteilung": "书目信息通知",
+      "prüfungsantrag": "实质审查请求",
+      "prüfungsbescheid": "审查意见通知书",
+      "bescheid": "通知书",
+      "erwidung": "答复",
+      "beschränkung": "修改/限制",
+      "erteilung": "授权",
+      "erteilungsbescheid": "授权通知书",
+      "einspruch": "异议",
+      "beschwerde": "申诉",
+      "recherche": "检索报告",
+      "offenlegungsschrift": "公开说明书",
+      "patentschrift": "专利说明书",
+      "teilung": "分案",
+      "schutzbereich": "保护范围",
+    },
+    typeNames: {
+      "office_action": "审查意见", "response": "答复", "request": "请求",
+      "allowance": "授权", "notification": "通知", "misc": "其他"
+    },
+    stageNames: {
+      "申请": "申请", "审查中": "审查中", "授权": "授权", "复审": "复审", "未知": "未知"
+    },
+    abstract: "德国专利审查",
+    aiAnalysisTypes: ["office_action", "response", "allowance"],
+  },
+  JP: {
+    codeMap: {
+      "A131": { name: "驳回理由通知书", type: "office_action", stage: "审查中" },
+      "A131-JP": { name: "驳回理由通知书（原文）", type: "office_action", stage: "审查中" },
+      "A53": { name: "意见书", type: "response", stage: "审查中" },
+      "A53-JP": { name: "意见书（原文）", type: "response", stage: "审查中" },
+      "A523": { name: "补正书", type: "response", stage: "审查中" },
+      "A523-JP": { name: "补正书（原文）", type: "response", stage: "审查中" },
+      "A621": { name: "审查请求书", type: "request", stage: "申请" },
+      "A621-JP": { name: "审查请求书（原文）", type: "request", stage: "申请" },
+      "A63": { name: "申请文件", type: "misc", stage: "申请" },
+      "A63-JP": { name: "申请文件（原文）", type: "misc", stage: "申请" },
+      "A01": { name: "授权决定", type: "allowance", stage: "授权" },
+      "A01-JP": { name: "授权决定（原文）", type: "allowance", stage: "授权" },
+      "A971007": { name: "检索报告", type: "misc", stage: "审查中" },
+      "A971007-JP": { name: "检索报告（原文）", type: "misc", stage: "审查中" },
+    },
+    descMap: {
+      "notice of reasons for refusal": "驳回理由通知书",
+      "written opinion": "意见书",
+      "written amendment": "补正书",
+      "request for examination": "审查请求书",
+      "decision to grant a patent": "授权决定",
+      "description": "说明书",
+      "claims": "权利要求书",
+      "drawings": "附图",
+      "abstract": "摘要",
+      "request for a patent": "专利申请",
+      "search report": "检索报告",
+    },
+    typeNames: {
+      "office_action": "审查意见", "response": "答复", "request": "请求",
+      "allowance": "授权", "notification": "通知", "misc": "其他"
+    },
+    stageNames: {
+      "申请": "申请", "审查中": "审查中", "授权": "授权", "复审": "复审", "未知": "未知"
+    },
+    abstract: "日本专利审查",
+    aiAnalysisTypes: ["office_action", "response", "allowance"],
+  },
 };
 
 function classifyDocCode(code, desc) {
   if (!code && !desc) return "misc";
-  const text = ((code || "") + " " + (desc || "")).toLowerCase();
+  const codeUpper = (code || "").toUpperCase();
+  const descLower = (desc || "").toLowerCase();
+  const text = (codeUpper + " " + descLower).toLowerCase();
 
+  // === CN specific patterns (desc is in English from GD API) ===
+  if (/notice of examination opinions|examination opinion/.test(descLower)) return "office_action";
+  if (/request for substantive examination/.test(descLower)) return "request";
+  if (/statement of opinions|opinion statement/.test(descLower)) return "response";
+  if (/correction|amendment.*replacement|replacement page/.test(descLower)) return "response";
+  if (/notice of grant|grant notification|authorization notice/.test(descLower)) return "allowance";
+  if (/registration.*notice|registration procedure/.test(descLower)) return "notification";
+  if (/reexamination request|request for reexamination/.test(descLower)) return "request";
+  if (/invalidation request|request for invalidation/.test(descLower)) return "request";
+  if (/right.?claiming document|claims/.test(descLower)) return "misc";
+  if (/instructions|description|specification/.test(descLower)) return "misc";
+  if (/drawings|附图/.test(descLower)) return "misc";
+  if (/abstract/.test(descLower)) return "misc";
+  if (/search report|recherche/.test(descLower)) return "misc";
+
+  // === JP specific patterns (desc is in English from GD API) ===
+  if (/notice of reasons for refusal/.test(descLower)) return "office_action";
+  if (/written opinion/.test(descLower)) return "response";
+  if (/written amendment/.test(descLower)) return "response";
+  if (/request for examination/.test(descLower)) return "request";
+  if (/decision to grant a patent/.test(descLower)) return "allowance";
+  if (/request for a patent/.test(descLower)) return "misc";
+
+  // === DE specific patterns (desc is in German from GD API, no docCode) ===
+  if (/prüfungsbescheid/.test(descLower)) return "office_action";
+  if (/erwidung/.test(descLower)) return "response";
+  if (/beschränkung/.test(descLower)) return "response";
+  if (/erteilungsbescheid/.test(descLower)) return "allowance";
+  if (/erteilung/.test(descLower)) return "allowance";
+  if (/prüfungsantrag/.test(descLower)) return "request";
+  if (/einspruch/.test(descLower)) return "request";
+  if (/beschwerde/.test(descLower)) return "request";
+  if (/antrag.*erteilung/.test(descLower)) return "request";
+  if (/bescheid/.test(descLower)) return "notification";
+  if (/anschreiben/.test(descLower)) return "notification";
+  if (/empfangsbestätigung/.test(descLower)) return "notification";
+  if (/bibliographie.*mitteilung|bibliografie.*mitteilung/.test(descLower)) return "notification";
+  if (/beschreibung/.test(descLower)) return "misc";
+  if (/ansprüche/.test(descLower)) return "misc";
+  if (/zusammenfassung/.test(descLower)) return "misc";
+  if (/zeichnung/.test(descLower)) return "misc";
+  if (/erfinderbenennung/.test(descLower)) return "misc";
+  if (/offenlegungsschrift/.test(descLower)) return "misc";
+  if (/patentschrift/.test(descLower)) return "misc";
+  if (/teilung/.test(descLower)) return "misc";
+  if (/schutzbereich/.test(descLower)) return "misc";
+
+  // === US / General patterns ===
   if (/notice of allowance|allowed|allowance/.test(text)) return "allowance";
   if (/egrant|e-grant/.test(text)) return "allowance";
   if (/abandonment/.test(text)) return "notification";
@@ -154,7 +314,18 @@ function getStatusInfo(office, code, desc) {
 
   const type = classifyDocCode(code, desc);
   const typeName = officeMap.typeNames[type] || "其他文件";
-  return { name: desc || code || typeName, type: type, stage: "审查中" };
+  let translatedName = desc || code || typeName;
+  if (officeMap.descMap && desc) {
+    const descLower = desc.toLowerCase();
+    const sortedKeys = Object.keys(officeMap.descMap).sort((a, b) => b.length - a.length);
+    for (const key of sortedKeys) {
+      if (descLower.includes(key)) {
+        translatedName = officeMap.descMap[key];
+        break;
+      }
+    }
+  }
+  return { name: translatedName, type: type, stage: "审查中" };
 }
 
 function shouldIncludeInAIAnalysis(office, type) {
