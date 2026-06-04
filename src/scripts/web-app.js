@@ -78,6 +78,27 @@ const readerDocList = document.getElementById("reader-doc-list");
 const readerContent = document.getElementById("reader-content");
 const readerExportBtn = document.getElementById("reader-export-btn");
 const exportWordBtn = document.getElementById("export-word-btn");
+const readerPdfToggle = document.getElementById("reader-pdf-toggle");
+const readerPdfView = document.getElementById("reader-pdf-view");
+const readerPdfContainer = document.getElementById("reader-pdf-container");
+const pdfPageInfo = document.getElementById("pdf-page-info");
+const pdfZoomLevel = document.getElementById("pdf-zoom-level");
+const pdfPrevPage = document.getElementById("pdf-prev-page");
+const pdfNextPage = document.getElementById("pdf-next-page");
+const pdfZoomIn = document.getElementById("pdf-zoom-in");
+const pdfZoomOut = document.getElementById("pdf-zoom-out");
+const pdfZoomFit = document.getElementById("pdf-zoom-fit");
+
+let pdfViewState = {
+  active: false,
+  currentDocIdx: null,
+  pdfDoc: null,
+  currentPage: 1,
+  totalPages: 0,
+  scale: 1.0,
+  baseScale: 1.0,
+  renderedPages: {},
+};
 
 function showError(msg) {
   errorToast.textContent = msg;
@@ -1109,6 +1130,63 @@ async function doExtractText(office, docNum, docId, pages, docFormat, engine, ap
   return await resp.json();
 }
 
+function buildTimelineSummary(office, documents) {
+  if (!documents || documents.length === 0) return "";
+
+  const officeNames = { US: "USPTO (美国)", EP: "EPO (欧洲)", CN: "CNIPA (中国)", DE: "DPMA (德国)", JP: "JPO (日本)" };
+  const officeLabel = officeNames[office] || office;
+
+  const typeLabels = {
+    office_action: "审查意见", response: "答复", allowance: "授权",
+    request: "请求", notification: "通知", misc: "其他",
+  };
+
+  // Sort documents by date for timeline
+  const sorted = [...documents].sort((a, b) => {
+    const da = parseDate(a.date);
+    const db = parseDate(b.date);
+    return da - db;
+  });
+
+  // Determine current status from the latest document
+  const latest = sorted[sorted.length - 1];
+  let currentStatus = "未知";
+  if (latest) {
+    if (latest.type === "allowance") {
+      currentStatus = "已授权";
+    } else if (latest.type === "office_action") {
+      currentStatus = "审查中（待答复）";
+    } else if (latest.type === "response") {
+      currentStatus = "审查中（已答复，等待审查员回应）";
+    } else if (latest.type === "request") {
+      currentStatus = "审查中（已提交请求）";
+    } else if (latest.type === "notification") {
+      currentStatus = "审查中（有通知）";
+    } else {
+      currentStatus = latest.stage || "审查中";
+    }
+  }
+
+  let lines = [];
+  lines.push("## 审查时间线概要");
+  lines.push("专利局: " + officeLabel);
+  lines.push("当前状态: " + currentStatus);
+  lines.push("");
+  lines.push("| 序号 | 日期 | 文档代码 | 文档名称 | 类型 | 阶段 |");
+  lines.push("|------|------|---------|---------|------|------|");
+
+  sorted.forEach((doc, i) => {
+    const typeLabel = typeLabels[doc.type] || doc.type || "其他";
+    lines.push("| " + (i + 1) + " | " + (doc.date || "—") + " | " + (doc.docCode || "—") + " | " + (doc.name || "—") + " | " + typeLabel + " | " + (doc.stage || "—") + " |");
+  });
+
+  lines.push("");
+  lines.push("--- 以下为各文档的详细提取内容 ---");
+  lines.push("");
+
+  return lines.join("\n");
+}
+
 kanbanAutoBtn.addEventListener("click", async () => {
   if (!currentData) { showError("请先查询专利"); return; }
   const config = window.AI.loadAIConfig();
@@ -1270,6 +1348,10 @@ kanbanAutoBtn.addEventListener("click", async () => {
   });
 
   const annotatedLines = [];
+
+  // Build timeline summary so AI knows the current procedural status
+  const timelineSummary = buildTimelineSummary(currentData.office, kanbanState.documents);
+
   oaItems.forEach((it, idx) => {
     const ext = kanbanState.extractions[it.idx];
     if (!ext) {
@@ -1294,6 +1376,8 @@ kanbanAutoBtn.addEventListener("click", async () => {
     ? window.AI.getCustomPrompt(promptConfig, "kanbanAnalysis")
     : window.AI.getCustomPrompt(promptConfig, "kanbanAnalysisSimple");
 
+  const userMessage = timelineSummary + annotatedLines.join("\n\n---\n\n");
+
   try {
     let fullText = "";
     for await (const chunk of window.AI.streamChat(
@@ -1302,7 +1386,7 @@ kanbanAutoBtn.addEventListener("click", async () => {
         model: provider.model,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: annotatedLines.join("\n\n---\n\n") },
+          { role: "user", content: userMessage },
         ],
         temperature: 0.3,
         maxTokens: 32768,
@@ -1388,6 +1472,12 @@ function onTraceClick(blockId) {
   }
   selectReaderDoc(info.docIdx);
   setTimeout(() => {
+    // If PDF view is active, highlight the overlay block
+    if (pdfViewState.active) {
+      highlightPdfBlock(blockId);
+      return;
+    }
+
     const md = kanbanState.extractions[info.docIdx];
     if (!md) return;
     const content = md.markdown || md.text || "";
@@ -1552,6 +1642,11 @@ function selectReaderDoc(idx) {
   const activeEl = document.querySelector(`.reader-doc-item[data-idx="${idx}"]`);
   if (activeEl) activeEl.classList.add("active");
 
+  // Render PDF view if active
+  if (pdfViewState.active) {
+    renderPdfView(idx);
+  }
+
   const ext = kanbanState.extractions[idx];
   if (ext) {
     const md = ext.markdown || ext.text || "";
@@ -1593,6 +1688,210 @@ function selectReaderAnalysis() {
     readerContent.innerHTML = '<div class="markdown-body">' + renderMarkdownWithTrace(kanbanState.analysis) + '</div>';
   } else {
     readerContent.innerHTML = '<p class="placeholder">尚未生成 AI 分析报告</p>';
+  }
+}
+
+// ============ PDF Viewer with Overlay Blocks ============
+
+function togglePdfView() {
+  if (pdfViewState.active) {
+    pdfViewState.active = false;
+    readerPdfView.classList.add("hidden");
+    readerContent.classList.remove("hidden");
+    readerPdfToggle.classList.remove("active");
+    readerPdfToggle.textContent = "PDF 视图";
+  } else {
+    pdfViewState.active = true;
+    readerPdfView.classList.remove("hidden");
+    readerContent.classList.add("hidden");
+    readerPdfToggle.classList.add("active");
+    readerPdfToggle.textContent = "文本视图";
+    if (pdfViewState.currentDocIdx !== null) {
+      renderPdfView(pdfViewState.currentDocIdx);
+    }
+  }
+}
+
+async function renderPdfView(idx) {
+  if (!pdfViewState.active) return;
+
+  const items = kanbanState.documents;
+  const it = items.find(d => d.idx === idx);
+  if (!it) {
+    readerPdfContainer.innerHTML = '<p class="pdf-error">未找到文档信息</p>';
+    return;
+  }
+
+  pdfViewState.currentDocIdx = idx;
+
+  if (typeof pdfjsLib === "undefined") {
+    readerPdfContainer.innerHTML = '<p class="pdf-error">PDF.js 库未加载，无法显示 PDF 视图。请检查网络连接后刷新页面。</p>';
+    return;
+  }
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+  const ext = kanbanState.extractions[idx];
+  const blocks = ext ? (ext.blocks || []) : [];
+  const pageDimensions = ext ? (ext.pageDimensions || {}) : {};
+
+  const isUS = currentData.office === "US";
+  const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+  const encodedDocId = encodeURIComponent(it.docId);
+  const pdfUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+
+  readerPdfContainer.innerHTML = '<p class="pdf-loading">正在加载 PDF 文件...</p>';
+
+  try {
+    const resp = await fetch(pdfUrl, { headers: { "Accept": "application/pdf,*/*" } });
+    if (!resp.ok) throw new Error("PDF 下载失败: HTTP " + resp.status);
+
+    const contentType = resp.headers.get("content-type") || "";
+    if (contentType.includes("text/plain") || contentType.includes("text/html")) {
+      const text = await resp.text();
+      if (text.includes("Attachment Not Found") || text.includes("Not Found")) {
+        throw new Error("文档暂不可下载（Attachment Not Found）");
+      }
+    }
+
+    const arrayBuffer = await resp.arrayBuffer();
+    if (arrayBuffer.byteLength < 100) {
+      throw new Error("下载的文件过小，文档可能暂不可用");
+    }
+
+    const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    pdfViewState.pdfDoc = pdfDoc;
+    pdfViewState.totalPages = pdfDoc.numPages;
+    pdfViewState.currentPage = 1;
+    pdfViewState.renderedPages = {};
+
+    readerPdfContainer.innerHTML = "";
+
+    const containerWidth = readerPdfContainer.clientWidth - 32;
+    const firstPage = await pdfDoc.getPage(1);
+    const viewport = firstPage.getViewport({ scale: 1.0 });
+    pdfViewState.baseScale = containerWidth / viewport.width;
+    pdfViewState.scale = pdfViewState.baseScale;
+
+    updatePdfToolbar();
+    await renderAllPdfPages(pdfDoc, blocks, pageDimensions, pdfViewState.scale);
+  } catch (e) {
+    readerPdfContainer.innerHTML = '<p class="pdf-error">' + escapeHtml(e.message) + '<br><small>请切换到文本视图查看提取的内容</small></p>';
+  }
+}
+
+async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
+  readerPdfContainer.innerHTML = "";
+
+  for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+    const page = await pdfDoc.getPage(pageNum);
+    const viewport = page.getViewport({ scale: scale });
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "pdf-page-wrapper";
+    wrapper.dataset.page = pageNum;
+
+    const pageLabel = document.createElement("div");
+    pageLabel.className = "pdf-page-label";
+    pageLabel.textContent = "第 " + pageNum + " 页";
+    wrapper.appendChild(pageLabel);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d");
+    await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+    wrapper.appendChild(canvas);
+
+    const pageBlocks = blocks.filter(b => b.page === pageNum);
+    const pageDim = pageDimensions[pageNum];
+    if (pageBlocks.length > 0 && pageDim) {
+      const scaleX = viewport.width / pageDim.width;
+      const scaleY = viewport.height / pageDim.height;
+
+      pageBlocks.forEach(b => {
+        if (!b.bbox) return;
+        const [x1, y1, x2, y2] = b.bbox;
+        const overlay = document.createElement("div");
+        overlay.className = "pdf-block-overlay";
+        overlay.dataset.blockId = b.block_id;
+        overlay.dataset.label = b.label || "text";
+        overlay.style.left = (x1 * scaleX) + "px";
+        overlay.style.top = (y1 * scaleY) + "px";
+        overlay.style.width = ((x2 - x1) * scaleX) + "px";
+        overlay.style.height = ((y2 - y1) * scaleY) + "px";
+
+        const tooltip = document.createElement("div");
+        tooltip.className = "pdf-block-tooltip";
+        tooltip.textContent = b.block_id + " [" + (b.label || "text") + "]";
+        overlay.appendChild(tooltip);
+
+        overlay.addEventListener("click", () => {
+          document.querySelectorAll(".pdf-block-overlay.highlight").forEach(el => el.classList.remove("highlight"));
+          overlay.classList.add("highlight");
+          setTimeout(() => overlay.classList.remove("highlight"), 3000);
+        });
+
+        wrapper.appendChild(overlay);
+      });
+    }
+
+    readerPdfContainer.appendChild(wrapper);
+    pdfViewState.renderedPages[pageNum] = wrapper;
+  }
+}
+
+async function rerenderPdfPages() {
+  if (!pdfViewState.pdfDoc) return;
+  const idx = pdfViewState.currentDocIdx;
+  const ext = kanbanState.extractions[idx];
+  const blocks = ext ? (ext.blocks || []) : [];
+  const pageDimensions = ext ? (ext.pageDimensions || {}) : {};
+  await renderAllPdfPages(pdfViewState.pdfDoc, blocks, pageDimensions, pdfViewState.scale);
+  updatePdfToolbar();
+}
+
+function updatePdfToolbar() {
+  if (pdfPageInfo) {
+    pdfPageInfo.textContent = pdfViewState.currentPage + " / " + pdfViewState.totalPages;
+  }
+  if (pdfZoomLevel) {
+    pdfZoomLevel.textContent = Math.round(pdfViewState.scale * 100) + "%";
+  }
+}
+
+function pdfGoToPage(pageNum) {
+  if (pageNum < 1 || pageNum > pdfViewState.totalPages) return;
+  pdfViewState.currentPage = pageNum;
+  updatePdfToolbar();
+  const wrapper = pdfViewState.renderedPages[pageNum];
+  if (wrapper) {
+    wrapper.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function pdfZoomInAction() {
+  pdfViewState.scale = Math.min(pdfViewState.scale * 1.25, 5.0);
+  rerenderPdfPages();
+}
+
+function pdfZoomOutAction() {
+  pdfViewState.scale = Math.max(pdfViewState.scale / 1.25, 0.25);
+  rerenderPdfPages();
+}
+
+function pdfZoomFitAction() {
+  pdfViewState.scale = pdfViewState.baseScale;
+  rerenderPdfPages();
+}
+
+function highlightPdfBlock(blockId) {
+  document.querySelectorAll(".pdf-block-overlay.highlight").forEach(el => el.classList.remove("highlight"));
+  const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${blockId}"]`);
+  if (overlay) {
+    overlay.classList.add("highlight");
+    overlay.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => overlay.classList.remove("highlight"), 3000);
   }
 }
 
@@ -1929,12 +2228,31 @@ document.addEventListener("DOMContentLoaded", () => {
   if (readerCloseBtn) {
     readerCloseBtn.addEventListener("click", () => {
       readerModal.classList.add("hidden");
+      // Reset PDF view state when closing
+      if (pdfViewState.active) {
+        pdfViewState.active = false;
+        readerPdfView.classList.add("hidden");
+        readerContent.classList.remove("hidden");
+        readerPdfToggle.classList.remove("active");
+        readerPdfToggle.textContent = "PDF 视图";
+      }
+      pdfViewState.pdfDoc = null;
+      pdfViewState.renderedPages = {};
     });
   }
 
   if (readerModal) {
     readerModal.querySelector(".modal-overlay").addEventListener("click", () => {
       readerModal.classList.add("hidden");
+      if (pdfViewState.active) {
+        pdfViewState.active = false;
+        readerPdfView.classList.add("hidden");
+        readerContent.classList.remove("hidden");
+        readerPdfToggle.classList.remove("active");
+        readerPdfToggle.textContent = "PDF 视图";
+      }
+      pdfViewState.pdfDoc = null;
+      pdfViewState.renderedPages = {};
     });
   }
 
@@ -1956,6 +2274,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (readerExportBtn) {
     readerExportBtn.addEventListener("click", exportToWord);
+  }
+
+  if (readerPdfToggle) {
+    readerPdfToggle.addEventListener("click", togglePdfView);
+  }
+
+  if (pdfPrevPage) {
+    pdfPrevPage.addEventListener("click", () => pdfGoToPage(pdfViewState.currentPage - 1));
+  }
+  if (pdfNextPage) {
+    pdfNextPage.addEventListener("click", () => pdfGoToPage(pdfViewState.currentPage + 1));
+  }
+  if (pdfZoomIn) {
+    pdfZoomIn.addEventListener("click", pdfZoomInAction);
+  }
+  if (pdfZoomOut) {
+    pdfZoomOut.addEventListener("click", pdfZoomOutAction);
+  }
+  if (pdfZoomFit) {
+    pdfZoomFit.addEventListener("click", pdfZoomFitAction);
   }
 
   document.addEventListener("click", (e) => {
