@@ -98,6 +98,7 @@ let pdfViewState = {
   scale: 1.0,
   baseScale: 1.0,
   renderedPages: {},
+  pendingHighlight: null,
 };
 
 function showError(msg) {
@@ -296,6 +297,8 @@ searchBtn.addEventListener("click", async () => {
 
   if (aiSummarizeBtn) aiSummarizeBtn.disabled = false;
   kanbanAutoBtn.disabled = false;
+  const citedRefsBtn = document.getElementById("cited-refs-btn");
+  if (citedRefsBtn) citedRefsBtn.disabled = false;
   resultSection.classList.remove("hidden");
   searchBtn.disabled = false;
   loading.classList.add("hidden");
@@ -1236,7 +1239,8 @@ kanbanAutoBtn.addEventListener("click", async () => {
   analysisSection.classList.remove("hidden");
   analysisContent.innerHTML = '<p class="extracting">正在准备审查意见和答复的提取内容...</p>';
 
-  const oaItems = items.filter(it => shouldIncludeInAIAnalysis(currentData.office, it.type));
+  const CLAIMS_CODES = ["CLM", "FWCLM", "SPEC"];
+  const oaItems = items.filter(it => shouldIncludeInAIAnalysis(currentData.office, it.type) || CLAIMS_CODES.includes(it.docCode));
   if (oaItems.length === 0) {
     analysisContent.innerHTML = '<p class="placeholder">未找到审查意见或答复类文档</p>';
     kanbanAutoBtn.disabled = false;
@@ -1376,10 +1380,17 @@ kanbanAutoBtn.addEventListener("click", async () => {
   oaItems.forEach((it, idx) => {
     const ext = kanbanState.extractions[it.idx];
     if (!ext) {
-      annotatedLines.push(`【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）\n[未能提取内容]`);
+      const isClaimsDoc = CLAIMS_CODES.includes(it.docCode);
+      const missingHeader = isClaimsDoc
+        ? `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）[权利要求/说明书参考]`
+        : `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）`;
+      annotatedLines.push(missingHeader + "\n[未能提取内容]");
       return;
     }
-    const header = `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）`;
+    const isClaimsDoc = CLAIMS_CODES.includes(it.docCode);
+    const header = isClaimsDoc
+      ? `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）[权利要求/说明书参考]`
+      : `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）`;
     if (hasBlocks && ext.blocks && ext.blocks.length > 0) {
       const blockParts = ext.blocks
         .filter(b => b.content && b.content.trim())
@@ -1444,6 +1455,94 @@ kanbanAutoBtn.addEventListener("click", async () => {
   }
 });
 
+const citedRefsBtn = document.getElementById("cited-refs-btn");
+if (citedRefsBtn) {
+  citedRefsBtn.addEventListener("click", async () => {
+    if (!currentData || !kanbanState.documents.length) return;
+    citedRefsBtn.disabled = true;
+    citedRefsBtn.textContent = "分析中...";
+
+    try {
+      // Collect cited reference documents (FOR, 892, 1449, IDS, SRNT, SRFW)
+      const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
+      const citedDocs = kanbanState.documents.filter(d => CITED_DOC_CODES.includes(d.docCode));
+
+      if (citedDocs.length === 0) {
+        showError("未找到引用文献相关文档（FOR/892/1449/IDS/SRNT/SRFW）");
+        return;
+      }
+
+      // Build content from extracted cited reference documents
+      const lines = [];
+      lines.push(`# 引用文献梳理\n\n专利号: ${currentData.applicationNumber}\n\n`);
+      lines.push("## 引用文献相关文档\n");
+
+      for (const doc of citedDocs) {
+        const extraction = kanbanState.extractions[doc.idx];
+        if (extraction && extraction.text) {
+          lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n${extraction.text}\n`);
+        } else {
+          lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n[未提取内容]\n`);
+        }
+      }
+
+      lines.push("\n## 分析要求\n");
+      lines.push("请对以上引用文献相关文档进行分析，包括：");
+      lines.push("1. 审查员引用了哪些文献？列出每篇引用文献的编号、类型和相关性说明");
+      lines.push("2. 申请人引用了哪些文献？与审查员引用有何异同");
+      lines.push("3. 引用文献的技术领域分布，是否涉及竞争对手专利");
+      lines.push("4. 引用文献对本专利权利要求的影响评估");
+      lines.push("5. 建议关注的引用文献和潜在风险");
+
+      // Use AI to analyze
+      const config = window.AI.loadAIConfig();
+      const provider = window.AI.getCurrentProvider(config);
+      if (!provider) {
+        showError("请先配置 AI 服务（设置 → AI 配置）");
+        return;
+      }
+
+      const prompt = `你是一位资深专利分析师，专注于引用文献分析。请根据以下引用文献相关文档，进行系统梳理和分析。
+
+${lines.join("\n")}`;
+
+      const resultDiv = document.getElementById("kanban-analysis");
+      if (resultDiv) {
+        resultDiv.classList.remove("hidden");
+        resultDiv.innerHTML = "<h3>引用文献梳理</h3><div class='analysis-content markdown-body'></div>";
+        const contentDiv = resultDiv.querySelector(".analysis-content");
+
+        let fullText = "";
+        for await (const chunk of window.AI.streamChat(
+          provider.type, provider.apiKey, provider.baseUrl,
+          {
+            model: provider.model,
+            messages: [
+              { role: "system", content: "你是一位资深专利分析师，专注于引用文献分析。" },
+              { role: "user", content: prompt },
+            ],
+            temperature: 0.3,
+            maxTokens: 32768,
+          }
+        )) {
+          if (chunk.content) {
+            fullText += chunk.content;
+            contentDiv.innerHTML = marked.parse(fullText);
+            resultDiv.scrollTop = resultDiv.scrollHeight;
+          }
+        }
+
+        kanbanState.citedRefsAnalysis = fullText;
+      }
+    } catch (e) {
+      showError("引用文献梳理失败: " + e.message);
+    } finally {
+      citedRefsBtn.disabled = false;
+      citedRefsBtn.textContent = "引用文献梳理";
+    }
+  });
+}
+
 function renderMarkdown(text) {
   if (!text) return "";
   if (typeof marked !== "undefined" && marked.parse) {
@@ -1490,6 +1589,11 @@ function onTraceClick(blockId) {
   }
   if (readerModal.classList.contains("hidden")) {
     openReader();
+  }
+  // Set pending highlight before selectReaderDoc so renderPdfView can apply it
+  // after async PDF rendering completes
+  if (pdfViewState.active) {
+    pdfViewState.pendingHighlight = blockId;
   }
   selectReaderDoc(info.docIdx);
   setTimeout(() => {
@@ -1663,6 +1767,9 @@ function selectReaderDoc(idx) {
   const activeEl = document.querySelector(`.reader-doc-item[data-idx="${idx}"]`);
   if (activeEl) activeEl.classList.add("active");
 
+  // Track the currently selected document for PDF view
+  pdfViewState.currentDocIdx = idx;
+
   // Render PDF view if active
   if (pdfViewState.active) {
     renderPdfView(idx);
@@ -1796,7 +1903,15 @@ async function renderPdfView(idx) {
 
     updatePdfToolbar();
     await renderAllPdfPages(pdfDoc, blocks, pageDimensions, pdfViewState.scale);
+
+    // Apply pending highlight from onTraceClick if set
+    if (pdfViewState.pendingHighlight) {
+      const blockId = pdfViewState.pendingHighlight;
+      pdfViewState.pendingHighlight = null;
+      highlightPdfBlock(blockId);
+    }
   } catch (e) {
+    pdfViewState.pendingHighlight = null;
     readerPdfContainer.innerHTML = '<p class="pdf-error">' + escapeHtml(e.message) + '<br><small>请切换到文本视图查看提取的内容</small></p>';
   }
 }
@@ -2259,6 +2374,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       pdfViewState.pdfDoc = null;
       pdfViewState.renderedPages = {};
+      pdfViewState.pendingHighlight = null;
     });
   }
 
@@ -2274,6 +2390,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       pdfViewState.pdfDoc = null;
       pdfViewState.renderedPages = {};
+      pdfViewState.pendingHighlight = null;
     });
   }
 

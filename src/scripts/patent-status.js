@@ -82,6 +82,11 @@ var PATENT_STATUS = {
       "EGRT": { name: "电子授权通知 (eGrant Notification)", type: "allowance", stage: "授权" },
       "ISS.NTF": { name: "授权公告通知 (Issue Notification)", type: "allowance", stage: "授权" },
       "PTO.FEE": { name: "专利局费用通知 (PTO Fee Notification)", type: "notification", stage: "授权" },
+      "WELCOME.LET": { name: "USPTO局长欢迎信 (Welcome Letter from USPTO Director and Deputy Director)", type: "notification", stage: "审查前" },
+      "PD.FILED.F": { name: "电子检索优先权文件 (Priority Documents electronically retrieved requiring USPTO confirmation)", type: "misc", stage: "审查前" },
+      "N417.PYMT": { name: "电子提交缴费回执 (Electronic Filing System Payment Receipt)", type: "notification", stage: "审查中" },
+      "OA.APPENDIX": { name: "审查意见附录 (Office Action Appendix)", type: "office_action", stage: "审查中" },
+      "EGRANT.NTF": { name: "电子授权通知 (eGrant Notification)", type: "allowance", stage: "授权" },
     },
     typeNames: {
       "office_action": "审查意见",
