@@ -255,15 +255,23 @@ searchBtn.addEventListener("click", async () => {
   try {
     const familyData = await gdFetch(`/patent-family/svc/family/${queryType}/${office}/${docNum}`);
     result.family = familyData;
+    // 当通过 publication/patent 类型查询时，family 返回 corrAppNum 是真正的申请号
+    // 后续的文档列表查询必须使用申请号
+    if (familyData && familyData.corrAppNum) {
+      result.applicationNumber = familyData.corrAppNum;
+    }
   } catch (e) {
     warnings.push("同族查询失败: " + e.message);
   }
+
+  // 使用修正后的申请号查询文档列表
+  const appNumForDocs = result.applicationNumber;
 
   loadingText.textContent = "正在查询审查文档...";
   await new Promise(r => setTimeout(r, 1500));
 
   try {
-    const docData = await gdFetch(`/doc-list/svc/doclist/${office}/${docNum}/A`);
+    const docData = await gdFetch(`/doc-list/svc/doclist/${office}/${appNumForDocs}/A`);
     result.documents = docData;
     if (docData && docData.docNumber) {
       result.docNumber = docData.docNumber;
