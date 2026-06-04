@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=400">
+  <link rel="stylesheet" href="popup.css">
+  <title>专利审查文档助手</title>
+</head>
+<body>
+  <div class="container">
+    <!-- 顶部：页面识别 -->
+    <header class="header">
+      <h1 class="title">专利审查文档助手</h1>
+      <div id="page-info" class="page-info">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="page-type-text">检测中...</span>
+      </div>
+    </header>
+
+    <!-- 操作按钮区域 -->
+    <section id="actions" class="actions">
+      <!-- 动态生成按钮 -->
+    </section>
+
+    <!-- 提取结果区域 -->
+    <section id="result-section" class="result-section hidden">
+      <div class="result-header">
+        <h2>提取结果</h2>
+        <span id="result-count" class="result-count"></span>
+      </div>
+      <div id="result-content" class="result-content">
+        <!-- 动态填充 -->
+      </div>
+    </section>
+
+    <!-- 底部操作栏 -->
+    <footer id="footer-actions" class="footer-actions hidden">
+      <button id="btn-copy" class="btn btn-secondary" title="复制到剪贴板">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        复制
+      </button>
+      <button id="btn-send" class="btn btn-primary" title="发送到 Tauri 应用">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4z"/></svg>
+        发送到 Tauri
+      </button>
+      <button id="btn-analyze" class="btn btn-accent" title="AI 梳理">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 017 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 01-2 2h-4a2 2 0 01-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 017-7z"/><line x1="9" y1="21" x2="15" y2="21"/></svg>
+        AI 梳理
+      </button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
