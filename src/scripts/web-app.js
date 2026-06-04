@@ -4,14 +4,33 @@ const OFFICE_NAMES = {
   US: "美国 (USPTO)",
   EP: "欧洲 (EPO)",
   JP: "日本 (JPO)",
+  DE: "德国 (DPMA)",
   KR: "韩国 (KIPO)",
   WO: "WIPO (PCT)",
   WIPO: "WIPO (PCT)",
   CN: "中国 (CNIPA)",
-  DE: "德国 (DPMA)",
 };
 
 let currentData = null;
+
+// Map JP document codes to JPO API doc type endpoints
+function mapJpDocType(docCode, type) {
+  if (!docCode) return null;
+  const code = docCode.toUpperCase();
+  if (code.includes("KY") || code.includes("REFUSAL") || type === "office_action") {
+    return "refusal_reason";
+  }
+  if (code.includes("SA") || code.includes("DISPATCH") || type === "allowance") {
+    return "dispatch";
+  }
+  if (code.includes("IK") || code.includes("HO") || code.includes("SUBMISSION") || type === "response") {
+    return "submission";
+  }
+  if (code.includes("SH") || code.includes("TRIAL")) {
+    return "trial";
+  }
+  return "dispatch";
+}
 
 const isTauri = !!(window.__TAURI_INTERNALS__);
 
@@ -315,10 +334,28 @@ function renderKanban(data) {
     } else {
       colItems.forEach(it => {
         const isUS = data.office === "US";
+        const isJP = data.office === "JP";
+        const isDE = data.office === "DE";
         const urlDocNum = isUS ? data.applicationNumber : encodeURIComponent(data.docNumber || data.applicationNumber);
         const encodedDocId = encodeURIComponent(it.docId);
-        const extractUrl = it.docId ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
-        const downloadUrl = it.docId ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
+        let extractUrl = null;
+        let downloadUrl = null;
+
+        if (it.docId) {
+          if (isJP) {
+            const jpDocType = mapJpDocType(it.docCode, it.type);
+            if (jpDocType) {
+              extractUrl = `/api/jpo/doc/${jpDocType}/${urlDocNum}`;
+              downloadUrl = extractUrl;
+            }
+          } else if (isDE) {
+            extractUrl = `/api/de/file-inspection/${urlDocNum}`;
+            downloadUrl = extractUrl;
+          } else {
+            extractUrl = `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+            downloadUrl = `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+          }
+        }
         html += `
           <div class="kanban-card" data-idx="${it.idx}">
             <div class="kanban-card-header">
@@ -983,6 +1020,48 @@ function showTestResult(success, message) {
 }
 
 async function doExtractText(office, docNum, docId, pages, docFormat, engine, apiKey) {
+  // JP documents: use JPO API via Tauri command
+  if (office === "JP" && isTauri) {
+    const jpDocType = mapJpDocType(docId, null) || "dispatch";
+    const result = await tauriInvoke("jpo_fetch_doc", {
+      appNumber: docNum,
+      docType: jpDocType,
+    });
+    if (result && result.success && result.data) {
+      const docs = result.data.documents || [];
+      const allText = docs.map(d => d.content).join("\n\n");
+      return {
+        text: allText,
+        markdown: allText,
+        engine: "jpo_api",
+        blocks: [],
+        page_dimensions: {},
+        error: null,
+      };
+    }
+    throw new Error(result?.error || "JPO 文档获取失败");
+  }
+
+  // DE documents: use DPMA via Tauri command
+  if (office === "DE" && isTauri) {
+    const result = await tauriInvoke("dpma_file_inspection", {
+      fileNumber: docNum,
+    });
+    if (result && result.success && result.data) {
+      const docs = result.data.documents || [];
+      const allText = docs.map(d => d.document_type || d.document_id).join("\n");
+      return {
+        text: allText,
+        markdown: allText,
+        engine: "dpma_register",
+        blocks: [],
+        page_dimensions: {},
+        error: null,
+      };
+    }
+    throw new Error(result?.error || "DPMA 案卷查阅失败");
+  }
+
   if (isTauri) {
     const result = await tauriInvoke("extract_text", {
       country: office,

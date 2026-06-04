@@ -7,6 +7,7 @@ pub enum PatentOffice {
     CN,
     EP,
     JP,
+    DE,
     KR,
     WO,
 }
@@ -18,6 +19,7 @@ impl fmt::Display for PatentOffice {
             PatentOffice::CN => write!(f, "CN"),
             PatentOffice::EP => write!(f, "EP"),
             PatentOffice::JP => write!(f, "JP"),
+            PatentOffice::DE => write!(f, "DE"),
             PatentOffice::KR => write!(f, "KR"),
             PatentOffice::WO => write!(f, "WO"),
         }
@@ -31,19 +33,19 @@ impl PatentOffice {
             PatentOffice::CN => "中国 (CNIPA)",
             PatentOffice::EP => "欧洲 (EPO)",
             PatentOffice::JP => "日本 (JPO)",
+            PatentOffice::DE => "德国 (DPMA)",
             PatentOffice::KR => "韩国 (KIPO)",
             PatentOffice::WO => "世界知识产权组织 (WIPO/PCT)",
         }
     }
 
     pub fn supports_examination_history(&self) -> bool {
-        matches!(self, PatentOffice::US | PatentOffice::EP | PatentOffice::WO)
+        matches!(self, PatentOffice::US | PatentOffice::EP | PatentOffice::JP | PatentOffice::DE | PatentOffice::WO)
     }
 
     pub fn api_unavailable_message(&self) -> Option<String> {
         match self {
             PatentOffice::CN => Some("中国国家知识产权局 (CNIPA) 暂无公开 API，请访问 cnipa.gov.cn 网站查询".to_string()),
-            PatentOffice::JP => Some("日本特许厅 (JPO) API 需单独注册，请访问 j-platpat.inpit.go.jp 网站查询".to_string()),
             PatentOffice::KR => Some("韩国特许厅 (KIPO) KIPRIS API 需单独注册，请访问 kipris.or.kr 网站查询".to_string()),
             _ => None,
         }
@@ -81,6 +83,8 @@ pub fn detect_office(number: &str) -> Option<PatentOffice> {
         Some(PatentOffice::EP)
     } else if upper.starts_with("JP") {
         Some(PatentOffice::JP)
+    } else if upper.starts_with("DE") {
+        Some(PatentOffice::DE)
     } else if upper.starts_with("KR") {
         Some(PatentOffice::KR)
     } else if upper.starts_with("WO") || upper.starts_with("PCT") {
@@ -164,7 +168,27 @@ pub fn normalize_jp_application_number(input: &str) -> Result<String, Conversion
         return Err(ConversionError::InvalidNumber(input.to_string()));
     }
 
-    Ok(format!("JP{}", cleaned))
+    // JPO API uses 出願番号 format: YYYYNNNNNN (4-digit year + 6-digit serial)
+    let digits: String = cleaned.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.len() >= 10 {
+        Ok(digits)
+    } else {
+        Ok(format!("JP{}", cleaned))
+    }
+}
+
+pub fn normalize_de_application_number(input: &str) -> Result<String, ConversionError> {
+    let trimmed = input.trim().to_uppercase();
+    let cleaned = trimmed
+        .trim_start_matches("DE")
+        .replace(" ", "")
+        .replace(".", "");
+
+    if cleaned.is_empty() {
+        return Err(ConversionError::InvalidNumber(input.to_string()));
+    }
+
+    Ok(format!("DE{}", cleaned))
 }
 
 pub fn normalize_kr_application_number(input: &str) -> Result<String, ConversionError> {
@@ -191,6 +215,7 @@ pub fn parse_patent_number(input: &str) -> Result<PatentNumber, ConversionError>
         PatentOffice::CN => Some(normalize_cn_application_number(trimmed)?),
         PatentOffice::EP => Some(normalize_ep_application_number(trimmed)?),
         PatentOffice::JP => Some(normalize_jp_application_number(trimmed)?),
+        PatentOffice::DE => Some(normalize_de_application_number(trimmed)?),
         PatentOffice::KR => Some(normalize_kr_application_number(trimmed)?),
         PatentOffice::WO => Some(normalize_wo_application_number(trimmed)?),
     };
@@ -291,8 +316,9 @@ mod tests {
         assert!(PatentOffice::US.supports_examination_history());
         assert!(PatentOffice::EP.supports_examination_history());
         assert!(PatentOffice::WO.supports_examination_history());
+        assert!(PatentOffice::JP.supports_examination_history());
+        assert!(PatentOffice::DE.supports_examination_history());
         assert!(!PatentOffice::CN.supports_examination_history());
-        assert!(!PatentOffice::JP.supports_examination_history());
         assert!(!PatentOffice::KR.supports_examination_history());
     }
 }

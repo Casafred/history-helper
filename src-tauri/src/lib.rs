@@ -258,6 +258,114 @@ async fn extract_text(
     }
 }
 
+#[tauri::command]
+async fn jpo_status() -> Result<CommandResult, String> {
+    let configured = api::jpo::JpoClient::is_configured();
+    Ok(CommandResult::ok(serde_json::json!({
+        "configured": configured,
+        "office": "JP",
+        "source": "JPO API (ip-data.jpo.go.jp)"
+    })))
+}
+
+#[tauri::command]
+async fn jpo_fetch_progress(app_number: String) -> Result<CommandResult, String> {
+    let client = match api::jpo::JpoClient::new() {
+        Ok(c) => c,
+        Err(e) => return Ok(CommandResult::err(format!("JPO API 未配置: {}", e))),
+    };
+    match client.get_progress(&app_number).await {
+        Ok(data) => Ok(CommandResult::ok(serde_json::to_value(data).unwrap_or_default())),
+        Err(e) => Ok(CommandResult::err(format!("JPO 审查经纬查询失败: {}", e))),
+    }
+}
+
+#[tauri::command]
+async fn jpo_fetch_doc(app_number: String, doc_type: String) -> Result<CommandResult, String> {
+    let client = match api::jpo::JpoClient::new() {
+        Ok(c) => c,
+        Err(e) => return Ok(CommandResult::err(format!("JPO API 未配置: {}", e))),
+    };
+
+    let zip_bytes = match doc_type.as_str() {
+        "refusal_reason" => client.get_refusal_reason_doc(&app_number).await,
+        "dispatch" => client.get_dispatch_doc(&app_number).await,
+        "submission" => client.get_submission_doc(&app_number).await,
+        "trial" => client.get_trial_doc(&app_number).await,
+        _ => return Ok(CommandResult::err(format!("未知的文档类型: {}", doc_type))),
+    };
+
+    match zip_bytes {
+        Ok(bytes) => {
+            match api::jpo::JpoClient::extract_text_from_zip(&bytes) {
+                Ok(docs) => {
+                    let contents: Vec<serde_json::Value> = docs.iter().map(|d| {
+                        serde_json::json!({
+                            "filename": d.filename,
+                            "content": d.content,
+                            "docType": format!("{:?}", d.doc_type),
+                        })
+                    }).collect();
+                    Ok(CommandResult::ok(serde_json::json!({
+                        "office": "JP",
+                        "appNumber": app_number,
+                        "docType": doc_type,
+                        "documents": contents,
+                        "rawSize": bytes.len(),
+                    })))
+                }
+                Err(_) => {
+                    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                    Ok(CommandResult::ok(serde_json::json!({
+                        "office": "JP",
+                        "appNumber": app_number,
+                        "docType": doc_type,
+                        "rawData": encoded,
+                        "rawSize": bytes.len(),
+                        "format": "zip",
+                    })))
+                }
+            }
+        }
+        Err(e) => Ok(CommandResult::err(format!("JPO 文档下载失败: {}", e))),
+    }
+}
+
+#[tauri::command]
+async fn dpma_status() -> Result<CommandResult, String> {
+    Ok(CommandResult::ok(serde_json::json!({
+        "configured": true,
+        "office": "DE",
+        "source": "DPMAregister (register.dpma.de)"
+    })))
+}
+
+#[tauri::command]
+async fn dpma_file_inspection(file_number: String) -> Result<CommandResult, String> {
+    let client = api::dpma::DpmaClient::new();
+    match client.get_file_inspection(&file_number).await {
+        Ok(inspection) => Ok(CommandResult::ok(serde_json::to_value(&inspection).unwrap_or_default())),
+        Err(e) => Ok(CommandResult::err(format!("DPMA 案卷查阅失败: {}", e))),
+    }
+}
+
+#[tauri::command]
+async fn dpma_download_document(document_url: String) -> Result<CommandResult, String> {
+    let client = api::dpma::DpmaClient::new();
+    match client.download_document(&document_url).await {
+        Ok(pdf_bytes) => {
+            let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &pdf_bytes);
+            let is_pdf = pdf_bytes.len() > 2 && pdf_bytes[0] == 0x25 && pdf_bytes[1] == 0x50;
+            Ok(CommandResult::ok(serde_json::json!({
+                "data": encoded,
+                "size": pdf_bytes.len(),
+                "format": if is_pdf { "pdf" } else { "binary" },
+            })))
+        }
+        Err(e) => Ok(CommandResult::err(format!("DPMA 文档下载失败: {}", e))),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Ok(path) = std::env::current_exe() {
@@ -306,6 +414,12 @@ pub fn run() {
             download_document,
             batch_fetch_patents,
             extract_text,
+            jpo_status,
+            jpo_fetch_progress,
+            jpo_fetch_doc,
+            dpma_status,
+            dpma_file_inspection,
+            dpma_download_document,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -29,6 +29,8 @@ thiserror = "2"
 url = "2"
 rusqlite = { version = "0.31", features = ["bundled"] }
 base64 = "0.22"
+zip = "2"
+urlencoding = "2"
 
 [profile.release]
 lto = true

@@ -4,6 +4,8 @@ const fs = require("fs");
 const path = require("path");
 
 const GD_API_BASE = "https://d1kazzu6rbodne.cloudfront.net";
+const JPO_API_BASE = "https://ip-data.jpo.go.jp";
+const DPMA_REGISTER_BASE = "https://register.dpma.de";
 const PORT = 8080;
 
 const MIME_TYPES = {
@@ -139,6 +141,206 @@ function proxyGdApi(urlPath, res) {
   }
 }
 
+// ── JPO API proxy ──────────────────────────────────────────────────────────
+
+let jpoAccessToken = null;
+let jpoTokenExpires = 0;
+
+async function getJpoToken() {
+  const username = process.env.JPO_API_USERNAME;
+  const password = process.env.JPO_API_PASSWORD;
+  if (!username || !password) return null;
+
+  if (jpoAccessToken && Date.now() < jpoTokenExpires) return jpoAccessToken;
+
+  const tokenUrl = `${JPO_API_BASE}/oauth2/token`;
+  const body = `grant_type=password&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+
+  const result = await new Promise((resolve) => {
+    execFile("curl", [
+      "-s", "-w", "\n__HTTP_CODE__%{http_code}",
+      "--max-time", "15",
+      "-X", "POST",
+      "-H", `Host: ip-data.jpo.go.jp`,
+      "-H", "Content-Type: application/x-www-form-urlencoded",
+      "-d", body,
+      tokenUrl,
+    ], { maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
+      if (err) { resolve(null); return; }
+      const marker = "\n__HTTP_CODE__";
+      const idx = stdout.lastIndexOf(marker);
+      let httpCode = 200;
+      let jsonBody = stdout;
+      if (idx !== -1) {
+        httpCode = parseInt(stdout.substring(idx + marker.length), 10);
+        jsonBody = stdout.substring(0, idx);
+      }
+      if (httpCode !== 200) { resolve(null); return; }
+      try {
+        const data = JSON.parse(jsonBody);
+        resolve(data);
+      } catch { resolve(null); }
+    });
+  });
+
+  if (!result || !result.access_token) return null;
+  jpoAccessToken = result.access_token;
+  jpoTokenExpires = Date.now() + ((result.expires_in || 3600) - 300) * 1000;
+  return jpoAccessToken;
+}
+
+function proxyJpoDoc(docType, appNumber, res) {
+  const endpointMap = {
+    refusal_reason: "app_doc_cont_refusal_reason",
+    dispatch: "app_doc_cont_dispatch",
+    submission: "app_doc_cont_submission",
+    trial: "app_doc_cont_trial",
+  };
+  const endpoint = endpointMap[docType] || "app_doc_cont_dispatch";
+  const url = `${JPO_API_BASE}/api/patent/v1/${endpoint}/${appNumber}`;
+
+  (async () => {
+    const token = await getJpoToken();
+    if (!token) {
+      res.writeHead(503, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ error: "JPO API 未配置 (需设置 JPO_API_USERNAME / JPO_API_PASSWORD)" }));
+      return;
+    }
+
+    const args = [
+      "-s", "-w", " HTTP_CODE_%{http_code}",
+      "--max-time", "60",
+      "-H", `Authorization: Bearer ${token}`,
+      "-H", "Host: ip-data.jpo.go.jp",
+      "-H", "Accept: application/zip,*/*",
+      url,
+    ];
+
+    execFile("curl", args, { maxBuffer: 50 * 1024 * 1024, encoding: "buffer" }, (err, stdoutBuffer) => {
+      if (err) {
+        res.writeHead(502, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+
+      const markerBuffer = Buffer.from(" HTTP_CODE_");
+      let idx = -1;
+      for (let i = Math.max(0, stdoutBuffer.length - 20); i < stdoutBuffer.length; i++) {
+        if (stdoutBuffer.slice(i, i + markerBuffer.length).equals(markerBuffer)) {
+          idx = i; break;
+        }
+      }
+
+      let httpCode = 200;
+      let bodyBuffer = stdoutBuffer;
+      if (idx !== -1) {
+        httpCode = parseInt(stdoutBuffer.slice(idx + markerBuffer.length).toString().trim(), 10);
+        bodyBuffer = stdoutBuffer.slice(0, idx);
+      }
+
+      const isZip = bodyBuffer.length > 2 && bodyBuffer[0] === 0x50 && bodyBuffer[1] === 0x4b;
+      res.writeHead(httpCode, {
+        "Content-Type": isZip ? "application/zip" : "application/octet-stream",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+      });
+      res.end(bodyBuffer);
+    });
+  })();
+}
+
+// ── DPMA register proxy ────────────────────────────────────────────────────
+
+function proxyDpmaFileInspection(fileNumber, res) {
+  const searchUrl = `${DPMA_REGISTER_BASE}/DPMAregister/pat/Akteneinsicht?fileNumber=${encodeURIComponent(fileNumber)}`;
+
+  const args = [
+    "-s", "-w", "\n__HTTP_CODE__%{http_code}",
+    "--max-time", "30",
+    "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "-H", "Accept-Language: de,en-US;q=0.7,en;q=0.3",
+    "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    searchUrl,
+  ];
+
+  execFile("curl", args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+    if (err) {
+      res.writeHead(502, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ error: err.message }));
+      return;
+    }
+
+    const marker = "\n__HTTP_CODE__";
+    const idx = stdout.lastIndexOf(marker);
+    let httpCode = 200;
+    let body = stdout;
+    if (idx !== -1) {
+      httpCode = parseInt(stdout.substring(idx + marker.length), 10);
+      body = stdout.substring(0, idx);
+    }
+
+    res.writeHead(httpCode, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+    });
+    res.end(body);
+  });
+}
+
+function proxyDpmaDownload(reqUrl, res) {
+  // reqUrl = /api/de/download?uri=...
+  const urlObj = new URL(reqUrl, "http://localhost");
+  const targetUrl = urlObj.searchParams.get("uri");
+  if (!targetUrl) {
+    res.writeHead(400, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({ error: "Missing uri parameter" }));
+    return;
+  }
+
+  const args = [
+    "-s", "-w", " HTTP_CODE_%{http_code}",
+    "--max-time", "60",
+    "-H", "Accept: application/pdf,*/*",
+    "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    targetUrl,
+  ];
+
+  execFile("curl", args, { maxBuffer: 50 * 1024 * 1024, encoding: "buffer" }, (err, stdoutBuffer) => {
+    if (err) {
+      res.writeHead(502, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ error: err.message }));
+      return;
+    }
+
+    const markerBuffer = Buffer.from(" HTTP_CODE_");
+    let idx = -1;
+    for (let i = Math.max(0, stdoutBuffer.length - 20); i < stdoutBuffer.length; i++) {
+      if (stdoutBuffer.slice(i, i + markerBuffer.length).equals(markerBuffer)) {
+        idx = i; break;
+      }
+    }
+
+    let httpCode = 200;
+    let bodyBuffer = stdoutBuffer;
+    if (idx !== -1) {
+      httpCode = parseInt(stdoutBuffer.slice(idx + markerBuffer.length).toString().trim(), 10);
+      bodyBuffer = stdoutBuffer.slice(0, idx);
+    }
+
+    const isPdf = bodyBuffer.length > 2 && bodyBuffer[0] === 0x25 && bodyBuffer[1] === 0x50;
+    res.writeHead(httpCode, {
+      "Content-Type": isPdf ? "application/pdf" : "application/octet-stream",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+    });
+    res.end(bodyBuffer);
+  });
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
@@ -152,6 +354,25 @@ const server = http.createServer((req, res) => {
 
   if (req.url.startsWith("/api/gd/extract-text/")) {
     extractPdfText(req, res);
+    return;
+  }
+
+  if (req.url.startsWith("/api/jpo/doc/")) {
+    const parts = req.url.replace("/api/jpo/doc/", "").split("/");
+    const docType = parts[0] || "dispatch";
+    const appNumber = parts.slice(1).join("/");
+    proxyJpoDoc(docType, appNumber, res);
+    return;
+  }
+
+  if (req.url.startsWith("/api/de/download")) {
+    proxyDpmaDownload(req.url, res);
+    return;
+  }
+
+  if (req.url.startsWith("/api/de/file-inspection/")) {
+    const fileNumber = req.url.replace("/api/de/file-inspection/", "");
+    proxyDpmaFileInspection(fileNumber, res);
     return;
   }
 
@@ -277,4 +498,6 @@ async function extractPdfText(req, res) {
 server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}/`);
   console.log(`GD API proxy: /api/gd/* -> ${GD_API_BASE}/* (via curl)`);
+  console.log(`JPO API proxy: /api/jpo/doc/* -> ${JPO_API_BASE}/* (via curl)`);
+  console.log(`DPMA proxy: /api/de/* -> ${DPMA_REGISTER_BASE}/* (via curl)`);
 });
