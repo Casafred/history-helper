@@ -336,33 +336,17 @@ async fn dpma_status() -> Result<CommandResult, String> {
     Ok(CommandResult::ok(serde_json::json!({
         "configured": true,
         "office": "DE",
-        "source": "DPMAregister (register.dpma.de)"
+        "source": "DPMAregister (register.dpma.de)",
+        "note": "注册信息查询可用，案卷查阅(Akteneinsicht)需CAPTCHA无法程序化获取"
     })))
 }
 
 #[tauri::command]
-async fn dpma_file_inspection(file_number: String) -> Result<CommandResult, String> {
+async fn dpma_register_info(number: String) -> Result<CommandResult, String> {
     let client = api::dpma::DpmaClient::new();
-    match client.get_file_inspection(&file_number).await {
-        Ok(inspection) => Ok(CommandResult::ok(serde_json::to_value(&inspection).unwrap_or_default())),
-        Err(e) => Ok(CommandResult::err(format!("DPMA 案卷查阅失败: {}", e))),
-    }
-}
-
-#[tauri::command]
-async fn dpma_download_document(document_url: String) -> Result<CommandResult, String> {
-    let client = api::dpma::DpmaClient::new();
-    match client.download_document(&document_url).await {
-        Ok(pdf_bytes) => {
-            let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &pdf_bytes);
-            let is_pdf = pdf_bytes.len() > 2 && pdf_bytes[0] == 0x25 && pdf_bytes[1] == 0x50;
-            Ok(CommandResult::ok(serde_json::json!({
-                "data": encoded,
-                "size": pdf_bytes.len(),
-                "format": if is_pdf { "pdf" } else { "binary" },
-            })))
-        }
-        Err(e) => Ok(CommandResult::err(format!("DPMA 文档下载失败: {}", e))),
+    match client.get_register_info(&number).await {
+        Ok(info) => Ok(CommandResult::ok(serde_json::to_value(&info).unwrap_or_default())),
+        Err(e) => Ok(CommandResult::err(format!("DPMA 注册信息查询失败: {}", e))),
     }
 }
 
@@ -418,8 +402,7 @@ pub fn run() {
             jpo_fetch_progress,
             jpo_fetch_doc,
             dpma_status,
-            dpma_file_inspection,
-            dpma_download_document,
+            dpma_register_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

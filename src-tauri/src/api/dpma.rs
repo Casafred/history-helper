@@ -22,23 +22,26 @@ pub enum DpmaError {
     ParseError(String),
 }
 
+/// DPMAregister 注册信息（无需 CAPTCHA 即可获取）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DpmaDocumentEntry {
-    pub document_id: String,
-    pub document_type: Option<String>,
-    pub document_description: Option<String>,
-    pub document_date: Option<String>,
-    pub page_count: Option<i64>,
-    pub download_url: Option<String>,
-    pub doc_category: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DpmaFileInspection {
+pub struct DpmaRegisterInfo {
     pub file_number: String,
-    pub documents: Vec<DpmaDocumentEntry>,
+    pub aktenzeichen: Option<String>,
+    pub status: Option<String>,
+    pub applicant: Option<String>,
+    pub inventor: Option<String>,
+    pub representative: Option<String>,
+    pub filing_date: Option<String>,
+    pub publication_date: Option<String>,
+    pub priority: Option<String>,
+    pub ipc_classes: Vec<String>,
+    pub title: Option<String>,
+    pub bescheide_count: Option<i64>,
+    pub erwiderungen_count: Option<i64>,
+    pub publication_pdf_url: Option<String>,
+    /// 案卷查阅需要 CAPTCHA，无法程序化获取
+    pub akteneinsicht_requires_captcha: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -102,139 +105,221 @@ impl DpmaClient {
         Err(last_error.unwrap_or(DpmaError::RateLimited))
     }
 
-    pub async fn search_patent(&self, file_number: &str) -> Result<String, DpmaError> {
+    /// 从公开号/出願号获取案卷号(AKZ)，然后查询注册信息
+    pub async fn get_register_info(&self, number: &str) -> Result<DpmaRegisterInfo, DpmaError> {
+        // 尝试将输入号码转换为 AKZ 格式（10位数字 + 校验位，无空格无点）
+        let akz = self.normalize_to_akz(number);
+
+        // 直接访问注册信息页面（无需 CAPTCHA）
         let url = format!(
-            "{}/DPMAregister/pat/experte?search={}",
-            DPMA_REGISTER_BASE,
-            urlencoding::encode(file_number)
+            "{}/DPMAregister/pat/register?AKZ={}&CURSOR=0",
+            DPMA_REGISTER_BASE, akz
         );
         let resp = self.get_with_retry(&url).await?;
         let html = resp.text().await?;
-        Ok(html)
+
+        // 检查是否找到了专利
+        if html.contains("Kein Treffer") || html.contains("keine Ergebnisse") {
+            return Err(DpmaError::NotFound(format!("DPMAregister 中未找到: {}", number)));
+        }
+
+        self.parse_register_page(&html, &akz)
     }
 
-    pub async fn get_file_inspection(&self, file_number: &str) -> Result<DpmaFileInspection, DpmaError> {
-        let search_html = self.search_patent(file_number).await?;
-        let inspection_url = self.extract_inspection_url(&search_html, file_number)?;
-        let resp = self.get_with_retry(&inspection_url).await?;
-        let inspection_html = resp.text().await?;
-        let documents = self.parse_inspection_documents(&inspection_html)?;
+    /// 将各种格式的号码转换为 AKZ 格式
+    /// DE102023115542A1 -> 1020231155423
+    /// 102023115542.3 -> 1020231155423
+    /// 1020231155423 -> 1020231155423
+    fn normalize_to_akz(&self, number: &str) -> String {
+        let mut n = number.to_string();
+        // 去除 DE 前缀
+        if n.starts_with("DE") || n.starts_with("de") {
+            n = n[2..].to_string();
+        }
+        // 去除公开类型后缀 (A1, B3, etc.)
+        while !n.is_empty() && n.chars().last().map_or(false, |c| c.is_ascii_alphabetic()) {
+            n.pop();
+        }
+        // 去除空格和点
+        n = n.chars().filter(|c| !c.is_whitespace() && *c != '.').collect();
 
-        Ok(DpmaFileInspection {
-            file_number: file_number.to_string(),
-            documents,
+        // 如果是11位纯数字（10位+校验位），直接返回
+        if n.len() == 11 && n.chars().all(|c| c.is_ascii_digit()) {
+            return n;
+        }
+        // 如果是10位纯数字，添加校验位
+        if n.len() == 10 && n.chars().all(|c| c.is_ascii_digit()) {
+            return self.compute_akz_check_digit(&n);
+        }
+        // 其他情况原样返回
+        n
+    }
+
+    /// 计算 DPMA AKZ 校验位（模11算法）
+    fn compute_akz_check_digit(&self, digits10: &str) -> String {
+        let weights = [2, 3, 4, 5, 6, 7, 8, 9, 2, 3];
+        let chars: Vec<char> = digits10.chars().collect();
+        let mut sum = 0i64;
+        for (i, c) in chars.iter().enumerate() {
+            if let Some(d) = c.to_digit(10) {
+                if i < weights.len() {
+                    sum += d as i64 * weights[i];
+                }
+            }
+        }
+        let check = (11 - (sum % 11)) % 11;
+        format!("{}{}", digits10, check)
+    }
+
+    fn parse_register_page(&self, html: &str, akz: &str) -> Result<DpmaRegisterInfo, DpmaError> {
+        let title = self.extract_field(html, "Bezeichnung");
+        let applicant = self.extract_field(html, "Anmelder");
+        let inventor = self.extract_field(html, "Erfinder");
+        let representative = self.extract_field(html, "Vertreter");
+        let filing_date = self.extract_field(html, "Anmeldetag");
+        let publication_date = self.extract_labeled_date(html, "Offenlegungstag");
+        let priority = self.extract_field(html, "Priorität");
+        let status = self.extract_status(html);
+        let ipc_classes = self.extract_ipc_classes(html);
+        let bescheide_count = self.extract_count(html, "Bescheide");
+        let erwiderungen_count = self.extract_count(html, "Erwiderungen");
+        let publication_pdf_url = self.extract_publication_pdf_link(html);
+
+        Ok(DpmaRegisterInfo {
+            file_number: akz.to_string(),
+            aktenzeichen: Some(format!("{} {} {} {}.{}", &akz[0..2], &akz[2..6], &akz[6..9], &akz[9..11], &akz[11..12])),
+            status,
+            applicant,
+            inventor,
+            representative,
+            filing_date,
+            publication_date,
+            priority,
+            ipc_classes,
+            title,
+            bescheide_count,
+            erwiderungen_count,
+            publication_pdf_url,
+            akteneinsicht_requires_captcha: true,
         })
     }
 
-    pub async fn download_document(&self, document_url: &str) -> Result<Vec<u8>, DpmaError> {
-        let full_url = if document_url.starts_with("http") {
-            document_url.to_string()
-        } else {
-            format!("{}{}", DPMA_REGISTER_BASE, document_url)
-        };
-
-        let resp = self
-            .client
-            .get(&full_url)
-            .header("Accept", "application/pdf,*/*")
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(DpmaError::ApiError { status, message: body });
-        }
-
-        let bytes = resp.bytes().await?.to_vec();
-        Ok(bytes)
-    }
-
-    fn extract_inspection_url(&self, html: &str, file_number: &str) -> Result<String, DpmaError> {
-        if let Some(url) = self.find_link_by_pattern(html, "Akteneinsicht") {
-            return Ok(if url.starts_with("http") { url } else { format!("{}{}", DPMA_REGISTER_BASE, url) });
-        }
-        Ok(format!(
-            "{}/DPMAregister/pat/Akteneinsicht?fileNumber={}",
-            DPMA_REGISTER_BASE,
-            urlencoding::encode(file_number)
-        ))
-    }
-
-    fn find_link_by_pattern(&self, html: &str, pattern: &str) -> Option<String> {
-        let lower_html = html.to_lowercase();
-        let pattern_lower = pattern.to_lowercase();
-        if let Some(idx) = lower_html.find(&pattern_lower) {
-            let before = &html[..idx];
-            if let Some(href_start) = before.rfind("href=\"") {
-                let url_start = href_start + 6;
-                if let Some(url_end) = html[url_start..].find('"') {
-                    return Some(html[url_start..url_start + url_end].to_string());
+    fn extract_field(&self, html: &str, label: &str) -> Option<String> {
+        // 尝试在 <th>label</th><td>value</td> 格式中提取
+        if let Some(idx) = html.find(label) {
+            let after_label = &html[idx + label.len()..];
+            // 找到下一个 <td> 内容
+            if let Some(td_start) = after_label.find("<td") {
+                let td_content_start = &after_label[td_start..];
+                if let Some(content_start) = td_content_start.find('>') {
+                    let content = &td_content_start[content_start + 1..];
+                    if let Some(content_end) = content.find("</td>") {
+                        let text = self.strip_html_tags(&content[..content_end]);
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            return Some(trimmed.to_string());
+                        }
+                    }
                 }
             }
         }
         None
     }
 
-    fn parse_inspection_documents(&self, html: &str) -> Result<Vec<DpmaDocumentEntry>, DpmaError> {
-        let mut documents = Vec::new();
-        let mut pos = 0;
-        let html_lower = html.to_lowercase();
-
-        while let Some(row_start) = html_lower[pos..].find("<tr") {
-            let row_start_abs = pos + row_start;
-            if let Some(row_end) = html[row_start_abs..].find("</tr>") {
-                let row = &html[row_start_abs..row_start_abs + row_end + 5];
-                if let Some(pdf_link) = self.extract_pdf_link(row) {
-                    let cells: Vec<String> = self.extract_table_cells(row);
-                    let doc_type = cells.get(0).cloned();
-                    let doc_date = cells.get(1).cloned();
-                    let doc_category = doc_type.as_ref().map(|dt| self.classify_de_document(dt)).flatten();
-
-                    documents.push(DpmaDocumentEntry {
-                        document_id: format!("DE_{}", documents.len()),
-                        document_type: doc_type,
-                        document_description: None,
-                        document_date: doc_date,
-                        page_count: None,
-                        download_url: Some(pdf_link),
-                        doc_category,
-                    });
-                }
-                pos = row_start_abs + row_end + 5;
-            } else {
-                break;
-            }
-        }
-
-        if documents.is_empty() {
-            let pdf_links = self.extract_all_pdf_links(html);
-            for (idx, link) in pdf_links.into_iter().enumerate() {
-                documents.push(DpmaDocumentEntry {
-                    document_id: format!("DE_{}", idx),
-                    document_type: None,
-                    document_description: None,
-                    document_date: None,
-                    page_count: None,
-                    download_url: Some(link),
-                    doc_category: None,
-                });
-            }
-        }
-
-        Ok(documents)
+    fn extract_labeled_date(&self, html: &str, label: &str) -> Option<String> {
+        self.extract_field(html, label)
     }
 
-    fn extract_pdf_link(&self, html: &str) -> Option<String> {
-        let lower = html.to_lowercase();
-        if !lower.contains(".pdf") && !lower.contains("download") && !lower.contains("document") {
-            return None;
+    fn extract_status(&self, html: &str) -> Option<String> {
+        // 尝试从 "Verfahrensstand" 或 "Status" 字段提取
+        if let Some(s) = self.extract_field(html, "Verfahrensstand") {
+            return Some(s);
         }
-        if let Some(href_idx) = lower.find("href=\"") {
-            let url_start = href_idx + 6;
+        if let Some(s) = self.extract_field(html, "Status") {
+            return Some(s);
+        }
+        // 尝试从 HTML 中找状态描述
+        if let Some(idx) = html.find("verfahrensstand") {
+            let after = &html[idx..];
+            if let Some(td) = after.find("<td") {
+                let content = &after[td..];
+                if let Some(gt) = content.find('>') {
+                    if let Some(end) = content.find("</td>") {
+                        let text = self.strip_html_tags(&content[gt + 1..end]);
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            return Some(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn extract_ipc_classes(&self, html: &str) -> Vec<String> {
+        let mut classes = Vec::new();
+        if let Some(idx) = html.find("IPC") {
+            let after = &html[idx..];
+            // IPC 分类号通常在链接中
+            let mut pos = 0;
+            let lower = after.to_lowercase();
+            while let Some(href_idx) = lower[pos..].find("href=\"") {
+                let abs_idx = pos + href_idx;
+                let url_start = abs_idx + 6;
+                if let Some(url_end) = after[url_start..].find('"') {
+                    let url = &after[url_start..url_start + url_end];
+                    if url.contains("ipc") || url.contains("klassifikation") {
+                        // 提取链接文本作为分类号
+                        if let Some(gt) = after[url_start + url_end..].find('>') {
+                            let text_start = url_start + url_end + gt + 1;
+                            if let Some(lt) = after[text_start..].find('<') {
+                                let class_text = after[text_start..text_start + lt].trim().to_string();
+                                if !class_text.is_empty() && class_text.len() < 20 {
+                                    classes.push(class_text);
+                                }
+                            }
+                        }
+                    }
+                    pos = url_start + url_end + 1;
+                } else {
+                    break;
+                }
+                if pos > 5000 { break; }
+            }
+        }
+        classes
+    }
+
+    fn extract_count(&self, html: &str, label: &str) -> Option<i64> {
+        // 查找 "Anzahl der Bescheide: X" 或类似格式
+        if let Some(idx) = html.find(label) {
+            let after = &html[idx + label.len()..];
+            // 查找紧跟的数字
+            for c in after.chars().take(20) {
+                if c.is_ascii_digit() {
+                    if let Some(num_str) = after.chars().take(20).collect::<String>().split(|c: char| !c.is_ascii_digit()).next() {
+                        if let Ok(n) = num_str.parse::<i64>() {
+                            return Some(n);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        None
+    }
+
+    fn extract_publication_pdf_link(&self, html: &str) -> Option<String> {
+        // 查找公开文献 PDF 链接（Offenlegungsschrift / Patentschrift）
+        let lower = html.to_lowercase();
+        let mut pos = 0;
+        while let Some(href_idx) = lower[pos..].find("href=\"") {
+            let abs_idx = pos + href_idx;
+            let url_start = abs_idx + 6;
             if let Some(url_end) = html[url_start..].find('"') {
                 let url = &html[url_start..url_start + url_end];
-                if url.contains(".pdf") || url.contains("download") || url.contains("Akteneinsicht") {
+                if url.contains("reqToken") && (url.contains(".pdf") || url.contains("download")) {
                     let full_url = if url.starts_with("http") {
                         url.to_string()
                     } else if url.starts_with("/") {
@@ -244,54 +329,12 @@ impl DpmaClient {
                     };
                     return Some(full_url);
                 }
-            }
-        }
-        None
-    }
-
-    fn extract_all_pdf_links(&self, html: &str) -> Vec<String> {
-        let mut links = Vec::new();
-        let lower = html.to_lowercase();
-        let mut pos = 0;
-
-        while let Some(href_idx) = lower[pos..].find("href=\"") {
-            let abs_idx = pos + href_idx;
-            let url_start = abs_idx + 6;
-            if let Some(url_end) = html[url_start..].find('"') {
-                let url = &html[url_start..url_start + url_end];
-                if url.contains(".pdf") || (url.contains("Akteneinsicht") && url.contains("download")) {
-                    let full_url = if url.starts_with("http") {
-                        url.to_string()
-                    } else if url.starts_with("/") {
-                        format!("{}{}", DPMA_REGISTER_BASE, url)
-                    } else {
-                        format!("{}/{}", DPMA_REGISTER_BASE, url)
-                    };
-                    links.push(full_url);
-                }
                 pos = url_start + url_end + 1;
             } else {
                 break;
             }
         }
-        links
-    }
-
-    fn extract_table_cells(&self, row: &str) -> Vec<String> {
-        let mut cells = Vec::new();
-        let mut pos = 0;
-        while let Some(td_start) = row[pos..].find("<td") {
-            let abs_start = pos + td_start;
-            if let Some(content_start) = row[abs_start..].find('>') {
-                let content_start_abs = abs_start + content_start + 1;
-                if let Some(content_end) = row[content_start_abs..].find("</td>") {
-                    let content = &row[content_start_abs..content_start_abs + content_end];
-                    cells.push(self.strip_html_tags(content).to_string());
-                    pos = content_start_abs + content_end + 5;
-                } else { break; }
-            } else { break; }
-        }
-        cells
+        None
     }
 
     fn strip_html_tags(&self, html: &str) -> String {
@@ -302,29 +345,6 @@ impl DpmaClient {
             } else { break; }
         }
         result
-    }
-
-    fn classify_de_document(&self, doc_type: &str) -> Option<String> {
-        let lower = doc_type.to_lowercase();
-        if lower.contains("prüfungsbescheid") || lower.contains("bescheid") {
-            Some("office_action".to_string())
-        } else if lower.contains("recherchebericht") {
-            Some("office_action".to_string())
-        } else if lower.contains("erteilungsbescheid") {
-            Some("allowance".to_string())
-        } else if lower.contains("patentschrift") {
-            Some("allowance".to_string())
-        } else if lower.contains("eingabe") || lower.contains("antwort") {
-            Some("response".to_string())
-        } else if lower.contains("prüfungsantrag") {
-            Some("request".to_string())
-        } else if lower.contains("offenlegungsschrift") {
-            Some("notification".to_string())
-        } else if lower.contains("einspruch") {
-            Some("notification".to_string())
-        } else {
-            Some("misc".to_string())
-        }
     }
 }
 

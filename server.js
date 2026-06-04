@@ -252,8 +252,26 @@ function proxyJpoDoc(docType, appNumber, res) {
 
 // ── DPMA register proxy ────────────────────────────────────────────────────
 
-function proxyDpmaFileInspection(fileNumber, res) {
-  const searchUrl = `${DPMA_REGISTER_BASE}/DPMAregister/pat/Akteneinsicht?fileNumber=${encodeURIComponent(fileNumber)}`;
+function proxyDpmaRegisterInfo(number, res) {
+  // 将号码转换为 AKZ 格式
+  let akz = number;
+  if (akz.startsWith("DE") || akz.startsWith("de")) akz = akz.substring(2);
+  // 去除公开类型后缀
+  while (akz.length > 0 && /[A-Za-z]/.test(akz[akz.length - 1])) {
+    akz = akz.substring(0, akz.length - 1);
+  }
+  // 去除空格和点
+  akz = akz.replace(/[\s.]/g, "");
+  // 如果10位数字，计算校验位
+  if (/^\d{10}$/.test(akz)) {
+    const weights = [2, 3, 4, 5, 6, 7, 8, 9, 2, 3];
+    let sum = 0;
+    for (let i = 0; i < 10; i++) sum += parseInt(akz[i]) * weights[i];
+    const check = (11 - (sum % 11)) % 11;
+    akz = akz + check;
+  }
+
+  const registerUrl = `${DPMA_REGISTER_BASE}/DPMAregister/pat/register?AKZ=${encodeURIComponent(akz)}&CURSOR=0`;
 
   const args = [
     "-s", "-w", "\n__HTTP_CODE__%{http_code}",
@@ -261,7 +279,7 @@ function proxyDpmaFileInspection(fileNumber, res) {
     "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "-H", "Accept-Language: de,en-US;q=0.7,en;q=0.3",
     "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-    searchUrl,
+    registerUrl,
   ];
 
   execFile("curl", args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
@@ -280,6 +298,7 @@ function proxyDpmaFileInspection(fileNumber, res) {
       body = stdout.substring(0, idx);
     }
 
+    // 返回HTML让前端解析，或直接返回原始内容
     res.writeHead(httpCode, {
       "Content-Type": "text/html; charset=utf-8",
       "Access-Control-Allow-Origin": "*",
@@ -370,9 +389,9 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.url.startsWith("/api/de/file-inspection/")) {
-    const fileNumber = req.url.replace("/api/de/file-inspection/", "");
-    proxyDpmaFileInspection(fileNumber, res);
+  if (req.url.startsWith("/api/de/register-info/")) {
+    const number = req.url.replace("/api/de/register-info/", "");
+    proxyDpmaRegisterInfo(number, res);
     return;
   }
 

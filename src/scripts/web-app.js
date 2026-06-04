@@ -349,8 +349,9 @@ function renderKanban(data) {
               downloadUrl = extractUrl;
             }
           } else if (isDE) {
-            extractUrl = `/api/de/file-inspection/${urlDocNum}`;
-            downloadUrl = extractUrl;
+            // DE: 案卷查阅需CAPTCHA，无法程序化获取文档，仅提供注册信息查询
+            extractUrl = null;
+            downloadUrl = null;
           } else {
             extractUrl = `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
             downloadUrl = `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
@@ -1042,24 +1043,37 @@ async function doExtractText(office, docNum, docId, pages, docFormat, engine, ap
     throw new Error(result?.error || "JPO 文档获取失败");
   }
 
-  // DE documents: use DPMA via Tauri command
-  if (office === "DE" && isTauri) {
-    const result = await tauriInvoke("dpma_file_inspection", {
-      fileNumber: docNum,
-    });
-    if (result && result.success && result.data) {
-      const docs = result.data.documents || [];
-      const allText = docs.map(d => d.document_type || d.document_id).join("\n");
-      return {
-        text: allText,
-        markdown: allText,
-        engine: "dpma_register",
-        blocks: [],
-        page_dimensions: {},
-        error: null,
-      };
+  // DE: 案卷查阅需CAPTCHA，无法程序化获取文档原文
+  if (office === "DE") {
+    // 尝试获取注册信息作为替代
+    if (isTauri) {
+      const result = await tauriInvoke("dpma_register_info", {
+        number: docNum,
+      });
+      if (result && result.success && result.data) {
+        const info = result.data;
+        const lines = [];
+        if (info.status) lines.push(`程序状态: ${info.status}`);
+        if (info.bescheideCount != null) lines.push(`审查通知数: ${info.bescheideCount}`);
+        if (info.erwiderungenCount != null) lines.push(`答复数: ${info.erwiderungenCount}`);
+        if (info.applicant) lines.push(`申请人: ${info.applicant}`);
+        if (info.filingDate) lines.push(`申请日: ${info.filingDate}`);
+        if (info.title) lines.push(`标题: ${info.title}`);
+        lines.push("");
+        lines.push("⚠ DPMAregister 案卷查阅(Akteneinsicht)需图形验证码，无法程序化获取审查文档原文。");
+        lines.push("请访问 https://register.dpma.de 手动查阅。");
+        const text = lines.join("\n");
+        return {
+          text,
+          markdown: text,
+          engine: "dpma_register",
+          blocks: [],
+          page_dimensions: {},
+          error: null,
+        };
+      }
     }
-    throw new Error(result?.error || "DPMA 案卷查阅失败");
+    throw new Error("DE 专利审查文档需通过 DPMAregister 网站手动查阅（需验证码），暂不支持程序化获取");
   }
 
   if (isTauri) {
