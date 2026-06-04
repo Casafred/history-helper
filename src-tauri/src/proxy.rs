@@ -7,11 +7,16 @@ use axum::{
 use reqwest::Client;
 use tower_http::cors::{Any, CorsLayer};
 
+use crate::api::dpma::DpmaClient;
+use crate::api::jpo::JpoClient;
+
 const GD_API_BASE: &str = "https://d1kazzu6rbodne.cloudfront.net";
 
 #[derive(Clone)]
 struct ProxyState {
     http_client: Client,
+    jpo_client: Option<JpoClient>,
+    dpma_client: DpmaClient,
 }
 
 /// Start the API proxy server on a random port. Returns the port number.
@@ -21,7 +26,30 @@ pub fn start_api_proxy() -> u16 {
         .build()
         .unwrap_or_default();
 
-    let state = ProxyState { http_client };
+    // Initialize JPO client if credentials are available
+    let jpo_client = if JpoClient::is_configured() {
+        match JpoClient::new() {
+            Ok(client) => {
+                log::info!("[Proxy] JPO API client initialized successfully");
+                Some(client)
+            }
+            Err(e) => {
+                log::warn!("[Proxy] JPO API client init failed: {}", e);
+                None
+            }
+        }
+    } else {
+        log::info!("[Proxy] JPO API credentials not configured, JP document access disabled");
+        None
+    };
+
+    let dpma_client = DpmaClient::new();
+
+    let state = ProxyState {
+        http_client,
+        jpo_client,
+        dpma_client,
+    };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -29,7 +57,19 @@ pub fn start_api_proxy() -> u16 {
         .allow_headers(Any);
 
     let app = Router::new()
+        // Global Dossier API proxy (existing)
         .route("/api/gd/{*path}", axum::routing::any(api_handler))
+        // JPO API routes (JP-specific)
+        .route("/api/jpo/progress/{app_number}", axum::routing::get(jpo_progress_handler))
+        .route("/api/jpo/doc/refusal-reason/{app_number}", axum::routing::get(jpo_refusal_reason_handler))
+        .route("/api/jpo/doc/dispatch/{app_number}", axum::routing::get(jpo_dispatch_handler))
+        .route("/api/jpo/doc/submission/{app_number}", axum::routing::get(jpo_submission_handler))
+        .route("/api/jpo/doc/trial/{app_number}", axum::routing::get(jpo_trial_handler))
+        .route("/api/jpo/status", axum::routing::get(jpo_status_handler))
+        // DPMA routes (DE-specific)
+        .route("/api/de/file-inspection/{file_number}", axum::routing::get(de_file_inspection_handler))
+        .route("/api/de/download/{*path}", axum::routing::get(de_download_handler))
+        .route("/api/de/status", axum::routing::get(de_status_handler))
         .layer(cors)
         .with_state(state);
 
@@ -74,6 +114,8 @@ pub fn start_api_proxy() -> u16 {
 }
 
 type QueryParams = std::collections::HashMap<String, String>;
+
+// ─── Global Dossier API Handler (existing) ──────────────────────────
 
 async fn api_handler(
     State(state): State<ProxyState>,
@@ -245,6 +287,267 @@ async fn handle_extract_text(
         })),
     }
 }
+
+// ─── JPO API Handlers (JP-specific) ─────────────────────────────────
+
+/// GET /api/jpo/status - Check if JPO API is configured
+async fn jpo_status_handler(State(state): State<ProxyState>) -> Response<Body> {
+    let configured = state.jpo_client.is_some();
+    json_ok(&serde_json::json!({
+        "configured": configured,
+        "office": "JP",
+        "source": "JPO API (ip-data.jpo.go.jp)"
+    }))
+}
+
+/// GET /api/jpo/progress/{app_number} - Get examination progress
+async fn jpo_progress_handler(
+    State(state): State<ProxyState>,
+    Path(app_number): Path<String>,
+) -> Response<Body> {
+    let jpo = match &state.jpo_client {
+        Some(client) => client,
+        None => return json_error(503, "JPO API 未配置。请在 .env 文件中设置 JPO_API_USERNAME 和 JPO_API_PASSWORD"),
+    };
+
+    match jpo.get_progress(&app_number).await {
+        Ok(data) => json_ok(&serde_json::to_value(data).unwrap_or_default()),
+        Err(e) => json_error(502, &format!("JPO API 请求失败: {}", e)),
+    }
+}
+
+/// GET /api/jpo/doc/refusal-reason/{app_number} - Download refusal reason document
+async fn jpo_refusal_reason_handler(
+    State(state): State<ProxyState>,
+    Path(app_number): Path<String>,
+) -> Response<Body> {
+    let jpo = match &state.jpo_client {
+        Some(client) => client,
+        None => return json_error(503, "JPO API 未配置"),
+    };
+
+    match jpo.get_refusal_reason_doc(&app_number).await {
+        Ok(zip_bytes) => {
+            // Try to extract text from ZIP, fallback to returning raw ZIP
+            match JpoClient::extract_text_from_zip(&zip_bytes) {
+                Ok(docs) => {
+                    let contents: Vec<serde_json::Value> = docs.iter().map(|d| {
+                        serde_json::json!({
+                            "filename": d.filename,
+                            "content": d.content,
+                            "docType": format!("{:?}", d.doc_type),
+                        })
+                    }).collect();
+                    json_ok(&serde_json::json!({
+                        "office": "JP",
+                        "appNumber": app_number,
+                        "docType": "refusal_reason",
+                        "documents": contents,
+                        "rawSize": zip_bytes.len(),
+                    }))
+                }
+                Err(_) => {
+                    // Return raw ZIP as binary if text extraction fails
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "application/zip")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .header("Content-Disposition", &format!("attachment; filename=\"jp_refusal_reason_{}.zip\"", app_number))
+                        .body(Body::from(zip_bytes))
+                        .unwrap_or_else(|_| json_error(500, "Failed to build response"))
+                }
+            }
+        }
+        Err(e) => json_error(502, &format!("JPO 拒絶理由通知書下载失败: {}", e)),
+    }
+}
+
+/// GET /api/jpo/doc/dispatch/{app_number} - Download dispatched documents
+async fn jpo_dispatch_handler(
+    State(state): State<ProxyState>,
+    Path(app_number): Path<String>,
+) -> Response<Body> {
+    let jpo = match &state.jpo_client {
+        Some(client) => client,
+        None => return json_error(503, "JPO API 未配置"),
+    };
+
+    match jpo.get_dispatch_doc(&app_number).await {
+        Ok(zip_bytes) => {
+            match JpoClient::extract_text_from_zip(&zip_bytes) {
+                Ok(docs) => {
+                    let contents: Vec<serde_json::Value> = docs.iter().map(|d| {
+                        serde_json::json!({
+                            "filename": d.filename,
+                            "content": d.content,
+                            "docType": format!("{:?}", d.doc_type),
+                        })
+                    }).collect();
+                    json_ok(&serde_json::json!({
+                        "office": "JP",
+                        "appNumber": app_number,
+                        "docType": "dispatch",
+                        "documents": contents,
+                        "rawSize": zip_bytes.len(),
+                    }))
+                }
+                Err(_) => {
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "application/zip")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .header("Content-Disposition", &format!("attachment; filename=\"jp_dispatch_{}.zip\"", app_number))
+                        .body(Body::from(zip_bytes))
+                        .unwrap_or_else(|_| json_error(500, "Failed to build response"))
+                }
+            }
+        }
+        Err(e) => json_error(502, &format!("JPO 発送書類下载失败: {}", e)),
+    }
+}
+
+/// GET /api/jpo/doc/submission/{app_number} - Download submitted documents
+async fn jpo_submission_handler(
+    State(state): State<ProxyState>,
+    Path(app_number): Path<String>,
+) -> Response<Body> {
+    let jpo = match &state.jpo_client {
+        Some(client) => client,
+        None => return json_error(503, "JPO API 未配置"),
+    };
+
+    match jpo.get_submission_doc(&app_number).await {
+        Ok(zip_bytes) => {
+            match JpoClient::extract_text_from_zip(&zip_bytes) {
+                Ok(docs) => {
+                    let contents: Vec<serde_json::Value> = docs.iter().map(|d| {
+                        serde_json::json!({
+                            "filename": d.filename,
+                            "content": d.content,
+                            "docType": format!("{:?}", d.doc_type),
+                        })
+                    }).collect();
+                    json_ok(&serde_json::json!({
+                        "office": "JP",
+                        "appNumber": app_number,
+                        "docType": "submission",
+                        "documents": contents,
+                        "rawSize": zip_bytes.len(),
+                    }))
+                }
+                Err(_) => {
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "application/zip")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .header("Content-Disposition", &format!("attachment; filename=\"jp_submission_{}.zip\"", app_number))
+                        .body(Body::from(zip_bytes))
+                        .unwrap_or_else(|_| json_error(500, "Failed to build response"))
+                }
+            }
+        }
+        Err(e) => json_error(502, &format!("JPO 提出書類下载失败: {}", e)),
+    }
+}
+
+/// GET /api/jpo/doc/trial/{app_number} - Download trial documents
+async fn jpo_trial_handler(
+    State(state): State<ProxyState>,
+    Path(app_number): Path<String>,
+) -> Response<Body> {
+    let jpo = match &state.jpo_client {
+        Some(client) => client,
+        None => return json_error(503, "JPO API 未配置"),
+    };
+
+    match jpo.get_trial_doc(&app_number).await {
+        Ok(zip_bytes) => {
+            match JpoClient::extract_text_from_zip(&zip_bytes) {
+                Ok(docs) => {
+                    let contents: Vec<serde_json::Value> = docs.iter().map(|d| {
+                        serde_json::json!({
+                            "filename": d.filename,
+                            "content": d.content,
+                            "docType": format!("{:?}", d.doc_type),
+                        })
+                    }).collect();
+                    json_ok(&serde_json::json!({
+                        "office": "JP",
+                        "appNumber": app_number,
+                        "docType": "trial",
+                        "documents": contents,
+                        "rawSize": zip_bytes.len(),
+                    }))
+                }
+                Err(_) => {
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "application/zip")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .header("Content-Disposition", &format!("attachment; filename=\"jp_trial_{}.zip\"", app_number))
+                        .body(Body::from(zip_bytes))
+                        .unwrap_or_else(|_| json_error(500, "Failed to build response"))
+                }
+            }
+        }
+        Err(e) => json_error(502, &format!("JPO 審判書類下载失败: {}", e)),
+    }
+}
+
+// ─── DPMA Handlers (DE-specific) ─────────────────────────────────────
+
+/// GET /api/de/status - Check if DPMA access is available
+async fn de_status_handler() -> Response<Body> {
+    json_ok(&serde_json::json!({
+        "configured": true,
+        "office": "DE",
+        "source": "DPMAregister (register.dpma.de)"
+    }))
+}
+
+/// GET /api/de/file-inspection/{file_number} - Get file inspection documents
+async fn de_file_inspection_handler(
+    State(state): State<ProxyState>,
+    Path(file_number): Path<String>,
+) -> Response<Body> {
+    match state.dpma_client.get_file_inspection(&file_number).await {
+        Ok(inspection) => {
+            json_ok(&serde_json::to_value(&inspection).unwrap_or_default())
+        }
+        Err(e) => json_error(502, &format!("DPMA 案卷查阅失败: {}", e)),
+    }
+}
+
+/// GET /api/de/download/{*path} - Download a specific document from DPMAregister
+async fn de_download_handler(
+    State(state): State<ProxyState>,
+    Path(path): Path<String>,
+) -> Response<Body> {
+    // Reconstruct the full URL from the path
+    let doc_url = if path.starts_with("http") {
+        path
+    } else {
+        format!("https://register.dpma.de/{}", path)
+    };
+
+    match state.dpma_client.download_document(&doc_url).await {
+        Ok(pdf_bytes) => {
+            let is_pdf = pdf_bytes.len() > 2 && pdf_bytes[0] == 0x25 && pdf_bytes[1] == 0x50;
+            let content_type = if is_pdf { "application/pdf" } else { "application/octet-stream" };
+
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, content_type)
+                .header("Access-Control-Allow-Origin", "*")
+                .header("Content-Disposition", "attachment; filename=\"de_document.pdf\"")
+                .body(Body::from(pdf_bytes))
+                .unwrap_or_else(|_| json_error(500, "Failed to build response"))
+        }
+        Err(e) => json_error(502, &format!("DPMA 文档下载失败: {}", e)),
+    }
+}
+
+// ─── Utility ──────────────────────────────────────────────────────────
 
 fn json_error(status: u16, message: &str) -> Response<Body> {
     Response::builder()

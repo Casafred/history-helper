@@ -59,7 +59,7 @@ pub fn run() {
                 );
             }
 
-            // Start local API proxy server (only /api/gd/* routes)
+            // Start local API proxy server (GD + JPO + DPMA routes)
             let port = proxy::start_api_proxy();
             eprintln!("[Tauri] API proxy server started on port {}", port);
 

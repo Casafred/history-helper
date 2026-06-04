@@ -1,5 +1,7 @@
 const GD_API_BASE_DEFAULT = "/api/gd";
 let GD_API_BASE = GD_API_BASE_DEFAULT;
+let JPO_API_BASE = "/api/jpo";
+let DE_API_BASE = "/api/de";
 const isTauri = !!(window.__TAURI_INTERNALS__);
 
 async function tauriInvoke(cmd, args) {
@@ -20,6 +22,8 @@ if (isTauri) {
       const port = await tauriInvoke("get_api_port", {});
       if (port) {
         GD_API_BASE = `http://127.0.0.1:${port}/api/gd`;
+        JPO_API_BASE = `http://127.0.0.1:${port}/api/jpo`;
+        DE_API_BASE = `http://127.0.0.1:${port}/api/de`;
         console.log("[Tauri] API base set to:", GD_API_BASE);
       }
     } catch (e) {
@@ -550,6 +554,25 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+function mapJpDocType(docCode, type) {
+  // Map JP document codes/types to JPO API document type identifiers
+  if (type === "office_action") return "rejection";
+  if (type === "response") return "opinion";
+  if (type === "request") return "amendment";
+  if (type === "allowance") return "decision";
+  if (type === "notification") return "notification";
+
+  // Try matching by docCode for common JP document types
+  const code = (docCode || "").toLowerCase();
+  if (code.includes("拒絶") || code.includes("rejection")) return "rejection";
+  if (code.includes("意見") || code.includes("opinion")) return "opinion";
+  if (code.includes("補正") || code.includes("amendment")) return "amendment";
+  if (code.includes("査定") || code.includes("decision")) return "decision";
+  if (code.includes("通知") || code.includes("notification")) return "notification";
+
+  return null;
+}
+
 function renderDocuments(data) {
   const container = document.getElementById("documents-content");
   const docs = data.documents;
@@ -568,7 +591,9 @@ function renderDocuments(data) {
   const docNumber = docs.docNumber || data.applicationNumber;
   const isUS = data.office === "US";
   const isEP = data.office === "EP";
-  const canDownload = isUS || isEP;
+  const isJP = data.office === "JP";
+  const isDE = data.office === "DE";
+  const canDownload = isUS || isEP || isJP || isDE;
   const urlDocNum = isUS ? (data.corrAppNum || data.applicationNumber) : encodeURIComponent(data.corrAppNum || docNumber);
 
   // Build type counts for filter chips
@@ -647,8 +672,28 @@ function renderDocuments(data) {
     } else {
       colItems.forEach(it => {
         const encodedDocId = encodeURIComponent(it.docId);
-        const extractUrl = (it.docId && canDownload) ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
-        const downloadUrl = (it.docId && canDownload) ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}` : null;
+        let extractUrl = null;
+        let downloadUrl = null;
+
+        if (it.docId && canDownload) {
+          if (isJP) {
+            // JP documents use JPO API endpoints
+            // Map docCode to JPO API doc type
+            const jpDocType = mapJpDocType(it.docCode, it.type);
+            if (jpDocType) {
+              extractUrl = `${JPO_API_BASE}/doc/${jpDocType}/${urlDocNum}`;
+              downloadUrl = extractUrl; // JPO returns structured JSON with text content
+            }
+          } else if (isDE) {
+            // DE documents use DPMAregister file inspection
+            extractUrl = `${DE_API_BASE}/file-inspection/${urlDocNum}`;
+            downloadUrl = extractUrl;
+          } else {
+            // US/EP use Global Dossier API
+            extractUrl = `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+            downloadUrl = `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+          }
+        }
         columnsHtml += `
           <div class="kanban-card doc-column-card" data-idx="${it.idx}" data-filter-type="${it.type}" data-search-text="${escapeHtml((it.docCode + ' ' + it.desc + ' ' + it.date + ' ' + it.name).toLowerCase())}">
             <div class="kanban-card-header">
@@ -662,6 +707,8 @@ function renderDocuments(data) {
               ${extractUrl ? '<button class="btn-small btn-extract" data-action="doc-col-extract" data-url="' + extractUrl + '" data-idx="' + it.idx + '" data-doctype="' + escapeHtml(it.docCode) + '">提取内容</button>' : ''}
               ${downloadUrl ? '<button class="btn-small btn-download" data-action="doc-col-download" data-url="' + downloadUrl + '" data-filename="' + escapeHtml(it.docCode) + '_' + escapeHtml(it.date.replace(/\//g, '-')) + '.pdf">下载</button>' : ''}
               ${!canDownload ? '<span class="doc-readonly-hint">仅提供状态信息，暂不支持下载原文</span>' : ''}
+              ${isJP && canDownload ? '<span class="doc-source-hint">数据来源: JPO API</span>' : ''}
+              ${isDE && canDownload ? '<span class="doc-source-hint">数据来源: DPMAregister</span>' : ''}
             </div>
             <div id="doc-col-extracted-${it.idx}" class="kanban-extracted hidden"></div>
           </div>
@@ -1109,6 +1156,44 @@ async function doExtractText(office, docNum, docId, pages, docFormat, engine, ap
     throw new Error(result?.error || "Tauri extract_text failed");
   }
 
+  // JP documents use JPO API
+  if (office === "JP") {
+    const it = kanbanState.documents.find(d => d.docId === docId);
+    const jpDocType = mapJpDocType(it ? it.docCode : "", it ? it.type : "");
+    if (jpDocType) {
+      const jpUrl = `${JPO_API_BASE}/doc/${jpDocType}/${docNum}`;
+      const resp = await fetch(jpUrl);
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const data = await resp.json();
+      return {
+        text: data.text || "",
+        markdown: data.markdown || "",
+        engine: "jpo_api",
+        blocks: data.blocks || [],
+        page_dimensions: data.page_dimensions || {},
+        error: data.error || null,
+      };
+    }
+    throw new Error("无法识别 JP 文档类型");
+  }
+
+  // DE documents use DPMAregister API
+  if (office === "DE") {
+    const deUrl = `${DE_API_BASE}/file-inspection/${docNum}`;
+    const resp = await fetch(deUrl);
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    return {
+      text: data.text || "",
+      markdown: data.markdown || "",
+      engine: "dpma_api",
+      blocks: data.blocks || [],
+      page_dimensions: data.page_dimensions || {},
+      error: data.error || null,
+    };
+  }
+
+  // US/EP use Global Dossier API
   let extractUrl = `/api/gd/extract-text/${office}/${docNum}/${encodeURIComponent(docId)}/${pages}/${docFormat}?engine=${encodeURIComponent(engine)}`;
   if (engine === "glm_ocr" && apiKey) {
     extractUrl += "&api_key=" + encodeURIComponent(apiKey);
@@ -1131,10 +1216,10 @@ kanbanAutoBtn.addEventListener("click", async () => {
   const items = kanbanState.documents;
   if (!items || items.length === 0) { showError("请先查询专利并加载审查文档"); return; }
 
-  const canDownload = currentData.office === "US" || currentData.office === "EP";
+  const canDownload = currentData.office === "US" || currentData.office === "EP" || currentData.office === "JP" || currentData.office === "DE";
   if (!canDownload) {
     analysisSection.classList.remove("hidden");
-    analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">CN / DE / JP 专利暂不支持文档下载与提取，无法进行 AI 梳理。仅 US / EP 专利支持审查文档原文获取。</p>';
+    analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">CN 专利暂不支持文档下载与提取，无法进行 AI 梳理。仅 US / EP / JP / DE 专利支持审查文档原文获取。</p>';
     kanbanAutoBtn.disabled = false;
     return;
   }
@@ -1820,7 +1905,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         // Try to extract on demand
         const it = kanbanState.documents.find(d => d.idx === idx);
-        const canDl = currentData && (currentData.office === "US" || currentData.office === "EP");
+        const canDl = currentData && (currentData.office === "US" || currentData.office === "EP" || currentData.office === "JP" || currentData.office === "DE");
         if (it && it.docId && currentData && canDl) {
           compareDocContent.innerHTML = '<p class="extracting">正在提取文档内容...</p>';
           const config = window.AI.loadAIConfig();
@@ -1860,7 +1945,7 @@ document.addEventListener("DOMContentLoaded", () => {
               compareDocContent.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(e.message) + '</p>';
             });
         } else if (!canDl) {
-          compareDocContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">CN / DE / JP 专利暂不支持文档下载与提取</p>';
+          compareDocContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">CN 专利暂不支持文档下载与提取</p>';
         } else {
           compareDocContent.innerHTML = '<p class="placeholder">该文档尚未提取内容</p>';
         }

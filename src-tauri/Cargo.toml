@@ -31,6 +31,8 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 base64 = "0.22"
 axum = "0.7"
 tower-http = { version = "0.5", features = ["cors", "fs"] }
+zip = "2"
+urlencoding = "2"
 
 [profile.release]
 lto = true
