@@ -2,12 +2,66 @@
   "name": "history-helper",
   "version": "0.1.0",
   "private": true,
+  "main": "electron-main.js",
   "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "pack": "electron-builder --dir",
+    "build:electron": "electron-builder",
     "tauri": "tauri",
-    "dev": "tauri dev",
-    "build": "tauri build"
+    "dev:tauri": "tauri dev",
+    "build:tauri": "tauri build"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@tauri-apps/cli": "^2",
+    "electron": "^35",
+    "electron-builder": "^26"
+  },
+  "build": {
+    "appId": "com.history-helper.app",
+    "productName": "专利审查梳理工具",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron-main.js",
+      "extract_pdf.py",
+      {
+        "from": "src",
+        "to": "src",
+        "filter": [
+          "web.html",
+          "styles/**",
+          "scripts/marked.min.js",
+          "scripts/docx.umd.js",
+          "scripts/FileSaver.min.js",
+          "scripts/web-ai.js",
+          "scripts/patent-status.js",
+          "scripts/web-app.js"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "src-tauri/icons/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": ["zh-CN"],
+      "language": 2052,
+      "perMachine": false,
+      "allowElevation": false,
+      "unicode": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "${productName}-${version}-setup.${ext}"
+    },
+    "asar": true,
+    "asarUnpack": []
   }
 }
