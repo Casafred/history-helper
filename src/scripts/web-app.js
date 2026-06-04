@@ -138,9 +138,17 @@ function parsePatentNumber(input) {
   }
 
   let appNum = stripped;
-  // 统一规则：有字母后缀(如 B2, A1, B1) → publication；无后缀 → application
+  // 根据后缀自动识别查询类型：
+  //   B1/B2 → patent（授权专利号）
+  //   A1/A2/A3 等 → publication（公开号）
+  //   无后缀 → application（申请号）
   if (kindCode) {
-    queryType = "publication";
+    const kc = kindCode.toUpperCase();
+    if (/^B\d*$/.test(kc)) {
+      queryType = "patent";
+    } else {
+      queryType = "publication";
+    }
   }
   switch (office) {
     case "US":
