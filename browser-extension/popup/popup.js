@@ -8,6 +8,65 @@
  *   4. 提供复制、发送到 Tauri、AI 梳理功能
  */
 
+// ============ 应用端口发现 ============
+
+const APP_PORT_STORAGE_KEY = 'patent-helper-app-port';
+const DEFAULT_PORTS = [7865, 7866, 7867, 7868, 7869, 7870, 7871, 7872, 7873, 7874, 7875];
+
+/**
+ * 发现桌面应用端口
+ * 策略：1) 用户配置的端口 2) 扫描常见端口 3) 提示用户输入
+ */
+async function discoverAppPort() {
+  // 1. 检查用户保存的端口
+  const saved = localStorage.getItem(APP_PORT_STORAGE_KEY);
+  if (saved) {
+    const port = parseInt(saved, 10);
+    if (await testPort(port)) return port;
+    localStorage.removeItem(APP_PORT_STORAGE_KEY);
+  }
+
+  // 2. 扫描常见端口
+  for (const port of DEFAULT_PORTS) {
+    if (await testPort(port)) {
+      localStorage.setItem(APP_PORT_STORAGE_KEY, String(port));
+      return port;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 测试端口是否可用
+ */
+async function testPort(port) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    const response = await fetch(`http://127.0.0.1:${port}/api/extension/port`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (response.ok) {
+      const data = await response.json();
+      return data.port === port;
+    }
+  } catch {
+    // 端口不可用
+  }
+  return false;
+}
+
+/**
+ * 获取应用基础 URL
+ */
+async function getAppBaseUrl() {
+  const port = await discoverAppPort();
+  if (port) return `http://127.0.0.1:${port}`;
+  return null;
+}
+
 // ============ DOM 元素引用 ============
 const pageInfo = document.getElementById('page-info');
 const statusDot = document.getElementById('status-dot');
@@ -471,7 +530,13 @@ btnSend.addEventListener('click', async () => {
   btnSend.innerHTML = '<span class="loading"></span> 发送中...';
 
   try {
-    const response = await fetch('http://localhost:7865/api/extension/import', {
+    const baseUrl = await getAppBaseUrl();
+    if (!baseUrl) {
+      showToast('未找到桌面应用，请确保应用已启动');
+      return;
+    }
+
+    const response = await fetch(`${baseUrl}/api/extension/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -508,7 +573,13 @@ btnAnalyze.addEventListener('click', async () => {
   btnAnalyze.innerHTML = '<span class="loading"></span> 分析中...';
 
   try {
-    const response = await fetch('http://localhost:7865/api/extension/analyze', {
+    const baseUrl = await getAppBaseUrl();
+    if (!baseUrl) {
+      showToast('未找到桌面应用，请确保应用已启动');
+      return;
+    }
+
+    const response = await fetch(`${baseUrl}/api/extension/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

@@ -396,8 +396,95 @@ async function extractPdfText(req, res) {
   }
 }
 
+// ============ 浏览器插件接口 ============
+
+function handleExtensionApi(req, res) {
+  const corsHeaders = {
+    "Content-Type": "application/json; charset=utf-8",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  };
+
+  const urlObj = new URL(req.url, "http://localhost");
+  const pathname = urlObj.pathname;
+
+  // GET /api/extension/port — 返回当前服务端口（供插件发现）
+  if (pathname === "/api/extension/port" && req.method === "GET") {
+    const port = server.address()?.port;
+    res.writeHead(200, corsHeaders);
+    res.end(JSON.stringify({ port, status: "ok" }));
+    return;
+  }
+
+  // POST /api/extension/import — 接收插件抓取的数据
+  if (pathname === "/api/extension/import" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      try {
+        const data = JSON.parse(body);
+        console.log("[Extension] 收到数据:", data.office, data.type || data.data?.type);
+
+        // 通知前端渲染器（通过 postMessage 注入到页面）
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.executeJavaScript(
+            `window.postMessage({type:'extension-data',payload:${JSON.stringify(data).replace(/</g, '\\u003c')}},'*');`
+          );
+        }
+
+        res.writeHead(200, corsHeaders);
+        res.end(JSON.stringify({ success: true, message: "数据已接收" }));
+      } catch (e) {
+        res.writeHead(400, corsHeaders);
+        res.end(JSON.stringify({ success: false, error: "无效的 JSON 数据" }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/extension/analyze — 对文本内容做 AI 梳理
+  if (pathname === "/api/extension/analyze" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      try {
+        const data = JSON.parse(body);
+        console.log("[Extension] 分析请求:", data.office, data.type);
+
+        // 通知前端渲染器进行 AI 分析（通过 postMessage 注入到页面）
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.executeJavaScript(
+            `window.postMessage({type:'extension-analyze',payload:${JSON.stringify({office: data.office, content: data.content, type: data.type, source: "browser-extension"}).replace(/</g, '\\u003c')}},'*');`
+          );
+        }
+
+        res.writeHead(200, corsHeaders);
+        res.end(JSON.stringify({ success: true, message: "分析请求已提交" }));
+      } catch (e) {
+        res.writeHead(400, corsHeaders);
+        res.end(JSON.stringify({ success: false, error: "无效的 JSON 数据" }));
+      }
+    });
+    return;
+  }
+
+  res.writeHead(404, corsHeaders);
+  res.end(JSON.stringify({ error: "未知的扩展接口" }));
+}
+
+function writePortFile(port) {
+  try {
+    const portFile = path.join(app.getPath("userData"), "extension-port.json");
+    fs.writeFileSync(portFile, JSON.stringify({ port, pid: process.pid, timestamp: Date.now() }));
+    console.log(`[Electron] Extension port file: ${portFile}`);
+  } catch (e) {
+    console.warn("[Electron] 无法写入端口文件:", e.message);
+  }
+}
+
 function startServer() {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     server = http.createServer((req, res) => {
       if (req.method === "OPTIONS") {
         res.writeHead(204, {
@@ -406,6 +493,12 @@ function startServer() {
           "Access-Control-Allow-Headers": "Content-Type, user-type",
         });
         res.end();
+        return;
+      }
+
+      // ── 浏览器插件接口 ──
+      if (req.url.startsWith("/api/extension/")) {
+        handleExtensionApi(req, res);
         return;
       }
 
@@ -427,9 +520,27 @@ function startServer() {
       serveStatic(filePath, res);
     });
 
-    server.listen(0, "127.0.0.1", () => {
+    // 优先使用固定端口 7865，被占用则自动分配
+    const preferredPort = 7865;
+    
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE" && preferredPort) {
+        console.log(`[Electron] Port ${preferredPort} in use, trying random port...`);
+        server.listen(0, "127.0.0.1", () => {
+          const port = server.address().port;
+          console.log(`[Electron] Local server running on http://127.0.0.1:${port}/`);
+          writePortFile(port);
+          resolve(port);
+        });
+      } else {
+        reject(err);
+      }
+    });
+
+    server.listen(preferredPort, "127.0.0.1", () => {
       const port = server.address().port;
       console.log(`[Electron] Local server running on http://127.0.0.1:${port}/`);
+      writePortFile(port);
       resolve(port);
     });
   });

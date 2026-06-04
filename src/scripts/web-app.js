@@ -1596,6 +1596,169 @@ function selectReaderAnalysis() {
   }
 }
 
+// ============ 浏览器插件数据处理 ============
+
+function handleExtensionData(data) {
+  if (!data) return;
+
+  // JP 审查经纬数据 — 填充到看板
+  if (data.office === "JP" && data.type === "keika" && data.documents) {
+    const appNumber = data.appNumber || "";
+    const docs = data.documents.map((doc, idx) => ({
+      docId: `jp-ext-${idx}`,
+      docCode: doc.name,
+      type: doc.category,
+      date: doc.date,
+      url: "",
+      description: doc.name,
+      extractUrl: null,
+      downloadUrl: null,
+      extractedText: null,
+      aiAnalysis: null,
+    }));
+
+    // 更新看板
+    const kanbanBoard = document.getElementById("kanban-board");
+    if (kanbanBoard) {
+      const statusColumns = kanbanBoard.querySelectorAll(".kanban-column");
+      if (statusColumns.length > 0) {
+        // 将文档按类别分配到看板列
+        for (const doc of docs) {
+          const colIdx = getKanbanColumnIndex(doc.type);
+          if (colIdx < statusColumns.length) {
+            const card = createKanbanCard(doc, doc.type, "JP", appNumber);
+            const cardsContainer = statusColumns[colIdx].querySelector(".kanban-cards");
+            if (cardsContainer) cardsContainer.appendChild(card);
+          }
+        }
+      }
+    }
+    showNotification(`已导入 ${docs.length} 个 JP 审查文档（来自浏览器插件）`);
+  }
+
+  // JP 文档全文 — 直接显示
+  if (data.office === "JP" && data.type === "document" && data.content) {
+    const idx = currentData?.documents?.length || 0;
+    const docObj = {
+      docId: `jp-doc-ext`,
+      docCode: data.title || "文档",
+      type: "extension",
+      date: "",
+      url: "",
+      description: data.title || "浏览器插件导入的文档",
+      extractedText: {
+        text: data.content,
+        markdown: data.content,
+        engine: "jplatpat_text",
+        blocks: [],
+        page_dimensions: {},
+      },
+    };
+
+    // 添加到文档列表
+    if (!currentData) currentData = {};
+    if (!currentData.documents) currentData.documents = [];
+    currentData.documents.push(docObj);
+
+    // 显示文档内容
+    showDocumentContent(data.content, data.title || "文档内容");
+    showNotification(`已导入文档: ${data.title || "未知"}`);
+  }
+
+  // DE 注册信息 — 显示在结果区域
+  if (data.office === "DE" && data.type === "register") {
+    const info = data.data || data;
+    const lines = [];
+    if (info.akz) lines.push(`Aktenzeichen: ${info.akz}`);
+    if (info.status) lines.push(`Status: ${info.status}`);
+    if (info.title) lines.push(`Bezeichnung: ${info.title}`);
+    if (info.applicant) lines.push(`Anmelder: ${info.applicant}`);
+    if (info.inventor) lines.push(`Erfinder: ${info.inventor}`);
+    if (info.representative) lines.push(`Vertreter: ${info.representative}`);
+    if (info.filingDate) lines.push(`Anmeldetag: ${info.filingDate}`);
+    if (info.publicationDate) lines.push(`Offenlegungstag: ${info.publicationDate}`);
+    if (info.bescheideCount != null) lines.push(`Bescheide: ${info.bescheideCount}`);
+    if (info.erwiderungenCount != null) lines.push(`Erwiderungen: ${info.erwiderungenCount}`);
+    if (info.ipcClasses?.length) lines.push(`IPC: ${info.ipcClasses.join(", ")}`);
+
+    if (info.procedures?.length) {
+      lines.push("\nVerfahrensdaten:");
+      for (const p of info.procedures) {
+        lines.push(`  ${p.nr}. ${p.type} - ${p.status} (${p.date})`);
+      }
+    }
+
+    showDocumentContent(lines.join("\n"), `DE 注册信息: ${info.akz || "未知"}`);
+    showNotification("已导入 DE 注册信息（来自浏览器插件）");
+  }
+}
+
+function handleExtensionAnalyze(data) {
+  if (!data || !data.content) return;
+
+  // 使用已有的 AI 分析功能
+  const config = AI.loadAIConfig();
+  const provider = AI.getCurrentProvider(config);
+  if (!provider || !provider.apiKey) {
+    showNotification("请先配置 AI API Key");
+    return;
+  }
+
+  const prompt = AI.getDefaultPrompt("docAnalysis");
+  const messages = [
+    { role: "system", content: prompt },
+    { role: "user", content: data.content },
+  ];
+
+  // 流式分析
+  const readerContent = document.getElementById("reader-content");
+  if (readerContent) {
+    readerContent.innerHTML = "<h3>AI 分析中...</h3>";
+    let fullContent = "";
+
+    AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
+      model: provider.model,
+      messages,
+      maxTokens: 32768,
+    }).then(async (stream) => {
+      for await (const chunk of stream) {
+        if (chunk.content) {
+          fullContent += chunk.content;
+          readerContent.innerHTML = marked.parse(fullContent);
+        }
+      }
+    }).catch((err) => {
+      readerContent.innerHTML = `<p class="error">分析失败: ${err.message}</p>`;
+    });
+  }
+}
+
+function showNotification(message) {
+  const existing = document.querySelector(".extension-notification");
+  if (existing) existing.remove();
+
+  const notif = document.createElement("div");
+  notif.className = "extension-notification";
+  notif.style.cssText = "position:fixed;top:20px;right:20px;background:#1a73e8;color:#fff;padding:12px 20px;border-radius:8px;z-index:10000;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);transition:opacity 0.3s;";
+  notif.textContent = message;
+  document.body.appendChild(notif);
+
+  setTimeout(() => {
+    notif.style.opacity = "0";
+    setTimeout(() => notif.remove(), 300);
+  }, 3000);
+}
+
+function showDocumentContent(content, title) {
+  const readerContent = document.getElementById("reader-content");
+  if (readerContent) {
+    readerContent.innerHTML = `<h3>${title || "文档内容"}</h3><pre style="white-space:pre-wrap;word-break:break-all;">${content}</pre>`;
+  }
+  // 切换到阅读器标签
+  const readerTab = document.querySelector('[data-tab="reader"]');
+  if (readerTab) readerTab.click();
+}
+
 async function exportToWord() {
   if (typeof docx === "undefined" || typeof saveAs === "undefined") {
     showError("Word 导出库未加载，请刷新页面重试");
@@ -1716,6 +1879,19 @@ async function exportToWord() {
 
 document.addEventListener("DOMContentLoaded", () => {
   loadAISettingsToForm();
+
+  // ── 监听浏览器插件发送的数据（通过 Electron 主进程注入） ──
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    if (event.data && event.data.type === "extension-data") {
+      console.log("[Extension] 收到插件数据:", event.data.payload);
+      handleExtensionData(event.data.payload);
+    }
+    if (event.data && event.data.type === "extension-analyze") {
+      console.log("[Extension] 收到分析请求:", event.data.payload);
+      handleExtensionAnalyze(event.data.payload);
+    }
+  });
 
   document.getElementById("documents-content").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-action]");
