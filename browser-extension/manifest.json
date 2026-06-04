@@ -3,7 +3,7 @@
   "name": "专利审查文档助手",
   "version": "1.0.0",
   "description": "抓取日本 J-PlatPat 和德国 DPMAregister 的专利审查文档",
-  "permissions": ["activeTab", "tabs", "storage"],
+  "permissions": ["activeTab", "tabs", "storage", "contextMenus"],
   "host_permissions": [
     "https://www.j-platpat.inpit.go.jp/*",
     "https://register.dpma.de/*",

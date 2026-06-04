@@ -392,8 +392,13 @@ function renderBibliographyResult(data) {
   if (data.patentNumber) addField('专利号', data.patentNumber);
   if (data.appNumber) addField('出愿号', data.appNumber);
   if (data.title) addField('发明名称', data.title);
-  if (data.applicant) addField('申请人', data.applicant);
-  if (data.status) addField('状态', data.status);
+  if (data.applicant) addField('专利权者', data.applicant);
+  if (data.inventor) addField('发明者', data.inventor);
+  if (data.filingDate) addField('出愿日', data.filingDate);
+  if (data.registrationDate) addField('注册日', data.registrationDate);
+  if (data.publicationNumber) addField('公开番号', data.publicationNumber);
+  if (data.publicationDate) addField('公开日', data.publicationDate);
+  if (data.status) addField('公报种别', data.status);
 }
 
 /**

@@ -21,6 +21,78 @@ chrome.runtime.onInstalled.addListener((details) => {
   } else if (details.reason === 'update') {
     console.log('[专利审查文档助手] 扩展已更新');
   }
+
+  // 创建右键菜单（解决弹窗页面无法点击扩展图标的问题）
+  chrome.contextMenus.create({
+    id: 'patent-extract',
+    title: '专利审查文档助手 - 提取当前页面',
+    contexts: ['page'],
+    documentUrlPatterns: [
+      'https://www.j-platpat.inpit.go.jp/*',
+      'https://register.dpma.de/*',
+    ],
+  });
+
+  // J-PlatPat 子菜单
+  chrome.contextMenus.create({
+    id: 'jp-extract-keika',
+    parentId: 'patent-extract',
+    title: '提取审查经纬列表',
+    contexts: ['page'],
+    documentUrlPatterns: ['https://www.j-platpat.inpit.go.jp/*'],
+  });
+  chrome.contextMenus.create({
+    id: 'jp-extract-document',
+    parentId: 'patent-extract',
+    title: '提取当前文档内容',
+    contexts: ['page'],
+    documentUrlPatterns: ['https://www.j-platpat.inpit.go.jp/*'],
+  });
+  chrome.contextMenus.create({
+    id: 'jp-extract-bibliography',
+    parentId: 'patent-extract',
+    title: '提取书志信息',
+    contexts: ['page'],
+    documentUrlPatterns: ['https://www.j-platpat.inpit.go.jp/*'],
+  });
+
+  // DPMA 子菜单
+  chrome.contextMenus.create({
+    id: 'de-extract-register',
+    parentId: 'patent-extract',
+    title: '提取注册信息',
+    contexts: ['page'],
+    documentUrlPatterns: ['https://register.dpma.de/*'],
+  });
+});
+
+// ============ 右键菜单点击处理 ============
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (!tab || !tab.id) return;
+
+  const actionMap = {
+    'jp-extract-keika': 'extractKeika',
+    'jp-extract-document': 'extractDocument',
+    'jp-extract-bibliography': 'extractBibliography',
+    'de-extract-register': 'extractRegister',
+  };
+
+  const action = actionMap[info.menuItemId];
+  if (!action) return;
+
+  const target = info.menuItemId.startsWith('jp-') ? 'jplatpat' : 'dpma';
+
+  chrome.tabs.sendMessage(tab.id, { target, action }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error('[右键菜单] 提取失败:', chrome.runtime.lastError.message);
+      return;
+    }
+    if (response && !response.error) {
+      // 存储提取结果，供 popup 查看或发送到应用
+      chrome.storage.local.set({ lastExtractedData: response });
+      console.log('[右键菜单] 提取成功:', response.type || response.office);
+    }
+  });
 });
 
 // ============ 消息监听 ============

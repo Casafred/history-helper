@@ -249,6 +249,7 @@ function extractDocumentContent() {
 
 /**
  * 从文献表示页面 (/p0200) 提取书志信息
+ * 页面结构：书志信息不是表格，而是 【字段名】值 格式的纯文本，用 <br> 分隔
  */
 function extractBibliography() {
   try {
@@ -259,41 +260,61 @@ function extractBibliography() {
       appNumber: '',
       title: '',
       applicant: '',
+      inventor: '',
+      filingDate: '',
+      registrationDate: '',
+      publicationNumber: '',
+      publicationDate: '',
       status: '',
     };
 
     const bodyText = document.body.innerText;
 
-    // 直接从页面文本正则匹配（比表格解析更可靠）
-    const appMatch = bodyText.match(/特願(\d{4}-\d+)/);
-    if (appMatch) result.appNumber = appMatch[0];
+    // 特許番号
+    const patentMatch = bodyText.match(/【特許番号】特許第(\d+)号/);
+    if (patentMatch) result.patentNumber = `特許${patentMatch[1]}`;
 
-    const patentMatch = bodyText.match(/特許(\d+)/);
-    if (patentMatch) result.patentNumber = patentMatch[0];
+    // 出願番号
+    const appMatch = bodyText.match(/【出願番号】特願(\d{4}-\d+)/);
+    if (appMatch) result.appNumber = `特願${appMatch[1]}`;
 
-    // 从标题提取状态
-    const headingMatch = bodyText.match(/特許\d+\s+(.+?)[\n\r]/);
-    if (headingMatch) result.status = headingMatch[1].trim();
+    // 発明の名称
+    const titleMatch = bodyText.match(/【発明の名称】(.+)/);
+    if (titleMatch) result.title = titleMatch[1].trim();
 
-    // 尝试从表格行提取键值对
-    const rows = document.querySelectorAll('table tr');
-    const fieldMap = {};
-    for (const row of rows) {
-      const cells = row.querySelectorAll('td, th');
-      if (cells.length >= 2) {
-        const key = cells[0].textContent.trim();
-        const value = cells[1].textContent.trim();
-        fieldMap[key] = value;
-      }
+    // 特許権者（J-PlatPat 使用「特許権者」而非「出願人」）
+    const applicantMatch = bodyText.match(/【特許権者】[\s\S]*?【氏名又は名称】(.+)/);
+    if (applicantMatch) {
+      result.applicant = applicantMatch[1].trim();
+    } else {
+      // 尝试出願人格式
+      const applicantMatch2 = bodyText.match(/【出願人】[\s\S]*?【氏名又は名称】(.+)/);
+      if (applicantMatch2) result.applicant = applicantMatch2[1].trim();
     }
 
-    for (const [key, value] of Object.entries(fieldMap)) {
-      if (key.includes('発明の名称') || key.includes('名称') || key.includes('Title')) {
-        result.title = value;
-      } else if (key.includes('出願人') || key.includes('権利者') || key.includes('Applicant')) {
-        result.applicant = value;
-      }
-    }
+    // 発明者
+    const inventorMatch = bodyText.match(/【発明者】[\s\S]*?【氏名】(.+)/);
+    if (inventorMatch) result.inventor = inventorMatch[1].trim();
+
+    // 出願日
+    const filingMatch = bodyText.match(/【出願日】(.+)/);
+    if (filingMatch) result.filingDate = filingMatch[1].trim();
+
+    // 登録日
+    const regMatch = bodyText.match(/【登録日】(.+)/);
+    if (regMatch) result.registrationDate = regMatch[1].trim();
+
+    // 公開番号
+    const pubNumMatch = bodyText.match(/【公開番号】\s*(.+?)[\s(]/);
+    if (pubNumMatch) result.publicationNumber = pubNumMatch[1].trim();
+
+    // 公開日
+    const pubDateMatch = bodyText.match(/【公開日】(.+)/);
+    if (pubDateMatch) result.publicationDate = pubDateMatch[1].trim();
+
+    // 公報種別作为状态
+    const statusMatch = bodyText.match(/【公報種別】(.+)/);
+    if (statusMatch) result.status = statusMatch[1].trim();
 
     return result;
   } catch (error) {
