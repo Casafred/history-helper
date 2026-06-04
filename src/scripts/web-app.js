@@ -138,34 +138,23 @@ function parsePatentNumber(input) {
   }
 
   let appNum = stripped;
+  // 统一规则：有字母后缀(如 B2, A1, B1) → publication；无后缀 → application
+  if (kindCode) {
+    queryType = "publication";
+  }
   switch (office) {
     case "US":
       appNum = stripped.replace(/^US/i, "").replace(/[^0-9]/g, "");
-      // 有字母后缀(如 B2, A1) → 公开号/专利号；无后缀 → 申请号
-      if (kindCode) {
-        const kc = kindCode.toUpperCase();
-        if (/^B\d*$/.test(kc)) {
-          queryType = "patent";
-        } else {
-          queryType = "publication";
-        }
-      } else if (appNum.length === 11 && /^20\d{9}$/.test(appNum)) {
-        // 11-digit starting with 20 → pre-grant publication
+      // 无后缀的11位且以20开头 → 也是公开号(如 20220301610)
+      if (!kindCode && appNum.length === 11 && /^20\d{9}$/.test(appNum)) {
         queryType = "publication";
       }
       break;
     case "EP":
       appNum = stripped.replace(/^EP/i, "").replace(/[\s.]/g, "");
-      if (kindCode) {
-        queryType = "publication";
-      } else if (appNum.length <= 8) {
-        queryType = "publication";
-      }
       break;
     case "JP":
       appNum = stripped.replace(/^JP/i, "").replace(/[\s-]/g, "");
-      if (kindCode) queryType = "publication";
-      else queryType = "publication";
       break;
     case "KR":
       appNum = stripped.replace(/^KR/i, "").replace(/[\s-]/g, "");
