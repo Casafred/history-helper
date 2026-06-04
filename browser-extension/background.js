@@ -3,7 +3,7 @@
  *
  * 功能：
  *   - 监听来自 content script 和 popup 的消息
- *   - 转发消息
+ *   - 管理右键菜单提取
  *   - 管理扩展状态
  */
 
@@ -11,7 +11,6 @@
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
     console.log('[专利审查文档助手] 扩展已安装');
-    // 初始化存储
     chrome.storage.local.set({
       settings: {
         tauriEndpoint: 'http://localhost:7865',
@@ -67,7 +66,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 // ============ 右键菜单点击处理 ============
-chrome.contextMenus.onClicked.addListener((info, tab) => {
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab || !tab.id) return;
 
   const actionMap = {
@@ -82,17 +81,56 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
   const target = info.menuItemId.startsWith('jp-') ? 'jplatpat' : 'dpma';
 
-  chrome.tabs.sendMessage(tab.id, { target, action }, (response) => {
-    if (chrome.runtime.lastError) {
-      console.error('[右键菜单] 提取失败:', chrome.runtime.lastError.message);
-      return;
-    }
+  try {
+    // 方法1：尝试通过 content script 消息通信
+    const response = await new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(tab.id, { target, action }, (res) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve(res);
+        }
+      });
+    });
+
     if (response && !response.error) {
-      // 存储提取结果，供 popup 查看或发送到应用
       chrome.storage.local.set({ lastExtractedData: response });
       console.log('[右键菜单] 提取成功:', response.type || response.office);
+    } else if (response && response.error) {
+      console.error('[右键菜单] 提取返回错误:', response.error);
     }
-  });
+  } catch {
+    // 方法2：Content script 未加载，使用 scripting API 动态注入
+    console.log('[右键菜单] Content script 未响应，尝试动态注入...');
+    try {
+      const file = target === 'jplatpat' ? 'content/jplatpat.js' : 'content/dpma.js';
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: [file],
+      });
+      // 等待脚本初始化
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      const response = await new Promise((resolve, reject) => {
+        chrome.tabs.sendMessage(tab.id, { target, action }, (res) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(res);
+          }
+        });
+      });
+
+      if (response && !response.error) {
+        chrome.storage.local.set({ lastExtractedData: response });
+        console.log('[右键菜单] 动态注入后提取成功:', response.type || response.office);
+      } else if (response && response.error) {
+        console.error('[右键菜单] 动态注入后提取返回错误:', response.error);
+      }
+    } catch (injectError) {
+      console.error('[右键菜单] 动态注入也失败:', injectError.message);
+    }
+  }
 });
 
 // ============ 消息监听 ============
@@ -116,8 +154,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // 处理来自 content script 的消息
   if (message.action === 'openDocumentTab') {
-    // J-PlatPat 文档链接通过 window.open 打开新窗口
-    // content script 可以请求 background 打开新标签页
     const { url } = message;
     if (url) {
       chrome.tabs.create({ url }, (tab) => {
@@ -156,7 +192,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 /**
  * 处理提取全部文档的请求
- * 逐个打开文档页面并提取内容
  */
 async function handleExtractAllDocuments(message, sender) {
   const { documents, baseUrl } = message;
@@ -168,13 +203,11 @@ async function handleExtractAllDocuments(message, sender) {
 
   for (const doc of documents) {
     try {
-      // 打开文档页面
       const tab = await chrome.tabs.create({
         url: baseUrl || 'about:blank',
         active: false,
       });
 
-      // 等待页面加载
       await new Promise((resolve) => {
         chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
           if (tabId === tab.id && info.status === 'complete') {
@@ -182,11 +215,9 @@ async function handleExtractAllDocuments(message, sender) {
             resolve();
           }
         });
-        // 超时保护
         setTimeout(resolve, 10000);
       });
 
-      // 向新标签页的 content script 发送提取请求
       const response = await new Promise((resolve) => {
         chrome.tabs.sendMessage(tab.id, {
           target: 'jplatpat',
@@ -207,7 +238,6 @@ async function handleExtractAllDocuments(message, sender) {
         ...response,
       });
 
-      // 关闭标签页
       await chrome.tabs.remove(tab.id);
     } catch (error) {
       results.push({
@@ -228,10 +258,8 @@ async function handleExtractAllDocuments(message, sender) {
 
 // ============ 标签页更新监听 ============
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  // 当 J-PlatPat 或 DPMA 页面加载完成时，可以执行初始化操作
   if (changeInfo.status === 'complete' && tab.url) {
     if (tab.url.includes('j-platpat.inpit.go.jp') || tab.url.includes('register.dpma.de')) {
-      // 更新扩展图标状态（可选）
       chrome.action.setBadgeText({ text: '', tabId });
     }
   }

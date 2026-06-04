@@ -10,6 +10,10 @@
  *       需要等待 DOM 加载完成后再提取数据。
  */
 
+// ============ 防止重复注入 ============
+if (typeof window.__patentHelperJpLoaded === 'undefined') {
+  window.__patentHelperJpLoaded = true;
+
 // ============ 文档类别映射 ============
 const JP_CATEGORY_MAP = {
   '拒絶理由通知書': 'office_action',
@@ -45,7 +49,7 @@ function inferCategory(name) {
  */
 function extractAppNumberFromUrl() {
   const bodyText = document.body.innerText;
-  const textMatch = bodyText.match(/特願(\d{4}-\d+)/);
+  const textMatch = bodyText.match(/特願(\d{4}[-‐]\d+)/);
   if (textMatch) return textMatch[0];
   return '';
 }
@@ -77,28 +81,23 @@ function waitForElement(selector, timeout = 5000) {
 
 /**
  * 从审查经纬页面 (/h0000) 提取审查文档列表
- * 页面结构：审查记录和注册记录分区，每行包含文档名称链接和日期
  */
 function extractKeikaInfo() {
   try {
     const appNumber = extractAppNumberFromUrl();
     const documents = [];
 
-    // 查找审查经纬表格中的文档链接
     const links = document.querySelectorAll('a[href="javascript:void(0)"]');
 
-    // 先收集特許願的日期，用于同组文档日期继承
     let applicationDate = '';
 
     for (const link of links) {
       const name = link.textContent.trim();
       if (!name || name.length < 2) continue;
 
-      // 只保留已知文档类别的链接
       const category = inferCategory(name);
       if (category === 'other') continue;
 
-      // 尝试从同一行提取日期
       let date = '';
       const row = link.closest('tr');
       if (row) {
@@ -113,7 +112,6 @@ function extractKeikaInfo() {
         }
       }
 
-      // 记录特許願的日期
       if (category === 'application' && date) {
         applicationDate = date;
       }
@@ -121,7 +119,6 @@ function extractKeikaInfo() {
       documents.push({ name, date, category });
     }
 
-    // 日期继承：出愿同时提交的文档（明細書等）继承特許願的日期
     if (applicationDate) {
       for (const doc of documents) {
         if (!doc.date && JP_CO_FILED_DOCS.some(k => doc.name.includes(k))) {
@@ -130,7 +127,6 @@ function extractKeikaInfo() {
       }
     }
 
-    // 如果没有找到 javascript:void(0) 链接，尝试表格行方式
     if (documents.length === 0) {
       const tables = document.querySelectorAll('table');
       for (const table of tables) {
@@ -175,11 +171,9 @@ function extractKeikaInfo() {
 
 /**
  * 从文档内容页面 (/h0101) 提取文档全文
- * 页面结构：标题在 <h2> 中，内容在 .processes-content 或主内容区
  */
 function extractDocumentContent() {
   try {
-    // 提取标题
     let title = '';
     const h2 = document.querySelector('h2');
     if (h2) {
@@ -197,20 +191,17 @@ function extractDocumentContent() {
       }
     }
 
-    // 提取文档内容 — 优先使用 .processes-content 选择器（更精准）
     let content = '';
     const mainContent = document.querySelector('.processes-content');
     if (mainContent) {
       content = mainContent.innerText.trim();
     } else {
-      // 回退：提取 #contents 区域
       const contentsArea = document.querySelector('#contents');
       if (contentsArea) {
         const clone = contentsArea.cloneNode(true);
         clone.querySelectorAll('script, style, noscript, .global-nav, header, nav').forEach(el => el.remove());
         content = clone.innerText.trim();
       } else {
-        // 最终回退：body 文本
         const body = document.body.cloneNode(true);
         body.querySelectorAll('script, style, noscript').forEach(el => el.remove());
         body.querySelectorAll('h1, h2, h3').forEach(el => el.remove());
@@ -218,7 +209,6 @@ function extractDocumentContent() {
       }
     }
 
-    // 清除常见 UI 噪声
     const noisePatterns = [
       /^ヘッダ情報を飛ばしてコンテンツへ\s*/,
       /^特許情報プラットフォーム\s*/,
@@ -249,7 +239,8 @@ function extractDocumentContent() {
 
 /**
  * 从文献表示页面 (/p0200) 提取书志信息
- * 页面结构：书志信息不是表格，而是 【字段名】值 格式的纯文本，用 <br> 分隔
+ * 页面结构：书志信息不是表格，而是 【字段名】值 格式的纯文本
+ * 使用 <SDO><DP><RTI> 等自定义元素，但 innerText 可以正确获取文本
  */
 function extractBibliography() {
   try {
@@ -270,38 +261,38 @@ function extractBibliography() {
 
     const bodyText = document.body.innerText;
 
-    // 特許番号
-    const patentMatch = bodyText.match(/【特許番号】特許第(\d+)号/);
+    // 特許番号 — 处理可能的空格和全角字符
+    const patentMatch = bodyText.match(/【特許番号】\s*特許第(\d+)号/);
     if (patentMatch) result.patentNumber = `特許${patentMatch[1]}`;
 
-    // 出願番号
-    const appMatch = bodyText.match(/【出願番号】特願(\d{4}-\d+)/);
+    // 出願番号 — 处理全角横线 ‐ 和半角横线 -
+    const appMatch = bodyText.match(/【出願番号】\s*特願(\d{4}[-‐]\d+)/);
     if (appMatch) result.appNumber = `特願${appMatch[1]}`;
 
     // 発明の名称
-    const titleMatch = bodyText.match(/【発明の名称】(.+)/);
+    const titleMatch = bodyText.match(/【発明の名称】\s*(.+)/);
     if (titleMatch) result.title = titleMatch[1].trim();
 
-    // 特許権者（J-PlatPat 使用「特許権者」而非「出願人」）
-    const applicantMatch = bodyText.match(/【特許権者】[\s\S]*?【氏名又は名称】(.+)/);
+    // 特許権者 → 氏名又は名称（嵌套结构）
+    const applicantMatch = bodyText.match(/【特許権者】[\s\S]*?【氏名又は名称】\s*(.+)/);
     if (applicantMatch) {
       result.applicant = applicantMatch[1].trim();
     } else {
       // 尝试出願人格式
-      const applicantMatch2 = bodyText.match(/【出願人】[\s\S]*?【氏名又は名称】(.+)/);
+      const applicantMatch2 = bodyText.match(/【出願人】[\s\S]*?【氏名又は名称】\s*(.+)/);
       if (applicantMatch2) result.applicant = applicantMatch2[1].trim();
     }
 
     // 発明者
-    const inventorMatch = bodyText.match(/【発明者】[\s\S]*?【氏名】(.+)/);
+    const inventorMatch = bodyText.match(/【発明者】[\s\S]*?【氏名】\s*(.+)/);
     if (inventorMatch) result.inventor = inventorMatch[1].trim();
 
     // 出願日
-    const filingMatch = bodyText.match(/【出願日】(.+)/);
+    const filingMatch = bodyText.match(/【出願日】\s*(.+)/);
     if (filingMatch) result.filingDate = filingMatch[1].trim();
 
     // 登録日
-    const regMatch = bodyText.match(/【登録日】(.+)/);
+    const regMatch = bodyText.match(/【登録日】\s*(.+)/);
     if (regMatch) result.registrationDate = regMatch[1].trim();
 
     // 公開番号
@@ -309,12 +300,15 @@ function extractBibliography() {
     if (pubNumMatch) result.publicationNumber = pubNumMatch[1].trim();
 
     // 公開日
-    const pubDateMatch = bodyText.match(/【公開日】(.+)/);
+    const pubDateMatch = bodyText.match(/【公開日】\s*(.+)/);
     if (pubDateMatch) result.publicationDate = pubDateMatch[1].trim();
 
     // 公報種別作为状态
-    const statusMatch = bodyText.match(/【公報種別】(.+)/);
+    const statusMatch = bodyText.match(/【公報種別】\s*(.+)/);
     if (statusMatch) result.status = statusMatch[1].trim();
+
+    // 添加调试信息：页面文本前 800 字符，帮助排查提取失败
+    result._debug = bodyText.substring(0, 800);
 
     return result;
   } catch (error) {
@@ -384,3 +378,5 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
   }
 });
+
+} // end of __patentHelperJpLoaded guard

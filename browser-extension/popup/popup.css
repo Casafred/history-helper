@@ -87,6 +87,21 @@ body {
   color: var(--text-secondary);
 }
 
+.app-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.status-dot.connected {
+  background: var(--accent-green);
+}
+
+.status-dot.disconnected {
+  background: var(--text-tertiary);
+}
+
 .status-dot {
   width: 8px;
   height: 8px;

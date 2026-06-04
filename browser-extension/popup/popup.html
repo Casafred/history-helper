@@ -15,6 +15,10 @@
         <span class="status-dot" id="status-dot"></span>
         <span id="page-type-text">检测中...</span>
       </div>
+      <div class="app-status">
+        <span class="status-dot disconnected" id="app-status-dot"></span>
+        <span id="app-status-text" style="font-size:11px;color:var(--text-tertiary);">检测中...</span>
+      </div>
     </header>
 
     <!-- 操作按钮区域 -->
@@ -39,11 +43,11 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
         复制
       </button>
-      <button id="btn-send" class="btn btn-primary" title="发送到 Tauri 应用">
+      <button id="btn-send" class="btn btn-primary" title="发送到桌面应用（需应用运行）">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4z"/></svg>
-        发送到 Tauri
+        发送到应用
       </button>
-      <button id="btn-analyze" class="btn btn-accent" title="AI 梳理">
+      <button id="btn-analyze" class="btn btn-accent" title="AI 梳理（需应用运行）">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 017 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 01-2 2h-4a2 2 0 01-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 017-7z"/><line x1="9" y1="21" x2="15" y2="21"/></svg>
         AI 梳理
       </button>
