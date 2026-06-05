@@ -118,6 +118,8 @@ let pdfViewState = {
 
 let chatHistory = [];
 let chatAbortController = null;
+let analysisChatHistory = [];
+let analysisChatAbortController = null;
 
 function showError(msg) {
   errorToast.textContent = msg;
@@ -370,7 +372,14 @@ function renderKanban(data) {
   kanbanState.documents = items;
   kanbanState.extractions = {};
   kanbanState.analysis = "";
+  kanbanState.analysisSystemPrompt = "";
+  kanbanState.analysisUserMessage = "";
   kanbanState.traceIndex = {};
+  analysisChatHistory = [];
+  const analysisChatToggleBtn = document.getElementById("analysis-chat-toggle-btn");
+  if (analysisChatToggleBtn) analysisChatToggleBtn.classList.add("hidden");
+  const analysisChatPanel = document.getElementById("analysis-chat-panel");
+  if (analysisChatPanel) analysisChatPanel.classList.add("hidden");
 
   // Build filter bar
   const filterBar = document.getElementById("kanban-filter-bar");
@@ -1514,6 +1523,11 @@ kanbanAutoBtn.addEventListener("click", async () => {
       }
     }
     kanbanState.analysis = fullText;
+    // Save context for continued chat
+    kanbanState.analysisSystemPrompt = systemPrompt;
+    kanbanState.analysisUserMessage = userMessage;
+    analysisChatHistory = [];
+    showAnalysisChatToggle();
     if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份审查/答复文档" + (hasBlocks ? "（含溯源标记）" : "");
 
     let reportHtml = "";
@@ -2025,6 +2039,11 @@ manualSelectBtn.addEventListener("click", () => {
         }
       }
       kanbanState.analysis = fullText;
+      // Save context for continued chat
+      kanbanState.analysisSystemPrompt = systemPrompt;
+      kanbanState.analysisUserMessage = userMessage;
+      analysisChatHistory = [];
+      showAnalysisChatToggle();
       if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份文档" + (hasBlocks ? "（含溯源标记）" : "");
 
       let reportHtml = "";
@@ -3344,6 +3363,165 @@ function appendChatMessage(role, content) {
   chatMessages.scrollTop = chatMessages.scrollHeight;
   return msgEl;
 }
+
+// ===== Analysis Chat (continued conversation with AI analysis report) =====
+
+function showAnalysisChatToggle() {
+  const toggleBtn = document.getElementById("analysis-chat-toggle-btn");
+  if (toggleBtn) toggleBtn.classList.remove("hidden");
+}
+
+function appendAnalysisChatMessage(role, content) {
+  const messagesEl = document.getElementById("analysis-chat-messages");
+  if (!messagesEl) return null;
+  const msgEl = document.createElement("div");
+  msgEl.className = `chat-msg ${role}`;
+  if (role === "assistant") {
+    msgEl.innerHTML = `<div class="chat-msg-content">${escapeHtml(content)}</div>`;
+  } else if (role === "system") {
+    msgEl.textContent = content;
+  } else {
+    msgEl.textContent = content;
+  }
+  messagesEl.appendChild(msgEl);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return msgEl;
+}
+
+async function sendAnalysisChatMessage() {
+  const input = document.getElementById("analysis-chat-input");
+  if (!input) return;
+  const question = input.value.trim();
+  if (!question) return;
+
+  if (!kanbanState.analysis) {
+    showError("请先生成审查分析报告");
+    return;
+  }
+
+  const config = window.AI.loadAIConfig();
+  const provider = window.AI.getCurrentProvider(config);
+  if (!provider || !provider.apiKey) {
+    showError("请先配置 AI 服务（API Key）");
+    return;
+  }
+
+  // Add user message to history and UI
+  analysisChatHistory.push({ role: "user", content: question });
+  appendAnalysisChatMessage("user", question);
+  input.value = "";
+
+  // Build messages: system prompt + original OCR content + AI report + chat history
+  const messages = [
+    { role: "system", content: kanbanState.analysisSystemPrompt },
+    { role: "user", content: kanbanState.analysisUserMessage },
+    { role: "assistant", content: kanbanState.analysis },
+    ...analysisChatHistory,
+  ];
+
+  // Add assistant placeholder
+  const assistantMsgEl = appendAnalysisChatMessage("assistant", "");
+  const sendBtn = document.getElementById("analysis-chat-send-btn");
+  const abortBtn = document.getElementById("analysis-chat-abort-btn");
+  if (sendBtn) sendBtn.disabled = true;
+  if (abortBtn) abortBtn.classList.remove("hidden");
+  analysisChatAbortController = new AbortController();
+
+  try {
+    let fullResponse = "";
+    const stream = window.AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
+      model: provider.model,
+      messages: messages,
+      temperature: 0.3,
+      maxTokens: 8192,
+    }, analysisChatAbortController.signal);
+
+    const messagesEl = document.getElementById("analysis-chat-messages");
+    for await (const chunk of stream) {
+      if (analysisChatAbortController.signal.aborted) break;
+      if (chunk.content) {
+        fullResponse += chunk.content;
+        if (assistantMsgEl) {
+          const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+          contentEl.textContent = fullResponse;
+          if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      }
+    }
+
+    analysisChatHistory.push({ role: "assistant", content: fullResponse });
+  } catch (e) {
+    if (e.name !== "AbortError") {
+      appendAnalysisChatMessage("system", "AI 响应出错: " + e.message);
+    }
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+    if (abortBtn) abortBtn.classList.add("hidden");
+    analysisChatAbortController = null;
+  }
+}
+
+// Analysis chat event listeners (script loaded at end of body, DOM is ready)
+(function initAnalysisChat() {
+  const analysisChatToggleBtn = document.getElementById("analysis-chat-toggle-btn");
+  const analysisChatPanel = document.getElementById("analysis-chat-panel");
+  const analysisChatCloseBtn = document.getElementById("analysis-chat-close-btn");
+  const analysisChatClearBtn = document.getElementById("analysis-chat-clear-btn");
+  const analysisChatSendBtn = document.getElementById("analysis-chat-send-btn");
+  const analysisChatAbortBtnEl = document.getElementById("analysis-chat-abort-btn");
+  const analysisChatInput = document.getElementById("analysis-chat-input");
+
+  if (analysisChatToggleBtn) {
+    analysisChatToggleBtn.addEventListener("click", () => {
+      if (analysisChatPanel) {
+        analysisChatPanel.classList.toggle("hidden");
+        if (!analysisChatPanel.classList.contains("hidden")) {
+          if (analysisChatInput) analysisChatInput.focus();
+        }
+      }
+    });
+  }
+
+  if (analysisChatCloseBtn) {
+    analysisChatCloseBtn.addEventListener("click", () => {
+      if (analysisChatPanel) analysisChatPanel.classList.add("hidden");
+    });
+  }
+
+  if (analysisChatClearBtn) {
+    analysisChatClearBtn.addEventListener("click", () => {
+      analysisChatHistory = [];
+      const messagesEl = document.getElementById("analysis-chat-messages");
+      if (messagesEl) messagesEl.innerHTML = "";
+      appendAnalysisChatMessage("system", "对话已清空，可继续提问");
+    });
+  }
+
+  if (analysisChatSendBtn) {
+    analysisChatSendBtn.addEventListener("click", sendAnalysisChatMessage);
+  }
+
+  if (analysisChatInput) {
+    analysisChatInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendAnalysisChatMessage();
+      }
+    });
+  }
+
+  if (analysisChatAbortBtnEl) {
+    analysisChatAbortBtnEl.addEventListener("click", () => {
+      if (analysisChatAbortController) {
+        analysisChatAbortController.abort();
+        analysisChatAbortController = null;
+      }
+      analysisChatAbortBtnEl.classList.add("hidden");
+      const sendBtn = document.getElementById("analysis-chat-send-btn");
+      if (sendBtn) sendBtn.disabled = false;
+    });
+  }
+})();
 
 async function kanbanManualExtract(url, idx, docType) {
   const container = document.getElementById("kanban-extracted-" + idx);
