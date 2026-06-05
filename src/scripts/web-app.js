@@ -544,11 +544,17 @@ function renderOverview(data) {
       // Also check docList for richer data (US members store title/applicants in docList)
       const dl = m.docList || {};
       title = m.title || dl.title || m.inventionTitle || "";
-      // applicantNames is an array in GD API (on member level and in docList)
+      // applicantNames in GD API actually contains inventor names for US patents
+      // The field is misleadingly named - it returns first/last name format which is inventors
       const applicantNamesArr = m.applicantNames || dl.applicantNames || [];
-      applicants = Array.isArray(applicantNamesArr) ? applicantNamesArr.join(", ") : (applicantNamesArr || m.applicants || m.applicantName || "");
-      // inventors not available in GD family API
-      inventors = m.inventors || m.inventorName || "";
+      const namesStr = Array.isArray(applicantNamesArr) ? applicantNamesArr.join(", ") : (applicantNamesArr || "");
+      // For US patents, applicantNames = inventors; for EP/CN/JP it may be actual applicants
+      if (data.office === "US") {
+        inventors = namesStr || m.inventors || m.inventorName || "";
+      } else {
+        applicants = namesStr || m.applicants || m.applicantName || "";
+        inventors = m.inventors || m.inventorName || "";
+      }
       // filing date: appDateStr or appDate (epoch ms)
       filingDate = m.appDateStr || m.filingDate || m.applicationDate || "";
       if (!filingDate && m.appDate) {
