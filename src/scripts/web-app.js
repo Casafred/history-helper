@@ -320,6 +320,8 @@ searchBtn.addEventListener("click", async () => {
   kanbanAutoBtn.disabled = false;
   const citedRefsBtn = document.getElementById("cited-refs-btn");
   if (citedRefsBtn) citedRefsBtn.disabled = false;
+  const citedRefsManualBtn = document.getElementById("cited-refs-manual-select-btn");
+  if (citedRefsManualBtn) citedRefsManualBtn.disabled = false;
   const manualSelectBtn = document.getElementById("kanban-manual-select-btn");
   if (manualSelectBtn) manualSelectBtn.disabled = false;
   resultSection.classList.remove("hidden");
@@ -525,10 +527,34 @@ function renderOverview(data) {
   const office = OFFICE_NAMES[data.office] || data.office;
 
   let title = "";
-  if (data.documents && data.documents.title) {
+  let inventors = "";
+  let applicants = "";
+  let filingDate = "";
+  let publicationDate = "";
+  let priorityDate = "";
+  let ipcClasses = "";
+  let cpcClasses = "";
+  let legalStatus = "";
+
+  if (data.family) {
+    const members = extractFamilyMembers(data.family);
+    if (members.length > 0) {
+      const m = members[0];
+      title = m.title || m.inventionTitle || "";
+      inventors = m.inventors || m.inventorName || "";
+      applicants = m.applicants || m.applicantName || "";
+      filingDate = m.filingDate || m.applicationDate || "";
+      publicationDate = m.publicationDate || m.pubDate || "";
+      priorityDate = m.priorityDate || "";
+      ipcClasses = m.ipc || m.ipcClass || m.classification || "";
+      if (Array.isArray(ipcClasses)) ipcClasses = ipcClasses.join(", ");
+      cpcClasses = m.cpcClass || m.cpc || "";
+      if (Array.isArray(cpcClasses)) cpcClasses = cpcClasses.join(", ");
+      legalStatus = m.legalStatus || m.status || "";
+    }
+  }
+  if (data.documents && data.documents.title && !title) {
     title = data.documents.title;
-  } else if (data.family && data.family.list && data.family.list.length > 0) {
-    title = data.family.list[0].title || "";
   }
 
   const queryTypeLabel = data.queryType === "publication" ? "公开号/专利号" : "申请号";
@@ -538,19 +564,44 @@ function renderOverview(data) {
     <div class="info-row"><span class="info-label">${queryTypeLabel}</span><span class="info-value">${data.applicationNumber || "-"}</span></div>
     ${data.documents && data.documents.docNumber ? '<div class="info-row"><span class="info-label">文档编号</span><span class="info-value">' + escapeHtml(data.documents.docNumber) + '</span></div>' : ''}
     ${title ? '<div class="info-row"><span class="info-label">标题</span><span class="info-value">' + escapeHtml(title) + '</span></div>' : ''}
+    ${inventors ? '<div class="info-row"><span class="info-label">发明人</span><span class="info-value">' + escapeHtml(inventors) + '</span></div>' : ''}
+    ${applicants ? '<div class="info-row"><span class="info-label">申请人</span><span class="info-value">' + escapeHtml(applicants) + '</span></div>' : ''}
+    ${filingDate ? '<div class="info-row"><span class="info-label">申请日</span><span class="info-value">' + escapeHtml(filingDate) + '</span></div>' : ''}
+    ${publicationDate ? '<div class="info-row"><span class="info-label">公开日</span><span class="info-value">' + escapeHtml(publicationDate) + '</span></div>' : ''}
+    ${priorityDate ? '<div class="info-row"><span class="info-label">优先权日</span><span class="info-value">' + escapeHtml(priorityDate) + '</span></div>' : ''}
+    ${ipcClasses ? '<div class="info-row"><span class="info-label">IPC分类</span><span class="info-value">' + escapeHtml(ipcClasses) + '</span></div>' : ''}
+    ${cpcClasses ? '<div class="info-row"><span class="info-label">CPC分类</span><span class="info-value">' + escapeHtml(cpcClasses) + '</span></div>' : ''}
   `;
 
   const family = data.family;
-  if (family) {
-    const famCount = countFamilyMembers(family);
-    const docCount = countDocuments(data.documents);
-    appStatus.innerHTML = `
-      <div class="info-row"><span class="info-label">同族成员</span><span class="info-value">${famCount} 个</span></div>
-      <div class="info-row"><span class="info-label">审查文档</span><span class="info-value">${docCount} 份</span></div>
-    `;
-  } else {
-    appStatus.innerHTML = '<p class="placeholder">暂无状态信息</p>';
+  const items = kanbanState.documents;
+  const famCount = family ? countFamilyMembers(family) : 0;
+  const docCount = family ? countDocuments(data.documents) : 0;
+  const oaCount = items.filter(it => it.type === "office_action").length;
+  const respCount = items.filter(it => it.type === "response").length;
+  const allowCount = items.filter(it => it.type === "allowance").length;
+
+  let statusHtml = '';
+  if (legalStatus) {
+    statusHtml += '<div class="info-row"><span class="info-label">法律状态</span><span class="info-value">' + escapeHtml(legalStatus) + '</span></div>';
   }
+  if (famCount > 0) {
+    statusHtml += '<div class="info-row"><span class="info-label">同族成员</span><span class="info-value">' + famCount + ' 个</span></div>';
+  }
+  if (docCount > 0) {
+    statusHtml += '<div class="info-row"><span class="info-label">审查文档</span><span class="info-value">' + docCount + ' 份</span></div>';
+  }
+  if (items.length > 0) {
+    statusHtml += '<div class="info-row"><span class="info-label">审查意见</span><span class="info-value">' + oaCount + ' 份</span></div>';
+    statusHtml += '<div class="info-row"><span class="info-label">申请人答复</span><span class="info-value">' + respCount + ' 份</span></div>';
+    if (allowCount > 0) {
+      statusHtml += '<div class="info-row"><span class="info-label">授权通知</span><span class="info-value">' + allowCount + ' 份</span></div>';
+    }
+  }
+  if (!statusHtml) {
+    statusHtml = '<p class="placeholder">暂无状态信息</p>';
+  }
+  appStatus.innerHTML = statusHtml;
 }
 
 function countFamilyMembers(family) {
@@ -997,7 +1048,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.classList.add("active");
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
     const app = document.getElementById("app");
-    const wideTabs = ["kanban", "ai-analysis", "timeline"];
+    const wideTabs = ["kanban", "ai-analysis"];
     if (wideTabs.includes(btn.dataset.tab)) {
       app.classList.add("wide-layout");
     } else {
@@ -1059,6 +1110,7 @@ aiSaveBtn.addEventListener("click", () => {
     { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
     { id: "prompt-doc-analysis", key: "docAnalysis" },
     { id: "prompt-history-summary", key: "historySummary" },
+    { id: "prompt-cited-refs-analysis", key: "citedRefsAnalysis" },
   ];
   promptKeys.forEach(p => {
     const el = document.getElementById(p.id);
@@ -1101,6 +1153,7 @@ function loadAISettingsToForm() {
     { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
     { id: "prompt-doc-analysis", key: "docAnalysis" },
     { id: "prompt-history-summary", key: "historySummary" },
+    { id: "prompt-cited-refs-analysis", key: "citedRefsAnalysis" },
   ];
   promptKeys.forEach(p => {
     const el = document.getElementById(p.id);
@@ -1122,6 +1175,7 @@ document.querySelectorAll("[id^='reset-prompt-']").forEach(btn => {
       "kanban-simple": "kanbanAnalysisSimple",
       "doc-analysis": "docAnalysis",
       "history-summary": "historySummary",
+      "cited-refs-analysis": "citedRefsAnalysis",
     };
     const key = keyMap[promptId];
     if (!key) return;
@@ -1579,174 +1633,177 @@ const citedRefsBtn = document.getElementById("cited-refs-btn");
 if (citedRefsBtn) {
   citedRefsBtn.addEventListener("click", async () => {
     if (!currentData || !kanbanState.documents.length) return;
-    citedRefsBtn.disabled = true;
-    citedRefsAbortController = new AbortController();
-    const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
-    citedRefsBtn.classList.add("hidden");
-    if (citedRefsAbortBtn) citedRefsAbortBtn.classList.remove("hidden");
-
-    try {
-      const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
-      const citedDocs = kanbanState.documents.filter(d => CITED_DOC_CODES.includes(d.docCode));
-
-      if (citedDocs.length === 0) {
-        showError("未找到引用文献相关文档（FOR/892/1449/IDS/SRNT/SRFW）");
-        return;
-      }
-
-      const analysisSection = document.getElementById("kanban-analysis");
-      const analysisContent = document.getElementById("kanban-analysis-content");
-      if (!analysisSection || !analysisContent) {
-        showError("分析区域未找到");
-        return;
-      }
-      analysisSection.classList.remove("hidden");
-      analysisContent.innerHTML = '<p class="extracting">正在提取引用文献内容并分析...</p>';
-
-      // 先提取引用文献文档内容（如果尚未提取）
-      const config = window.AI.loadAIConfig();
-      const ocrConfig = window.AI.getOCRConfig(config);
-      const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
-      const glmApiKey = window.AI.getGlmOcrApiKey(config);
-      const isUS = currentData.office === "US";
-      const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
-
-      for (const doc of citedDocs) {
-        if (kanbanState.extractions[doc.idx] && kanbanState.extractions[doc.idx].text) continue;
-
-        // 需要先提取此文档
-        const extractUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${doc.docId}/${doc.numberOfPages}/${doc.docFormat}`;
-        try {
-          analysisContent.innerHTML = `<p class="extracting">正在提取 ${doc.docCode} - ${doc.name}...</p>`;
-          const resp = await fetch(extractUrl);
-          if (!resp.ok) {
-            kanbanState.extractions[doc.idx] = { text: "", error: `HTTP ${resp.status}` };
-            continue;
-          }
-          const arrayBuf = await resp.arrayBuffer();
-          const b64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
-
-          const ocrResp = await fetch("/api/gd/extract-text/ocr", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pdf_base64: b64, engine: primaryEngine }),
-          });
-          if (!ocrResp.ok) {
-            kanbanState.extractions[doc.idx] = { text: "", error: `OCR HTTP ${ocrResp.status}` };
-            continue;
-          }
-          const ocrResult = await ocrResp.json();
-          if (ocrResult.error) {
-            // 降级尝试 GLM OCR
-            if (glmApiKey && primaryEngine !== "glm_ocr") {
-              try {
-                const glmResp = await fetch("/api/gd/extract-text/ocr", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ pdf_base64: b64, engine: "glm_ocr", glm_api_key: glmApiKey }),
-                });
-                const glmResult = await glmResp.json();
-                if (!glmResult.error && glmResult.text) {
-                  kanbanState.extractions[doc.idx] = {
-                    markdown: glmResult.markdown || "",
-                    text: glmResult.text || "",
-                    blocks: glmResult.blocks || [],
-                    pageDims: glmResult.pageDims || {},
-                    engine: "glm_ocr",
-                  };
-                  continue;
-                }
-              } catch {}
-            }
-            kanbanState.extractions[doc.idx] = { text: "", error: ocrResult.error };
-            continue;
-          }
-          kanbanState.extractions[doc.idx] = {
-            markdown: ocrResult.markdown || "",
-            text: ocrResult.text || "",
-            blocks: ocrResult.blocks || [],
-            pageDims: ocrResult.pageDims || {},
-            engine: ocrResult.engine || primaryEngine,
-          };
-        } catch (e) {
-          kanbanState.extractions[doc.idx] = { text: "", error: e.message };
-        }
-      }
-
-      // 构建分析内容
-      const lines = [];
-      lines.push(`# 引用文献梳理\n\n专利号: ${currentData.applicationNumber}\n\n`);
-      lines.push("## 引用文献相关文档\n");
-
-      let hasContent = false;
-      for (const doc of citedDocs) {
-        const extraction = kanbanState.extractions[doc.idx];
-        if (extraction && extraction.text) {
-          lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n${extraction.text}\n`);
-          hasContent = true;
-        } else {
-          lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n[未能提取内容]\n`);
-        }
-      }
-
-      if (!hasContent) {
-        analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有引用文献文档均未能提取到内容</p>';
-        return;
-      }
-
-      lines.push("\n## 分析要求\n");
-      lines.push("请对以上引用文献相关文档进行分析，包括：");
-      lines.push("1. 审查员引用了哪些文献？列出每篇引用文献的编号、类型和相关性说明");
-      lines.push("2. 申请人引用了哪些文献？与审查员引用有何异同");
-      lines.push("3. 引用文献的技术领域分布，是否涉及竞争对手专利");
-      lines.push("4. 引用文献对本专利权利要求的影响评估");
-      lines.push("5. 建议关注的引用文献和潜在风险");
-
-      const provider = window.AI.getCurrentProvider(config);
-      if (!provider) {
-        analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">请先配置 AI 服务（设置 → AI 配置）</p>';
-        return;
-      }
-
-      const prompt = `你是一位资深专利分析师，专注于引用文献分析。请根据以下引用文献相关文档，进行系统梳理和分析。
-
-${lines.join("\n")}`;
-
-      analysisContent.innerHTML = '';
-      let fullText = "";
-      for await (const chunk of window.AI.streamChat(
-        provider.type, provider.apiKey, provider.baseUrl,
-        {
-          model: provider.model,
-          messages: [
-            { role: "system", content: "你是一位资深专利分析师，专注于引用文献分析。" },
-            { role: "user", content: prompt },
-          ],
-          temperature: 0.3,
-          maxTokens: 32768,
-        },
-        citedRefsAbortController ? citedRefsAbortController.signal : undefined
-      )) {
-        if (chunk.content) {
-          fullText += chunk.content;
-          analysisContent.innerHTML = marked.parse(fullText);
-          analysisSection.scrollTop = analysisSection.scrollHeight;
-        }
-      }
-
-      kanbanState.citedRefsAnalysis = fullText;
-    } catch (e) {
-      const analysisContent = document.getElementById("kanban-analysis-content");
-      if (analysisContent) analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + '</p>';
-      showError("引用文献梳理失败: " + e.message);
-    } finally {
-      citedRefsBtn.disabled = false;
-      citedRefsBtn.classList.remove("hidden");
-      const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
-      if (citedRefsAbortBtn) citedRefsAbortBtn.classList.add("hidden");
-      citedRefsAbortController = null;
+    const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
+    const citedDocs = kanbanState.documents.filter(d => CITED_DOC_CODES.includes(d.docCode));
+    if (citedDocs.length === 0) {
+      showError("未找到引用文献相关文档（FOR/892/1449/IDS/SRNT/SRFW）");
+      return;
     }
+    const selectedIdxs = citedDocs.map(d => d.idx);
+    await runCitedRefsAnalysis(selectedIdxs);
   });
+}
+
+async function runCitedRefsAnalysis(selectedIdxs) {
+  if (!currentData || !kanbanState.documents.length) return;
+
+  const config = window.AI.loadAIConfig();
+  const provider = window.AI.getCurrentProvider(config);
+  if (!provider) {
+    showError("请先在 AI 设置中配置并选择一个 AI 服务商");
+    return;
+  }
+
+  citedRefsBtn.disabled = true;
+  citedRefsAbortController = new AbortController();
+  const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
+  citedRefsBtn.classList.add("hidden");
+  if (citedRefsAbortBtn) citedRefsAbortBtn.classList.remove("hidden");
+
+  try {
+    const citedDocs = kanbanState.documents.filter(d => selectedIdxs.includes(d.idx));
+
+    const analysisSection = document.getElementById("kanban-analysis");
+    const analysisContent = document.getElementById("kanban-analysis-content");
+    if (!analysisSection || !analysisContent) {
+      showError("分析区域未找到");
+      return;
+    }
+    analysisSection.classList.remove("hidden");
+    analysisContent.innerHTML = '<p class="extracting">正在提取引用文献内容并分析...</p>';
+
+    // 先提取引用文献文档内容（如果尚未提取）
+    const ocrConfig = window.AI.getOCRConfig(config);
+    const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
+    const glmApiKey = window.AI.getGlmOcrApiKey(config);
+    const isUS = currentData.office === "US";
+    const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+
+    for (const doc of citedDocs) {
+      if (kanbanState.extractions[doc.idx] && kanbanState.extractions[doc.idx].text) continue;
+
+      // 需要先提取此文档
+      const extractUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${doc.docId}/${doc.numberOfPages}/${doc.docFormat}`;
+      try {
+        analysisContent.innerHTML = `<p class="extracting">正在提取 ${doc.docCode} - ${doc.name}...</p>`;
+        const resp = await fetch(extractUrl);
+        if (!resp.ok) {
+          kanbanState.extractions[doc.idx] = { text: "", error: `HTTP ${resp.status}` };
+          continue;
+        }
+        const arrayBuf = await resp.arrayBuffer();
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
+
+        const ocrResp = await fetch("/api/gd/extract-text/ocr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pdf_base64: b64, engine: primaryEngine }),
+        });
+        if (!ocrResp.ok) {
+          kanbanState.extractions[doc.idx] = { text: "", error: `OCR HTTP ${ocrResp.status}` };
+          continue;
+        }
+        const ocrResult = await ocrResp.json();
+        if (ocrResult.error) {
+          // 降级尝试 GLM OCR
+          if (glmApiKey && primaryEngine !== "glm_ocr") {
+            try {
+              const glmResp = await fetch("/api/gd/extract-text/ocr", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ pdf_base64: b64, engine: "glm_ocr", glm_api_key: glmApiKey }),
+              });
+              const glmResult = await glmResp.json();
+              if (!glmResult.error && glmResult.text) {
+                kanbanState.extractions[doc.idx] = {
+                  markdown: glmResult.markdown || "",
+                  text: glmResult.text || "",
+                  blocks: glmResult.blocks || [],
+                  pageDims: glmResult.pageDims || {},
+                  engine: "glm_ocr",
+                };
+                continue;
+              }
+            } catch {}
+          }
+          kanbanState.extractions[doc.idx] = { text: "", error: ocrResult.error };
+          continue;
+        }
+        kanbanState.extractions[doc.idx] = {
+          markdown: ocrResult.markdown || "",
+          text: ocrResult.text || "",
+          blocks: ocrResult.blocks || [],
+          pageDims: ocrResult.pageDims || {},
+          engine: ocrResult.engine || primaryEngine,
+        };
+      } catch (e) {
+        kanbanState.extractions[doc.idx] = { text: "", error: e.message };
+      }
+    }
+
+    // 构建分析内容
+    const lines = [];
+    lines.push(`# 引用文献梳理\n\n专利号: ${currentData.applicationNumber}\n\n`);
+    lines.push("## 引用文献相关文档\n");
+
+    let hasContent = false;
+    for (const doc of citedDocs) {
+      const extraction = kanbanState.extractions[doc.idx];
+      if (extraction && extraction.text) {
+        lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n${extraction.text}\n`);
+        hasContent = true;
+      } else {
+        lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n[未能提取内容]\n`);
+      }
+    }
+
+    if (!hasContent) {
+      analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有引用文献文档均未能提取到内容</p>';
+      return;
+    }
+
+    // 使用自定义提示词
+    const citedRefsPrompt = window.AI.getCustomPrompt(config, "citedRefsAnalysis");
+
+    lines.push("\n## 分析要求\n");
+    lines.push(citedRefsPrompt || "请对以上引用文献相关文档进行分析，包括：\n1. 审查员引用了哪些文献？列出每篇引用文献的编号、类型和相关性说明\n2. 申请人引用了哪些文献？与审查员引用有何异同\n3. 引用文献的技术领域分布，是否涉及竞争对手专利\n4. 引用文献对本专利权利要求的影响评估\n5. 建议关注的引用文献和潜在风险");
+
+    const prompt = `你是一位资深专利分析师，专注于引用文献分析。请根据以下引用文献相关文档，进行系统梳理和分析。\n\n${lines.join("\n")}`;
+
+    analysisContent.innerHTML = '';
+    let fullText = "";
+    for await (const chunk of window.AI.streamChat(
+      provider.type, provider.apiKey, provider.baseUrl,
+      {
+        model: provider.model,
+        messages: [
+          { role: "system", content: "你是一位资深专利分析师，专注于引用文献分析。" },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.3,
+        maxTokens: 32768,
+      },
+      citedRefsAbortController ? citedRefsAbortController.signal : undefined
+    )) {
+      if (chunk.content) {
+        fullText += chunk.content;
+        analysisContent.innerHTML = marked.parse(fullText);
+        analysisSection.scrollTop = analysisSection.scrollHeight;
+      }
+    }
+
+    kanbanState.citedRefsAnalysis = fullText;
+  } catch (e) {
+    const analysisContent = document.getElementById("kanban-analysis-content");
+    if (analysisContent) analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + '</p>';
+    showError("引用文献梳理失败: " + e.message);
+  } finally {
+    citedRefsBtn.disabled = false;
+    citedRefsBtn.classList.remove("hidden");
+    const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
+    if (citedRefsAbortBtn) citedRefsAbortBtn.classList.add("hidden");
+    citedRefsAbortController = null;
+  }
 }
 
 // Cited refs abort button handler
@@ -1774,6 +1831,81 @@ manualSelectBtn.disabled = true;
 const aiAnalysisActions = document.querySelector(".ai-analysis-actions");
 if (aiAnalysisActions) {
   aiAnalysisActions.insertBefore(manualSelectBtn, citedRefsBtn);
+}
+
+// Cited refs manual select button
+const citedRefsManualBtn = document.createElement("button");
+citedRefsManualBtn.id = "cited-refs-manual-select-btn";
+citedRefsManualBtn.className = "btn-secondary";
+citedRefsManualBtn.innerHTML = '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> 手动选择引用文献';
+citedRefsManualBtn.disabled = true;
+if (aiAnalysisActions) {
+  aiAnalysisActions.insertBefore(citedRefsManualBtn, citedRefsBtn);
+}
+
+if (citedRefsManualBtn) {
+  citedRefsManualBtn.addEventListener("click", () => {
+    const manualSelectPanel = document.getElementById("ai-manual-select");
+    if (!manualSelectPanel) return;
+    manualSelectPanel.classList.remove("hidden");
+
+    const items = kanbanState.documents;
+    const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
+
+    let html = '<div class="ai-manual-header"><span class="ai-manual-title">手动选择引用文献文件范围</span></div>';
+    html += '<div class="ai-manual-select-all"><button id="cited-manual-select-all" class="btn-small btn-extract">全选</button><button id="cited-manual-select-none" class="btn-small btn-extract">全不选</button><button id="cited-manual-select-default" class="btn-small btn-extract">默认选择</button></div>';
+    html += '<div class="ai-manual-checkboxes">';
+    items.forEach(it => {
+      html += `
+        <label class="ai-manual-item">
+          <input type="checkbox" class="cited-manual-select-checkbox" data-idx="${it.idx}" ${CITED_DOC_CODES.includes(it.docCode) ? 'checked' : ''}>
+          <span class="ai-manual-item-info">
+            <span class="ai-manual-item-code">${escapeHtml(it.docCode)}</span>
+            <span class="ai-manual-item-name">${escapeHtml(it.name)}</span>
+            <span class="ai-manual-item-date">${escapeHtml(it.date)}</span>
+          </span>
+        </label>
+      `;
+    });
+    html += '</div>';
+    html += '<div class="ai-manual-actions">';
+    html += '<button id="cited-manual-select-cancel" class="btn-secondary">取消</button>';
+    html += '<button id="cited-manual-select-confirm" class="btn-primary">确认选择并开始引用文献梳理</button>';
+    html += '</div>';
+
+    manualSelectPanel.innerHTML = html;
+
+    document.getElementById("cited-manual-select-all").addEventListener("click", () => {
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => cb.checked = true);
+    });
+    document.getElementById("cited-manual-select-none").addEventListener("click", () => {
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => cb.checked = false);
+    });
+    document.getElementById("cited-manual-select-default").addEventListener("click", () => {
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => {
+        const idx = parseInt(cb.dataset.idx);
+        const it = items.find(d => d.idx === idx);
+        cb.checked = it && CITED_DOC_CODES.includes(it.docCode);
+      });
+    });
+    document.getElementById("cited-manual-select-cancel").addEventListener("click", () => {
+      manualSelectPanel.classList.add("hidden");
+    });
+    document.getElementById("cited-manual-select-confirm").addEventListener("click", async () => {
+      const selectedIdxs = [];
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox:checked").forEach(cb => {
+        selectedIdxs.push(parseInt(cb.dataset.idx));
+      });
+      if (selectedIdxs.length === 0) {
+        showError("请至少选择一个文档");
+        return;
+      }
+      manualSelectPanel.classList.add("hidden");
+
+      // Run cited refs analysis with selected documents
+      await runCitedRefsAnalysis(selectedIdxs);
+    });
+  });
 }
 
 manualSelectBtn.addEventListener("click", () => {

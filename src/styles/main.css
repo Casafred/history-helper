@@ -2063,6 +2063,14 @@ body {
   text-align: right;
 }
 
+.overview-timeline-section {
+  margin-top: 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
 .timeline-header {
   display: flex;
   align-items: center;

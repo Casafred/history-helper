@@ -30,7 +30,6 @@
           <button class="tab-btn" data-tab="family">同族</button>
           <button class="tab-btn" data-tab="kanban">审查看板</button>
           <button class="tab-btn" data-tab="ai-analysis">AI 分析</button>
-          <button class="tab-btn" data-tab="timeline">时间线</button>
         </div>
 
         <div id="tab-overview" class="tab-content active">
@@ -42,6 +41,15 @@
             <div class="info-card">
               <div class="card-header">当前状态</div>
               <div id="app-status" class="card-body"><p class="placeholder">-</p></div>
+            </div>
+          </div>
+          <div id="timeline-content" class="overview-timeline-section">
+            <div class="timeline-header">
+              <span class="timeline-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 审查时间线</span>
+              <span id="timeline-status" class="timeline-status"></span>
+            </div>
+            <div id="timeline-board" class="timeline-board">
+              <p class="placeholder">请先查询专利，审查文档加载后可生成时间线</p>
             </div>
           </div>
         </div>
@@ -106,17 +114,6 @@
           </div>
         </div>
 
-        <div id="tab-timeline" class="tab-content">
-          <div id="timeline-content">
-            <div class="timeline-header">
-              <span class="timeline-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 审查时间线</span>
-              <span id="timeline-status" class="timeline-status"></span>
-            </div>
-            <div id="timeline-board" class="timeline-board">
-              <p class="placeholder">请先查询专利，审查文档加载后可生成时间线</p>
-            </div>
-          </div>
-        </div>
 
 
       </section>
@@ -277,6 +274,13 @@
               <textarea id="prompt-history-summary" class="prompt-textarea" rows="3" placeholder="审查历史整体梳理提示词"></textarea>
               <div class="prompt-actions">
                 <button id="reset-prompt-history-summary" class="btn-secondary btn-small" type="button">恢复默认</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>引用文献梳理提示词</label>
+              <textarea id="prompt-cited-refs-analysis" class="prompt-textarea" rows="4" placeholder="引用文献梳理分析要求提示词"></textarea>
+              <div class="prompt-actions">
+                <button id="reset-prompt-cited-refs-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
               </div>
             </div>
           </div>
