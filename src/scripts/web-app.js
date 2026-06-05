@@ -2781,7 +2781,86 @@ async function exportToWord() {
     return;
   }
 
-  // Parse markdown table helper
+  // ── Helper: parse inline markdown formatting (bold, italic, code, trace refs) into TextRun[] ──
+  function parseInlineMarkdown(text) {
+    const runs = [];
+    // Process text segment by segment, handling **bold**, *italic*, `code`
+    let remaining = text;
+    while (remaining.length > 0) {
+      // Try matching **bold**
+      let m = remaining.match(/^(.*?)\*\*(.+?)\*\*/s);
+      if (m) {
+        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
+        runs.push(new docx.TextRun({ text: m[2], bold: true, size: 20, font: "Microsoft YaHei" }));
+        remaining = remaining.slice(m[0].length);
+        continue;
+      }
+      // Try matching *italic* (single asterisk, not preceded/followed by *)
+      m = remaining.match(/^(.*?)\*([^*]+?)\*/s);
+      if (m) {
+        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
+        runs.push(new docx.TextRun({ text: m[2], italics: true, size: 20, font: "Microsoft YaHei" }));
+        remaining = remaining.slice(m[0].length);
+        continue;
+      }
+      // Try matching `code`
+      m = remaining.match(/^(.*?)`([^`]+?)`/s);
+      if (m) {
+        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
+        runs.push(new docx.TextRun({ text: m[2], size: 18, font: "Consolas", shading: { fill: "f0f0f0" } }));
+        remaining = remaining.slice(m[0].length);
+        continue;
+      }
+      // Try matching 【来源: ...】 trace references
+      m = remaining.match(/^(.*?)【来源:\s*([^\】]+)】/s);
+      if (m) {
+        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
+        // Convert trace refs to readable format
+        const refs = m[2].split(",").map(r => r.trim()).filter(r => r.startsWith("B_"));
+        const readableRefs = [];
+        const grouped = {};
+        refs.forEach(ref => {
+          const info = kanbanState.traceIndex[ref];
+          if (!info) return;
+          const doc = kanbanState.documents.find(d => d.idx === info.docIdx);
+          const docLabel = doc ? `${doc.name} (${doc.docCode})` : `文档${info.docIdx}`;
+          const key = `${info.docIdx}|${info.page}|${docLabel}`;
+          if (!grouped[key]) grouped[key] = [];
+          const blockMatch = ref.match(/B_p(\d+)_(\d+)/);
+          if (blockMatch) {
+            grouped[key].push({ blockIdx: parseInt(blockMatch[2]), page: parseInt(blockMatch[1]) });
+          }
+        });
+        Object.keys(grouped).forEach(key => {
+          const [,, docLabel] = key.split("|");
+          const page = grouped[key][0].page;
+          const indices = grouped[key].map(e => e.blockIdx).sort((a, b) => a - b);
+          // Merge consecutive indices
+          const ranges = [];
+          let rs = indices[0], re = indices[0];
+          for (let i = 1; i < indices.length; i++) {
+            if (indices[i] === re + 1) { re = indices[i]; } else {
+              ranges.push(rs === re ? `${rs}` : `${rs}-${re}`);
+              rs = indices[i]; re = indices[i];
+            }
+          }
+          ranges.push(rs === re ? `${rs}` : `${rs}-${re}`);
+          readableRefs.push(`${docLabel} 第${page}页§${ranges.join(",")}`);
+        });
+        if (readableRefs.length > 0) {
+          runs.push(new docx.TextRun({ text: " [来源: " + readableRefs.join("; ") + "]", size: 16, color: "4F8FF7", font: "Microsoft YaHei", italics: true }));
+        }
+        remaining = remaining.slice(m[0].length);
+        continue;
+      }
+      // No more patterns, push remaining as plain text
+      runs.push(new docx.TextRun({ text: remaining, size: 20, font: "Microsoft YaHei" }));
+      remaining = "";
+    }
+    return runs;
+  }
+
+  // ── Helper: parse markdown table ──
   function parseMarkdownTable(lines, startIdx) {
     const tableLines = [];
     let i = startIdx;
@@ -2791,28 +2870,19 @@ async function exportToWord() {
     }
     if (tableLines.length < 2) return { elements: [], nextIdx: i };
 
-    // Parse header
     const headerCells = tableLines[0].split("|").map(c => c.trim()).filter(c => c);
-    // Skip separator line (line with ---)
     const dataStartIdx = (tableLines.length > 1 && tableLines[1].match(/^\|[\s\-:|]+\|$/)) ? 2 : 1;
 
     const rows = [];
-    // Header row
     rows.push(headerCells.map(cell => new docx.TableCell({
-      children: [new docx.Paragraph({ children: [new docx.TextRun({ text: cell, bold: true, size: 20, font: "Microsoft YaHei" })] })],
+      children: [new docx.Paragraph({ children: [new docx.TextRun({ text: cell.replace(/\*+/g, ""), bold: true, size: 20, font: "Microsoft YaHei" })] })],
       shading: { fill: "2e3348" },
     })));
 
-    // Data rows
     for (let r = dataStartIdx; r < tableLines.length; r++) {
       const cells = tableLines[r].split("|").map(c => c.trim()).filter(c => c);
       rows.push(cells.map(cell => {
-        // Handle bold text in cells
-        const boldParts = cell.split(/\*\*(.*?)\*\*/g);
-        const runs = boldParts.map((part, j) => {
-          if (j % 2 === 1) return new docx.TextRun({ text: part, bold: true, size: 18, font: "Microsoft YaHei" });
-          return new docx.TextRun({ text: part, size: 18, font: "Microsoft YaHei" });
-        });
+        const runs = parseInlineMarkdown(cell);
         return new docx.TableCell({
           children: [new docx.Paragraph({ children: runs })],
         });
@@ -2827,121 +2897,245 @@ async function exportToWord() {
     return { elements: [table], nextIdx: i };
   }
 
-  const items = kanbanState.documents;
-  const importantTypes = ["office_action", "response", "allowance"];
-  const exportItems = items ? items.filter(it => importantTypes.indexOf(it.type) !== -1) : [];
-
-  const children = [];
-
-  children.push(
-    new docx.Paragraph({
-      children: [new docx.TextRun({ text: "专利审查历史分析报告", bold: true, size: 36, font: "Microsoft YaHei" })],
-      spacing: { after: 200 },
-    })
-  );
-
-  if (currentData) {
-    const info = `专利号: ${currentData.docNumber || ""} | 申请号: ${currentData.applicationNumber || ""} | 申请人: ${currentData.applicantName || ""}`;
-    children.push(
-      new docx.Paragraph({
-        children: [new docx.TextRun({ text: info, size: 20, color: "666666", font: "Microsoft YaHei" })],
-        spacing: { after: 400 },
-      })
-    );
-  }
-
-  if (kanbanState.analysis) {
-    children.push(
-      new docx.Paragraph({
-        children: [new docx.TextRun({ text: "审查历史综合分析", bold: true, size: 28, font: "Microsoft YaHei" })],
-        spacing: { before: 200, after: 100 },
-      })
-    );
-
-    const lines = kanbanState.analysis.split("\n");
+  // ── Helper: process markdown lines into docx children ──
+  function processMarkdownLines(text) {
+    const output = [];
+    const lines = text.split("\n");
     let i = 0;
     while (i < lines.length) {
       const trimmed = lines[i].trim();
       if (!trimmed) {
-        children.push(new docx.Paragraph({ children: [] }));
+        output.push(new docx.Paragraph({ children: [] }));
         i++;
         continue;
       }
-      // Check for markdown table
+      // Markdown table
       if (trimmed.startsWith("|") && trimmed.includes("|")) {
         const { elements, nextIdx } = parseMarkdownTable(lines, i);
-        elements.forEach(el => children.push(el));
+        elements.forEach(el => output.push(el));
         i = nextIdx;
         continue;
       }
-      if (trimmed.startsWith("# ")) {
-        children.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(2), bold: true, size: 28, font: "Microsoft YaHei" })],
-          spacing: { before: 200, after: 100 },
-        }));
-      } else if (trimmed.startsWith("## ")) {
-        children.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(3), bold: true, size: 24, font: "Microsoft YaHei" })],
-          spacing: { before: 160, after: 80 },
+      // Headings
+      if (trimmed.startsWith("#### ")) {
+        output.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(5).replace(/\*+/g, ""), bold: true, size: 20, font: "Microsoft YaHei" })],
+          spacing: { before: 100, after: 40 },
         }));
       } else if (trimmed.startsWith("### ")) {
-        children.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(4), bold: true, size: 22, font: "Microsoft YaHei" })],
+        output.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(4).replace(/\*+/g, ""), bold: true, size: 22, font: "Microsoft YaHei" })],
           spacing: { before: 120, after: 60 },
         }));
+      } else if (trimmed.startsWith("## ")) {
+        output.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(3).replace(/\*+/g, ""), bold: true, size: 24, font: "Microsoft YaHei" })],
+          spacing: { before: 160, after: 80 },
+        }));
+      } else if (trimmed.startsWith("# ")) {
+        output.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(2).replace(/\*+/g, ""), bold: true, size: 28, font: "Microsoft YaHei" })],
+          spacing: { before: 200, after: 100 },
+        }));
       } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-        children.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(2), size: 20, font: "Microsoft YaHei" })],
+        // Bullet list - strip leading marker and parse inline
+        const bulletText = trimmed.slice(2);
+        output.push(new docx.Paragraph({
+          children: parseInlineMarkdown(bulletText),
+          bullet: { level: 0 },
+        }));
+      } else if (trimmed.match(/^\d+\.\s/)) {
+        // Numbered list
+        const listText = trimmed.replace(/^\d+\.\s/, "");
+        output.push(new docx.Paragraph({
+          children: parseInlineMarkdown(listText),
           bullet: { level: 0 },
         }));
       } else {
-        const boldParts = trimmed.split(/\*\*(.*?)\*\*/g);
-        const runs = boldParts.map((part, idx) => {
-          if (idx % 2 === 1) {
-            return new docx.TextRun({ text: part, bold: true, size: 20, font: "Microsoft YaHei" });
-          }
-          return new docx.TextRun({ text: part, size: 20, font: "Microsoft YaHei" });
-        });
-        children.push(new docx.Paragraph({ children: runs, spacing: { after: 60 } }));
+        // Normal paragraph - parse inline formatting
+        output.push(new docx.Paragraph({
+          children: parseInlineMarkdown(trimmed),
+          spacing: { after: 60 },
+        }));
       }
       i++;
     }
+    return output;
   }
 
+  // ── Build document ──
+  const children = [];
+
+  // Title
   children.push(
     new docx.Paragraph({
-      children: [new docx.TextRun({ text: "审查文档详情", bold: true, size: 28, font: "Microsoft YaHei" })],
-      spacing: { before: 400, after: 100 },
+      children: [new docx.TextRun({ text: "专利审查历史分析报告", bold: true, size: 36, font: "Microsoft YaHei" })],
+      spacing: { after: 200 },
+      alignment: docx.AlignmentType.CENTER,
     })
   );
 
-  for (const it of exportItems) {
+  // ── Patent Overview Section ──
+  if (currentData) {
+    const office = currentData.office || "";
+    const officeNames = { US: "USPTO (美国)", EP: "EPO (欧洲)", CN: "CNIPA (中国)", DE: "DPMA (德国)", JP: "JPO (日本)" };
+    const officeLabel = officeNames[office] || office;
+
+    let title = "";
+    if (currentData.documents && currentData.documents.title) {
+      title = currentData.documents.title;
+    } else if (currentData.family && currentData.family.list && currentData.family.list.length > 0) {
+      title = currentData.family.list[0].title || "";
+    }
+
+    // Extract inventor/applicant info from family data
+    let inventor = "", applicant = "", filingDate = "", publicationDate = "";
+    if (currentData.family) {
+      const famList = currentData.family.list || currentData.family.familyMemberList || [];
+      const firstMember = Array.isArray(famList) ? famList[0] : null;
+      if (firstMember) {
+        inventor = firstMember.inventorName || firstMember.inventors || "";
+        applicant = firstMember.applicantName || firstMember.applicants || currentData.applicantName || "";
+        filingDate = firstMember.filingDate || firstMember.applicationDate || "";
+        publicationDate = firstMember.publicationDate || firstMember.pubDate || "";
+      }
+    }
+    if (!applicant && currentData.applicantName) applicant = currentData.applicantName;
+
+    const overviewRows = [
+      ["专利号", currentData.docNumber || "—"],
+      ["申请号", currentData.applicationNumber || "—"],
+      ["申请局", officeLabel],
+      ["标题", title || "—"],
+      ["发明人", inventor || "—"],
+      ["申请人", applicant || "—"],
+      ["申请日", filingDate || "—"],
+      ["公开日", publicationDate || "—"],
+    ];
+
+    const overviewTableRows = overviewRows.map(([label, value]) => new docx.TableRow({
+      children: [
+        new docx.TableCell({
+          children: [new docx.Paragraph({ children: [new docx.TextRun({ text: label, bold: true, size: 20, font: "Microsoft YaHei" })] })],
+          width: { size: 25, type: docx.WidthType.PERCENTAGE },
+          shading: { fill: "f0f4f8" },
+        }),
+        new docx.TableCell({
+          children: [new docx.Paragraph({ children: [new docx.TextRun({ text: value, size: 20, font: "Microsoft YaHei" })] })],
+          width: { size: 75, type: docx.WidthType.PERCENTAGE },
+        }),
+      ],
+    }));
+
     children.push(
       new docx.Paragraph({
-        children: [new docx.TextRun({ text: `${it.docCode} - ${it.name}（${it.date}）`, bold: true, size: 22, font: "Microsoft YaHei" })],
-        spacing: { before: 200, after: 60 },
+        children: [new docx.TextRun({ text: "专利概览", bold: true, size: 28, font: "Microsoft YaHei" })],
+        spacing: { before: 200, after: 100 },
+      })
+    );
+    children.push(new docx.Table({
+      rows: overviewTableRows,
+      width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    }));
+  }
+
+  // ── Timeline Section ──
+  const items = kanbanState.documents;
+  if (items && items.length > 0) {
+    const typeLabels = {
+      office_action: "审查意见", response: "答复", allowance: "授权",
+      request: "请求", notification: "通知", misc: "其他",
+    };
+    const sorted = [...items].sort((a, b) => parseDate(a.date) - parseDate(b.date));
+
+    // Determine current status
+    const latest = sorted[sorted.length - 1];
+    let currentStatus = "未知";
+    if (latest) {
+      if (latest.type === "allowance") currentStatus = "已授权";
+      else if (latest.type === "office_action") currentStatus = "审查中（待答复）";
+      else if (latest.type === "response") currentStatus = "审查中（已答复）";
+      else if (latest.type === "request") currentStatus = "审查中（已提交请求）";
+      else currentStatus = latest.stage || "审查中";
+    }
+
+    children.push(
+      new docx.Paragraph({
+        children: [new docx.TextRun({ text: "审查时间线", bold: true, size: 28, font: "Microsoft YaHei" })],
+        spacing: { before: 300, after: 60 },
+      })
+    );
+    children.push(
+      new docx.Paragraph({
+        children: [new docx.TextRun({ text: "当前状态: " + currentStatus, bold: true, size: 20, color: "4F8FF7", font: "Microsoft YaHei" })],
+        spacing: { after: 100 },
       })
     );
 
-    const ext = kanbanState.extractions[it.idx];
-    if (ext) {
-      const content = ext.markdown || ext.text || "";
-      const contentLines = content.split("\n").slice(0, 100);
-      for (const line of contentLines) {
-        children.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: line, size: 18, font: "Microsoft YaHei" })],
-          spacing: { after: 30 },
-        }));
-      }
-    } else {
-      children.push(new docx.Paragraph({
-        children: [new docx.TextRun({ text: "（未提取内容）", italics: true, size: 18, color: "999999", font: "Microsoft YaHei" })],
+    const timelineHeaderCells = ["序号", "日期", "文档代码", "文档名称", "类型", "阶段"].map(h =>
+      new docx.TableCell({
+        children: [new docx.Paragraph({ children: [new docx.TextRun({ text: h, bold: true, size: 18, font: "Microsoft YaHei", color: "FFFFFF" })] })],
+        shading: { fill: "2e3348" },
+      })
+    );
+    const timelineRows = [new docx.TableRow({ children: timelineHeaderCells })];
+
+    sorted.forEach((doc, idx) => {
+      const typeLabel = typeLabels[doc.type] || doc.type || "其他";
+      const cells = [
+        String(idx + 1),
+        doc.date || "—",
+        doc.docCode || "—",
+        doc.name || "—",
+        typeLabel,
+        doc.stage || "—",
+      ].map(val => new docx.TableCell({
+        children: [new docx.Paragraph({ children: [new docx.TextRun({ text: val, size: 18, font: "Microsoft YaHei" })] })],
       }));
-    }
+      timelineRows.push(new docx.TableRow({ children: cells }));
+    });
+
+    children.push(new docx.Table({
+      rows: timelineRows,
+      width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    }));
   }
 
+  // ── AI Analysis Section ──
+  if (kanbanState.analysis) {
+    children.push(
+      new docx.Paragraph({
+        children: [new docx.TextRun({ text: "审查历史综合分析", bold: true, size: 28, font: "Microsoft YaHei" })],
+        spacing: { before: 300, after: 100 },
+      })
+    );
+    const analysisChildren = processMarkdownLines(kanbanState.analysis);
+    analysisChildren.forEach(c => children.push(c));
+  }
+
+  // ── Build final document with header ──
   const doc = new docx.Document({
-    sections: [{ children }],
+    sections: [{
+      properties: {
+        defaultTabStop: 420,
+        page: {
+          margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 },
+        },
+      },
+      headers: {
+        default: new docx.Header({
+          children: [
+            new docx.Paragraph({
+              children: [
+                new docx.TextRun({ text: "由 PatentLens 工具制作", size: 16, color: "999999", font: "Microsoft YaHei", italics: true }),
+              ],
+              alignment: docx.AlignmentType.RIGHT,
+            }),
+          ],
+        }),
+      },
+      children,
+    }],
   });
 
   const blob = await docx.Packer.toBlob(doc);
