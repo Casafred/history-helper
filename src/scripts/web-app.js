@@ -2717,7 +2717,7 @@ function searchPdfKeyword() {
     firstOverlay.classList.add("pdf-search-current");
     firstOverlay.scrollIntoView({ behavior: "smooth", block: "center" });
   }
-  if (searchInfo) searchInfo.textContent = `1/${pdfViewState.searchMatches.length}`;
+  updateSearchInfo();
 }
 
 function searchPdfNext() {
@@ -2736,8 +2736,32 @@ function searchPdfNext() {
     overlay.classList.add("pdf-search-current");
     overlay.scrollIntoView({ behavior: "smooth", block: "center" });
   }
+  updateSearchInfo();
+}
+
+function searchPdfPrev() {
+  if (pdfViewState.searchMatches.length === 0) return;
+
+  // Remove current highlight
+  document.querySelectorAll(".pdf-block-overlay.pdf-search-current").forEach(el => el.classList.remove("pdf-search-current"));
+
+  pdfViewState.searchCurrentIdx = (pdfViewState.searchCurrentIdx - 1 + pdfViewState.searchMatches.length) % pdfViewState.searchMatches.length;
+  const id = pdfViewState.searchMatches[pdfViewState.searchCurrentIdx];
+  const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
+  if (overlay) {
+    overlay.classList.add("pdf-search-current");
+    overlay.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  updateSearchInfo();
+}
+
+function updateSearchInfo() {
   const searchInfo = document.getElementById("pdf-search-info");
   if (searchInfo) searchInfo.textContent = `${pdfViewState.searchCurrentIdx + 1}/${pdfViewState.searchMatches.length}`;
+  const prevBtn = document.getElementById("pdf-search-prev-btn");
+  const nextBtn = document.getElementById("pdf-search-next-btn");
+  if (prevBtn) prevBtn.disabled = pdfViewState.searchMatches.length === 0;
+  if (nextBtn) nextBtn.disabled = pdfViewState.searchMatches.length === 0;
 }
 
 // ===== OCR extract button for single document =====
@@ -3484,6 +3508,32 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Sidebar toggle
+  const readerSidebarToggle = document.getElementById("reader-sidebar-toggle");
+  const readerSidebar = document.getElementById("reader-sidebar");
+  const readerMain = document.querySelector(".reader-main");
+  if (readerSidebarToggle && readerSidebar) {
+    readerSidebarToggle.addEventListener("click", () => {
+      readerSidebar.classList.toggle("collapsed");
+      if (readerSidebar.classList.contains("collapsed")) {
+        // Add expand button
+        const expandBtn = document.createElement("button");
+        expandBtn.id = "reader-sidebar-expand";
+        expandBtn.className = "reader-sidebar-expand-btn";
+        expandBtn.innerHTML = '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>';
+        expandBtn.title = "展开文档列表";
+        if (readerMain) readerMain.appendChild(expandBtn);
+        expandBtn.addEventListener("click", () => {
+          readerSidebar.classList.remove("collapsed");
+          expandBtn.remove();
+        });
+      } else {
+        const expandBtn = document.getElementById("reader-sidebar-expand");
+        if (expandBtn) expandBtn.remove();
+      }
+    });
+  }
+
   if (readerFullscreenBtn) {
     readerFullscreenBtn.addEventListener("click", () => {
       const content = document.querySelector(".reader-modal-content");
@@ -3519,8 +3569,16 @@ document.addEventListener("DOMContentLoaded", () => {
   // PDF search
   const pdfSearchBtn = document.getElementById("pdf-search-btn");
   const pdfSearchInput = document.getElementById("pdf-search-input");
+  const pdfSearchPrevBtn = document.getElementById("pdf-search-prev-btn");
+  const pdfSearchNextBtn = document.getElementById("pdf-search-next-btn");
   if (pdfSearchBtn) {
     pdfSearchBtn.addEventListener("click", searchPdfKeyword);
+  }
+  if (pdfSearchPrevBtn) {
+    pdfSearchPrevBtn.addEventListener("click", searchPdfPrev);
+  }
+  if (pdfSearchNextBtn) {
+    pdfSearchNextBtn.addEventListener("click", searchPdfNext);
   }
   if (pdfSearchInput) {
     pdfSearchInput.addEventListener("keydown", (e) => {
@@ -3691,8 +3749,7 @@ async function sendChatMessage() {
         fullResponse += chunk.content;
         if (assistantMsgEl) {
           const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
-          contentEl.textContent = fullResponse;
-          chatMessages.scrollTop = chatMessages.scrollHeight;
+          contentEl.innerHTML = renderMarkdown(fullResponse);
         }
       }
     }
@@ -3713,7 +3770,7 @@ function appendChatMessage(role, content) {
   const msgEl = document.createElement("div");
   msgEl.className = `chat-msg ${role}`;
   if (role === "assistant") {
-    msgEl.innerHTML = `<div class="chat-msg-content">${escapeHtml(content)}</div>`;
+    msgEl.innerHTML = `<div class="chat-msg-content markdown-body">${renderMarkdown(content)}</div>`;
   } else if (role === "system") {
     msgEl.textContent = content;
   } else {
@@ -3737,7 +3794,7 @@ function appendAnalysisChatMessage(role, content) {
   const msgEl = document.createElement("div");
   msgEl.className = `chat-msg ${role}`;
   if (role === "assistant") {
-    msgEl.innerHTML = `<div class="chat-msg-content">${escapeHtml(content)}</div>`;
+    msgEl.innerHTML = `<div class="chat-msg-content markdown-body">${renderMarkdown(content)}</div>`;
   } else if (role === "system") {
     msgEl.textContent = content;
   } else {
@@ -3803,8 +3860,7 @@ async function sendAnalysisChatMessage() {
         fullResponse += chunk.content;
         if (assistantMsgEl) {
           const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
-          contentEl.textContent = fullResponse;
-          if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+          contentEl.innerHTML = renderMarkdown(fullResponse);
         }
       }
     }

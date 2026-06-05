@@ -1120,7 +1120,7 @@ body {
 }
 
 .chat-msg.assistant .chat-msg-content {
-  white-space: pre-wrap;
+  white-space: normal;
 }
 
 .chat-msg.system {
@@ -1991,6 +1991,18 @@ body {
   opacity: 0.7;
 }
 
+/* Sticky kanban filter bar - stays visible on scroll */
+#kanban-filter-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg-card);
+  padding-top: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
 .app-footer {
   text-align: center;
   padding: 24px 0 8px;
@@ -2204,6 +2216,9 @@ body {
 }
 
 .reader-sidebar-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-muted);
@@ -2252,6 +2267,51 @@ body {
 .reader-doc-item .doc-item-name {
   color: var(--text-primary);
   margin-top: 2px;
+}
+
+.reader-sidebar.collapsed {
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+  border-right: none;
+}
+
+.reader-sidebar.collapsed .reader-sidebar-title {
+  display: none;
+}
+
+.reader-sidebar-expand-btn {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 48px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  color: var(--text-muted);
+  transition: background 0.2s;
+}
+
+.reader-sidebar-expand-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.reader-sidebar.collapsed ~ .reader-main .reader-chat-panel {
+  width: 380px;
+}
+
+.reader-modal-content.docked .reader-sidebar.collapsed {
+  width: 0;
+  padding: 0;
 }
 
 .reader-main {
