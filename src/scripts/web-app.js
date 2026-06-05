@@ -2337,8 +2337,7 @@ function openReader(defaultToPdf = false) {
     togglePdfView();
   }
 
-  const importantTypes = ["office_action", "response", "allowance"];
-  const readerItems = items.filter(it => importantTypes.indexOf(it.type) !== -1);
+  const readerItems = items;
 
   let listHtml = "";
   readerItems.forEach((it, idx) => {
@@ -2379,6 +2378,12 @@ function selectReaderDoc(idx) {
 
   // Track the currently selected document for PDF view
   pdfViewState.currentDocIdx = idx;
+
+  // Reset search state
+  pdfViewState.searchMatches = [];
+  pdfViewState.searchCurrentIdx = -1;
+  const searchInfo = document.getElementById("pdf-search-info");
+  if (searchInfo) searchInfo.textContent = "";
 
   // Reset OCR/search state for new document
   const ext = kanbanState.extractions[idx];
