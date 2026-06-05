@@ -1231,6 +1231,8 @@ body {
   height: 20px;
   background: var(--border);
   margin: 0 4px;
+}
+
 .pdf-zoom-level {
   min-width: 42px;
   text-align: center;
