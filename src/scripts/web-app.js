@@ -76,6 +76,8 @@ const kanbanAutoBtn = document.getElementById("kanban-auto-btn");
 const readerBtn = document.getElementById("reader-btn");
 const readerModal = document.getElementById("reader-modal");
 const readerCloseBtn = document.getElementById("reader-close-btn");
+const readerMinimizeBtn = document.getElementById("reader-minimize-btn");
+const readerFloatingBall = document.getElementById("reader-floating-ball");
 const readerDocList = document.getElementById("reader-doc-list");
 const readerContent = document.getElementById("reader-content");
 const readerExportBtn = document.getElementById("reader-export-btn");
@@ -92,6 +94,14 @@ const pdfNextPage = document.getElementById("pdf-next-page");
 const pdfZoomIn = document.getElementById("pdf-zoom-in");
 const pdfZoomOut = document.getElementById("pdf-zoom-out");
 const pdfZoomFit = document.getElementById("pdf-zoom-fit");
+const pdfOcrBtn = document.getElementById("pdf-ocr-btn");
+
+const readerChatPanel = document.getElementById("reader-chat-panel");
+const chatMessages = document.getElementById("chat-messages");
+const chatInput = document.getElementById("chat-input");
+const chatSendBtn = document.getElementById("chat-send-btn");
+const chatCloseBtn = document.getElementById("chat-close-btn");
+const readerChatToggle = document.getElementById("reader-chat-toggle");
 
 let pdfViewState = {
   active: false,
@@ -105,6 +115,9 @@ let pdfViewState = {
   pendingHighlight: null,
   pendingHighlightRange: null,
 };
+
+let chatHistory = [];
+let chatAbortController = null;
 
 function showError(msg) {
   errorToast.textContent = msg;
@@ -2330,6 +2343,10 @@ function openReader(defaultToPdf = false) {
 }
 
 function selectReaderDoc(idx) {
+  // Reset chat for new document
+  chatHistory = [];
+  if (chatMessages) chatMessages.innerHTML = "";
+
   const items = kanbanState.documents;
   const it = items.find(d => d.idx === idx);
   if (!it) return;
@@ -2341,12 +2358,25 @@ function selectReaderDoc(idx) {
   // Track the currently selected document for PDF view
   pdfViewState.currentDocIdx = idx;
 
+  // Reset OCR/search state for new document
+  const ext = kanbanState.extractions[idx];
+  const searchInput = document.getElementById("pdf-search-input");
+  const searchBtn = document.getElementById("pdf-search-btn");
+  if (ext && ext.blocks && ext.blocks.length > 0) {
+    if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
+    if (searchBtn) searchBtn.disabled = false;
+    if (pdfOcrBtn) { pdfOcrBtn.textContent = "已提取"; pdfOcrBtn.disabled = true; }
+  } else {
+    if (searchInput) { searchInput.disabled = true; searchInput.placeholder = "请先OCR提取..."; }
+    if (searchBtn) searchBtn.disabled = true;
+    if (pdfOcrBtn) { pdfOcrBtn.textContent = "OCR 提取"; pdfOcrBtn.disabled = false; }
+  }
+
   // Render PDF view if active
   if (pdfViewState.active) {
     renderPdfView(idx);
   }
 
-  const ext = kanbanState.extractions[idx];
   if (ext) {
     const md = ext.markdown || ext.text || "";
     const blocks = ext.blocks || [];
@@ -3004,6 +3034,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (readerCloseBtn) {
     readerCloseBtn.addEventListener("click", () => {
       readerModal.classList.add("hidden");
+      if (readerFloatingBall) readerFloatingBall.classList.add("hidden");
       // Reset PDF view state when closing
       if (pdfViewState.active) {
         pdfViewState.active = false;
@@ -3021,28 +3052,45 @@ document.addEventListener("DOMContentLoaded", () => {
       if (content) content.classList.remove("docked");
       if (readerFullscreenBtn) readerFullscreenBtn.classList.add("hidden");
       if (readerDockBtn) readerDockBtn.classList.remove("hidden");
+      // Close chat panel
+      if (readerChatPanel) readerChatPanel.classList.add("hidden");
+      if (readerChatToggle) readerChatToggle.classList.remove("active");
+      chatHistory = [];
+      if (chatMessages) chatMessages.innerHTML = "";
     });
   }
 
   if (readerModal) {
     readerModal.querySelector(".modal-overlay").addEventListener("click", () => {
-      readerModal.classList.add("hidden");
-      if (pdfViewState.active) {
-        pdfViewState.active = false;
-        readerPdfView.classList.add("hidden");
-        readerContent.classList.remove("hidden");
-        readerPdfToggle.classList.remove("active");
-        readerPdfToggle.textContent = "PDF 视图";
-      }
-      pdfViewState.pdfDoc = null;
-      pdfViewState.renderedPages = {};
-      pdfViewState.pendingHighlight = null;
-      pdfViewState.pendingHighlightRange = null;
-      // Reset docked state
       const content = document.querySelector(".reader-modal-content");
-      if (content) content.classList.remove("docked");
-      if (readerFullscreenBtn) readerFullscreenBtn.classList.add("hidden");
-      if (readerDockBtn) readerDockBtn.classList.remove("hidden");
+      if (content && content.classList.contains("docked")) {
+        // In docked mode, minimize to floating ball instead of closing
+        readerModal.classList.add("hidden");
+        if (readerFloatingBall) readerFloatingBall.classList.remove("hidden");
+      } else {
+        // Full screen mode, close fully
+        readerModal.classList.add("hidden");
+        if (readerFloatingBall) readerFloatingBall.classList.add("hidden");
+        if (pdfViewState.active) {
+          pdfViewState.active = false;
+          readerPdfView.classList.add("hidden");
+          readerContent.classList.remove("hidden");
+          readerPdfToggle.classList.remove("active");
+          readerPdfToggle.textContent = "PDF 视图";
+        }
+        pdfViewState.pdfDoc = null;
+        pdfViewState.renderedPages = {};
+        pdfViewState.pendingHighlight = null;
+        pdfViewState.pendingHighlightRange = null;
+        if (content) content.classList.remove("docked");
+        if (readerFullscreenBtn) readerFullscreenBtn.classList.add("hidden");
+        if (readerDockBtn) readerDockBtn.classList.remove("hidden");
+        // Close chat panel
+        if (readerChatPanel) readerChatPanel.classList.add("hidden");
+        if (readerChatToggle) readerChatToggle.classList.remove("active");
+        chatHistory = [];
+        if (chatMessages) chatMessages.innerHTML = "";
+      }
     });
   }
 
@@ -3108,6 +3156,91 @@ document.addEventListener("DOMContentLoaded", () => {
     pdfZoomFit.addEventListener("click", pdfZoomFitAction);
   }
 
+  // Minimize to floating ball
+  if (readerMinimizeBtn) {
+    readerMinimizeBtn.addEventListener("click", () => {
+      readerModal.classList.add("hidden");
+      if (readerFloatingBall) readerFloatingBall.classList.remove("hidden");
+    });
+  }
+
+  // Floating ball click to restore reader
+  if (readerFloatingBall) {
+    readerFloatingBall.addEventListener("click", () => {
+      readerFloatingBall.classList.add("hidden");
+      readerModal.classList.remove("hidden");
+    });
+  }
+
+  // OCR extract button in PDF toolbar
+  if (pdfOcrBtn) {
+    pdfOcrBtn.addEventListener("click", async () => {
+      if (pdfViewState.currentDocIdx == null) return;
+      const idx = pdfViewState.currentDocIdx;
+      const items = kanbanState.documents;
+      const it = items.find(d => d.idx === idx);
+      if (!it) return;
+
+      pdfOcrBtn.disabled = true;
+      pdfOcrBtn.textContent = "提取中...";
+
+      try {
+        const isUS = currentData.office === "US";
+        const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+        const encodedDocId = encodeURIComponent(it.docId);
+        const extractUrl = `/api/gd/extract-text/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+        await extractDocumentText(extractUrl, idx, it.type);
+        // Enable search after extraction
+        const searchInput = document.getElementById("pdf-search-input");
+        const searchBtn = document.getElementById("pdf-search-btn");
+        if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
+        if (searchBtn) searchBtn.disabled = false;
+        pdfOcrBtn.textContent = "已提取";
+        pdfOcrBtn.disabled = true;
+
+        // Re-render PDF view with overlays if active
+        if (pdfViewState.active) {
+          renderPdfView(idx);
+        }
+      } catch (e) {
+        pdfOcrBtn.textContent = "OCR 提取";
+        pdfOcrBtn.disabled = false;
+        showError("OCR 提取失败: " + e.message);
+      }
+    });
+  }
+
+  // Chat toggle
+  if (readerChatToggle) {
+    readerChatToggle.addEventListener("click", () => {
+      if (readerChatPanel) {
+        readerChatPanel.classList.toggle("hidden");
+        readerChatToggle.classList.toggle("active");
+      }
+    });
+  }
+
+  if (chatCloseBtn) {
+    chatCloseBtn.addEventListener("click", () => {
+      if (readerChatPanel) readerChatPanel.classList.add("hidden");
+      if (readerChatToggle) readerChatToggle.classList.remove("active");
+    });
+  }
+
+  // Chat send
+  if (chatSendBtn) {
+    chatSendBtn.addEventListener("click", sendChatMessage);
+  }
+
+  if (chatInput) {
+    chatInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    });
+  }
+
   document.addEventListener("click", (e) => {
     const traceLink = e.target.closest(".trace-link");
     if (traceLink) {
@@ -3116,6 +3249,101 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 });
+
+async function sendChatMessage() {
+  const input = chatInput;
+  if (!input) return;
+  const question = input.value.trim();
+  if (!question) return;
+
+  // Check if document has OCR content
+  const idx = pdfViewState.currentDocIdx;
+  if (idx == null) {
+    showError("请先选择一个文档");
+    return;
+  }
+  const ext = kanbanState.extractions[idx];
+  if (!ext || !ext.text) {
+    showError("请先提取文档内容（OCR提取）");
+    return;
+  }
+
+  // Get AI config
+  const config = AI.loadAIConfig();
+  const provider = AI.getCurrentProvider(config);
+  if (!provider || !provider.apiKey) {
+    showError("请先配置 AI 服务（API Key）");
+    return;
+  }
+
+  // Add user message
+  chatHistory.push({ role: "user", content: question });
+  appendChatMessage("user", question);
+  input.value = "";
+
+  // Build context from document content
+  const docContent = ext.text.slice(0, 8000); // Limit context size
+  const doc = kanbanState.documents.find(d => d.idx === idx);
+  const docName = doc ? `${doc.name} (${doc.docCode})` : "当前文档";
+
+  const systemPrompt = `你是专利审查文档分析助手。用户正在查看专利审查文档「${docName}」的内容。以下是该文档的OCR提取内容，请基于此内容回答用户的问题。如果文档内容不足以回答，请如实说明。\n\n---文档内容开始---\n${docContent}\n---文档内容结束---`;
+
+  const messages = [
+    { role: "system", content: systemPrompt },
+    ...chatHistory.slice(-10) // Keep last 10 messages for context
+  ];
+
+  // Add assistant placeholder
+  const assistantMsgEl = appendChatMessage("assistant", "");
+  chatSendBtn.disabled = true;
+  chatAbortController = new AbortController();
+
+  try {
+    let fullResponse = "";
+    const stream = AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
+      model: provider.model,
+      messages: messages,
+      maxTokens: 4096,
+    }, chatAbortController.signal);
+
+    for await (const chunk of stream) {
+      if (chatAbortController.signal.aborted) break;
+      if (chunk.content) {
+        fullResponse += chunk.content;
+        if (assistantMsgEl) {
+          const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+          contentEl.textContent = fullResponse;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+      }
+    }
+
+    chatHistory.push({ role: "assistant", content: fullResponse });
+  } catch (e) {
+    if (e.name !== "AbortError") {
+      appendChatMessage("system", "AI 响应出错: " + e.message);
+    }
+  } finally {
+    chatSendBtn.disabled = false;
+    chatAbortController = null;
+  }
+}
+
+function appendChatMessage(role, content) {
+  if (!chatMessages) return null;
+  const msgEl = document.createElement("div");
+  msgEl.className = `chat-msg ${role}`;
+  if (role === "assistant") {
+    msgEl.innerHTML = `<div class="chat-msg-content">${escapeHtml(content)}</div>`;
+  } else if (role === "system") {
+    msgEl.textContent = content;
+  } else {
+    msgEl.textContent = content;
+  }
+  chatMessages.appendChild(msgEl);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return msgEl;
+}
 
 async function kanbanManualExtract(url, idx, docType) {
   const container = document.getElementById("kanban-extracted-" + idx);
