@@ -869,6 +869,7 @@ body {
   grid-template-columns: repeat(6, 1fr);
   gap: 12px;
   min-width: unset;
+  height: 65vh;
 }
 
 .kanban-column {
@@ -877,7 +878,8 @@ body {
   border-radius: 6px;
   display: flex;
   flex-direction: column;
-  min-height: 200px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .kanban-column-header {
@@ -919,7 +921,8 @@ body {
   flex-direction: column;
   gap: 6px;
   max-height: none;
-  overflow-y: visible;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .kanban-empty {
