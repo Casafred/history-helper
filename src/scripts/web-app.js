@@ -539,10 +539,13 @@ function renderOverview(data) {
   if (data.family) {
     const members = extractFamilyMembers(data.family);
     if (members.length > 0) {
-      const m = members[0];
-      title = m.title || (m.docList && m.docList.title) || m.inventionTitle || "";
-      // applicantNames is an array in GD API
-      const applicantNamesArr = m.applicantNames || (m.docList && m.docList.applicantNames) || [];
+      // Find the member matching the queried office, fall back to first member
+      let m = members.find(mem => mem.countryCode === data.office) || members[0];
+      // Also check docList for richer data (US members store title/applicants in docList)
+      const dl = m.docList || {};
+      title = m.title || dl.title || m.inventionTitle || "";
+      // applicantNames is an array in GD API (on member level and in docList)
+      const applicantNamesArr = m.applicantNames || dl.applicantNames || [];
       applicants = Array.isArray(applicantNamesArr) ? applicantNamesArr.join(", ") : (applicantNamesArr || m.applicants || m.applicantName || "");
       // inventors not available in GD family API
       inventors = m.inventors || m.inventorName || "";
@@ -571,8 +574,20 @@ function renderOverview(data) {
       if (Array.isArray(ipcClasses)) ipcClasses = ipcClasses.join(", ");
       cpcClasses = m.cpcClass || m.cpc || "";
       if (Array.isArray(cpcClasses)) cpcClasses = cpcClasses.join(", ");
-      // legal status not available in GD family API
-      legalStatus = m.legalStatus || m.status || "";
+      // Infer legal status from document types
+      const docItems = kanbanState.documents || [];
+      const hasAllowance = docItems.some(it => it.type === "allowance");
+      const hasOA = docItems.some(it => it.type === "office_action");
+      const hasResponse = docItems.some(it => it.type === "response");
+      if (hasAllowance) {
+        legalStatus = "已授权 (Granted)";
+      } else if (hasOA && !hasResponse) {
+        legalStatus = "待答复 (Pending Response)";
+      } else if (hasOA && hasResponse) {
+        legalStatus = "审查中 (Under Examination)";
+      } else {
+        legalStatus = m.legalStatus || m.status || "";
+      }
     }
   }
   if (data.documents && data.documents.title && !title) {
