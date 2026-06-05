@@ -76,6 +76,8 @@ const kanbanAutoBtn = document.getElementById("kanban-auto-btn");
 const readerBtn = document.getElementById("reader-btn");
 const readerModal = document.getElementById("reader-modal");
 const readerCloseBtn = document.getElementById("reader-close-btn");
+const readerMinimizeBtn = document.getElementById("reader-minimize-btn");
+const readerFloatingBall = document.getElementById("reader-floating-ball");
 const readerDocList = document.getElementById("reader-doc-list");
 const readerContent = document.getElementById("reader-content");
 const readerExportBtn = document.getElementById("reader-export-btn");
@@ -92,6 +94,14 @@ const pdfNextPage = document.getElementById("pdf-next-page");
 const pdfZoomIn = document.getElementById("pdf-zoom-in");
 const pdfZoomOut = document.getElementById("pdf-zoom-out");
 const pdfZoomFit = document.getElementById("pdf-zoom-fit");
+const pdfOcrBtn = document.getElementById("pdf-ocr-btn");
+
+const readerChatPanel = document.getElementById("reader-chat-panel");
+const chatMessages = document.getElementById("chat-messages");
+const chatInput = document.getElementById("chat-input");
+const chatSendBtn = document.getElementById("chat-send-btn");
+const chatCloseBtn = document.getElementById("chat-close-btn");
+const readerChatToggle = document.getElementById("reader-chat-toggle");
 
 let pdfViewState = {
   active: false,
@@ -104,9 +114,12 @@ let pdfViewState = {
   renderedPages: {},
   pendingHighlight: null,
   pendingHighlightRange: null,
-  searchMatches: [],
-  searchCurrentIdx: -1,
 };
+
+let chatHistory = [];
+let chatAbortController = null;
+let analysisChatHistory = [];
+let analysisChatAbortController = null;
 
 function showError(msg) {
   errorToast.textContent = msg;
@@ -359,7 +372,14 @@ function renderKanban(data) {
   kanbanState.documents = items;
   kanbanState.extractions = {};
   kanbanState.analysis = "";
+  kanbanState.analysisSystemPrompt = "";
+  kanbanState.analysisUserMessage = "";
   kanbanState.traceIndex = {};
+  analysisChatHistory = [];
+  const analysisChatToggleBtn = document.getElementById("analysis-chat-toggle-btn");
+  if (analysisChatToggleBtn) analysisChatToggleBtn.classList.add("hidden");
+  const analysisChatPanel = document.getElementById("analysis-chat-panel");
+  if (analysisChatPanel) analysisChatPanel.classList.add("hidden");
 
   // Build filter bar
   const filterBar = document.getElementById("kanban-filter-bar");
@@ -475,7 +495,6 @@ function renderKanban(data) {
             <div class="kanban-card-actions">
               ${extractUrl ? '<button class="btn-small btn-extract" data-action="kanban-extract" data-url="' + extractUrl + '" data-idx="' + it.idx + '" data-doctype="' + escapeHtml(it.docCode) + '">提取内容</button>' : ''}
               ${downloadUrl ? '<button class="btn-small btn-download" data-action="kanban-download" data-url="' + downloadUrl + '" data-filename="' + escapeHtml(it.docCode) + '_' + escapeHtml(it.date.replace(/\//g, '-')) + '.pdf">下载</button>' : ''}
-              ${downloadUrl ? '<button class="btn-small btn-view-pdf" data-action="kanban-view-pdf" data-idx="' + it.idx + '">查看PDF</button>' : ''}
             </div>
             <div id="kanban-extracted-${it.idx}" class="kanban-extracted hidden"></div>
           </div>
@@ -1504,6 +1523,11 @@ kanbanAutoBtn.addEventListener("click", async () => {
       }
     }
     kanbanState.analysis = fullText;
+    // Save context for continued chat
+    kanbanState.analysisSystemPrompt = systemPrompt;
+    kanbanState.analysisUserMessage = userMessage;
+    analysisChatHistory = [];
+    showAnalysisChatToggle();
     if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份审查/答复文档" + (hasBlocks ? "（含溯源标记）" : "");
 
     let reportHtml = "";
@@ -2015,6 +2039,11 @@ manualSelectBtn.addEventListener("click", () => {
         }
       }
       kanbanState.analysis = fullText;
+      // Save context for continued chat
+      kanbanState.analysisSystemPrompt = systemPrompt;
+      kanbanState.analysisUserMessage = userMessage;
+      analysisChatHistory = [];
+      showAnalysisChatToggle();
       if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份文档" + (hasBlocks ? "（含溯源标记）" : "");
 
       let reportHtml = "";
@@ -2305,7 +2334,8 @@ function openReader(defaultToPdf = false) {
     togglePdfView();
   }
 
-  const readerItems = items;
+  const importantTypes = ["office_action", "response", "allowance"];
+  const readerItems = items.filter(it => importantTypes.indexOf(it.type) !== -1);
 
   let listHtml = "";
   readerItems.forEach((it, idx) => {
@@ -2331,24 +2361,11 @@ function openReader(defaultToPdf = false) {
   readerContent.innerHTML = '<p class="placeholder">请从左侧选择文档查看内容</p>';
 }
 
-function openReaderForDoc(idx) {
-  if (!readerModal) return;
-  const items = kanbanState.documents;
-  if (!items || items.length === 0) {
-    showError("请先查询专利并加载审查文档");
-    return;
-  }
-
-  // Build full document list (same as openReader)
-  openReader(true);
-  
-  // Auto-select the specified document
-  setTimeout(() => {
-    selectReaderDoc(idx);
-  }, 100);
-}
-
 function selectReaderDoc(idx) {
+  // Reset chat for new document
+  chatHistory = [];
+  if (chatMessages) chatMessages.innerHTML = "";
+
   const items = kanbanState.documents;
   const it = items.find(d => d.idx === idx);
   if (!it) return;
@@ -2360,12 +2377,25 @@ function selectReaderDoc(idx) {
   // Track the currently selected document for PDF view
   pdfViewState.currentDocIdx = idx;
 
+  // Reset OCR/search state for new document
+  const ext = kanbanState.extractions[idx];
+  const searchInput = document.getElementById("pdf-search-input");
+  const searchBtn = document.getElementById("pdf-search-btn");
+  if (ext && ext.blocks && ext.blocks.length > 0) {
+    if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
+    if (searchBtn) searchBtn.disabled = false;
+    if (pdfOcrBtn) { pdfOcrBtn.textContent = "已提取"; pdfOcrBtn.disabled = true; }
+  } else {
+    if (searchInput) { searchInput.disabled = true; searchInput.placeholder = "请先OCR提取..."; }
+    if (searchBtn) searchBtn.disabled = true;
+    if (pdfOcrBtn) { pdfOcrBtn.textContent = "OCR 提取"; pdfOcrBtn.disabled = false; }
+  }
+
   // Render PDF view if active
   if (pdfViewState.active) {
     renderPdfView(idx);
   }
 
-  const ext = kanbanState.extractions[idx];
   if (ext) {
     const md = ext.markdown || ext.text || "";
     const blocks = ext.blocks || [];
@@ -2631,82 +2661,6 @@ function highlightPdfBlock(blockId) {
   }
 }
 
-function searchPdfKeyword(keyword) {
-  // Clear previous search highlights
-  document.querySelectorAll(".pdf-search-highlight, .pdf-search-match").forEach(el => {
-    el.classList.remove("pdf-search-highlight", "pdf-search-match");
-  });
-  pdfViewState.searchMatches = [];
-  pdfViewState.searchCurrentIdx = -1;
-
-  const searchInfo = document.getElementById("pdf-search-info");
-  if (!keyword || !keyword.trim()) {
-    if (searchInfo) searchInfo.textContent = "";
-    return;
-  }
-
-  const kw = keyword.trim().toLowerCase();
-  const ext = kanbanState.extractions[pdfViewState.currentDocIdx];
-  if (!ext || !ext.blocks || ext.blocks.length === 0) {
-    if (searchInfo) searchInfo.textContent = "无OCR数据";
-    return;
-  }
-
-  // Find all blocks containing the keyword
-  const matches = [];
-  ext.blocks.forEach(b => {
-    if (b.content && b.content.toLowerCase().includes(kw)) {
-      matches.push(b.block_id);
-    }
-  });
-
-  pdfViewState.searchMatches = matches;
-
-  if (matches.length === 0) {
-    if (searchInfo) searchInfo.textContent = "无匹配";
-    return;
-  }
-
-  // Highlight all matching blocks
-  matches.forEach(blockId => {
-    const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${blockId}"]`);
-    if (overlay) overlay.classList.add("pdf-search-match");
-  });
-
-  // Jump to first match
-  pdfViewState.searchCurrentIdx = 0;
-  const firstBlockId = matches[0];
-  const firstOverlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${firstBlockId}"]`);
-  if (firstOverlay) {
-    firstOverlay.classList.add("pdf-search-highlight");
-    firstOverlay.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
-
-  if (searchInfo) searchInfo.textContent = `${1}/${matches.length}`;
-}
-
-function searchPdfNext() {
-  const matches = pdfViewState.searchMatches;
-  if (matches.length === 0) return;
-
-  // Remove current highlight
-  const currentBlockId = matches[pdfViewState.searchCurrentIdx];
-  const currentOverlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${currentBlockId}"]`);
-  if (currentOverlay) currentOverlay.classList.remove("pdf-search-highlight");
-
-  // Move to next
-  pdfViewState.searchCurrentIdx = (pdfViewState.searchCurrentIdx + 1) % matches.length;
-  const nextBlockId = matches[pdfViewState.searchCurrentIdx];
-  const nextOverlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${nextBlockId}"]`);
-  if (nextOverlay) {
-    nextOverlay.classList.add("pdf-search-highlight");
-    nextOverlay.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
-
-  const searchInfo = document.getElementById("pdf-search-info");
-  if (searchInfo) searchInfo.textContent = `${pdfViewState.searchCurrentIdx + 1}/${matches.length}`;
-}
-
 // ============ 浏览器插件数据处理 ============
 
 function handleExtensionData(data) {
@@ -2876,86 +2830,7 @@ async function exportToWord() {
     return;
   }
 
-  // ── Helper: parse inline markdown formatting (bold, italic, code, trace refs) into TextRun[] ──
-  function parseInlineMarkdown(text) {
-    const runs = [];
-    // Process text segment by segment, handling **bold**, *italic*, `code`
-    let remaining = text;
-    while (remaining.length > 0) {
-      // Try matching **bold**
-      let m = remaining.match(/^(.*?)\*\*(.+?)\*\*/s);
-      if (m) {
-        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
-        runs.push(new docx.TextRun({ text: m[2], bold: true, size: 20, font: "Microsoft YaHei" }));
-        remaining = remaining.slice(m[0].length);
-        continue;
-      }
-      // Try matching *italic* (single asterisk, not preceded/followed by *)
-      m = remaining.match(/^(.*?)\*([^*]+?)\*/s);
-      if (m) {
-        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
-        runs.push(new docx.TextRun({ text: m[2], italics: true, size: 20, font: "Microsoft YaHei" }));
-        remaining = remaining.slice(m[0].length);
-        continue;
-      }
-      // Try matching `code`
-      m = remaining.match(/^(.*?)`([^`]+?)`/s);
-      if (m) {
-        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
-        runs.push(new docx.TextRun({ text: m[2], size: 18, font: "Consolas", shading: { fill: "f0f0f0" } }));
-        remaining = remaining.slice(m[0].length);
-        continue;
-      }
-      // Try matching 【来源: ...】 trace references
-      m = remaining.match(/^(.*?)【来源:\s*([^\】]+)】/s);
-      if (m) {
-        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
-        // Convert trace refs to readable format
-        const refs = m[2].split(",").map(r => r.trim()).filter(r => r.startsWith("B_"));
-        const readableRefs = [];
-        const grouped = {};
-        refs.forEach(ref => {
-          const info = kanbanState.traceIndex[ref];
-          if (!info) return;
-          const doc = kanbanState.documents.find(d => d.idx === info.docIdx);
-          const docLabel = doc ? `${doc.name} (${doc.docCode})` : `文档${info.docIdx}`;
-          const key = `${info.docIdx}|${info.page}|${docLabel}`;
-          if (!grouped[key]) grouped[key] = [];
-          const blockMatch = ref.match(/B_p(\d+)_(\d+)/);
-          if (blockMatch) {
-            grouped[key].push({ blockIdx: parseInt(blockMatch[2]), page: parseInt(blockMatch[1]) });
-          }
-        });
-        Object.keys(grouped).forEach(key => {
-          const [,, docLabel] = key.split("|");
-          const page = grouped[key][0].page;
-          const indices = grouped[key].map(e => e.blockIdx).sort((a, b) => a - b);
-          // Merge consecutive indices
-          const ranges = [];
-          let rs = indices[0], re = indices[0];
-          for (let i = 1; i < indices.length; i++) {
-            if (indices[i] === re + 1) { re = indices[i]; } else {
-              ranges.push(rs === re ? `${rs}` : `${rs}-${re}`);
-              rs = indices[i]; re = indices[i];
-            }
-          }
-          ranges.push(rs === re ? `${rs}` : `${rs}-${re}`);
-          readableRefs.push(`${docLabel} 第${page}页§${ranges.join(",")}`);
-        });
-        if (readableRefs.length > 0) {
-          runs.push(new docx.TextRun({ text: " [来源: " + readableRefs.join("; ") + "]", size: 16, color: "4F8FF7", font: "Microsoft YaHei", italics: true }));
-        }
-        remaining = remaining.slice(m[0].length);
-        continue;
-      }
-      // No more patterns, push remaining as plain text
-      runs.push(new docx.TextRun({ text: remaining, size: 20, font: "Microsoft YaHei" }));
-      remaining = "";
-    }
-    return runs;
-  }
-
-  // ── Helper: parse markdown table ──
+  // Parse markdown table helper
   function parseMarkdownTable(lines, startIdx) {
     const tableLines = [];
     let i = startIdx;
@@ -2965,19 +2840,28 @@ async function exportToWord() {
     }
     if (tableLines.length < 2) return { elements: [], nextIdx: i };
 
+    // Parse header
     const headerCells = tableLines[0].split("|").map(c => c.trim()).filter(c => c);
+    // Skip separator line (line with ---)
     const dataStartIdx = (tableLines.length > 1 && tableLines[1].match(/^\|[\s\-:|]+\|$/)) ? 2 : 1;
 
     const rows = [];
+    // Header row
     rows.push(headerCells.map(cell => new docx.TableCell({
-      children: [new docx.Paragraph({ children: [new docx.TextRun({ text: cell.replace(/\*+/g, ""), bold: true, size: 20, font: "Microsoft YaHei" })] })],
+      children: [new docx.Paragraph({ children: [new docx.TextRun({ text: cell, bold: true, size: 20, font: "Microsoft YaHei" })] })],
       shading: { fill: "2e3348" },
     })));
 
+    // Data rows
     for (let r = dataStartIdx; r < tableLines.length; r++) {
       const cells = tableLines[r].split("|").map(c => c.trim()).filter(c => c);
       rows.push(cells.map(cell => {
-        const runs = parseInlineMarkdown(cell);
+        // Handle bold text in cells
+        const boldParts = cell.split(/\*\*(.*?)\*\*/g);
+        const runs = boldParts.map((part, j) => {
+          if (j % 2 === 1) return new docx.TextRun({ text: part, bold: true, size: 18, font: "Microsoft YaHei" });
+          return new docx.TextRun({ text: part, size: 18, font: "Microsoft YaHei" });
+        });
         return new docx.TableCell({
           children: [new docx.Paragraph({ children: runs })],
         });
@@ -2992,245 +2876,121 @@ async function exportToWord() {
     return { elements: [table], nextIdx: i };
   }
 
-  // ── Helper: process markdown lines into docx children ──
-  function processMarkdownLines(text) {
-    const output = [];
-    const lines = text.split("\n");
-    let i = 0;
-    while (i < lines.length) {
-      const trimmed = lines[i].trim();
-      if (!trimmed) {
-        output.push(new docx.Paragraph({ children: [] }));
-        i++;
-        continue;
-      }
-      // Markdown table
-      if (trimmed.startsWith("|") && trimmed.includes("|")) {
-        const { elements, nextIdx } = parseMarkdownTable(lines, i);
-        elements.forEach(el => output.push(el));
-        i = nextIdx;
-        continue;
-      }
-      // Headings
-      if (trimmed.startsWith("#### ")) {
-        output.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(5).replace(/\*+/g, ""), bold: true, size: 20, font: "Microsoft YaHei" })],
-          spacing: { before: 100, after: 40 },
-        }));
-      } else if (trimmed.startsWith("### ")) {
-        output.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(4).replace(/\*+/g, ""), bold: true, size: 22, font: "Microsoft YaHei" })],
-          spacing: { before: 120, after: 60 },
-        }));
-      } else if (trimmed.startsWith("## ")) {
-        output.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(3).replace(/\*+/g, ""), bold: true, size: 24, font: "Microsoft YaHei" })],
-          spacing: { before: 160, after: 80 },
-        }));
-      } else if (trimmed.startsWith("# ")) {
-        output.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(2).replace(/\*+/g, ""), bold: true, size: 28, font: "Microsoft YaHei" })],
-          spacing: { before: 200, after: 100 },
-        }));
-      } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-        // Bullet list - strip leading marker and parse inline
-        const bulletText = trimmed.slice(2);
-        output.push(new docx.Paragraph({
-          children: parseInlineMarkdown(bulletText),
-          bullet: { level: 0 },
-        }));
-      } else if (trimmed.match(/^\d+\.\s/)) {
-        // Numbered list
-        const listText = trimmed.replace(/^\d+\.\s/, "");
-        output.push(new docx.Paragraph({
-          children: parseInlineMarkdown(listText),
-          bullet: { level: 0 },
-        }));
-      } else {
-        // Normal paragraph - parse inline formatting
-        output.push(new docx.Paragraph({
-          children: parseInlineMarkdown(trimmed),
-          spacing: { after: 60 },
-        }));
-      }
-      i++;
-    }
-    return output;
-  }
+  const items = kanbanState.documents;
+  const importantTypes = ["office_action", "response", "allowance"];
+  const exportItems = items ? items.filter(it => importantTypes.indexOf(it.type) !== -1) : [];
 
-  // ── Build document ──
   const children = [];
 
-  // Title
   children.push(
     new docx.Paragraph({
       children: [new docx.TextRun({ text: "专利审查历史分析报告", bold: true, size: 36, font: "Microsoft YaHei" })],
       spacing: { after: 200 },
-      alignment: docx.AlignmentType.CENTER,
     })
   );
 
-  // ── Patent Overview Section ──
   if (currentData) {
-    const office = currentData.office || "";
-    const officeNames = { US: "USPTO (美国)", EP: "EPO (欧洲)", CN: "CNIPA (中国)", DE: "DPMA (德国)", JP: "JPO (日本)" };
-    const officeLabel = officeNames[office] || office;
-
-    let title = "";
-    if (currentData.documents && currentData.documents.title) {
-      title = currentData.documents.title;
-    } else if (currentData.family && currentData.family.list && currentData.family.list.length > 0) {
-      title = currentData.family.list[0].title || "";
-    }
-
-    // Extract inventor/applicant info from family data
-    let inventor = "", applicant = "", filingDate = "", publicationDate = "";
-    if (currentData.family) {
-      const famList = currentData.family.list || currentData.family.familyMemberList || [];
-      const firstMember = Array.isArray(famList) ? famList[0] : null;
-      if (firstMember) {
-        inventor = firstMember.inventorName || firstMember.inventors || "";
-        applicant = firstMember.applicantName || firstMember.applicants || currentData.applicantName || "";
-        filingDate = firstMember.filingDate || firstMember.applicationDate || "";
-        publicationDate = firstMember.publicationDate || firstMember.pubDate || "";
-      }
-    }
-    if (!applicant && currentData.applicantName) applicant = currentData.applicantName;
-
-    const overviewRows = [
-      ["专利号", currentData.docNumber || "—"],
-      ["申请号", currentData.applicationNumber || "—"],
-      ["申请局", officeLabel],
-      ["标题", title || "—"],
-      ["发明人", inventor || "—"],
-      ["申请人", applicant || "—"],
-      ["申请日", filingDate || "—"],
-      ["公开日", publicationDate || "—"],
-    ];
-
-    const overviewTableRows = overviewRows.map(([label, value]) => new docx.TableRow({
-      children: [
-        new docx.TableCell({
-          children: [new docx.Paragraph({ children: [new docx.TextRun({ text: label, bold: true, size: 20, font: "Microsoft YaHei" })] })],
-          width: { size: 25, type: docx.WidthType.PERCENTAGE },
-          shading: { fill: "f0f4f8" },
-        }),
-        new docx.TableCell({
-          children: [new docx.Paragraph({ children: [new docx.TextRun({ text: value, size: 20, font: "Microsoft YaHei" })] })],
-          width: { size: 75, type: docx.WidthType.PERCENTAGE },
-        }),
-      ],
-    }));
-
+    const info = `专利号: ${currentData.docNumber || ""} | 申请号: ${currentData.applicationNumber || ""} | 申请人: ${currentData.applicantName || ""}`;
     children.push(
       new docx.Paragraph({
-        children: [new docx.TextRun({ text: "专利概览", bold: true, size: 28, font: "Microsoft YaHei" })],
-        spacing: { before: 200, after: 100 },
+        children: [new docx.TextRun({ text: info, size: 20, color: "666666", font: "Microsoft YaHei" })],
+        spacing: { after: 400 },
       })
     );
-    children.push(new docx.Table({
-      rows: overviewTableRows,
-      width: { size: 100, type: docx.WidthType.PERCENTAGE },
-    }));
   }
 
-  // ── Timeline Section ──
-  const items = kanbanState.documents;
-  if (items && items.length > 0) {
-    const typeLabels = {
-      office_action: "审查意见", response: "答复", allowance: "授权",
-      request: "请求", notification: "通知", misc: "其他",
-    };
-    const sorted = [...items].sort((a, b) => parseDate(a.date) - parseDate(b.date));
-
-    // Determine current status
-    const latest = sorted[sorted.length - 1];
-    let currentStatus = "未知";
-    if (latest) {
-      if (latest.type === "allowance") currentStatus = "已授权";
-      else if (latest.type === "office_action") currentStatus = "审查中（待答复）";
-      else if (latest.type === "response") currentStatus = "审查中（已答复）";
-      else if (latest.type === "request") currentStatus = "审查中（已提交请求）";
-      else currentStatus = latest.stage || "审查中";
-    }
-
-    children.push(
-      new docx.Paragraph({
-        children: [new docx.TextRun({ text: "审查时间线", bold: true, size: 28, font: "Microsoft YaHei" })],
-        spacing: { before: 300, after: 60 },
-      })
-    );
-    children.push(
-      new docx.Paragraph({
-        children: [new docx.TextRun({ text: "当前状态: " + currentStatus, bold: true, size: 20, color: "4F8FF7", font: "Microsoft YaHei" })],
-        spacing: { after: 100 },
-      })
-    );
-
-    const timelineHeaderCells = ["序号", "日期", "文档代码", "文档名称", "类型", "阶段"].map(h =>
-      new docx.TableCell({
-        children: [new docx.Paragraph({ children: [new docx.TextRun({ text: h, bold: true, size: 18, font: "Microsoft YaHei", color: "FFFFFF" })] })],
-        shading: { fill: "2e3348" },
-      })
-    );
-    const timelineRows = [new docx.TableRow({ children: timelineHeaderCells })];
-
-    sorted.forEach((doc, idx) => {
-      const typeLabel = typeLabels[doc.type] || doc.type || "其他";
-      const cells = [
-        String(idx + 1),
-        doc.date || "—",
-        doc.docCode || "—",
-        doc.name || "—",
-        typeLabel,
-        doc.stage || "—",
-      ].map(val => new docx.TableCell({
-        children: [new docx.Paragraph({ children: [new docx.TextRun({ text: val, size: 18, font: "Microsoft YaHei" })] })],
-      }));
-      timelineRows.push(new docx.TableRow({ children: cells }));
-    });
-
-    children.push(new docx.Table({
-      rows: timelineRows,
-      width: { size: 100, type: docx.WidthType.PERCENTAGE },
-    }));
-  }
-
-  // ── AI Analysis Section ──
   if (kanbanState.analysis) {
     children.push(
       new docx.Paragraph({
         children: [new docx.TextRun({ text: "审查历史综合分析", bold: true, size: 28, font: "Microsoft YaHei" })],
-        spacing: { before: 300, after: 100 },
+        spacing: { before: 200, after: 100 },
       })
     );
-    const analysisChildren = processMarkdownLines(kanbanState.analysis);
-    analysisChildren.forEach(c => children.push(c));
+
+    const lines = kanbanState.analysis.split("\n");
+    let i = 0;
+    while (i < lines.length) {
+      const trimmed = lines[i].trim();
+      if (!trimmed) {
+        children.push(new docx.Paragraph({ children: [] }));
+        i++;
+        continue;
+      }
+      // Check for markdown table
+      if (trimmed.startsWith("|") && trimmed.includes("|")) {
+        const { elements, nextIdx } = parseMarkdownTable(lines, i);
+        elements.forEach(el => children.push(el));
+        i = nextIdx;
+        continue;
+      }
+      if (trimmed.startsWith("# ")) {
+        children.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(2), bold: true, size: 28, font: "Microsoft YaHei" })],
+          spacing: { before: 200, after: 100 },
+        }));
+      } else if (trimmed.startsWith("## ")) {
+        children.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(3), bold: true, size: 24, font: "Microsoft YaHei" })],
+          spacing: { before: 160, after: 80 },
+        }));
+      } else if (trimmed.startsWith("### ")) {
+        children.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(4), bold: true, size: 22, font: "Microsoft YaHei" })],
+          spacing: { before: 120, after: 60 },
+        }));
+      } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+        children.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(2), size: 20, font: "Microsoft YaHei" })],
+          bullet: { level: 0 },
+        }));
+      } else {
+        const boldParts = trimmed.split(/\*\*(.*?)\*\*/g);
+        const runs = boldParts.map((part, idx) => {
+          if (idx % 2 === 1) {
+            return new docx.TextRun({ text: part, bold: true, size: 20, font: "Microsoft YaHei" });
+          }
+          return new docx.TextRun({ text: part, size: 20, font: "Microsoft YaHei" });
+        });
+        children.push(new docx.Paragraph({ children: runs, spacing: { after: 60 } }));
+      }
+      i++;
+    }
   }
 
-  // ── Build final document with header ──
+  children.push(
+    new docx.Paragraph({
+      children: [new docx.TextRun({ text: "审查文档详情", bold: true, size: 28, font: "Microsoft YaHei" })],
+      spacing: { before: 400, after: 100 },
+    })
+  );
+
+  for (const it of exportItems) {
+    children.push(
+      new docx.Paragraph({
+        children: [new docx.TextRun({ text: `${it.docCode} - ${it.name}（${it.date}）`, bold: true, size: 22, font: "Microsoft YaHei" })],
+        spacing: { before: 200, after: 60 },
+      })
+    );
+
+    const ext = kanbanState.extractions[it.idx];
+    if (ext) {
+      const content = ext.markdown || ext.text || "";
+      const contentLines = content.split("\n").slice(0, 100);
+      for (const line of contentLines) {
+        children.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: line, size: 18, font: "Microsoft YaHei" })],
+          spacing: { after: 30 },
+        }));
+      }
+    } else {
+      children.push(new docx.Paragraph({
+        children: [new docx.TextRun({ text: "（未提取内容）", italics: true, size: 18, color: "999999", font: "Microsoft YaHei" })],
+      }));
+    }
+  }
+
   const doc = new docx.Document({
-    sections: [{
-      properties: {
-        defaultTabStop: 420,
-        page: {
-          margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 },
-        },
-      },
-      headers: {
-        default: new docx.Header({
-          children: [
-            new docx.Paragraph({
-              children: [
-                new docx.TextRun({ text: "由 PatentLens 工具制作", size: 16, color: "999999", font: "Microsoft YaHei", italics: true }),
-              ],
-              alignment: docx.AlignmentType.RIGHT,
-            }),
-          ],
-        }),
-      },
-      children,
-    }],
+    sections: [{ children }],
   });
 
   const blob = await docx.Packer.toBlob(doc);
@@ -3280,9 +3040,6 @@ document.addEventListener("DOMContentLoaded", () => {
         downloadDocument(btn.dataset.url, btn.dataset.filename);
       } else if (action === "kanban-extract") {
         kanbanManualExtract(btn.dataset.url, parseInt(btn.dataset.idx), btn.dataset.doctype);
-      } else if (action === "kanban-view-pdf") {
-        const idx = parseInt(btn.dataset.idx);
-        openReaderForDoc(idx);
       } else if (action === "ai-analyze-doc") {
         aiAnalyzeDocument(parseInt(btn.dataset.idx), btn.dataset.doctype);
       }
@@ -3296,6 +3053,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (readerCloseBtn) {
     readerCloseBtn.addEventListener("click", () => {
       readerModal.classList.add("hidden");
+      if (readerFloatingBall) readerFloatingBall.classList.add("hidden");
       // Reset PDF view state when closing
       if (pdfViewState.active) {
         pdfViewState.active = false;
@@ -3313,28 +3071,45 @@ document.addEventListener("DOMContentLoaded", () => {
       if (content) content.classList.remove("docked");
       if (readerFullscreenBtn) readerFullscreenBtn.classList.add("hidden");
       if (readerDockBtn) readerDockBtn.classList.remove("hidden");
+      // Close chat panel
+      if (readerChatPanel) readerChatPanel.classList.add("hidden");
+      if (readerChatToggle) readerChatToggle.classList.remove("active");
+      chatHistory = [];
+      if (chatMessages) chatMessages.innerHTML = "";
     });
   }
 
   if (readerModal) {
     readerModal.querySelector(".modal-overlay").addEventListener("click", () => {
-      readerModal.classList.add("hidden");
-      if (pdfViewState.active) {
-        pdfViewState.active = false;
-        readerPdfView.classList.add("hidden");
-        readerContent.classList.remove("hidden");
-        readerPdfToggle.classList.remove("active");
-        readerPdfToggle.textContent = "PDF 视图";
-      }
-      pdfViewState.pdfDoc = null;
-      pdfViewState.renderedPages = {};
-      pdfViewState.pendingHighlight = null;
-      pdfViewState.pendingHighlightRange = null;
-      // Reset docked state
       const content = document.querySelector(".reader-modal-content");
-      if (content) content.classList.remove("docked");
-      if (readerFullscreenBtn) readerFullscreenBtn.classList.add("hidden");
-      if (readerDockBtn) readerDockBtn.classList.remove("hidden");
+      if (content && content.classList.contains("docked")) {
+        // In docked mode, minimize to floating ball instead of closing
+        readerModal.classList.add("hidden");
+        if (readerFloatingBall) readerFloatingBall.classList.remove("hidden");
+      } else {
+        // Full screen mode, close fully
+        readerModal.classList.add("hidden");
+        if (readerFloatingBall) readerFloatingBall.classList.add("hidden");
+        if (pdfViewState.active) {
+          pdfViewState.active = false;
+          readerPdfView.classList.add("hidden");
+          readerContent.classList.remove("hidden");
+          readerPdfToggle.classList.remove("active");
+          readerPdfToggle.textContent = "PDF 视图";
+        }
+        pdfViewState.pdfDoc = null;
+        pdfViewState.renderedPages = {};
+        pdfViewState.pendingHighlight = null;
+        pdfViewState.pendingHighlightRange = null;
+        if (content) content.classList.remove("docked");
+        if (readerFullscreenBtn) readerFullscreenBtn.classList.add("hidden");
+        if (readerDockBtn) readerDockBtn.classList.remove("hidden");
+        // Close chat panel
+        if (readerChatPanel) readerChatPanel.classList.add("hidden");
+        if (readerChatToggle) readerChatToggle.classList.remove("active");
+        chatHistory = [];
+        if (chatMessages) chatMessages.innerHTML = "";
+      }
     });
   }
 
@@ -3400,23 +3175,87 @@ document.addEventListener("DOMContentLoaded", () => {
     pdfZoomFit.addEventListener("click", pdfZoomFitAction);
   }
 
-  const pdfSearchInput = document.getElementById("pdf-search-input");
-  const pdfSearchBtn = document.getElementById("pdf-search-btn");
-
-  if (pdfSearchBtn) {
-    pdfSearchBtn.addEventListener("click", () => {
-      searchPdfKeyword(pdfSearchInput ? pdfSearchInput.value : "");
+  // Minimize to floating ball
+  if (readerMinimizeBtn) {
+    readerMinimizeBtn.addEventListener("click", () => {
+      readerModal.classList.add("hidden");
+      if (readerFloatingBall) readerFloatingBall.classList.remove("hidden");
     });
   }
 
-  if (pdfSearchInput) {
-    pdfSearchInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        if (pdfViewState.searchMatches.length > 0) {
-          searchPdfNext();
-        } else {
-          searchPdfKeyword(pdfSearchInput.value);
+  // Floating ball click to restore reader
+  if (readerFloatingBall) {
+    readerFloatingBall.addEventListener("click", () => {
+      readerFloatingBall.classList.add("hidden");
+      readerModal.classList.remove("hidden");
+    });
+  }
+
+  // OCR extract button in PDF toolbar
+  if (pdfOcrBtn) {
+    pdfOcrBtn.addEventListener("click", async () => {
+      if (pdfViewState.currentDocIdx == null) return;
+      const idx = pdfViewState.currentDocIdx;
+      const items = kanbanState.documents;
+      const it = items.find(d => d.idx === idx);
+      if (!it) return;
+
+      pdfOcrBtn.disabled = true;
+      pdfOcrBtn.textContent = "提取中...";
+
+      try {
+        const isUS = currentData.office === "US";
+        const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+        const encodedDocId = encodeURIComponent(it.docId);
+        const extractUrl = `/api/gd/extract-text/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+        await extractDocumentText(extractUrl, idx, it.type);
+        // Enable search after extraction
+        const searchInput = document.getElementById("pdf-search-input");
+        const searchBtn = document.getElementById("pdf-search-btn");
+        if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
+        if (searchBtn) searchBtn.disabled = false;
+        pdfOcrBtn.textContent = "已提取";
+        pdfOcrBtn.disabled = true;
+
+        // Re-render PDF view with overlays if active
+        if (pdfViewState.active) {
+          renderPdfView(idx);
         }
+      } catch (e) {
+        pdfOcrBtn.textContent = "OCR 提取";
+        pdfOcrBtn.disabled = false;
+        showError("OCR 提取失败: " + e.message);
+      }
+    });
+  }
+
+  // Chat toggle
+  if (readerChatToggle) {
+    readerChatToggle.addEventListener("click", () => {
+      if (readerChatPanel) {
+        readerChatPanel.classList.toggle("hidden");
+        readerChatToggle.classList.toggle("active");
+      }
+    });
+  }
+
+  if (chatCloseBtn) {
+    chatCloseBtn.addEventListener("click", () => {
+      if (readerChatPanel) readerChatPanel.classList.add("hidden");
+      if (readerChatToggle) readerChatToggle.classList.remove("active");
+    });
+  }
+
+  // Chat send
+  if (chatSendBtn) {
+    chatSendBtn.addEventListener("click", sendChatMessage);
+  }
+
+  if (chatInput) {
+    chatInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
       }
     });
   }
@@ -3429,6 +3268,260 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 });
+
+async function sendChatMessage() {
+  const input = chatInput;
+  if (!input) return;
+  const question = input.value.trim();
+  if (!question) return;
+
+  // Check if document has OCR content
+  const idx = pdfViewState.currentDocIdx;
+  if (idx == null) {
+    showError("请先选择一个文档");
+    return;
+  }
+  const ext = kanbanState.extractions[idx];
+  if (!ext || !ext.text) {
+    showError("请先提取文档内容（OCR提取）");
+    return;
+  }
+
+  // Get AI config
+  const config = AI.loadAIConfig();
+  const provider = AI.getCurrentProvider(config);
+  if (!provider || !provider.apiKey) {
+    showError("请先配置 AI 服务（API Key）");
+    return;
+  }
+
+  // Add user message
+  chatHistory.push({ role: "user", content: question });
+  appendChatMessage("user", question);
+  input.value = "";
+
+  // Build context from document content
+  const docContent = ext.text.slice(0, 8000); // Limit context size
+  const doc = kanbanState.documents.find(d => d.idx === idx);
+  const docName = doc ? `${doc.name} (${doc.docCode})` : "当前文档";
+
+  const systemPrompt = `你是专利审查文档分析助手。用户正在查看专利审查文档「${docName}」的内容。以下是该文档的OCR提取内容，请基于此内容回答用户的问题。如果文档内容不足以回答，请如实说明。\n\n---文档内容开始---\n${docContent}\n---文档内容结束---`;
+
+  const messages = [
+    { role: "system", content: systemPrompt },
+    ...chatHistory.slice(-10) // Keep last 10 messages for context
+  ];
+
+  // Add assistant placeholder
+  const assistantMsgEl = appendChatMessage("assistant", "");
+  chatSendBtn.disabled = true;
+  chatAbortController = new AbortController();
+
+  try {
+    let fullResponse = "";
+    const stream = AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
+      model: provider.model,
+      messages: messages,
+      maxTokens: 4096,
+    }, chatAbortController.signal);
+
+    for await (const chunk of stream) {
+      if (chatAbortController.signal.aborted) break;
+      if (chunk.content) {
+        fullResponse += chunk.content;
+        if (assistantMsgEl) {
+          const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+          contentEl.textContent = fullResponse;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+      }
+    }
+
+    chatHistory.push({ role: "assistant", content: fullResponse });
+  } catch (e) {
+    if (e.name !== "AbortError") {
+      appendChatMessage("system", "AI 响应出错: " + e.message);
+    }
+  } finally {
+    chatSendBtn.disabled = false;
+    chatAbortController = null;
+  }
+}
+
+function appendChatMessage(role, content) {
+  if (!chatMessages) return null;
+  const msgEl = document.createElement("div");
+  msgEl.className = `chat-msg ${role}`;
+  if (role === "assistant") {
+    msgEl.innerHTML = `<div class="chat-msg-content">${escapeHtml(content)}</div>`;
+  } else if (role === "system") {
+    msgEl.textContent = content;
+  } else {
+    msgEl.textContent = content;
+  }
+  chatMessages.appendChild(msgEl);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return msgEl;
+}
+
+// ===== Analysis Chat (continued conversation with AI analysis report) =====
+
+function showAnalysisChatToggle() {
+  const toggleBtn = document.getElementById("analysis-chat-toggle-btn");
+  if (toggleBtn) toggleBtn.classList.remove("hidden");
+}
+
+function appendAnalysisChatMessage(role, content) {
+  const messagesEl = document.getElementById("analysis-chat-messages");
+  if (!messagesEl) return null;
+  const msgEl = document.createElement("div");
+  msgEl.className = `chat-msg ${role}`;
+  if (role === "assistant") {
+    msgEl.innerHTML = `<div class="chat-msg-content">${escapeHtml(content)}</div>`;
+  } else if (role === "system") {
+    msgEl.textContent = content;
+  } else {
+    msgEl.textContent = content;
+  }
+  messagesEl.appendChild(msgEl);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return msgEl;
+}
+
+async function sendAnalysisChatMessage() {
+  const input = document.getElementById("analysis-chat-input");
+  if (!input) return;
+  const question = input.value.trim();
+  if (!question) return;
+
+  if (!kanbanState.analysis) {
+    showError("请先生成审查分析报告");
+    return;
+  }
+
+  const config = window.AI.loadAIConfig();
+  const provider = window.AI.getCurrentProvider(config);
+  if (!provider || !provider.apiKey) {
+    showError("请先配置 AI 服务（API Key）");
+    return;
+  }
+
+  // Add user message to history and UI
+  analysisChatHistory.push({ role: "user", content: question });
+  appendAnalysisChatMessage("user", question);
+  input.value = "";
+
+  // Build messages: system prompt + original OCR content + AI report + chat history
+  const messages = [
+    { role: "system", content: kanbanState.analysisSystemPrompt },
+    { role: "user", content: kanbanState.analysisUserMessage },
+    { role: "assistant", content: kanbanState.analysis },
+    ...analysisChatHistory,
+  ];
+
+  // Add assistant placeholder
+  const assistantMsgEl = appendAnalysisChatMessage("assistant", "");
+  const sendBtn = document.getElementById("analysis-chat-send-btn");
+  const abortBtn = document.getElementById("analysis-chat-abort-btn");
+  if (sendBtn) sendBtn.disabled = true;
+  if (abortBtn) abortBtn.classList.remove("hidden");
+  analysisChatAbortController = new AbortController();
+
+  try {
+    let fullResponse = "";
+    const stream = window.AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
+      model: provider.model,
+      messages: messages,
+      temperature: 0.3,
+      maxTokens: 8192,
+    }, analysisChatAbortController.signal);
+
+    const messagesEl = document.getElementById("analysis-chat-messages");
+    for await (const chunk of stream) {
+      if (analysisChatAbortController.signal.aborted) break;
+      if (chunk.content) {
+        fullResponse += chunk.content;
+        if (assistantMsgEl) {
+          const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+          contentEl.textContent = fullResponse;
+          if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      }
+    }
+
+    analysisChatHistory.push({ role: "assistant", content: fullResponse });
+  } catch (e) {
+    if (e.name !== "AbortError") {
+      appendAnalysisChatMessage("system", "AI 响应出错: " + e.message);
+    }
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+    if (abortBtn) abortBtn.classList.add("hidden");
+    analysisChatAbortController = null;
+  }
+}
+
+// Analysis chat event listeners (script loaded at end of body, DOM is ready)
+(function initAnalysisChat() {
+  const analysisChatToggleBtn = document.getElementById("analysis-chat-toggle-btn");
+  const analysisChatPanel = document.getElementById("analysis-chat-panel");
+  const analysisChatCloseBtn = document.getElementById("analysis-chat-close-btn");
+  const analysisChatClearBtn = document.getElementById("analysis-chat-clear-btn");
+  const analysisChatSendBtn = document.getElementById("analysis-chat-send-btn");
+  const analysisChatAbortBtnEl = document.getElementById("analysis-chat-abort-btn");
+  const analysisChatInput = document.getElementById("analysis-chat-input");
+
+  if (analysisChatToggleBtn) {
+    analysisChatToggleBtn.addEventListener("click", () => {
+      if (analysisChatPanel) {
+        analysisChatPanel.classList.toggle("hidden");
+        if (!analysisChatPanel.classList.contains("hidden")) {
+          if (analysisChatInput) analysisChatInput.focus();
+        }
+      }
+    });
+  }
+
+  if (analysisChatCloseBtn) {
+    analysisChatCloseBtn.addEventListener("click", () => {
+      if (analysisChatPanel) analysisChatPanel.classList.add("hidden");
+    });
+  }
+
+  if (analysisChatClearBtn) {
+    analysisChatClearBtn.addEventListener("click", () => {
+      analysisChatHistory = [];
+      const messagesEl = document.getElementById("analysis-chat-messages");
+      if (messagesEl) messagesEl.innerHTML = "";
+      appendAnalysisChatMessage("system", "对话已清空，可继续提问");
+    });
+  }
+
+  if (analysisChatSendBtn) {
+    analysisChatSendBtn.addEventListener("click", sendAnalysisChatMessage);
+  }
+
+  if (analysisChatInput) {
+    analysisChatInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendAnalysisChatMessage();
+      }
+    });
+  }
+
+  if (analysisChatAbortBtnEl) {
+    analysisChatAbortBtnEl.addEventListener("click", () => {
+      if (analysisChatAbortController) {
+        analysisChatAbortController.abort();
+        analysisChatAbortController = null;
+      }
+      analysisChatAbortBtnEl.classList.add("hidden");
+      const sendBtn = document.getElementById("analysis-chat-send-btn");
+      if (sendBtn) sendBtn.disabled = false;
+    });
+  }
+})();
 
 async function kanbanManualExtract(url, idx, docType) {
   const container = document.getElementById("kanban-extracted-" + idx);
