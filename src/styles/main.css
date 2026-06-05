@@ -1231,14 +1231,42 @@ body {
   height: 20px;
   background: var(--border);
   margin: 0 4px;
-}
-
 .pdf-zoom-level {
   min-width: 42px;
   text-align: center;
   font-family: monospace;
   font-size: 12px;
+}
+
+.pdf-search-input {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  width: 160px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.pdf-search-input:focus {
+  border-color: var(--accent);
+}
+
+.pdf-search-info {
+  font-size: 11px;
   color: var(--text-muted);
+  min-width: 60px;
+}
+
+.pdf-search-highlight {
+  background: rgba(251, 191, 36, 0.35) !important;
+  border: 2px solid var(--warning) !important;
+}
+
+.pdf-search-match {
+  background: rgba(79, 143, 247, 0.2);
+  border: 1px solid rgba(79, 143, 247, 0.5);
 }
 
 .reader-pdf-container {

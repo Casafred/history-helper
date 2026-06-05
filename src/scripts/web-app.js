@@ -104,6 +104,8 @@ let pdfViewState = {
   renderedPages: {},
   pendingHighlight: null,
   pendingHighlightRange: null,
+  searchMatches: [],
+  searchCurrentIdx: -1,
 };
 
 function showError(msg) {
@@ -473,6 +475,7 @@ function renderKanban(data) {
             <div class="kanban-card-actions">
               ${extractUrl ? '<button class="btn-small btn-extract" data-action="kanban-extract" data-url="' + extractUrl + '" data-idx="' + it.idx + '" data-doctype="' + escapeHtml(it.docCode) + '">提取内容</button>' : ''}
               ${downloadUrl ? '<button class="btn-small btn-download" data-action="kanban-download" data-url="' + downloadUrl + '" data-filename="' + escapeHtml(it.docCode) + '_' + escapeHtml(it.date.replace(/\//g, '-')) + '.pdf">下载</button>' : ''}
+              ${downloadUrl ? '<button class="btn-small btn-view-pdf" data-action="kanban-view-pdf" data-idx="' + it.idx + '">查看PDF</button>' : ''}
             </div>
             <div id="kanban-extracted-${it.idx}" class="kanban-extracted hidden"></div>
           </div>
@@ -2302,8 +2305,7 @@ function openReader(defaultToPdf = false) {
     togglePdfView();
   }
 
-  const importantTypes = ["office_action", "response", "allowance"];
-  const readerItems = items.filter(it => importantTypes.indexOf(it.type) !== -1);
+  const readerItems = items;
 
   let listHtml = "";
   readerItems.forEach((it, idx) => {
@@ -2327,6 +2329,23 @@ function openReader(defaultToPdf = false) {
 
   readerDocList.innerHTML = listHtml;
   readerContent.innerHTML = '<p class="placeholder">请从左侧选择文档查看内容</p>';
+}
+
+function openReaderForDoc(idx) {
+  if (!readerModal) return;
+  const items = kanbanState.documents;
+  if (!items || items.length === 0) {
+    showError("请先查询专利并加载审查文档");
+    return;
+  }
+
+  // Build full document list (same as openReader)
+  openReader(true);
+  
+  // Auto-select the specified document
+  setTimeout(() => {
+    selectReaderDoc(idx);
+  }, 100);
 }
 
 function selectReaderDoc(idx) {
@@ -2610,6 +2629,82 @@ function highlightPdfBlock(blockId) {
     overlay.scrollIntoView({ behavior: "smooth", block: "center" });
     setTimeout(() => overlay.classList.remove("highlight"), 3000);
   }
+}
+
+function searchPdfKeyword(keyword) {
+  // Clear previous search highlights
+  document.querySelectorAll(".pdf-search-highlight, .pdf-search-match").forEach(el => {
+    el.classList.remove("pdf-search-highlight", "pdf-search-match");
+  });
+  pdfViewState.searchMatches = [];
+  pdfViewState.searchCurrentIdx = -1;
+
+  const searchInfo = document.getElementById("pdf-search-info");
+  if (!keyword || !keyword.trim()) {
+    if (searchInfo) searchInfo.textContent = "";
+    return;
+  }
+
+  const kw = keyword.trim().toLowerCase();
+  const ext = kanbanState.extractions[pdfViewState.currentDocIdx];
+  if (!ext || !ext.blocks || ext.blocks.length === 0) {
+    if (searchInfo) searchInfo.textContent = "无OCR数据";
+    return;
+  }
+
+  // Find all blocks containing the keyword
+  const matches = [];
+  ext.blocks.forEach(b => {
+    if (b.content && b.content.toLowerCase().includes(kw)) {
+      matches.push(b.block_id);
+    }
+  });
+
+  pdfViewState.searchMatches = matches;
+
+  if (matches.length === 0) {
+    if (searchInfo) searchInfo.textContent = "无匹配";
+    return;
+  }
+
+  // Highlight all matching blocks
+  matches.forEach(blockId => {
+    const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${blockId}"]`);
+    if (overlay) overlay.classList.add("pdf-search-match");
+  });
+
+  // Jump to first match
+  pdfViewState.searchCurrentIdx = 0;
+  const firstBlockId = matches[0];
+  const firstOverlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${firstBlockId}"]`);
+  if (firstOverlay) {
+    firstOverlay.classList.add("pdf-search-highlight");
+    firstOverlay.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  if (searchInfo) searchInfo.textContent = `${1}/${matches.length}`;
+}
+
+function searchPdfNext() {
+  const matches = pdfViewState.searchMatches;
+  if (matches.length === 0) return;
+
+  // Remove current highlight
+  const currentBlockId = matches[pdfViewState.searchCurrentIdx];
+  const currentOverlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${currentBlockId}"]`);
+  if (currentOverlay) currentOverlay.classList.remove("pdf-search-highlight");
+
+  // Move to next
+  pdfViewState.searchCurrentIdx = (pdfViewState.searchCurrentIdx + 1) % matches.length;
+  const nextBlockId = matches[pdfViewState.searchCurrentIdx];
+  const nextOverlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${nextBlockId}"]`);
+  if (nextOverlay) {
+    nextOverlay.classList.add("pdf-search-highlight");
+    nextOverlay.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  const searchInfo = document.getElementById("pdf-search-info");
+  if (searchInfo) searchInfo.textContent = `${pdfViewState.searchCurrentIdx + 1}/${matches.length}`;
 }
 
 // ============ 浏览器插件数据处理 ============
@@ -3185,6 +3280,9 @@ document.addEventListener("DOMContentLoaded", () => {
         downloadDocument(btn.dataset.url, btn.dataset.filename);
       } else if (action === "kanban-extract") {
         kanbanManualExtract(btn.dataset.url, parseInt(btn.dataset.idx), btn.dataset.doctype);
+      } else if (action === "kanban-view-pdf") {
+        const idx = parseInt(btn.dataset.idx);
+        openReaderForDoc(idx);
       } else if (action === "ai-analyze-doc") {
         aiAnalyzeDocument(parseInt(btn.dataset.idx), btn.dataset.doctype);
       }
@@ -3300,6 +3398,27 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (pdfZoomFit) {
     pdfZoomFit.addEventListener("click", pdfZoomFitAction);
+  }
+
+  const pdfSearchInput = document.getElementById("pdf-search-input");
+  const pdfSearchBtn = document.getElementById("pdf-search-btn");
+
+  if (pdfSearchBtn) {
+    pdfSearchBtn.addEventListener("click", () => {
+      searchPdfKeyword(pdfSearchInput ? pdfSearchInput.value : "");
+    });
+  }
+
+  if (pdfSearchInput) {
+    pdfSearchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        if (pdfViewState.searchMatches.length > 0) {
+          searchPdfNext();
+        } else {
+          searchPdfKeyword(pdfSearchInput.value);
+        }
+      }
+    });
   }
 
   document.addEventListener("click", (e) => {
