@@ -1026,6 +1026,28 @@ body {
   margin-top: 4px;
 }
 
+.reader-modal-content.docked {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  width: 55vw;
+  height: 50vh;
+  border-radius: 12px 12px 0 0;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.3);
+  z-index: 1000;
+}
+
+.reader-modal-content.docked .reader-sidebar {
+  width: 200px;
+}
+
+.pdf-block-overlay.highlight-range {
+  background: rgba(79, 143, 247, 0.15);
+  border: 1px solid rgba(79, 143, 247, 0.4);
+}
+
 /* ── AI Analysis Tab ── */
 .ai-analysis-header {
   display: flex;

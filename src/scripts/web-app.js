@@ -81,6 +81,8 @@ const readerContent = document.getElementById("reader-content");
 const readerExportBtn = document.getElementById("reader-export-btn");
 const exportWordBtn = document.getElementById("export-word-btn");
 const readerPdfToggle = document.getElementById("reader-pdf-toggle");
+const readerDockBtn = document.getElementById("reader-dock-btn");
+const readerFullscreenBtn = document.getElementById("reader-fullscreen-btn");
 const readerPdfView = document.getElementById("reader-pdf-view");
 const readerPdfContainer = document.getElementById("reader-pdf-container");
 const pdfPageInfo = document.getElementById("pdf-page-info");
@@ -101,6 +103,7 @@ let pdfViewState = {
   baseScale: 1.0,
   renderedPages: {},
   pendingHighlight: null,
+  pendingHighlightRange: null,
 };
 
 function showError(msg) {
@@ -2059,12 +2062,64 @@ function renderMarkdownWithTrace(text) {
     if (validRefs.length === 0) {
       return '<span class="trace-links"><span class="trace-label">溯源:</span> <span class="trace-unavailable">引用块未找到</span></span>';
     }
-    const refLinks = validRefs.map(ref => {
+    // Group valid refs by document and page, then merge consecutive block indices into ranges
+    const refLinks = [];
+    const grouped = {};
+    validRefs.forEach(ref => {
       const info = kanbanState.traceIndex[ref];
-      const pageLabel = info ? `第${info.page}页` : ref;
-      return `<a class="trace-link" data-block-id="${escapeHtml(ref)}" title="跳转到原文 ${pageLabel}">${escapeHtml(ref)}</a>`;
-    }).join(" ");
-    return `<span class="trace-links"><span class="trace-label">溯源:</span> ${refLinks}</span>`;
+      if (!info) return;
+      const doc = kanbanState.documents.find(d => d.idx === info.docIdx);
+      const docLabel = doc ? `${doc.name} (${doc.docCode})` : `文档${info.docIdx}`;
+      const key = `${info.docIdx}|${info.page}|${docLabel}`;
+      if (!grouped[key]) grouped[key] = [];
+      // Extract block index from block_id like "B_p2_5" -> 5
+      const blockMatch = ref.match(/B_p(\d+)_(\d+)/);
+      if (blockMatch) {
+        grouped[key].push({ ref, blockIdx: parseInt(blockMatch[2]), page: parseInt(blockMatch[1]) });
+      } else {
+        grouped[key].push({ ref, blockIdx: -1, page: info.page });
+      }
+    });
+
+    Object.keys(grouped).forEach(key => {
+      const [docIdxStr, pageStr, docLabel] = key.split("|");
+      const page = parseInt(pageStr);
+      const entries = grouped[key].sort((a, b) => a.blockIdx - b.blockIdx);
+
+      // Merge consecutive block indices into ranges
+      const ranges = [];
+      let rangeStart = entries[0];
+      let rangeEnd = entries[0];
+      for (let i = 1; i < entries.length; i++) {
+        if (entries[i].blockIdx === rangeEnd.blockIdx + 1) {
+          rangeEnd = entries[i];
+        } else {
+          ranges.push({ start: rangeStart, end: rangeEnd });
+          rangeStart = entries[i];
+          rangeEnd = entries[i];
+        }
+      }
+      ranges.push({ start: rangeStart, end: rangeEnd });
+
+      ranges.forEach(range => {
+        const allRefs = [];
+        for (let bi = range.start.blockIdx; bi <= range.end.blockIdx; bi++) {
+          const refId = `B_p${page}_${bi}`;
+          if (kanbanState.traceIndex[refId]) allRefs.push(refId);
+        }
+        const dataBlockIds = allRefs.map(r => escapeHtml(r)).join(",");
+        let label, hoverTitle;
+        if (range.start.blockIdx === range.end.blockIdx) {
+          label = `第${page}页 §${range.start.blockIdx}`;
+          hoverTitle = `${docLabel} · 第${page}页 第${range.start.blockIdx}段`;
+        } else {
+          label = `第${page}页 §${range.start.blockIdx}-${range.end.blockIdx}`;
+          hoverTitle = `${docLabel} · 第${page}页 第${range.start.blockIdx}-${range.end.blockIdx}段`;
+        }
+        refLinks.push(`<a class="trace-link" data-block-id="${dataBlockIds}" title="${escapeHtml(hoverTitle)}">${escapeHtml(label)}</a>`);
+      });
+    });
+    return `<span class="trace-links"><span class="trace-label">溯源:</span> ${refLinks.join(" ")}</span>`;
   });
   if (typeof marked !== "undefined" && marked.parse) {
     try {
@@ -2076,25 +2131,43 @@ function renderMarkdownWithTrace(text) {
   return escapeHtml(processed).replace(/\n/g, "<br>");
 }
 
-function onTraceClick(blockId) {
-  const info = kanbanState.traceIndex[blockId];
+function onTraceClick(blockIdStr) {
+  const blockIds = blockIdStr.split(",").filter(id => kanbanState.traceIndex[id]);
+  if (blockIds.length === 0) {
+    showError("溯源信息不存在: " + blockIdStr);
+    return;
+  }
+  const primaryBlockId = blockIds[0];
+  const info = kanbanState.traceIndex[primaryBlockId];
   if (!info) {
-    showError("溯源信息不存在: " + blockId);
+    showError("溯源信息不存在: " + primaryBlockId);
     return;
   }
   if (readerModal.classList.contains("hidden")) {
-    openReader();
+    openReader(true);
+  }
+  // Auto-switch to PDF view
+  if (!pdfViewState.active) {
+    togglePdfView();
   }
   // Set pending highlight before selectReaderDoc so renderPdfView can apply it
   // after async PDF rendering completes
   if (pdfViewState.active) {
-    pdfViewState.pendingHighlight = blockId;
+    pdfViewState.pendingHighlight = primaryBlockId;
+    pdfViewState.pendingHighlightRange = blockIds;
   }
   selectReaderDoc(info.docIdx);
   setTimeout(() => {
     // If PDF view is active, highlight the overlay block
     if (pdfViewState.active) {
-      highlightPdfBlock(blockId);
+      highlightPdfBlock(primaryBlockId);
+      // Also highlight range blocks with a lighter highlight
+      blockIds.forEach(id => {
+        if (id !== primaryBlockId) {
+          const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
+          if (overlay) overlay.classList.add("highlight-range");
+        }
+      });
       return;
     }
 
@@ -2102,10 +2175,10 @@ function onTraceClick(blockId) {
     if (!md) return;
     const content = md.markdown || md.text || "";
     const blocks = md.blocks || [];
-    const targetBlock = blocks.find(b => b.block_id === blockId);
+    const targetBlock = blocks.find(b => b.block_id === primaryBlockId);
     if (targetBlock && targetBlock.content) {
       const snippet = targetBlock.content.substring(0, 80);
-      const el = readerContent.querySelector(`[data-block-id="${blockId}"]`);
+      const el = readerContent.querySelector(`[data-block-id="${primaryBlockId}"]`);
       if (el) {
         el.scrollIntoView({ behavior: "smooth", block: "center" });
         el.classList.add("trace-highlight");
@@ -2117,7 +2190,7 @@ function onTraceClick(blockId) {
     traceEl.className = "trace-locator";
     traceEl.innerHTML = `
       <div class="trace-locator-header">
-        <span class="trace-locator-id">${escapeHtml(blockId)}</span>
+        <span class="trace-locator-id">${escapeHtml(primaryBlockId)}</span>
         <span class="trace-locator-page">第 ${info.page} 页</span>
         <button class="trace-locator-close" onclick="this.parentElement.parentElement.remove()">×</button>
       </div>
@@ -2126,7 +2199,7 @@ function onTraceClick(blockId) {
     `;
     readerContent.insertBefore(traceEl, readerContent.firstChild);
     traceEl.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, 300);
+  }, 500);
 }
 
 function renderTimeline(data) {
@@ -2216,7 +2289,7 @@ function parseDate(dateStr) {
   return new Date(dateStr).getTime();
 }
 
-function openReader() {
+function openReader(defaultToPdf = false) {
   if (!readerModal) return;
   const items = kanbanState.documents;
   if (!items || items.length === 0) {
@@ -2225,6 +2298,9 @@ function openReader() {
   }
 
   readerModal.classList.remove("hidden");
+  if (defaultToPdf && !pdfViewState.active) {
+    togglePdfView();
+  }
 
   const importantTypes = ["office_action", "response", "allowance"];
   const readerItems = items.filter(it => importantTypes.indexOf(it.type) !== -1);
@@ -2402,11 +2478,21 @@ async function renderPdfView(idx) {
     // Apply pending highlight from onTraceClick if set
     if (pdfViewState.pendingHighlight) {
       const blockId = pdfViewState.pendingHighlight;
+      const rangeIds = pdfViewState.pendingHighlightRange || [];
       pdfViewState.pendingHighlight = null;
+      pdfViewState.pendingHighlightRange = null;
       highlightPdfBlock(blockId);
+      // Also highlight range blocks with a lighter highlight
+      rangeIds.forEach(id => {
+        if (id !== blockId) {
+          const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
+          if (overlay) overlay.classList.add("highlight-range");
+        }
+      });
     }
   } catch (e) {
     pdfViewState.pendingHighlight = null;
+    pdfViewState.pendingHighlightRange = null;
     readerPdfContainer.innerHTML = '<p class="pdf-error">' + escapeHtml(e.message) + '<br><small>请切换到文本视图查看提取的内容</small></p>';
   }
 }
@@ -2929,6 +3015,12 @@ document.addEventListener("DOMContentLoaded", () => {
       pdfViewState.pdfDoc = null;
       pdfViewState.renderedPages = {};
       pdfViewState.pendingHighlight = null;
+      pdfViewState.pendingHighlightRange = null;
+      // Reset docked state
+      const content = document.querySelector(".reader-modal-content");
+      if (content) content.classList.remove("docked");
+      if (readerFullscreenBtn) readerFullscreenBtn.classList.add("hidden");
+      if (readerDockBtn) readerDockBtn.classList.remove("hidden");
     });
   }
 
@@ -2945,6 +3037,12 @@ document.addEventListener("DOMContentLoaded", () => {
       pdfViewState.pdfDoc = null;
       pdfViewState.renderedPages = {};
       pdfViewState.pendingHighlight = null;
+      pdfViewState.pendingHighlightRange = null;
+      // Reset docked state
+      const content = document.querySelector(".reader-modal-content");
+      if (content) content.classList.remove("docked");
+      if (readerFullscreenBtn) readerFullscreenBtn.classList.add("hidden");
+      if (readerDockBtn) readerDockBtn.classList.remove("hidden");
     });
   }
 
@@ -2970,6 +3068,28 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (readerPdfToggle) {
     readerPdfToggle.addEventListener("click", togglePdfView);
+  }
+
+  if (readerDockBtn) {
+    readerDockBtn.addEventListener("click", () => {
+      const content = document.querySelector(".reader-modal-content");
+      if (content) {
+        content.classList.add("docked");
+        readerDockBtn.classList.add("hidden");
+        readerFullscreenBtn.classList.remove("hidden");
+      }
+    });
+  }
+
+  if (readerFullscreenBtn) {
+    readerFullscreenBtn.addEventListener("click", () => {
+      const content = document.querySelector(".reader-modal-content");
+      if (content) {
+        content.classList.remove("docked");
+        readerFullscreenBtn.classList.add("hidden");
+        readerDockBtn.classList.remove("hidden");
+      }
+    });
   }
 
   if (pdfPrevPage) {
