@@ -540,16 +540,38 @@ function renderOverview(data) {
     const members = extractFamilyMembers(data.family);
     if (members.length > 0) {
       const m = members[0];
-      title = m.title || m.inventionTitle || "";
+      title = m.title || (m.docList && m.docList.title) || m.inventionTitle || "";
+      // applicantNames is an array in GD API
+      const applicantNamesArr = m.applicantNames || (m.docList && m.docList.applicantNames) || [];
+      applicants = Array.isArray(applicantNamesArr) ? applicantNamesArr.join(", ") : (applicantNamesArr || m.applicants || m.applicantName || "");
+      // inventors not available in GD family API
       inventors = m.inventors || m.inventorName || "";
-      applicants = m.applicants || m.applicantName || "";
-      filingDate = m.filingDate || m.applicationDate || "";
-      publicationDate = m.publicationDate || m.pubDate || "";
-      priorityDate = m.priorityDate || "";
+      // filing date: appDateStr or appDate (epoch ms)
+      filingDate = m.appDateStr || m.filingDate || m.applicationDate || "";
+      if (!filingDate && m.appDate) {
+        try { filingDate = new Date(m.appDate).toLocaleDateString("en-US"); } catch(e) {}
+      }
+      // publication date: from pubList
+      if (m.pubList && Array.isArray(m.pubList) && m.pubList.length > 0) {
+        publicationDate = m.pubList[0].pubDateStr || "";
+        if (!publicationDate && m.pubList[0].pubDate) {
+          try { publicationDate = new Date(m.pubList[0].pubDate).toLocaleDateString("en-US"); } catch(e2) {}
+        }
+      }
+      publicationDate = publicationDate || m.publicationDate || m.pubDate || "";
+      // priority date: from docNum.date or priorityClaimList
+      if (m.docNum && m.docNum.date) {
+        priorityDate = m.docNum.date;
+      }
+      if (!priorityDate && m.priorityClaimList && Array.isArray(m.priorityClaimList) && m.priorityClaimList.length > 0) {
+        priorityDate = m.priorityClaimList[0].date || "";
+      }
+      // IPC/CPC not available in GD family API
       ipcClasses = m.ipc || m.ipcClass || m.classification || "";
       if (Array.isArray(ipcClasses)) ipcClasses = ipcClasses.join(", ");
       cpcClasses = m.cpcClass || m.cpc || "";
       if (Array.isArray(cpcClasses)) cpcClasses = cpcClasses.join(", ");
+      // legal status not available in GD family API
       legalStatus = m.legalStatus || m.status || "";
     }
   }
