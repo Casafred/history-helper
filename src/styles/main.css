@@ -1123,6 +1123,18 @@ body {
   font-weight: 500;
 }
 
+.pdf-translate-type-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--accent-dim);
+  color: var(--accent);
+  margin-right: 6px;
+  vertical-align: top;
+}
+
 /* ── Analysis Chat Floating Ball ── */
 .analysis-chat-float-ball {
   position: fixed;
@@ -1218,6 +1230,48 @@ body {
 
 .reader-doc-search-input::placeholder {
   color: var(--text-muted);
+}
+
+/* ── Settings Modal Tabs ── */
+.settings-modal-content {
+  width: 560px;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+}
+
+.settings-tab-btn {
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.settings-tab-btn:hover {
+  color: var(--text-primary);
+}
+
+.settings-tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.settings-tab-content {
+  display: none;
+}
+
+.settings-tab-content.active {
+  display: block;
 }
 
 /* Floating ball for reader */

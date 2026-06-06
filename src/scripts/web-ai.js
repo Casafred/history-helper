@@ -32,6 +32,42 @@ var AI = (function () {
     };
   }
 
+  function getDefaultTranslateModel(type) {
+    switch (type) {
+      case "zhipu": return "glm-4-flash";
+      case "deepseek": return "deepseek-chat";
+      case "openai": return "gpt-4o-mini";
+      default: return "";
+    }
+  }
+
+  function getTranslateProvider(config) {
+    var translate = config.translate;
+    if (translate && translate.provider) {
+      var pType = translate.provider;
+      var pConfig = config[pType];
+      if (pConfig && pConfig.apiKey) {
+        return {
+          type: pType,
+          apiKey: translate.apiKey || pConfig.apiKey,
+          baseUrl: pConfig.baseUrl,
+          model: translate.model || getDefaultTranslateModel(pType),
+        };
+      }
+    }
+    // Fallback: use current AI provider with default translate model
+    var provider = getCurrentProvider(config);
+    if (provider) {
+      return {
+        type: provider.type,
+        apiKey: provider.apiKey,
+        baseUrl: provider.baseUrl,
+        model: getDefaultTranslateModel(provider.type) || provider.model,
+      };
+    }
+    return null;
+  }
+
   function loadAIConfig() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
@@ -213,6 +249,8 @@ var AI = (function () {
   return {
     getDefaultBaseUrl: getDefaultBaseUrl,
     getAvailableModels: getAvailableModels,
+    getDefaultTranslateModel: getDefaultTranslateModel,
+    getTranslateProvider: getTranslateProvider,
     loadAIConfig: loadAIConfig,
     saveAIConfig: saveAIConfig,
     getCurrentProvider: getCurrentProvider,

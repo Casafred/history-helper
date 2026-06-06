@@ -1150,39 +1150,123 @@ aiSaveBtn.addEventListener("click", () => {
     config[type].baseUrl = aiBaseUrlInput.value.trim();
     config[type].model = aiModelSelect.value;
   }
-  const ocrConfig = window.AI.getOCRConfig(config);
-  ocrConfig.engine = ocrEngineSelect.value;
-  ocrConfig.glmKey = ocrGlmKeyInput.value.trim();
-
-  // Save custom prompts
-  const promptKeys = [
-    { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
-    { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
-    { id: "prompt-doc-analysis", key: "docAnalysis" },
-    { id: "prompt-history-summary", key: "historySummary" },
-    { id: "prompt-cited-refs-analysis", key: "citedRefsAnalysis" },
-  ];
-  promptKeys.forEach(p => {
-    const el = document.getElementById(p.id);
-    if (el) {
-      const val = el.value.trim();
-      const defaultVal = window.AI.getDefaultPrompt(p.key);
-      if (val && val !== defaultVal) {
-        window.AI.saveCustomPrompt(config, p.key, val);
-      } else {
-        window.AI.resetPrompt(config, p.key);
-      }
-    }
-  });
-
   window.AI.saveAIConfig(config);
+  aiTestResult.classList.add("hidden");
   aiSettingsModal.classList.add("hidden");
 });
+
+// OCR save button
+const ocrSaveBtn = document.getElementById("ocr-save-btn");
+if (ocrSaveBtn) {
+  ocrSaveBtn.addEventListener("click", () => {
+    const config = window.AI.loadAIConfig();
+    const ocrConfig = window.AI.getOCRConfig(config);
+    ocrConfig.engine = ocrEngineSelect.value;
+    ocrConfig.glmKey = ocrGlmKeyInput.value.trim();
+    window.AI.saveAIConfig(config);
+    aiSettingsModal.classList.add("hidden");
+  });
+}
+
+// Translate save button
+const translateSaveBtn = document.getElementById("translate-save-btn");
+if (translateSaveBtn) {
+  translateSaveBtn.addEventListener("click", () => {
+    const config = window.AI.loadAIConfig();
+    const translateProviderSelect = document.getElementById("translate-provider-select");
+    const translateApiKeyInput = document.getElementById("translate-api-key-input");
+    const translateModelSelect = document.getElementById("translate-model-select");
+    const translateDefaultLang = document.getElementById("translate-default-lang");
+
+    if (!config.translate) config.translate = {};
+    config.translate.provider = translateProviderSelect ? translateProviderSelect.value : "";
+    config.translate.apiKey = translateApiKeyInput ? translateApiKeyInput.value.trim() : "";
+    config.translate.model = translateModelSelect ? translateModelSelect.value : "";
+    config.translate.defaultLang = translateDefaultLang ? translateDefaultLang.value : "zh";
+    window.AI.saveAIConfig(config);
+    aiSettingsModal.classList.add("hidden");
+  });
+}
+
+// Prompts save button
+const promptsSaveBtn = document.getElementById("prompts-save-btn");
+if (promptsSaveBtn) {
+  promptsSaveBtn.addEventListener("click", () => {
+    const config = window.AI.loadAIConfig();
+    const promptKeys = [
+      { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
+      { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
+      { id: "prompt-doc-analysis", key: "docAnalysis" },
+      { id: "prompt-history-summary", key: "historySummary" },
+      { id: "prompt-cited-refs-analysis", key: "citedRefsAnalysis" },
+    ];
+    promptKeys.forEach(p => {
+      const el = document.getElementById(p.id);
+      if (el) {
+        const val = el.value.trim();
+        const defaultVal = window.AI.getDefaultPrompt(p.key);
+        if (val && val !== defaultVal) {
+          window.AI.saveCustomPrompt(config, p.key, val);
+        } else {
+          window.AI.resetPrompt(config, p.key);
+        }
+      }
+    });
+    window.AI.saveAIConfig(config);
+    aiSettingsModal.classList.add("hidden");
+  });
+}
+
+// Settings tab switching
+document.querySelectorAll(".settings-tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const tabId = btn.dataset.settingsTab;
+    document.querySelectorAll(".settings-tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".settings-tab-content").forEach(c => c.classList.remove("active"));
+    btn.classList.add("active");
+    const tabContent = document.getElementById("settings-tab-" + tabId);
+    if (tabContent) tabContent.classList.add("active");
+  });
+});
+
+// Translate provider select change
+const translateProviderSelectEl = document.getElementById("translate-provider-select");
+if (translateProviderSelectEl) {
+  translateProviderSelectEl.addEventListener("change", () => {
+    const type = translateProviderSelectEl.value;
+    const translateApiKeyGroup = document.getElementById("translate-api-key-group");
+    const translateModelSelect = document.getElementById("translate-model-select");
+
+    if (type) {
+      if (translateApiKeyGroup) translateApiKeyGroup.style.display = "";
+      updateTranslateModelOptions(type);
+    } else {
+      if (translateApiKeyGroup) translateApiKeyGroup.style.display = "none";
+      if (translateModelSelect) translateModelSelect.innerHTML = '<option value="">跟随 AI 服务模型</option>';
+    }
+  });
+}
+
+function updateTranslateModelOptions(type) {
+  const translateModelSelect = document.getElementById("translate-model-select");
+  if (!translateModelSelect) return;
+  const models = window.AI.getAvailableModels(type);
+  const defaultModel = window.AI.getDefaultTranslateModel(type);
+  translateModelSelect.innerHTML = "";
+  models.forEach(model => {
+    const option = document.createElement("option");
+    option.value = model.value;
+    option.textContent = model.label + (model.value === defaultModel ? " (推荐)" : "");
+    translateModelSelect.appendChild(option);
+  });
+  // Set default
+  translateModelSelect.value = defaultModel;
+}
 
 function loadAISettingsToForm() {
   const config = window.AI.loadAIConfig();
   let type = aiProviderSelect.value;
-  if (!config[type]) type = Object.keys(config).find(k => k !== "ocr" && k !== "prompts") || "zhipu";
+  if (!config[type]) type = Object.keys(config).find(k => k !== "ocr" && k !== "prompts" && k !== "translate") || "zhipu";
   if (config[type]) {
     aiApiKeyInput.value = config[type].apiKey || "";
     aiBaseUrlInput.value = config[type].baseUrl || "";
@@ -1196,6 +1280,28 @@ function loadAISettingsToForm() {
   if (ocrEngineSelect) ocrEngineSelect.value = ocrConfig.engine || "paddle_ocr_vl";
   if (ocrGlmKeyInput) ocrGlmKeyInput.value = ocrConfig.glmKey || "";
   toggleOcrGlmKeyVisibility();
+
+  // Load translate settings
+  const translateProviderSelect = document.getElementById("translate-provider-select");
+  const translateApiKeyInput = document.getElementById("translate-api-key-input");
+  const translateDefaultLang = document.getElementById("translate-default-lang");
+  const translateApiKeyGroup = document.getElementById("translate-api-key-group");
+  const translate = config.translate || {};
+  if (translateProviderSelect) {
+    translateProviderSelect.value = translate.provider || "";
+    if (translate.provider) {
+      if (translateApiKeyGroup) translateApiKeyGroup.style.display = "";
+      updateTranslateModelOptions(translate.provider);
+      const translateModelSelect = document.getElementById("translate-model-select");
+      if (translateModelSelect && translate.model) translateModelSelect.value = translate.model;
+    } else {
+      if (translateApiKeyGroup) translateApiKeyGroup.style.display = "none";
+      const translateModelSelect = document.getElementById("translate-model-select");
+      if (translateModelSelect) translateModelSelect.innerHTML = '<option value="">跟随 AI 服务模型</option>';
+    }
+  }
+  if (translateApiKeyInput) translateApiKeyInput.value = translate.apiKey || "";
+  if (translateDefaultLang) translateDefaultLang.value = translate.defaultLang || "zh";
 
   // Load custom prompts
   const promptKeys = [
@@ -3071,8 +3177,8 @@ async function translatePdfPage() {
   }
 
   const config = window.AI.loadAIConfig();
-  const provider = window.AI.getCurrentProvider(config);
-  if (!provider || !provider.apiKey) {
+  const translateProvider = window.AI.getTranslateProvider(config);
+  if (!translateProvider || !translateProvider.apiKey) {
     showError("请先配置 AI 服务（API Key）");
     return;
   }
@@ -3080,7 +3186,7 @@ async function translatePdfPage() {
   // Show translate panel
   if (pdfTranslatePanel) pdfTranslatePanel.classList.remove("hidden");
 
-  const targetLang = pdfTranslateLang ? pdfTranslateLang.value : "zh";
+  const targetLang = pdfTranslateLang ? pdfTranslateLang.value : (config.translate && config.translate.defaultLang) || "zh";
   const langNames = { zh: "中文", en: "English", ja: "日本語", ko: "한국어" };
   const currentPage = pdfViewState.currentPage;
 
@@ -3100,8 +3206,17 @@ async function translatePdfPage() {
     return;
   }
 
-  // Group blocks by content for translation
-  const originalTexts = pageBlocks.map(b => b.content).filter(c => c && c.trim());
+  // Group blocks by content for translation, with type markers
+  const typeLabels = { title: "标题", text: "正文", table: "表格", formula: "公式", figure: "图注", header: "页眉", caption: "说明" };
+  const originalTexts = [];
+  const blockTypes = [];
+  pageBlocks.forEach(b => {
+    if (b.content && b.content.trim()) {
+      const label = typeLabels[b.label] || "正文";
+      originalTexts.push(b.content.trim());
+      blockTypes.push(label);
+    }
+  });
   if (originalTexts.length === 0) {
     if (pdfTranslateContent) {
       pdfTranslateContent.innerHTML = '<p class="placeholder">当前页面无文字内容</p>';
@@ -3112,9 +3227,9 @@ async function translatePdfPage() {
   // Show loading state
   if (pdfTranslateContent) {
     let html = `<div class="pdf-translate-page-label">第 ${currentPage} 页</div>`;
-    originalTexts.forEach(text => {
+    originalTexts.forEach((text, i) => {
       html += `<div class="pdf-translate-pair">
-        <div class="pdf-translate-original">${escapeHtml(text)}</div>
+        <div class="pdf-translate-original"><span class="pdf-translate-type-badge">${escapeHtml(blockTypes[i])}</span>${escapeHtml(text)}</div>
         <div class="pdf-translate-translated translating">正在翻译...</div>
       </div>`;
     });
@@ -3125,17 +3240,35 @@ async function translatePdfPage() {
   translateAbortController = new AbortController();
 
   try {
-    const fullText = originalTexts.join("\n\n");
-    const systemPrompt = `你是一个专业的专利文档翻译专家。请将以下专利文档内容翻译为${langNames[targetLang] || "中文"}。保持原文的段落结构，逐段翻译。只输出翻译结果，不要添加任何解释或注释。如果原文已经是目标语言，则直接返回原文。`;
+    // Build text with type markers for the AI
+    const markedText = originalTexts.map((text, i) => `【${blockTypes[i]}】\n${text}`).join("\n\n");
+    const systemPrompt = `你是一个专业的专利文档翻译专家。请将以下专利文档内容翻译为${langNames[targetLang] || "中文"}。
+
+## 翻译规则
+
+1. 原文中每个段落前标有【类型】标记，表示该段落的版面类型：
+   - 【标题】：文档标题、章节标题，翻译时保持简洁有力
+   - 【正文】：主体文字内容，逐句准确翻译，保持技术术语一致性
+   - 【表格】：表格内容，保持行列结构，用 | 分隔各列
+   - 【公式】：数学公式或化学式，保留原始公式符号，仅翻译公式旁的文字说明
+   - 【图注】：图片说明文字，简洁翻译
+   - 【页眉】：页眉信息，照实翻译
+   - 【说明】：图表说明，准确翻译
+
+2. 翻译时请保留【类型】标记，格式为【类型】\\n翻译内容
+3. 保持原文的段落结构，每个标记段落对应一段翻译
+4. 只输出翻译结果，不要添加任何解释或注释
+5. 如果原文已经是目标语言，则直接返回原文
+6. 专利技术术语请使用该领域的标准译法`;
 
     const messages = [
       { role: "system", content: systemPrompt },
-      { role: "user", content: fullText },
+      { role: "user", content: markedText },
     ];
 
     let fullResponse = "";
-    const stream = window.AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
-      model: provider.model,
+    const stream = window.AI.streamChat(translateProvider.type, translateProvider.apiKey, translateProvider.baseUrl, {
+      model: translateProvider.model,
       messages: messages,
       temperature: 0.1,
       maxTokens: 8192,
@@ -3154,11 +3287,12 @@ async function translatePdfPage() {
       }
     }
 
-    // Cache the result
-    const translatedParagraphs = fullResponse.split("\n\n").filter(p => p.trim());
+    // Cache the result - parse translated blocks from response
+    const translatedBlocks = fullResponse.split(/【[^】]+】\s*/).filter(s => s.trim());
     const pairs = originalTexts.map((orig, i) => ({
       original: orig,
-      translated: translatedParagraphs[i] || fullResponse,
+      translated: translatedBlocks[i] || fullResponse,
+      type: blockTypes[i],
     }));
     translatePageCache[cacheKey] = { pairs, page: currentPage };
     renderTranslateContent({ pairs, page: currentPage }, currentPage);
@@ -3177,8 +3311,9 @@ function renderTranslateContent(data, page) {
   if (!pdfTranslateContent) return;
   let html = `<div class="pdf-translate-page-label">第 ${page} 页</div>`;
   data.pairs.forEach(pair => {
+    const typeBadge = pair.type ? `<span class="pdf-translate-type-badge">${escapeHtml(pair.type)}</span>` : "";
     html += `<div class="pdf-translate-pair">
-      <div class="pdf-translate-original">${escapeHtml(pair.original)}</div>
+      <div class="pdf-translate-original">${typeBadge}${escapeHtml(pair.original)}</div>
       <div class="pdf-translate-translated">${renderMarkdown(pair.translated)}</div>
     </div>`;
   });

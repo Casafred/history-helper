@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PatentLens - 专利审查文档获取与梳理</title>
-  <link rel="stylesheet" href="styles/main.css?v=20260610">
+  <link rel="stylesheet" href="styles/main.css?v=20260611">
 </head>
 <body>
   <div id="app">
@@ -202,90 +202,138 @@
 
       <div id="ai-settings-modal" class="modal hidden">
         <div class="modal-overlay"></div>
-        <div class="modal-content">
+        <div class="modal-content settings-modal-content">
           <div class="modal-header">
-            <h2>AI & OCR 服务设置</h2>
+            <h2>设置</h2>
             <button id="modal-close-btn" class="btn-icon">&times;</button>
           </div>
+          <div class="settings-tabs">
+            <button class="settings-tab-btn active" data-settings-tab="ai">AI 服务</button>
+            <button class="settings-tab-btn" data-settings-tab="ocr">OCR</button>
+            <button class="settings-tab-btn" data-settings-tab="translate">翻译</button>
+            <button class="settings-tab-btn" data-settings-tab="prompts">提示词</button>
+          </div>
           <div class="modal-body">
-            <h3 class="settings-section-title">AI 服务</h3>
-            <div class="form-group">
-              <label>AI 服务商</label>
-              <select id="ai-provider-select">
-                <option value="zhipu">智谱 (GLM)</option>
-                <option value="deepseek">DeepSeek</option>
-                <option value="openai">OpenAI</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>API Key</label>
-              <input type="password" id="ai-api-key-input" placeholder="输入 API Key">
-            </div>
-            <div class="form-group">
-              <label>Base URL</label>
-              <input type="text" id="ai-base-url-input" placeholder="API Base URL">
-            </div>
-            <div class="form-group">
-              <label>模型</label>
-              <select id="ai-model-select"></select>
+            <!-- AI Service Tab -->
+            <div id="settings-tab-ai" class="settings-tab-content active">
+              <div class="form-group">
+                <label>AI 服务商</label>
+                <select id="ai-provider-select">
+                  <option value="zhipu">智谱 (GLM)</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>API Key</label>
+                <input type="password" id="ai-api-key-input" placeholder="输入 API Key">
+              </div>
+              <div class="form-group">
+                <label>Base URL</label>
+                <input type="text" id="ai-base-url-input" placeholder="API Base URL">
+              </div>
+              <div class="form-group">
+                <label>模型</label>
+                <select id="ai-model-select"></select>
+              </div>
+              <div class="form-actions">
+                <button id="ai-test-btn" class="btn-secondary">测试连接</button>
+                <button id="ai-save-btn" class="btn-primary">保存</button>
+              </div>
+              <div id="ai-test-result" class="test-result hidden"></div>
             </div>
 
-            <div class="form-actions">
-              <button id="ai-test-btn" class="btn-secondary">测试 AI 连接</button>
-              <button id="ai-save-btn" class="btn-primary">保存</button>
-            </div>
-            <div id="ai-test-result" class="test-result hidden"></div>
-
-            <hr style="border-color:var(--border);margin:20px 0 16px">
-            <h3 style="margin:0 0 12px;font-size:15px;color:var(--text-secondary)">OCR 文字识别设置</h3>
-            <div class="form-group">
-              <label>OCR 引擎</label>
-              <select id="ocr-engine-select">
-                <option value="paddle_ocr_vl">PaddleOCR-VL（免费，无需 Key）</option>
-                <option value="glm_ocr">GLM OCR（需要智谱 API Key）</option>
-              </select>
-            </div>
-            <div class="form-group" id="ocr-glm-key-group" style="display:none">
-              <label>GLM OCR API Key</label>
-              <input type="password" id="ocr-glm-key-input" placeholder="智谱 API Key（用于 GLM OCR）">
-              <small style="color:var(--text-secondary);margin-top:4px;display:block">如已配置智谱 AI 服务商，可留空自动复用其 Key</small>
+            <!-- OCR Tab -->
+            <div id="settings-tab-ocr" class="settings-tab-content">
+              <div class="form-group">
+                <label>OCR 引擎</label>
+                <select id="ocr-engine-select">
+                  <option value="paddle_ocr_vl">PaddleOCR-VL（免费，无需 Key）</option>
+                  <option value="glm_ocr">GLM OCR（需要智谱 API Key）</option>
+                </select>
+              </div>
+              <div class="form-group" id="ocr-glm-key-group" style="display:none">
+                <label>GLM OCR API Key</label>
+                <input type="password" id="ocr-glm-key-input" placeholder="智谱 API Key（用于 GLM OCR）">
+                <small style="color:var(--text-secondary);margin-top:4px;display:block">如已配置智谱 AI 服务商，可留空自动复用其 Key</small>
+              </div>
+              <div class="form-actions">
+                <button id="ocr-save-btn" class="btn-primary">保存</button>
+              </div>
             </div>
 
-            <hr style="border-color:var(--border);margin:20px 0 16px">
-            <h3 style="margin:0 0 12px;font-size:15px;color:var(--text-secondary)">AI 提示词自定义</h3>
-            <div class="form-group">
-              <label>审查意见梳理提示词（含溯源版）</label>
-              <textarea id="prompt-kanban-analysis" class="prompt-textarea" rows="6" placeholder="审查意见梳理提示词（含 OCR 溯源信息时使用）"></textarea>
-              <div class="prompt-actions">
-                <button id="reset-prompt-kanban-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+            <!-- Translate Tab -->
+            <div id="settings-tab-translate" class="settings-tab-content">
+              <div class="form-group">
+                <label>翻译模型服务商</label>
+                <select id="translate-provider-select">
+                  <option value="">跟随 AI 服务设置</option>
+                  <option value="zhipu">智谱 (GLM)</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+              </div>
+              <div class="form-group" id="translate-api-key-group" style="display:none">
+                <label>翻译 API Key</label>
+                <input type="password" id="translate-api-key-input" placeholder="留空则复用 AI 服务的 Key">
+              </div>
+              <div class="form-group">
+                <label>翻译模型</label>
+                <select id="translate-model-select"></select>
+              </div>
+              <div class="form-group">
+                <label>默认翻译目标语言</label>
+                <select id="translate-default-lang">
+                  <option value="zh">中文</option>
+                  <option value="en">English</option>
+                  <option value="ja">日本語</option>
+                  <option value="ko">한국어</option>
+                </select>
+              </div>
+              <div class="form-actions">
+                <button id="translate-save-btn" class="btn-primary">保存</button>
               </div>
             </div>
-            <div class="form-group">
-              <label>审查意见梳理提示词（简化版）</label>
-              <textarea id="prompt-kanban-simple" class="prompt-textarea" rows="4" placeholder="审查意见梳理提示词（无溯源信息时使用）"></textarea>
-              <div class="prompt-actions">
-                <button id="reset-prompt-kanban-simple" class="btn-secondary btn-small" type="button">恢复默认</button>
+
+            <!-- Prompts Tab -->
+            <div id="settings-tab-prompts" class="settings-tab-content">
+              <div class="form-group">
+                <label>审查意见梳理提示词（含溯源版）</label>
+                <textarea id="prompt-kanban-analysis" class="prompt-textarea" rows="6" placeholder="审查意见梳理提示词（含 OCR 溯源信息时使用）"></textarea>
+                <div class="prompt-actions">
+                  <button id="reset-prompt-kanban-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+                </div>
               </div>
-            </div>
-            <div class="form-group">
-              <label>单文档分析提示词</label>
-              <textarea id="prompt-doc-analysis" class="prompt-textarea" rows="3" placeholder="单篇文档 AI 分析提示词"></textarea>
-              <div class="prompt-actions">
-                <button id="reset-prompt-doc-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+              <div class="form-group">
+                <label>审查意见梳理提示词（简化版）</label>
+                <textarea id="prompt-kanban-simple" class="prompt-textarea" rows="4" placeholder="审查意见梳理提示词（无溯源信息时使用）"></textarea>
+                <div class="prompt-actions">
+                  <button id="reset-prompt-kanban-simple" class="btn-secondary btn-small" type="button">恢复默认</button>
+                </div>
               </div>
-            </div>
-            <div class="form-group">
-              <label>审查历史梳理提示词</label>
-              <textarea id="prompt-history-summary" class="prompt-textarea" rows="3" placeholder="审查历史整体梳理提示词"></textarea>
-              <div class="prompt-actions">
-                <button id="reset-prompt-history-summary" class="btn-secondary btn-small" type="button">恢复默认</button>
+              <div class="form-group">
+                <label>单文档分析提示词</label>
+                <textarea id="prompt-doc-analysis" class="prompt-textarea" rows="3" placeholder="单篇文档 AI 分析提示词"></textarea>
+                <div class="prompt-actions">
+                  <button id="reset-prompt-doc-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+                </div>
               </div>
-            </div>
-            <div class="form-group">
-              <label>引用文献梳理提示词</label>
-              <textarea id="prompt-cited-refs-analysis" class="prompt-textarea" rows="4" placeholder="引用文献梳理分析要求提示词"></textarea>
-              <div class="prompt-actions">
-                <button id="reset-prompt-cited-refs-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+              <div class="form-group">
+                <label>审查历史梳理提示词</label>
+                <textarea id="prompt-history-summary" class="prompt-textarea" rows="3" placeholder="审查历史整体梳理提示词"></textarea>
+                <div class="prompt-actions">
+                  <button id="reset-prompt-history-summary" class="btn-secondary btn-small" type="button">恢复默认</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>引用文献梳理提示词</label>
+                <textarea id="prompt-cited-refs-analysis" class="prompt-textarea" rows="4" placeholder="引用文献梳理分析要求提示词"></textarea>
+                <div class="prompt-actions">
+                  <button id="reset-prompt-cited-refs-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button id="prompts-save-btn" class="btn-primary">保存</button>
               </div>
             </div>
           </div>
@@ -328,11 +376,11 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="scripts/marked.min.js?v=20260610"></script>
-  <script src="scripts/docx.umd.js?v=20260610"></script>
-  <script src="scripts/FileSaver.min.js?v=20260610"></script>
-  <script src="scripts/web-ai.js?v=20260610"></script>
-  <script src="scripts/patent-status.js?v=20260610"></script>
-  <script src="scripts/web-app.js?v=20260610"></script>
+  <script src="scripts/marked.min.js?v=20260611"></script>
+  <script src="scripts/docx.umd.js?v=20260611"></script>
+  <script src="scripts/FileSaver.min.js?v=20260611"></script>
+  <script src="scripts/web-ai.js?v=20260611"></script>
+  <script src="scripts/patent-status.js?v=20260611"></script>
+  <script src="scripts/web-app.js?v=20260611"></script>
 </body>
 </html>
