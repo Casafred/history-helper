@@ -35,7 +35,7 @@ var AI = (function () {
   function getDefaultTranslateModel(type) {
     switch (type) {
       case "zhipu": return "glm-4-flash";
-      case "deepseek": return "deepseek-chat";
+      case "deepseek": return "deepseek-v4-flash";
       case "openai": return "gpt-4o-mini";
       default: return "";
     }
