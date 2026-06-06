@@ -95,6 +95,11 @@ const pdfZoomIn = document.getElementById("pdf-zoom-in");
 const pdfZoomOut = document.getElementById("pdf-zoom-out");
 const pdfZoomFit = document.getElementById("pdf-zoom-fit");
 const pdfOcrBtn = document.getElementById("pdf-ocr-btn");
+const pdfTranslateBtn = document.getElementById("pdf-translate-btn");
+const pdfTranslatePanel = document.getElementById("pdf-translate-panel");
+const pdfTranslateCloseBtn = document.getElementById("pdf-translate-close-btn");
+const pdfTranslateLang = document.getElementById("pdf-translate-lang");
+const pdfTranslateContent = document.getElementById("pdf-translate-content");
 
 const readerChatPanel = document.getElementById("reader-chat-panel");
 const chatMessages = document.getElementById("chat-messages");
@@ -122,6 +127,8 @@ let chatHistory = [];
 let chatAbortController = null;
 let analysisChatHistory = [];
 let analysisChatAbortController = null;
+let translateAbortController = null;
+let translatePageCache = {};
 
 function showError(msg) {
   errorToast.textContent = msg;
@@ -380,8 +387,8 @@ function renderKanban(data) {
   kanbanState.analysisUserMessage = "";
   kanbanState.traceIndex = {};
   analysisChatHistory = [];
-  const analysisChatToggleBtn = document.getElementById("analysis-chat-toggle-btn");
-  if (analysisChatToggleBtn) analysisChatToggleBtn.classList.add("hidden");
+  const analysisChatFloatBall = document.getElementById("analysis-chat-float-ball");
+  if (analysisChatFloatBall) analysisChatFloatBall.classList.add("hidden");
   const analysisChatPanel = document.getElementById("analysis-chat-panel");
   if (analysisChatPanel) analysisChatPanel.classList.add("hidden");
 
@@ -2568,11 +2575,16 @@ function selectReaderDoc(idx) {
     if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
     if (searchBtn) searchBtn.disabled = false;
     if (pdfOcrBtn) { pdfOcrBtn.textContent = "已提取"; pdfOcrBtn.disabled = true; }
+    if (pdfTranslateBtn) pdfTranslateBtn.disabled = false;
   } else {
     if (searchInput) { searchInput.disabled = true; searchInput.placeholder = "请先OCR提取..."; }
     if (searchBtn) searchBtn.disabled = true;
     if (pdfOcrBtn) { pdfOcrBtn.textContent = "OCR 提取"; pdfOcrBtn.disabled = false; }
+    if (pdfTranslateBtn) pdfTranslateBtn.disabled = true;
   }
+  // Reset translate panel
+  if (pdfTranslatePanel) pdfTranslatePanel.classList.add("hidden");
+  if (pdfTranslateContent) pdfTranslateContent.innerHTML = '<p class="placeholder">点击"翻译"按钮翻译当前页面</p>';
 
   // Render PDF view if active
   if (pdfViewState.active) {
@@ -2817,6 +2829,10 @@ function pdfGoToPage(pageNum) {
   if (wrapper) {
     wrapper.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+  // Auto-translate if translate panel is open
+  if (pdfTranslatePanel && !pdfTranslatePanel.classList.contains("hidden")) {
+    translatePdfPage();
+  }
 }
 
 function pdfZoomInAction() {
@@ -3028,6 +3044,8 @@ async function ocrPdf() {
     const searchBtn = document.getElementById("pdf-search-btn");
     if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
     if (searchBtn) searchBtn.disabled = false;
+    // Enable translate button after OCR
+    if (pdfTranslateBtn) pdfTranslateBtn.disabled = false;
     // Re-render PDF with block overlays
     if (pdfViewState.active) {
       await renderPdfView(idx);
@@ -3035,6 +3053,137 @@ async function ocrPdf() {
   } else {
     if (pdfOcrBtn) { pdfOcrBtn.textContent = "OCR 提取"; pdfOcrBtn.disabled = false; }
   }
+}
+
+// ===== PDF Translation =====
+
+async function translatePdfPage() {
+  const idx = pdfViewState.currentDocIdx;
+  if (idx == null) {
+    showError("请先选择一个文档");
+    return;
+  }
+
+  const extraction = kanbanState.extractions[idx];
+  if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
+    showError("请先进行 OCR 提取");
+    return;
+  }
+
+  const config = window.AI.loadAIConfig();
+  const provider = window.AI.getCurrentProvider(config);
+  if (!provider || !provider.apiKey) {
+    showError("请先配置 AI 服务（API Key）");
+    return;
+  }
+
+  // Show translate panel
+  if (pdfTranslatePanel) pdfTranslatePanel.classList.remove("hidden");
+
+  const targetLang = pdfTranslateLang ? pdfTranslateLang.value : "zh";
+  const langNames = { zh: "中文", en: "English", ja: "日本語", ko: "한국어" };
+  const currentPage = pdfViewState.currentPage;
+
+  // Check cache
+  const cacheKey = `${idx}_${currentPage}_${targetLang}`;
+  if (translatePageCache[cacheKey]) {
+    renderTranslateContent(translatePageCache[cacheKey], currentPage);
+    return;
+  }
+
+  // Get blocks for current page
+  const pageBlocks = extraction.blocks.filter(b => b.page === currentPage);
+  if (pageBlocks.length === 0) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder">当前页面无 OCR 文字内容</p>';
+    }
+    return;
+  }
+
+  // Group blocks by content for translation
+  const originalTexts = pageBlocks.map(b => b.content).filter(c => c && c.trim());
+  if (originalTexts.length === 0) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder">当前页面无文字内容</p>';
+    }
+    return;
+  }
+
+  // Show loading state
+  if (pdfTranslateContent) {
+    let html = `<div class="pdf-translate-page-label">第 ${currentPage} 页</div>`;
+    originalTexts.forEach(text => {
+      html += `<div class="pdf-translate-pair">
+        <div class="pdf-translate-original">${escapeHtml(text)}</div>
+        <div class="pdf-translate-translated translating">正在翻译...</div>
+      </div>`;
+    });
+    pdfTranslateContent.innerHTML = html;
+  }
+
+  if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译中..."; pdfTranslateBtn.disabled = true; }
+  translateAbortController = new AbortController();
+
+  try {
+    const fullText = originalTexts.join("\n\n");
+    const systemPrompt = `你是一个专业的专利文档翻译专家。请将以下专利文档内容翻译为${langNames[targetLang] || "中文"}。保持原文的段落结构，逐段翻译。只输出翻译结果，不要添加任何解释或注释。如果原文已经是目标语言，则直接返回原文。`;
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: fullText },
+    ];
+
+    let fullResponse = "";
+    const stream = window.AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
+      model: provider.model,
+      messages: messages,
+      temperature: 0.1,
+      maxTokens: 8192,
+    }, translateAbortController.signal);
+
+    for await (const chunk of stream) {
+      if (translateAbortController.signal.aborted) break;
+      if (chunk.content) {
+        fullResponse += chunk.content;
+        // Update the translated content in real-time
+        const translatedDivs = pdfTranslateContent ? pdfTranslateContent.querySelectorAll(".pdf-translate-translated") : [];
+        if (translatedDivs.length === 1) {
+          translatedDivs[0].innerHTML = renderMarkdown(fullResponse);
+          translatedDivs[0].classList.remove("translating");
+        }
+      }
+    }
+
+    // Cache the result
+    const translatedParagraphs = fullResponse.split("\n\n").filter(p => p.trim());
+    const pairs = originalTexts.map((orig, i) => ({
+      original: orig,
+      translated: translatedParagraphs[i] || fullResponse,
+    }));
+    translatePageCache[cacheKey] = { pairs, page: currentPage };
+    renderTranslateContent({ pairs, page: currentPage }, currentPage);
+
+  } catch (e) {
+    if (e.name !== "AbortError") {
+      showError("翻译出错: " + e.message);
+    }
+  } finally {
+    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译"; pdfTranslateBtn.disabled = false; }
+    translateAbortController = null;
+  }
+}
+
+function renderTranslateContent(data, page) {
+  if (!pdfTranslateContent) return;
+  let html = `<div class="pdf-translate-page-label">第 ${page} 页</div>`;
+  data.pairs.forEach(pair => {
+    html += `<div class="pdf-translate-pair">
+      <div class="pdf-translate-original">${escapeHtml(pair.original)}</div>
+      <div class="pdf-translate-translated">${renderMarkdown(pair.translated)}</div>
+    </div>`;
+  });
+  pdfTranslateContent.innerHTML = html;
+  pdfTranslateContent.scrollTop = 0;
 }
 
 // ===== Open reader for specific document from kanban =====
@@ -3425,27 +3574,79 @@ async function exportToWord() {
 
     addRow("专利号", currentData.docNumber || "");
     addRow("申请号", currentData.applicationNumber || "");
-    addRow("申请局", currentData.office || "");
+    addRow("申请局", OFFICE_NAMES[currentData.office] || currentData.office || "");
 
-    // Get title and inventor from family data
+    // Get title, inventor, dates from family data (same logic as renderOverview)
     let title = "";
     let inventors = "";
-    let applicants = currentData.applicantName || "";
+    let applicants = "";
     let filingDate = "";
     let publicationDate = "";
-    if (currentData.family && currentData.family.list && currentData.family.list.length > 0) {
-      const fam = currentData.family.list[0];
-      title = fam.title || fam.inventionTitle || "";
-      inventors = fam.inventors || fam.inventorName || "";
-      applicants = applicants || fam.applicants || fam.applicantName || "";
-      filingDate = fam.filingDate || fam.applicationDate || "";
-      publicationDate = fam.publicationDate || fam.pubDate || "";
+    let priorityDate = "";
+    let ipcClasses = "";
+    let cpcClasses = "";
+    let legalStatus = "";
+
+    if (currentData.family) {
+      const members = extractFamilyMembers(currentData.family);
+      if (members.length > 0) {
+        let m = members.find(mem => mem.countryCode === currentData.office) || members[0];
+        const dl = m.docList || {};
+        title = m.title || dl.title || m.inventionTitle || "";
+        const applicantNamesArr = m.applicantNames || dl.applicantNames || [];
+        const namesStr = Array.isArray(applicantNamesArr) ? applicantNamesArr.join(", ") : (applicantNamesArr || "");
+        if (currentData.office === "US") {
+          inventors = namesStr || m.inventors || m.inventorName || "";
+        } else {
+          applicants = namesStr || m.applicants || m.applicantName || "";
+          inventors = m.inventors || m.inventorName || "";
+        }
+        filingDate = m.appDateStr || m.filingDate || m.applicationDate || "";
+        if (!filingDate && m.appDate) {
+          try { filingDate = new Date(m.appDate).toLocaleDateString("en-US"); } catch(e) {}
+        }
+        if (m.pubList && Array.isArray(m.pubList) && m.pubList.length > 0) {
+          publicationDate = m.pubList[0].pubDateStr || "";
+          if (!publicationDate && m.pubList[0].pubDate) {
+            try { publicationDate = new Date(m.pubList[0].pubDate).toLocaleDateString("en-US"); } catch(e2) {}
+          }
+        }
+        publicationDate = publicationDate || m.publicationDate || m.pubDate || "";
+        if (m.docNum && m.docNum.date) {
+          priorityDate = m.docNum.date;
+        }
+        if (!priorityDate && m.priorityClaimList && Array.isArray(m.priorityClaimList) && m.priorityClaimList.length > 0) {
+          priorityDate = m.priorityClaimList[0].date || "";
+        }
+        ipcClasses = m.ipc || m.ipcClass || m.classification || "";
+        if (Array.isArray(ipcClasses)) ipcClasses = ipcClasses.join(", ");
+        cpcClasses = m.cpcClass || m.cpc || "";
+        if (Array.isArray(cpcClasses)) cpcClasses = cpcClasses.join(", ");
+        const docItems = kanbanState.documents || [];
+        const hasAllowance = docItems.some(it => it.type === "allowance");
+        const hasOA = docItems.some(it => it.type === "office_action");
+        const hasResponse = docItems.some(it => it.type === "response");
+        if (hasAllowance) {
+          legalStatus = "已授权 (Granted)";
+        } else if (hasOA && !hasResponse) {
+          legalStatus = "待答复 (Pending Response)";
+        } else if (hasOA && hasResponse) {
+          legalStatus = "审查中 (Under Examination)";
+        } else {
+          legalStatus = m.legalStatus || m.status || "";
+        }
+      }
     }
+
     addRow("标题", title);
     addRow("发明人", inventors);
     addRow("申请人", applicants);
     addRow("申请日", filingDate);
     addRow("公开日", publicationDate);
+    if (priorityDate) addRow("优先权日", priorityDate);
+    if (ipcClasses) addRow("IPC分类", ipcClasses);
+    if (cpcClasses) addRow("CPC分类", cpcClasses);
+    if (legalStatus) addRow("法律状态", legalStatus);
 
     children.push(new docx.Table({
       rows: overviewRows,
@@ -3741,6 +3942,28 @@ document.addEventListener("DOMContentLoaded", () => {
     pdfOcrBtn.addEventListener("click", ocrPdf);
   }
 
+  // PDF translate button
+  if (pdfTranslateBtn) {
+    pdfTranslateBtn.addEventListener("click", translatePdfPage);
+  }
+  if (pdfTranslateCloseBtn) {
+    pdfTranslateCloseBtn.addEventListener("click", () => {
+      if (pdfTranslatePanel) pdfTranslatePanel.classList.add("hidden");
+    });
+  }
+
+  // Reader sidebar doc search filter
+  const readerDocSearch = document.getElementById("reader-doc-search");
+  if (readerDocSearch) {
+    readerDocSearch.addEventListener("input", () => {
+      const keyword = readerDocSearch.value.trim().toLowerCase();
+      document.querySelectorAll(".reader-doc-item").forEach(el => {
+        const text = el.textContent.toLowerCase();
+        el.style.display = (!keyword || text.includes(keyword)) ? "" : "none";
+      });
+    });
+  }
+
   // PDF search
   const pdfSearchBtn = document.getElementById("pdf-search-btn");
   const pdfSearchInput = document.getElementById("pdf-search-input");
@@ -3959,8 +4182,8 @@ function appendChatMessage(role, content) {
 // ===== Analysis Chat (continued conversation with AI analysis report) =====
 
 function showAnalysisChatToggle() {
-  const toggleBtn = document.getElementById("analysis-chat-toggle-btn");
-  if (toggleBtn) toggleBtn.classList.remove("hidden");
+  const floatBall = document.getElementById("analysis-chat-float-ball");
+  if (floatBall) floatBall.classList.remove("hidden");
 }
 
 function appendAnalysisChatMessage(role, content) {
@@ -4054,7 +4277,7 @@ async function sendAnalysisChatMessage() {
 
 // Analysis chat event listeners (script loaded at end of body, DOM is ready)
 (function initAnalysisChat() {
-  const analysisChatToggleBtn = document.getElementById("analysis-chat-toggle-btn");
+  const analysisChatFloatBall = document.getElementById("analysis-chat-float-ball");
   const analysisChatPanel = document.getElementById("analysis-chat-panel");
   const analysisChatCloseBtn = document.getElementById("analysis-chat-close-btn");
   const analysisChatClearBtn = document.getElementById("analysis-chat-clear-btn");
@@ -4062,8 +4285,8 @@ async function sendAnalysisChatMessage() {
   const analysisChatAbortBtnEl = document.getElementById("analysis-chat-abort-btn");
   const analysisChatInput = document.getElementById("analysis-chat-input");
 
-  if (analysisChatToggleBtn) {
-    analysisChatToggleBtn.addEventListener("click", () => {
+  if (analysisChatFloatBall) {
+    analysisChatFloatBall.addEventListener("click", () => {
       if (analysisChatPanel) {
         analysisChatPanel.classList.toggle("hidden");
         if (!analysisChatPanel.classList.contains("hidden")) {
