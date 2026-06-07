@@ -3209,7 +3209,7 @@ async function translatePdfPage() {
     return;
   }
 
-  // Get blocks for current page
+  // Get blocks for current page, merge into continuous text
   const pageBlocks = extraction.blocks.filter(b => b.page === currentPage);
   if (pageBlocks.length === 0) {
     if (pdfTranslateContent) {
@@ -3218,64 +3218,82 @@ async function translatePdfPage() {
     return;
   }
 
-  // Group blocks by content for translation, with type markers
-  const typeLabels = { title: "标题", text: "正文", table: "表格", formula: "公式", figure: "图注", header: "页眉", caption: "说明" };
-  const originalTexts = [];
-  const blockTypes = [];
+  // Clean OCR artifact symbols and merge all blocks into one continuous document
+  const cleanOcrText = (text) => {
+    return text
+      .replace(/\$\s*\\Box\s*\$/g, '☐')       // checkbox empty
+      .replace(/\$\s*\\surd\s*\$/g, '☑')        // checkbox checked
+      .replace(/\$\s*\\§\s*(\d+)\s*\$/g, '§$1') // section symbol
+      .replace(/\$\s*\\[^$]+\$/g, '')            // remove other LaTeX inline math
+      .replace(/\$\{[^}]+\}/g, '')               // remove ${...} placeholders
+      .replace(/\s{2,}/g, ' ')                    // collapse multiple spaces
+      .trim();
+  };
+
+  // Build original text by merging blocks, with type hints only for non-text types
+  const typeLabels = { title: "标题", table: "表格", formula: "公式", figure: "图注", caption: "说明" };
+  const originalParts = [];
   pageBlocks.forEach(b => {
     if (b.content && b.content.trim()) {
-      const label = typeLabels[b.label] || "正文";
-      originalTexts.push(b.content.trim());
-      blockTypes.push(label);
+      const cleaned = cleanOcrText(b.content);
+      if (!cleaned) return;
+      const typeHint = typeLabels[b.label];
+      if (typeHint) {
+        originalParts.push(`[${typeHint}] ${cleaned}`);
+      } else {
+        originalParts.push(cleaned);
+      }
     }
   });
-  if (originalTexts.length === 0) {
+  const originalFullText = originalParts.join("\n\n");
+  if (!originalFullText.trim()) {
     if (pdfTranslateContent) {
-      pdfTranslateContent.innerHTML = '<p class="placeholder">当前页面无文字内容</p>';
+      pdfTranslateContent.innerHTML = '<p class="placeholder">当前页面无有效文字内容</p>';
     }
     return;
   }
 
-  // Show loading state
+  // Show loading state - full document view
   if (pdfTranslateContent) {
-    let html = `<div class="pdf-translate-page-label">第 ${currentPage} 页</div>`;
-    originalTexts.forEach((text, i) => {
-      html += `<div class="pdf-translate-pair">
-        <div class="pdf-translate-original"><span class="pdf-translate-type-badge">${escapeHtml(blockTypes[i])}</span>${escapeHtml(text)}</div>
-        <div class="pdf-translate-translated translating">正在翻译...</div>
+    pdfTranslateContent.innerHTML = `<div class="pdf-translate-page-label">第 ${currentPage} 页</div>
+      <div class="pdf-translate-doc-view">
+        <div class="pdf-translate-doc-col">
+          <div class="pdf-translate-col-header">原文</div>
+          <div class="pdf-translate-col-body">${escapeHtml(originalFullText)}</div>
+        </div>
+        <div class="pdf-translate-doc-col">
+          <div class="pdf-translate-col-header">译文</div>
+          <div class="pdf-translate-col-body translating">正在翻译...</div>
+        </div>
       </div>`;
-    });
-    pdfTranslateContent.innerHTML = html;
   }
 
   if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译中..."; pdfTranslateBtn.disabled = true; }
   translateAbortController = new AbortController();
 
   try {
-    // Build text with type markers for the AI
-    const markedText = originalTexts.map((text, i) => `【${blockTypes[i]}】\n${text}`).join("\n\n");
     const systemPrompt = `你是一个专业的专利文档翻译专家。请将以下专利文档内容翻译为${langNames[targetLang] || "中文"}。
 
 ## 翻译规则
 
-1. 原文中每个段落前标有【类型】标记，表示该段落的版面类型：
-   - 【标题】：文档标题、章节标题，翻译时保持简洁有力
-   - 【正文】：主体文字内容，逐句准确翻译，保持技术术语一致性
-   - 【表格】：表格内容，保持行列结构，用 | 分隔各列
-   - 【公式】：数学公式或化学式，保留原始公式符号，仅翻译公式旁的文字说明
-   - 【图注】：图片说明文字，简洁翻译
-   - 【页眉】：页眉信息，照实翻译
-   - 【说明】：图表说明，准确翻译
+1. 原文中部分段落前标有[类型]标记，表示该段落的版面类型：
+   - [标题]：文档标题、章节标题，翻译时保持简洁有力
+   - [表格]：表格内容，保持行列结构，用 | 分隔各列
+   - [公式]：数学公式或化学式，保留原始公式符号，仅翻译公式旁的文字说明
+   - [图注]：图片说明文字，简洁翻译
+   - [说明]：图表说明，准确翻译
+   - 无标记的段落为正文，逐句准确翻译，保持技术术语一致性
 
-2. 翻译时请保留【类型】标记，格式为【类型】\\n翻译内容
-3. 保持原文的段落结构，每个标记段落对应一段翻译
+2. 翻译时请去掉所有[类型]标记，直接输出翻译后的连续文档
+3. 保持原文的段落结构，每个段落对应一段翻译
 4. 只输出翻译结果，不要添加任何解释或注释
 5. 如果原文已经是目标语言，则直接返回原文
-6. 专利技术术语请使用该领域的标准译法`;
+6. 专利技术术语请使用该领域的标准译法
+7. 原文中的☐表示空复选框，☑表示已勾选复选框，§表示条款号，请保留这些符号`;
 
     const messages = [
       { role: "system", content: systemPrompt },
-      { role: "user", content: markedText },
+      { role: "user", content: originalFullText },
     ];
 
     let fullResponse = "";
@@ -3290,24 +3308,18 @@ async function translatePdfPage() {
       if (translateAbortController.signal.aborted) break;
       if (chunk.content) {
         fullResponse += chunk.content;
-        // Update the translated content in real-time
-        const translatedDivs = pdfTranslateContent ? pdfTranslateContent.querySelectorAll(".pdf-translate-translated") : [];
-        if (translatedDivs.length === 1) {
-          translatedDivs[0].innerHTML = renderMarkdown(fullResponse);
-          translatedDivs[0].classList.remove("translating");
+        // Update the translated column in real-time
+        const translatedCol = pdfTranslateContent ? pdfTranslateContent.querySelector(".pdf-translate-col-body.translating") : null;
+        if (translatedCol) {
+          translatedCol.innerHTML = renderMarkdown(fullResponse);
+          translatedCol.classList.remove("translating");
         }
       }
     }
 
-    // Cache the result - parse translated blocks from response
-    const translatedBlocks = fullResponse.split(/【[^】]+】\s*/).filter(s => s.trim());
-    const pairs = originalTexts.map((orig, i) => ({
-      original: orig,
-      translated: translatedBlocks[i] || fullResponse,
-      type: blockTypes[i],
-    }));
-    translatePageCache[cacheKey] = { pairs, page: currentPage };
-    renderTranslateContent({ pairs, page: currentPage }, currentPage);
+    // Cache the result
+    translatePageCache[cacheKey] = { original: originalFullText, translated: fullResponse, page: currentPage };
+    renderTranslateContent(translatePageCache[cacheKey], currentPage);
 
   } catch (e) {
     if (e.name !== "AbortError") {
@@ -3321,15 +3333,17 @@ async function translatePdfPage() {
 
 function renderTranslateContent(data, page) {
   if (!pdfTranslateContent) return;
-  let html = `<div class="pdf-translate-page-label">第 ${page} 页</div>`;
-  data.pairs.forEach(pair => {
-    const typeBadge = pair.type ? `<span class="pdf-translate-type-badge">${escapeHtml(pair.type)}</span>` : "";
-    html += `<div class="pdf-translate-pair">
-      <div class="pdf-translate-original">${typeBadge}${escapeHtml(pair.original)}</div>
-      <div class="pdf-translate-translated">${renderMarkdown(pair.translated)}</div>
+  pdfTranslateContent.innerHTML = `<div class="pdf-translate-page-label">第 ${page} 页</div>
+    <div class="pdf-translate-doc-view">
+      <div class="pdf-translate-doc-col">
+        <div class="pdf-translate-col-header">原文</div>
+        <div class="pdf-translate-col-body">${escapeHtml(data.original)}</div>
+      </div>
+      <div class="pdf-translate-doc-col">
+        <div class="pdf-translate-col-header">译文</div>
+        <div class="pdf-translate-col-body">${renderMarkdown(data.translated)}</div>
+      </div>
     </div>`;
-  });
-  pdfTranslateContent.innerHTML = html;
   pdfTranslateContent.scrollTop = 0;
 }
 

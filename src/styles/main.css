@@ -1087,34 +1087,43 @@ body {
   padding: 12px;
 }
 
-.pdf-translate-pair {
-  margin-bottom: 16px;
+.pdf-translate-doc-view {
+  display: flex;
+  gap: 12px;
+  height: calc(100% - 30px);
+}
+
+.pdf-translate-doc-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
 }
 
-.pdf-translate-original {
-  padding: 10px 12px;
+.pdf-translate-col-header {
+  padding: 6px 10px;
   background: var(--bg-secondary);
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border);
-  white-space: pre-wrap;
-  word-break: break-word;
+  text-align: center;
 }
 
-.pdf-translate-translated {
+.pdf-translate-col-body {
+  flex: 1;
+  overflow-y: auto;
   padding: 10px 12px;
   font-size: 13px;
-  line-height: 1.6;
-  color: var(--text-primary);
+  line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.pdf-translate-translated.translating {
+.pdf-translate-col-body.translating {
   color: var(--accent);
   font-style: italic;
 }
