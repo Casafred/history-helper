@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PatentLens - 专利审查文档获取与梳理</title>
-  <link rel="stylesheet" href="styles/main.css?v=20260611">
+  <link rel="stylesheet" href="styles/main.css?v=20260612">
 </head>
 <body>
   <div id="app">
@@ -135,60 +135,67 @@
               <div id="reader-doc-list" class="reader-doc-list"></div>
             </div>
             <div class="reader-main">
-              <div id="reader-content" class="reader-content markdown-body">
-                <p class="placeholder">请从左侧选择文档查看内容</p>
+              <div class="reader-main-center">
+                <div id="reader-content" class="reader-content markdown-body">
+                  <p class="placeholder">请从左侧选择文档查看内容</p>
+                </div>
+                <div id="reader-pdf-view" class="reader-pdf-view hidden">
+                  <div id="reader-pdf-toolbar" class="reader-pdf-toolbar">
+                    <button id="pdf-prev-page" class="btn-small">上一页</button>
+                    <span id="pdf-page-info">1 / 1</span>
+                    <button id="pdf-next-page" class="btn-small">下一页</button>
+                    <span class="pdf-toolbar-separator"></span>
+                    <button id="pdf-zoom-out" class="btn-small">-</button>
+                    <span id="pdf-zoom-level" class="pdf-zoom-level">100%</span>
+                    <button id="pdf-zoom-in" class="btn-small">+</button>
+                    <button id="pdf-zoom-fit" class="btn-small">适应</button>
+                    <span class="pdf-toolbar-separator"></span>
+                    <button id="pdf-ocr-btn" class="btn-small" title="提取OCR文字内容以启用搜索">OCR 提取</button>
+                    <span class="pdf-toolbar-separator"></span>
+                    <button id="pdf-translate-btn" class="btn-small" title="翻译当前页面（未OCR时自动先提取）">翻译</button>
+                    <input type="text" id="pdf-search-input" class="pdf-search-input" placeholder="请先OCR提取..." disabled>
+                    <button id="pdf-search-btn" class="btn-small" disabled>搜索</button>
+                    <button id="pdf-search-prev-btn" class="btn-small" disabled title="上一个匹配">▲</button>
+                    <button id="pdf-search-next-btn" class="btn-small" disabled title="下一个匹配">▼</button>
+                    <span id="pdf-search-info" class="pdf-search-info"></span>
+                  </div>
+                  <div id="reader-pdf-container" class="reader-pdf-container">
+                    <!-- PDF pages rendered here with canvas + overlay -->
+                  </div>
+                </div>
               </div>
-              <div id="reader-pdf-view" class="reader-pdf-view hidden">
-                <div id="reader-pdf-toolbar" class="reader-pdf-toolbar">
-                  <button id="pdf-prev-page" class="btn-small">上一页</button>
-                  <span id="pdf-page-info">1 / 1</span>
-                  <button id="pdf-next-page" class="btn-small">下一页</button>
-                  <span class="pdf-toolbar-separator"></span>
-                  <button id="pdf-zoom-out" class="btn-small">-</button>
-                  <span id="pdf-zoom-level" class="pdf-zoom-level">100%</span>
-                  <button id="pdf-zoom-in" class="btn-small">+</button>
-                  <button id="pdf-zoom-fit" class="btn-small">适应</button>
-                  <span class="pdf-toolbar-separator"></span>
-                  <button id="pdf-ocr-btn" class="btn-small" title="提取OCR文字内容以启用搜索">OCR 提取</button>
-                  <span class="pdf-toolbar-separator"></span>
-                  <button id="pdf-translate-btn" class="btn-small" title="翻译当前页面（未OCR时自动先提取）">翻译</button>
-                  <input type="text" id="pdf-search-input" class="pdf-search-input" placeholder="请先OCR提取..." disabled>
-                  <button id="pdf-search-btn" class="btn-small" disabled>搜索</button>
-                  <button id="pdf-search-prev-btn" class="btn-small" disabled title="上一个匹配">▲</button>
-                  <button id="pdf-search-next-btn" class="btn-small" disabled title="下一个匹配">▼</button>
-                  <span id="pdf-search-info" class="pdf-search-info"></span>
+              <!-- Right side panels (translate + chat) with tab switching -->
+              <div id="reader-right-panel" class="reader-right-panel hidden">
+                <div class="reader-right-panel-tabs">
+                  <button class="right-panel-tab active" data-panel="translate">对照翻译</button>
+                  <button class="right-panel-tab" data-panel="chat">AI 对话</button>
+                  <button id="right-panel-close-btn" class="btn-icon-sm" title="退出阅读模式"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
-                <div id="reader-pdf-container" class="reader-pdf-container">
-                  <!-- PDF pages rendered here with canvas + overlay -->
-                </div>
-                <!-- PDF Translation Panel -->
-                <div id="pdf-translate-panel" class="pdf-translate-panel hidden">
-                  <div class="pdf-translate-header">
-                    <span class="pdf-translate-title">对照翻译</span>
-                    <div class="pdf-translate-header-actions">
-                      <select id="pdf-translate-lang" class="pdf-translate-lang-select">
-                        <option value="zh">中文</option>
-                        <option value="en">English</option>
-                        <option value="ja">日本語</option>
-                        <option value="ko">한국어</option>
-                      </select>
-                      <button id="pdf-translate-close-btn" class="btn-icon-sm" title="关闭翻译"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                <div class="reader-right-panel-body">
+                  <!-- PDF Translation Panel -->
+                  <div id="pdf-translate-panel" class="pdf-translate-panel hidden">
+                    <div class="pdf-translate-header">
+                      <div class="pdf-translate-header-actions">
+                        <select id="pdf-translate-lang" class="pdf-translate-lang-select">
+                          <option value="zh">中文</option>
+                          <option value="en">English</option>
+                          <option value="ja">日本語</option>
+                          <option value="ko">한국어</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div id="pdf-translate-content" class="pdf-translate-content">
+                      <p class="placeholder">点击"翻译"按钮翻译当前页面</p>
                     </div>
                   </div>
-                  <div id="pdf-translate-content" class="pdf-translate-content">
-                    <p class="placeholder">点击"翻译"按钮翻译当前页面</p>
+                  <!-- AI Chat Panel -->
+                  <div id="reader-chat-panel" class="reader-chat-panel hidden">
+                    <div id="chat-messages" class="chat-messages"></div>
+                    <div class="chat-input-area">
+                      <textarea id="chat-input" class="chat-input" placeholder="输入问题，基于当前文档内容对话..." rows="2"></textarea>
+                      <button id="chat-send-btn" class="btn-primary btn-small">发送</button>
+                    </div>
                   </div>
-                </div>
-              </div>
-              <div id="reader-chat-panel" class="reader-chat-panel hidden">
-                <div class="chat-header">
-                  <span class="chat-title">AI 文档对话</span>
-                  <button id="chat-close-btn" class="btn-icon btn-small">&times;</button>
-                </div>
-                <div id="chat-messages" class="chat-messages"></div>
-                <div class="chat-input-area">
-                  <textarea id="chat-input" class="chat-input" placeholder="输入问题，基于当前文档内容对话..." rows="2"></textarea>
-                  <button id="chat-send-btn" class="btn-primary btn-small">发送</button>
                 </div>
               </div>
             </div>
@@ -376,11 +383,11 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="scripts/marked.min.js?v=20260611"></script>
-  <script src="scripts/docx.umd.js?v=20260611"></script>
-  <script src="scripts/FileSaver.min.js?v=20260611"></script>
-  <script src="scripts/web-ai.js?v=20260611"></script>
-  <script src="scripts/patent-status.js?v=20260611"></script>
-  <script src="scripts/web-app.js?v=20260611"></script>
+  <script src="scripts/marked.min.js?v=20260612"></script>
+  <script src="scripts/docx.umd.js?v=20260612"></script>
+  <script src="scripts/FileSaver.min.js?v=20260612"></script>
+  <script src="scripts/web-ai.js?v=20260612"></script>
+  <script src="scripts/patent-status.js?v=20260612"></script>
+  <script src="scripts/web-app.js?v=20260612"></script>
 </body>
 </html>

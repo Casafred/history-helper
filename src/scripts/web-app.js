@@ -97,7 +97,6 @@ const pdfZoomFit = document.getElementById("pdf-zoom-fit");
 const pdfOcrBtn = document.getElementById("pdf-ocr-btn");
 const pdfTranslateBtn = document.getElementById("pdf-translate-btn");
 const pdfTranslatePanel = document.getElementById("pdf-translate-panel");
-const pdfTranslateCloseBtn = document.getElementById("pdf-translate-close-btn");
 const pdfTranslateLang = document.getElementById("pdf-translate-lang");
 const pdfTranslateContent = document.getElementById("pdf-translate-content");
 
@@ -105,7 +104,6 @@ const readerChatPanel = document.getElementById("reader-chat-panel");
 const chatMessages = document.getElementById("chat-messages");
 const chatInput = document.getElementById("chat-input");
 const chatSendBtn = document.getElementById("chat-send-btn");
-const chatCloseBtn = document.getElementById("chat-close-btn");
 const readerChatToggle = document.getElementById("reader-chat-toggle");
 
 let pdfViewState = {
@@ -3160,6 +3158,7 @@ async function translatePdfPage() {
 
   // Show translate panel immediately for visual feedback
   if (pdfTranslatePanel) pdfTranslatePanel.classList.remove("hidden");
+  enterReadingMode("translate");
   if (pdfTranslateContent) {
     pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">准备中...</p>';
   }
@@ -3319,6 +3318,53 @@ function renderTranslateContent(data) {
   if (!pdfTranslateContent) return;
   pdfTranslateContent.innerHTML = `<div class="pdf-translate-result">${renderMarkdown(data.translated)}</div>`;
   pdfTranslateContent.scrollTop = 0;
+}
+
+// ===== Reading Mode Management =====
+
+function enterReadingMode(activePanel) {
+  const readerBody = document.querySelector(".reader-body");
+  const rightPanel = document.getElementById("reader-right-panel");
+  if (readerBody) readerBody.classList.add("reading-mode");
+  if (rightPanel) rightPanel.classList.remove("hidden");
+  // Switch to the specified panel tab
+  if (activePanel) {
+    switchRightPanelTab(activePanel);
+  }
+}
+
+function exitReadingMode() {
+  const readerBody = document.querySelector(".reader-body");
+  const rightPanel = document.getElementById("reader-right-panel");
+  const translatePanel = document.getElementById("pdf-translate-panel");
+  const chatPanel = document.getElementById("reader-chat-panel");
+  // Hide both panels
+  if (translatePanel) translatePanel.classList.add("hidden");
+  if (chatPanel) chatPanel.classList.add("hidden");
+  if (readerBody) readerBody.classList.remove("reading-mode");
+  if (rightPanel) rightPanel.classList.add("hidden");
+  // Deactivate chat toggle button
+  if (readerChatToggle) readerChatToggle.classList.remove("active");
+}
+
+function switchRightPanelTab(panelName) {
+  const translatePanel = document.getElementById("pdf-translate-panel");
+  const chatPanel = document.getElementById("reader-chat-panel");
+  const tabs = document.querySelectorAll(".right-panel-tab");
+
+  // Update tab active states
+  tabs.forEach(tab => {
+    tab.classList.toggle("active", tab.dataset.panel === panelName);
+  });
+
+  // Show/hide panels
+  if (panelName === "translate") {
+    if (translatePanel) translatePanel.classList.remove("hidden");
+    if (chatPanel) chatPanel.classList.add("hidden");
+  } else if (panelName === "chat") {
+    if (chatPanel) chatPanel.classList.remove("hidden");
+    if (translatePanel) translatePanel.classList.add("hidden");
+  }
 }
 
 // ===== Open reader for specific document from kanban =====
@@ -3947,6 +3993,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (readerChatToggle) readerChatToggle.classList.remove("active");
       chatHistory = [];
       if (chatMessages) chatMessages.innerHTML = "";
+      // Exit reading mode
+      exitReadingMode();
     });
   }
 
@@ -4081,11 +4129,22 @@ document.addEventListener("DOMContentLoaded", () => {
   if (pdfTranslateBtn) {
     pdfTranslateBtn.addEventListener("click", translatePdfPage);
   }
-  if (pdfTranslateCloseBtn) {
-    pdfTranslateCloseBtn.addEventListener("click", () => {
-      if (pdfTranslatePanel) pdfTranslatePanel.classList.add("hidden");
+
+  // Right panel close button (exits reading mode entirely)
+  const rightPanelCloseBtn = document.getElementById("right-panel-close-btn");
+  if (rightPanelCloseBtn) {
+    rightPanelCloseBtn.addEventListener("click", () => {
+      exitReadingMode();
     });
   }
+
+  // Right panel tab switching
+  document.querySelectorAll(".right-panel-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const panelName = tab.dataset.panel;
+      switchRightPanelTab(panelName);
+    });
+  });
 
   // Reader sidebar doc search filter
   const readerDocSearch = document.getElementById("reader-doc-search");
@@ -4146,18 +4205,21 @@ document.addEventListener("DOMContentLoaded", () => {
   if (readerChatToggle) {
     readerChatToggle.addEventListener("click", () => {
       if (readerChatPanel) {
-        readerChatPanel.classList.toggle("hidden");
-        readerChatToggle.classList.toggle("active");
+        const wasHidden = readerChatPanel.classList.contains("hidden");
+        if (wasHidden) {
+          readerChatPanel.classList.remove("hidden");
+          readerChatToggle.classList.add("active");
+          enterReadingMode("chat");
+        } else {
+          // Chat panel is visible, toggle off exits reading mode
+          exitReadingMode();
+        }
       }
     });
   }
 
-  if (chatCloseBtn) {
-    chatCloseBtn.addEventListener("click", () => {
-      if (readerChatPanel) readerChatPanel.classList.add("hidden");
-      if (readerChatToggle) readerChatToggle.classList.remove("active");
-    });
-  }
+  // Chat close button is now handled by the right panel close button
+  // No separate chatCloseBtn needed
 
   // Chat send
   if (chatSendBtn) {

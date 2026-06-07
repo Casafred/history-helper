@@ -1028,36 +1028,20 @@ body {
 
 /* ── PDF Translate Panel ── */
 .pdf-translate-panel {
-  position: fixed;
-  top: 80px;
-  right: 20px;
-  width: 440px;
-  height: calc(100vh - 120px);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
   display: flex;
   flex-direction: column;
-  z-index: 9990;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  flex: 1;
+  overflow: hidden;
 }
 
 .pdf-translate-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
+  justify-content: flex-end;
+  padding: 6px 14px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
-  border-radius: 12px 12px 0 0;
-}
-
-.pdf-translate-title {
-  font-weight: 600;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  background: var(--bg-card);
+  flex-shrink: 0;
 }
 
 .pdf-translate-header-actions {
@@ -1317,30 +1301,10 @@ body {
 
 /* Reader AI Chat */
 .reader-chat-panel {
-  position: absolute;
-  right: 0;
-  top: 0;
-  width: 380px;
-  height: 100%;
-  background: var(--bg-card);
-  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  z-index: 10;
-}
-
-.chat-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
-}
-
-.chat-title {
-  font-weight: 600;
-  font-size: 14px;
+  flex: 1;
+  overflow: hidden;
 }
 
 .chat-messages {
@@ -2464,6 +2428,7 @@ body {
   overflow-y: auto;
   padding: 12px;
   background: var(--bg-secondary);
+  transition: width 0.3s ease, padding 0.3s ease, border-right 0.3s ease;
 }
 
 .reader-sidebar-title {
@@ -2556,10 +2521,6 @@ body {
   color: var(--text-primary);
 }
 
-.reader-sidebar.collapsed ~ .reader-main .reader-chat-panel {
-  width: 380px;
-}
-
 .reader-modal-content.docked .reader-sidebar.collapsed {
   width: 0;
   padding: 0;
@@ -2568,13 +2529,120 @@ body {
 .reader-main {
   position: relative;
   flex: 1;
+  display: flex;
+  overflow: hidden;
+  padding: 0;
+  min-width: 0;
+}
+
+.reader-main-center {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* When showing markdown content (not PDF), add padding */
+.reader-main-center .reader-content {
+  flex: 1;
   overflow-y: auto;
   padding: 24px 32px;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* When showing PDF, fill the entire area */
+.reader-main-center .reader-pdf-view {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .reader-content {
   max-width: 800px;
   margin: 0 auto;
+}
+
+/* Right panel container for translate + chat */
+.reader-right-panel {
+  width: 420px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  overflow: hidden;
+  transition: width 0.3s ease;
+}
+
+.reader-right-panel.hidden {
+  display: none;
+}
+
+/* Right panel tab bar */
+.reader-right-panel-tabs {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+
+.right-panel-tab {
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+  flex: 1;
+  text-align: center;
+}
+
+.right-panel-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.right-panel-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.right-panel-close-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.reader-right-panel-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Reading mode: sidebar collapses when right panel is open */
+.reader-body.reading-mode .reader-sidebar {
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+  border-right: none;
+}
+
+.reader-body.reading-mode .reader-sidebar-title {
+  display: none;
+}
+
+.reader-body.reading-mode .reader-sidebar-search {
+  display: none;
 }
 
 .markdown-body {
