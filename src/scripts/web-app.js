@@ -2681,13 +2681,12 @@ function selectReaderDoc(idx) {
     if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
     if (searchBtn) searchBtn.disabled = false;
     if (pdfOcrBtn) { pdfOcrBtn.textContent = "已提取"; pdfOcrBtn.disabled = true; }
-    if (pdfTranslateBtn) pdfTranslateBtn.disabled = false;
   } else {
     if (searchInput) { searchInput.disabled = true; searchInput.placeholder = "请先OCR提取..."; }
     if (searchBtn) searchBtn.disabled = true;
     if (pdfOcrBtn) { pdfOcrBtn.textContent = "OCR 提取"; pdfOcrBtn.disabled = false; }
-    if (pdfTranslateBtn) pdfTranslateBtn.disabled = true;
   }
+  // Translate button always enabled (auto-OCR if needed)
   // Reset translate panel
   if (pdfTranslatePanel) pdfTranslatePanel.classList.add("hidden");
   if (pdfTranslateContent) pdfTranslateContent.innerHTML = '<p class="placeholder">点击"翻译"按钮翻译当前页面</p>';
@@ -3077,13 +3076,8 @@ async function ocrPdf() {
   }
 
   if (!currentData) { showError("请先查询专利"); return; }
-  const config = window.AI.loadAIConfig();
-  const provider = window.AI.getCurrentProvider(config);
-  if (!provider) {
-    showError("请先在 AI 设置中配置并选择一个 AI 服务商");
-    return;
-  }
 
+  const config = window.AI.loadAIConfig();
   const ocrConfig = window.AI.getOCRConfig(config);
   const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
   const glmApiKey = window.AI.getGlmOcrApiKey(config);
@@ -3150,8 +3144,6 @@ async function ocrPdf() {
     const searchBtn = document.getElementById("pdf-search-btn");
     if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
     if (searchBtn) searchBtn.disabled = false;
-    // Enable translate button after OCR
-    if (pdfTranslateBtn) pdfTranslateBtn.disabled = false;
     // Re-render PDF with block overlays
     if (pdfViewState.active) {
       await renderPdfView(idx);
@@ -3170,10 +3162,18 @@ async function translatePdfPage() {
     return;
   }
 
-  const extraction = kanbanState.extractions[idx];
+  // Check if OCR extraction exists, if not, auto-OCR first
+  let extraction = kanbanState.extractions[idx];
   if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
-    showError("请先进行 OCR 提取");
-    return;
+    // Auto-OCR: run ocrPdf and wait for it
+    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "OCR中..."; pdfTranslateBtn.disabled = true; }
+    await ocrPdf();
+    extraction = kanbanState.extractions[idx];
+    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译"; pdfTranslateBtn.disabled = false; }
+    if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
+      showError("OCR 提取失败，无法翻译");
+      return;
+    }
   }
 
   const config = window.AI.loadAIConfig();
@@ -4142,45 +4142,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // OCR extract button in PDF toolbar
-  if (pdfOcrBtn) {
-    pdfOcrBtn.addEventListener("click", async () => {
-      if (pdfViewState.currentDocIdx == null) return;
-      const idx = pdfViewState.currentDocIdx;
-      const items = kanbanState.documents;
-      const it = items.find(d => d.idx === idx);
-      if (!it) return;
-
-      pdfOcrBtn.disabled = true;
-      pdfOcrBtn.textContent = "提取中...";
-
-      try {
-        const isUS = currentData.office === "US";
-        const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
-        const encodedDocId = encodeURIComponent(it.docId);
-        const extractUrl = `/api/gd/extract-text/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
-        await extractDocumentText(extractUrl, idx, it.type);
-        // Enable search after extraction
-        const searchInput = document.getElementById("pdf-search-input");
-        const searchBtn = document.getElementById("pdf-search-btn");
-        if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
-        if (searchBtn) searchBtn.disabled = false;
-        pdfOcrBtn.textContent = "已提取";
-        pdfOcrBtn.disabled = true;
-
-        // Re-render PDF view with overlays if active
-        if (pdfViewState.active) {
-          renderPdfView(idx);
-        }
-      } catch (e) {
-        pdfOcrBtn.textContent = "OCR 提取";
-        pdfOcrBtn.disabled = false;
-        showError("OCR 提取失败: " + e.message);
-      }
-    });
-  }
-
-  // Chat toggle
+  // Floating ball click to restore reader
   if (readerChatToggle) {
     readerChatToggle.addEventListener("click", () => {
       if (readerChatPanel) {
