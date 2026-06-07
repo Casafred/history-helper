@@ -2934,10 +2934,6 @@ function pdfGoToPage(pageNum) {
   if (wrapper) {
     wrapper.scrollIntoView({ behavior: "smooth", block: "start" });
   }
-  // Auto-translate if translate panel is open
-  if (pdfTranslatePanel && !pdfTranslatePanel.classList.contains("hidden")) {
-    translatePdfPage();
-  }
 }
 
 function pdfZoomInAction() {
@@ -3200,40 +3196,32 @@ async function translatePdfPage() {
 
   const targetLang = pdfTranslateLang ? pdfTranslateLang.value : (config.translate && config.translate.defaultLang) || "zh";
   const langNames = { zh: "中文", en: "English", ja: "日本語", ko: "한국어" };
-  const currentPage = pdfViewState.currentPage;
 
-  // Check cache
-  const cacheKey = `${idx}_${currentPage}_${targetLang}`;
-  if (translatePageCache[cacheKey]) {
-    renderTranslateContent(translatePageCache[cacheKey], currentPage);
-    return;
-  }
-
-  // Get blocks for current page, merge into continuous text
-  const pageBlocks = extraction.blocks.filter(b => b.page === currentPage);
-  if (pageBlocks.length === 0) {
+  // Get ALL blocks from all pages, merge into one continuous document
+  const allBlocks = extraction.blocks || [];
+  if (allBlocks.length === 0) {
     if (pdfTranslateContent) {
-      pdfTranslateContent.innerHTML = '<p class="placeholder">当前页面无 OCR 文字内容</p>';
+      pdfTranslateContent.innerHTML = '<p class="placeholder">当前文档无 OCR 文字内容</p>';
     }
     return;
   }
 
-  // Clean OCR artifact symbols and merge all blocks into one continuous document
+  // Clean OCR artifact symbols
   const cleanOcrText = (text) => {
     return text
-      .replace(/\$\s*\\Box\s*\$/g, '☐')       // checkbox empty
-      .replace(/\$\s*\\surd\s*\$/g, '☑')        // checkbox checked
-      .replace(/\$\s*\\§\s*(\d+)\s*\$/g, '§$1') // section symbol
-      .replace(/\$\s*\\[^$]+\$/g, '')            // remove other LaTeX inline math
-      .replace(/\$\{[^}]+\}/g, '')               // remove ${...} placeholders
-      .replace(/\s{2,}/g, ' ')                    // collapse multiple spaces
+      .replace(/\$\s*\\Box\s*\$/g, '☐')
+      .replace(/\$\s*\\surd\s*\$/g, '☑')
+      .replace(/\$\s*\\§\s*(\d+)\s*\$/g, '§$1')
+      .replace(/\$\s*\\[^$]+\$/g, '')
+      .replace(/\$\{[^}]+\}/g, '')
+      .replace(/\s{2,}/g, ' ')
       .trim();
   };
 
-  // Build original text by merging blocks, with type hints only for non-text types
+  // Build full document text by merging all pages, with type hints only for non-text types
   const typeLabels = { title: "标题", table: "表格", formula: "公式", figure: "图注", caption: "说明" };
   const originalParts = [];
-  pageBlocks.forEach(b => {
+  allBlocks.forEach(b => {
     if (b.content && b.content.trim()) {
       const cleaned = cleanOcrText(b.content);
       if (!cleaned) return;
@@ -3248,24 +3236,21 @@ async function translatePdfPage() {
   const originalFullText = originalParts.join("\n\n");
   if (!originalFullText.trim()) {
     if (pdfTranslateContent) {
-      pdfTranslateContent.innerHTML = '<p class="placeholder">当前页面无有效文字内容</p>';
+      pdfTranslateContent.innerHTML = '<p class="placeholder">当前文档无有效文字内容</p>';
     }
     return;
   }
 
-  // Show loading state - full document view
+  // Check cache (whole document, not per-page)
+  const cacheKey = `${idx}_${targetLang}_full`;
+  if (translatePageCache[cacheKey]) {
+    renderTranslateContent(translatePageCache[cacheKey]);
+    return;
+  }
+
+  // Show loading state - translation only view
   if (pdfTranslateContent) {
-    pdfTranslateContent.innerHTML = `<div class="pdf-translate-page-label">第 ${currentPage} 页</div>
-      <div class="pdf-translate-doc-view">
-        <div class="pdf-translate-doc-col">
-          <div class="pdf-translate-col-header">原文</div>
-          <div class="pdf-translate-col-body">${escapeHtml(originalFullText)}</div>
-        </div>
-        <div class="pdf-translate-doc-col">
-          <div class="pdf-translate-col-header">译文</div>
-          <div class="pdf-translate-col-body translating">正在翻译...</div>
-        </div>
-      </div>`;
+    pdfTranslateContent.innerHTML = '<div class="pdf-translate-translating-hint">正在翻译全文，请稍候...</div>';
   }
 
   if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译中..."; pdfTranslateBtn.disabled = true; }
@@ -3289,7 +3274,8 @@ async function translatePdfPage() {
 4. 只输出翻译结果，不要添加任何解释或注释
 5. 如果原文已经是目标语言，则直接返回原文
 6. 专利技术术语请使用该领域的标准译法
-7. 原文中的☐表示空复选框，☑表示已勾选复选框，§表示条款号，请保留这些符号`;
+7. 原文中的☐表示空复选框，☑表示已勾选复选框，§表示条款号，请保留这些符号
+8. 请将所有页面的内容整合翻译，输出完整连贯的译文`;
 
     const messages = [
       { role: "system", content: systemPrompt },
@@ -3301,25 +3287,23 @@ async function translatePdfPage() {
       model: translateProvider.model,
       messages: messages,
       temperature: 0.1,
-      maxTokens: 8192,
+      maxTokens: 16384,
     }, translateAbortController.signal);
 
     for await (const chunk of stream) {
       if (translateAbortController.signal.aborted) break;
       if (chunk.content) {
         fullResponse += chunk.content;
-        // Update the translated column in real-time
-        const translatedCol = pdfTranslateContent ? pdfTranslateContent.querySelector(".pdf-translate-col-body.translating") : null;
-        if (translatedCol) {
-          translatedCol.innerHTML = renderMarkdown(fullResponse);
-          translatedCol.classList.remove("translating");
+        // Update translation in real-time
+        if (pdfTranslateContent) {
+          pdfTranslateContent.innerHTML = `<div class="pdf-translate-result">${renderMarkdown(fullResponse)}</div>`;
         }
       }
     }
 
     // Cache the result
-    translatePageCache[cacheKey] = { original: originalFullText, translated: fullResponse, page: currentPage };
-    renderTranslateContent(translatePageCache[cacheKey], currentPage);
+    translatePageCache[cacheKey] = { translated: fullResponse };
+    renderTranslateContent(translatePageCache[cacheKey]);
 
   } catch (e) {
     if (e.name !== "AbortError") {
@@ -3331,19 +3315,9 @@ async function translatePdfPage() {
   }
 }
 
-function renderTranslateContent(data, page) {
+function renderTranslateContent(data) {
   if (!pdfTranslateContent) return;
-  pdfTranslateContent.innerHTML = `<div class="pdf-translate-page-label">第 ${page} 页</div>
-    <div class="pdf-translate-doc-view">
-      <div class="pdf-translate-doc-col">
-        <div class="pdf-translate-col-header">原文</div>
-        <div class="pdf-translate-col-body">${escapeHtml(data.original)}</div>
-      </div>
-      <div class="pdf-translate-doc-col">
-        <div class="pdf-translate-col-header">译文</div>
-        <div class="pdf-translate-col-body">${renderMarkdown(data.translated)}</div>
-      </div>
-    </div>`;
+  pdfTranslateContent.innerHTML = `<div class="pdf-translate-result">${renderMarkdown(data.translated)}</div>`;
   pdfTranslateContent.scrollTop = 0;
 }
 

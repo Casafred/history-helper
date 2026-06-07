@@ -1084,48 +1084,44 @@ body {
 .pdf-translate-content {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: 16px;
 }
 
-.pdf-translate-doc-view {
-  display: flex;
-  gap: 12px;
-  height: calc(100% - 30px);
-}
-
-.pdf-translate-doc-col {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.pdf-translate-col-header {
-  padding: 6px 10px;
-  background: var(--bg-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--border);
+.pdf-translate-translating-hint {
   text-align: center;
-}
-
-.pdf-translate-col-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px 12px;
-  font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.pdf-translate-col-body.translating {
+  padding: 60px 20px;
   color: var(--accent);
-  font-style: italic;
+  font-size: 14px;
+}
+
+.pdf-translate-result {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-primary);
+}
+
+.pdf-translate-result h1,
+.pdf-translate-result h2,
+.pdf-translate-result h3 {
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.pdf-translate-result p {
+  margin-bottom: 10px;
+}
+
+.pdf-translate-result table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 10px 0;
+}
+
+.pdf-translate-result th,
+.pdf-translate-result td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  font-size: 13px;
 }
 
 .pdf-translate-page-label {
