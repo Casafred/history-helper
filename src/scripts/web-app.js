@@ -3162,16 +3162,28 @@ async function translatePdfPage() {
     return;
   }
 
+  // Show translate panel immediately for visual feedback
+  if (pdfTranslatePanel) pdfTranslatePanel.classList.remove("hidden");
+  if (pdfTranslateContent) {
+    pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">准备中...</p>';
+  }
+
   // Check if OCR extraction exists, if not, auto-OCR first
   let extraction = kanbanState.extractions[idx];
   if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
     // Auto-OCR: run ocrPdf and wait for it
     if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "OCR中..."; pdfTranslateBtn.disabled = true; }
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">正在 OCR 提取文字，请稍候...</p>';
+    }
     await ocrPdf();
     extraction = kanbanState.extractions[idx];
-    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译"; pdfTranslateBtn.disabled = false; }
+    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译中..."; pdfTranslateBtn.disabled = true; }
     if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
-      showError("OCR 提取失败，无法翻译");
+      if (pdfTranslateContent) {
+        pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">OCR 提取失败，无法翻译</p>';
+      }
+      if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译"; pdfTranslateBtn.disabled = false; }
       return;
     }
   }
@@ -3179,12 +3191,12 @@ async function translatePdfPage() {
   const config = window.AI.loadAIConfig();
   const translateProvider = window.AI.getTranslateProvider(config);
   if (!translateProvider || !translateProvider.apiKey) {
-    showError("请先配置 AI 服务（API Key）");
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">请先在设置中配置 AI 服务的 API Key</p>';
+    }
+    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译"; pdfTranslateBtn.disabled = false; }
     return;
   }
-
-  // Show translate panel
-  if (pdfTranslatePanel) pdfTranslatePanel.classList.remove("hidden");
 
   const targetLang = pdfTranslateLang ? pdfTranslateLang.value : (config.translate && config.translate.defaultLang) || "zh";
   const langNames = { zh: "中文", en: "English", ja: "日本語", ko: "한국어" };
