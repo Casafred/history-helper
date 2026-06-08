@@ -547,13 +547,15 @@ function startServer() {
 }
 
 function createWindow(port) {
+  const iconPath = path.join(__dirname, "src", "icon.png");
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 900,
     minWidth: 800,
     minHeight: 600,
     center: true,
-    title: "专利审查梳理工具",
+    title: "PatentLens - 专利审查梳理工具",
+    icon: iconPath,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

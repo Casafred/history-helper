@@ -1,6 +1,6 @@
 {
-  "name": "history-helper",
-  "version": "0.1.0",
+  "name": "patentlens",
+  "version": "0.2.0",
   "private": true,
   "main": "electron-main.js",
   "scripts": {
@@ -18,8 +18,8 @@
     "electron-builder": "^26"
   },
   "build": {
-    "appId": "com.history-helper.app",
-    "productName": "专利审查梳理工具",
+    "appId": "com.patentlens.app",
+    "productName": "PatentLens",
     "directories": {
       "output": "dist-electron"
     },
@@ -31,6 +31,7 @@
         "to": "src",
         "filter": [
           "web.html",
+          "icon.png",
           "styles/**",
           "scripts/marked.min.js",
           "scripts/docx.umd.js",
