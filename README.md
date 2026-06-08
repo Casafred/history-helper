@@ -1,145 +1,197 @@
-# PatentLens - 专利审查历史梳理工具
+# PatentLens - 专利审查文档获取与梳理工具
 
-一款用于梳理多地区专利审查历史的桌面工具。支持专利号格式自动转换、通过 USPTO ODP API 获取审查历史、审查时间线可视化展示，后续将接入 AI 做审查内容智能梳理。
-
----
-
-## 项目状态
-
-| 版本 | 状态 | 说明 |
-|------|------|------|
-| v0.1.0 | 开发中 | MVP：专利号转换 + USPTO API 查询 + 审查历史展示 |
+一款面向专利从业人员的专业工具，支持从 USPTO/EPO/JPO/CNIPA 等专利局自动获取审查历史文档，通过看板式管理和 AI 智能分析，高效梳理审查意见、答复策略及引用文献。
 
 ---
 
 ## 功能概览
 
-| 功能 | 优先级 | 当前状态 | 说明 |
-|------|--------|----------|------|
-| 专利号格式转换 | P0 | ✅ 已实现 | 支持 US/CN/EP/JP/KR/WO 六局识别与格式化 |
-| 美国专利审查历史查询 | P0 | ✅ 已实现 | 通过 USPTO ODP API 获取申请数据、审查事件、文档列表 |
-| 审查时间线展示 | P0 | ✅ 已实现 | 按时间倒序展示审查事件，分类标记 |
-| 审查文档列表与下载 | P0 | ✅ 已实现 | 列出所有审查文档，提供 PDF 下载链接 |
-| 续案/分案关系展示 | P1 | ✅ 已实现 | 展示父案、子案关系链 |
-| 同族专利查询 (Global Dossier) | P1 | 🔲 待开发 | IP5 五局同族审查信息 |
-| AI 辅助内容梳理 | P2 | 🔲 待开发 | 审查意见摘要与智能分析 |
-| 批量查询 | P2 | 🔲 待开发 | 批量输入专利号，逐个查询 |
+### 核心功能
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| 多专利局查询 | ✅ | 支持 US / EP / JP / DE / CN 专利审查信息查询，自动识别专利号类型 |
+| 审查文档获取 | ✅ | 通过 Global Dossier API 获取审查历史文档，自动分类归档 |
+| 审查时间线 | ✅ | 按时间倒序展示审查事件，分类标记（审查意见/答复/授权/通知等） |
+| 同族专利 | ✅ | IP5 五局同族审查信息展示 |
+| AI 智能梳理 | ✅ | 支持 DeepSeek / 智谱 GLM / OpenAI 兼容 API，流式生成审查意见梳理报告 |
+| OCR 文字提取 | ✅ | PaddleOCR-VL（免费）/ GLM OCR 双引擎，PDF 版面识别与文字提取 |
+| 全文翻译 | ✅ | 独立翻译模型配置，全文合并翻译，流式实时显示 |
+| 阅读模式 | ✅ | 沉浸式阅读，左侧收起 + 右侧 Tab 面板（翻译/AI 对话） |
+| AI 文档对话 | ✅ | 基于当前文档内容与 AI 实时对话，流式响应 |
+| Word 导出 | ✅ | 审查报告导出为 Word 文档，自动填充概览信息 |
+| 溯源对照 | ✅ | AI 分析结果可溯源至原文位置，点击跳转对照阅读 |
+| 浏览器扩展 | ✅ | Chrome 扩展，在 J-PlatPat / DPMA 网站一键跳转 PatentLens |
+
+### 文档分类
+
+自动识别并分类审查文档，支持 US / EP / JP / DE / CN 五局文档代码映射：
+
+| 类型 | 说明 | 颜色标记 |
+|------|------|----------|
+| 审查意见 | 驳回、限制性要求等 | 红色 |
+| 申请人答复 | 修改、意见陈述等 | 蓝色 |
+| 授权通知 | 授权通知、授权决定等 | 绿色 |
+| 申请人请求 | RCE、审查请求等 | 橙色 |
+| 通知 | 官方通知类文件 | 灰色 |
+| 其他文件 | 说明书、权利要求等 | 默认 |
 
 ---
 
-## 技术栈
+## 技术架构
 
-| 层级 | 技术 | 版本 | 用途 |
-|------|------|------|------|
-| 语言 | Rust | 2021 Edition | 后端全部逻辑 |
-| 桌面框架 | Tauri | v2 | 桌面应用壳，Rust 后端 + WebView 前端 |
-| HTTP 客户端 | reqwest | 0.12 | 调用 USPTO ODP API |
-| 异步运行时 | tokio | 1 | async/await 支持 |
-| 序列化 | serde / serde_json | 1.0 | JSON 解析与数据模型 |
-| 错误处理 | thiserror | 2 | 自定义错误类型 |
-| 前端 | HTML / CSS / JavaScript | - | Tauri 内嵌 WebView 渲染 |
-| 环境变量 | dotenv | 0.15 | 读取 .env 中的 API 密钥 |
+| 层级 | 技术 | 说明 |
+|------|------|------|
+| 桌面框架 | Electron | 跨平台桌面应用 |
+| 前端 | HTML / CSS / JavaScript | 纯原生，无框架依赖 |
+| PDF 渲染 | pdf.js + Canvas | PDF 文档在线渲染与 Block Overlay |
+| Markdown | marked.js | 审查报告 Markdown 渲染 |
+| Word 导出 | docx.js | 审查报告导出为 .docx |
+| AI 服务 | DeepSeek / GLM / OpenAI | SSE 流式对话，支持自定义 Base URL |
+| OCR | PaddleOCR-VL / GLM OCR | Python 调用，版面识别与文字提取 |
+| 专利数据 | Global Dossier API | USPTO/EPO/JPO/CNIPA 代理获取 |
+| 本地服务 | Node.js (Express) | 开发服务器 + API 代理 |
 
 ---
 
 ## 项目结构
 
 ```
-history-helper/
-├── docs/                                    # 项目文档（详见下方"文档体系"）
-├── src/                                     # 前端代码
-│   ├── index.html                           # 主页面
-│   ├── styles/main.css                      # 暗色主题样式
-│   └── scripts/app.js                       # 前端交互逻辑
-├── src-tauri/                               # Rust 后端（Tauri 核心）
-│   ├── Cargo.toml                           # Rust 依赖配置
-│   ├── tauri.conf.json                      # Tauri 应用配置
-│   ├── capabilities/default.json            # Tauri 权限声明
-│   ├── build.rs                             # Tauri 构建脚本
-│   └── src/
-│       ├── main.rs                          # 程序入口
-│       ├── lib.rs                           # Tauri 命令注册 + 状态管理
-│       ├── api/
-│       │   ├── mod.rs
-│       │   └── uspto.rs                     # USPTO ODP API 客户端
-│       ├── patent/
-│       │   ├── mod.rs
-│       │   └── converter.rs                 # 专利号格式转换（含单元测试）
-│       ├── parser/
-│       │   ├── mod.rs
-│       │   └── office_action.rs             # 审查意见解析 + 时间线构建
-│       └── models/
-│           ├── mod.rs
-│           └── patent.rs                    # 数据模型定义
-├── .env.example                             # API 密钥模板
-├── .gitignore                               # Git 忽略规则
-├── package.json                             # npm 配置（Tauri CLI）
-└── README.md                                # 本文件
+PatentLens/
+├── src/                              # 前端代码
+│   ├── web.html                      # 主界面（看板 + 阅读器）
+│   ├── index.html                    # 简版查询页面
+│   ├── styles/main.css               # 暗色主题样式
+│   └── scripts/
+│       ├── web-app.js                # 主交互逻辑
+│       ├── web-ai.js                 # AI 服务调用（DeepSeek/GLM/OpenAI）
+│       ├── patent-status.js          # 文档分类与状态映射
+│       ├── marked.min.js             # Markdown 渲染库
+│       ├── docx.umd.js               # Word 导出库
+│       └── FileSaver.min.js          # 文件保存库
+├── src-tauri/                        # Tauri 后端（备选）
+│   ├── src/api/                      # API 模块（USPTO/GD/JPO/DPMA）
+│   ├── src/cache/                    # SQLite 缓存
+│   ├── src/ocr/                      # OCR 模块
+│   ├── src/parser/                   # 文档解析
+│   └── src/patent/                   # 专利号转换
+├── browser-extension/                # Chrome 浏览器扩展
+│   ├── background.js                 # 后台脚本
+│   ├── popup/                        # 扩展弹窗
+│   └── content/                      # 内容脚本（J-PlatPat/DPMA）
+├── electron-main.js                  # Electron 主进程
+├── extract_pdf.py                    # Python OCR 调用脚本
+├── server.js                         # 本地开发服务器
+├── requirements.txt                  # Python 依赖
+├── package.json                      # Node.js 配置
+├── user-manual-new.html              # 用户说明书（HTML）
+└── user-manual-new.pdf               # 用户说明书（PDF）
 ```
-
----
-
-## 文档体系
-
-所有文档位于 `docs/` 目录，按编号阅读：
-
-| 编号 | 文档 | 内容 |
-|------|------|------|
-| 01 | [项目概述与技术选型](docs/01-项目概述与技术选型.md) | 项目背景、需求分析、技术选型论证、版本规划 |
-| 02 | [USPTO API 注册与使用指南](docs/02-USPTO-API注册与使用指南.md) | API 密钥申请、端点说明、认证方式、限流规则、常见文档代码 |
-| 03 | [开发规范](docs/03-开发规范.md) | Git 规范、密钥管理、打包命名、代码风格、项目目录结构 |
-| 04 | [交叉编译与打包指南](docs/04-交叉编译与打包指南.md) | cross 工具、GitHub Actions CI、打包检查清单 |
-| 05 | [架构设计](docs/05-架构设计.md) | 系统架构、数据流、模块交互、前后端通信机制 |
-| 06 | [开发者上手指南](docs/06-开发者上手指南.md) | 环境搭建、首次运行、调试方法、常见问题 |
-| 07 | [API 数据模型与字段映射](docs/07-API数据模型与字段映射.md) | USPTO API 响应结构、Rust 数据模型、前端字段映射 |
 
 ---
 
 ## 快速开始
 
-> 详细的步骤说明请参阅 [开发者上手指南](docs/06-开发者上手指南.md)
-
 ### 前置条件
 
-- Rust 1.77.2+（`rustup` 安装）
-- Node.js 18+（前端工具链）
-- USPTO ODP API Key（[申请方式](docs/02-USPTO-API注册与使用指南.md)）
+- Node.js 18+
+- Python 3.8+（OCR 功能需要）
+- AI 服务 API Key（DeepSeek / 智谱 GLM / OpenAI 兼容，至少一个）
 
 ### 安装与运行
 
 ```bash
 # 1. 克隆项目
-git clone <repo-url>
+git clone https://github.com/Casafred/history-helper.git
 cd history-helper
 
-# 2. 配置 API 密钥
-cp .env.example .env
-# 编辑 .env，填入你的 USPTO_API_KEY
-
-# 3. 安装前端依赖
+# 2. 安装 Node.js 依赖
 npm install
 
+# 3. 安装 Python 依赖（OCR 功能）
+pip install -r requirements.txt
+
 # 4. 开发模式运行
-npm run dev
+node server.js
+# 浏览器打开 http://localhost:8080
 ```
 
-### 构建
+### Electron 桌面应用
 
 ```bash
-npm run build
+# 开发模式
+npm run dev
+
+# 打包 Windows 安装程序
+npm run build:electron
 ```
+
+### 配置 AI 服务
+
+首次使用需在设置页面配置 AI 服务：
+
+1. 打开应用 → 点击右上角 ⚙️ 设置
+2. 在 **AI 服务** Tab 中选择服务商并填入 API Key
+3. 在 **OCR** Tab 中选择 OCR 引擎
+4. 在 **翻译** Tab 中配置翻译模型（可独立于 AI 服务）
+5. 在 **提示词** Tab 中自定义分析提示词
 
 ---
 
-## 核心设计决策
+## 主要功能说明
 
-| 决策 | 选择 | 理由 |
-|------|------|------|
-| 为什么选 Rust 而非 Python | Rust | 打包体积 <10MB、零依赖部署、无需安装运行时 |
-| 为什么选 Tauri 而非 Electron | Tauri | 使用系统 WebView，体积仅 3-8MB vs Electron 100MB+ |
-| 为什么用 ODP API 而非爬虫 | API | 官方接口稳定、结构化数据、不易触发反爬 |
-| 为什么每次 API 调用间隔 1.5s | 限流保护 | USPTO 限流约 10-15 次/分钟，1.5s 间隔留有安全余量 |
-| 为什么 API Key 存 .env 而非配置文件 | 安全 | .env 在 .gitignore 中，避免密钥泄露至远程仓库 |
+### 1. 专利查询
+
+输入专利号（如 `US12030161B2`、`EP4252965A3`），系统自动识别专利局和类型，获取审查历史文档。
+
+### 2. AI 审查梳理
+
+选择文档后点击"AI 梳理"，自动提取审查意见和答复内容，生成结构化梳理报告，支持溯源对照阅读。
+
+### 3. OCR 文字提取
+
+- **PaddleOCR-VL**：免费，无需 API Key
+- **GLM OCR**：需要智谱 API Key，识别精度更高
+- 自动清理 OCR 噪音符号（$ \Box $ → ☐ 等）
+
+### 4. 全文翻译
+
+- 独立翻译模型配置，默认模型：GLM → glm-4-flash，DeepSeek → deepseek-v4-flash
+- 全文合并翻译，不分页不分块
+- 流式实时显示翻译结果
+
+### 5. 阅读模式
+
+点击"翻译"或"AI 对话"按钮自动进入：
+- 左侧文件列表自动收起
+- PDF 阅读器向左扩展
+- 右侧 Tab 面板显示翻译对照 / AI 对话
+- 不遮挡 PDF 阅读区域
+
+### 6. Word 导出
+
+审查报告导出为 Word 文档，自动填充专利概览信息（专利号、标题、申请人、申请日等）。
+
+---
+
+## 支持的 AI 服务
+
+| 服务商 | 默认分析模型 | 默认翻译模型 | Base URL |
+|--------|-------------|-------------|----------|
+| DeepSeek | deepseek-chat | deepseek-v4-flash | https://api.deepseek.com |
+| 智谱 AI (GLM) | glm-4-plus | glm-4-flash | https://open.bigmodel.cn/api/paas |
+| OpenAI 兼容 | gpt-4o | gpt-4o-mini | 可自定义 |
+
+---
+
+## 浏览器扩展
+
+Chrome 扩展支持在以下网站一键跳转 PatentLens：
+
+- **J-PlatPat**（日本专利局） — 专利详情页显示"在 PatentLens 中打开"按钮
+- **DPMA**（德国专利局） — 专利详情页显示"在 PatentLens 中打开"按钮
+
+安装方式：Chrome → 扩展程序 → 开发者模式 → 加载已解压的扩展程序 → 选择 `browser-extension/` 目录
 
 ---
 
