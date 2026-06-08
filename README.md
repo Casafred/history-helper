@@ -1,4 +1,4 @@
-# 专利审查历史梳理工具 (Patent Examination History Helper)
+# PatentLens - 专利审查历史梳理工具
 
 一款用于梳理多地区专利审查历史的桌面工具。支持专利号格式自动转换、通过 USPTO ODP API 获取审查历史、审查时间线可视化展示，后续将接入 AI 做审查内容智能梳理。
 

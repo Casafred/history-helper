@@ -15,13 +15,13 @@ var PATENT_STATUS = {
       "OA": { name: "审查意见 (Office Action)", type: "office_action", stage: "审查中" },
       "RCEX": { name: "请求继续审查 (Request for Continued Examination)", type: "request", stage: "审查中" },
       "AMSB": { name: "修改提交 (Amendment Submitted)", type: "response", stage: "审查中" },
-      "A": { name: "授权 (Allowed)", type: "allowance", stage: "授权" },
+      "A": { name: "申请人修改 (Amendment)", type: "response", stage: "审查中" },
       "F": { name: "最终驳回 (Final Rejection)", type: "office_action", stage: "审查中" },
       "Q": { name: "非最终驳回 (Non-Final Rejection)", type: "office_action", stage: "审查中" },
       "R": { name: "限制性要求 (Restriction Requirement)", type: "office_action", stage: "审查中" },
       "M": { name: "其他文件 (Miscellaneous)", type: "misc", stage: "审查中" },
       "N": { name: "其他文件 (Miscellaneous)", type: "misc", stage: "审查中" },
-      "P": { name: "授权 (Allowed)", type: "allowance", stage: "授权" },
+      "P": { name: "初步修改/公开 (Preliminary Amendment / Publication)", type: "misc", stage: "审查中" },
       "B": { name: "维持驳回 (Ex Parte Quayle)", type: "office_action", stage: "审查中" },
       "EX.A": { name: "审查员答辩意见 (Examiner's Answer)", type: "office_action", stage: "复审" },
       "A...": { name: "非最终驳回后修改/复审请求 (Amendment/Request for Reconsideration-After Non-Final Rejection)", type: "response", stage: "审查中" },
@@ -258,7 +258,11 @@ function classifyDocCode(code, desc) {
   if (/prüfungsbescheid/.test(descLower)) return "office_action";
   if (/erwidung/.test(descLower)) return "response";
   if (/beschränkung/.test(descLower)) return "response";
+  // "erteilungsbescheid" = 授权通知书 → allowance
   if (/erteilungsbescheid/.test(descLower)) return "allowance";
+  // "antrag: erteilung eines patents" = 专利授权申请 → request (must be before general erteilung)
+  if (/antrag.*erteilung/.test(descLower)) return "request";
+  // "erteilung" alone (without "antrag" prefix) = 授权 → allowance
   if (/erteilung/.test(descLower)) return "allowance";
   if (/prüfungsantrag/.test(descLower)) return "request";
   if (/einspruch/.test(descLower)) return "request";
@@ -279,7 +283,7 @@ function classifyDocCode(code, desc) {
   if (/schutzbereich/.test(descLower)) return "misc";
 
   // === US / General patterns ===
-  if (/notice of allowance|allowed|allowance/.test(text)) return "allowance";
+  if (/notice of allowance/.test(text)) return "allowance";
   if (/egrant|e-grant/.test(text)) return "allowance";
   if (/abandonment/.test(text)) return "notification";
   if (/preliminary amendment/.test(text)) return "request";
