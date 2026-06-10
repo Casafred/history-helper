@@ -287,6 +287,15 @@ searchBtn.addEventListener("click", async () => {
     // 后续的文档列表查询必须使用申请号
     if (familyData && familyData.corrAppNum) {
       result.applicationNumber = familyData.corrAppNum;
+    } else if (familyData && familyData.list && Array.isArray(familyData.list)) {
+      // corrAppNum 为 null 时，从 family.list 中查找当前局的申请号
+      // EP 专利通过公开号/专利号查询时，corrAppNum 经常为 null
+      const ownEntry = familyData.list.find(item => item.countryCode === office);
+      if (ownEntry && ownEntry.appNum) {
+        result.applicationNumber = ownEntry.appNum;
+      } else if (ownEntry && ownEntry.docNum && ownEntry.docNum.docNumber) {
+        result.applicationNumber = ownEntry.docNum.docNumber;
+      }
     }
   } catch (e) {
     warnings.push("同族查询失败: " + e.message);
