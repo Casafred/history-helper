@@ -94,7 +94,6 @@ const pdfNextPage = document.getElementById("pdf-next-page");
 const pdfZoomIn = document.getElementById("pdf-zoom-in");
 const pdfZoomOut = document.getElementById("pdf-zoom-out");
 const pdfZoomFit = document.getElementById("pdf-zoom-fit");
-const pdfOcrBtn = document.getElementById("pdf-ocr-btn");
 const pdfTranslateBtn = document.getElementById("pdf-translate-btn");
 const pdfTranslatePanel = document.getElementById("pdf-translate-panel");
 const pdfTranslateLang = document.getElementById("pdf-translate-lang");
@@ -1174,6 +1173,8 @@ if (ocrSaveBtn) {
     const ocrConfig = window.AI.getOCRConfig(config);
     ocrConfig.engine = ocrEngineSelect.value;
     ocrConfig.glmKey = ocrGlmKeyInput.value.trim();
+    const autoCheckbox = document.getElementById("ocr-auto-checkbox");
+    ocrConfig.autoOcr = autoCheckbox ? autoCheckbox.checked : true;
     window.AI.saveAIConfig(config);
     aiSettingsModal.classList.add("hidden");
   });
@@ -1290,6 +1291,8 @@ function loadAISettingsToForm() {
   const ocrConfig = window.AI.getOCRConfig(config);
   if (ocrEngineSelect) ocrEngineSelect.value = ocrConfig.engine || "paddle_ocr_vl";
   if (ocrGlmKeyInput) ocrGlmKeyInput.value = ocrConfig.glmKey || "";
+  const autoCheckbox = document.getElementById("ocr-auto-checkbox");
+  if (autoCheckbox) autoCheckbox.checked = ocrConfig.autoOcr !== false;
   toggleOcrGlmKeyVisibility();
 
   // Load translate settings
@@ -2691,11 +2694,9 @@ function selectReaderDoc(idx) {
   if (ext && ext.blocks && ext.blocks.length > 0) {
     if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
     if (searchBtn) searchBtn.disabled = false;
-    if (pdfOcrBtn) { pdfOcrBtn.textContent = "已提取"; pdfOcrBtn.disabled = true; }
   } else {
     if (searchInput) { searchInput.disabled = true; searchInput.placeholder = "请先OCR提取..."; }
     if (searchBtn) searchBtn.disabled = true;
-    if (pdfOcrBtn) { pdfOcrBtn.textContent = "OCR 提取"; pdfOcrBtn.disabled = false; }
   }
   // Translate button always enabled (auto-OCR if needed)
   // Reset translate panel
@@ -2842,13 +2843,21 @@ async function renderPdfView(idx) {
       pdfViewState.pendingHighlight = null;
       pdfViewState.pendingHighlightRange = null;
       highlightPdfBlock(blockId);
-      // Also highlight range blocks with a lighter highlight
       rangeIds.forEach(id => {
         if (id !== blockId) {
           const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
           if (overlay) overlay.classList.add("highlight-range");
         }
       });
+    }
+
+    // Auto-OCR: if no extraction exists and autoOcr is enabled, trigger OCR
+    if (blocks.length === 0) {
+      const config = window.AI.loadAIConfig();
+      const ocrConfig = window.AI.getOCRConfig(config);
+      if (ocrConfig.autoOcr !== false) {
+        ocrPdf(); // fire-and-forget, will re-render on completion
+      }
     }
   } catch (e) {
     pdfViewState.pendingHighlight = null;
@@ -3344,8 +3353,6 @@ async function ocrPdf() {
   const isUS = currentData.office === "US";
   const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
 
-  if (pdfOcrBtn) { pdfOcrBtn.textContent = "提取中..."; pdfOcrBtn.disabled = true; }
-
   const MAX_RETRIES = 2;
   let success = false;
 
@@ -3398,7 +3405,6 @@ async function ocrPdf() {
   success = await tryExtract(primaryEngine, MAX_RETRIES);
 
   if (success) {
-    if (pdfOcrBtn) { pdfOcrBtn.textContent = "已提取"; pdfOcrBtn.disabled = true; }
     const searchInput = document.getElementById("pdf-search-input");
     const searchBtn = document.getElementById("pdf-search-btn");
     if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
@@ -3407,8 +3413,6 @@ async function ocrPdf() {
     if (pdfViewState.active) {
       await renderPdfView(idx);
     }
-  } else {
-    if (pdfOcrBtn) { pdfOcrBtn.textContent = "OCR 提取"; pdfOcrBtn.disabled = false; }
   }
 }
 
@@ -4455,10 +4459,7 @@ document.addEventListener("DOMContentLoaded", () => {
     pdfZoomFit.addEventListener("click", pdfZoomFitAction);
   }
 
-  // OCR extract button
-  if (pdfOcrBtn) {
-    pdfOcrBtn.addEventListener("click", ocrPdf);
-  }
+  // OCR extract button removed - auto-OCR on PDF open
 
   // PDF translate button
   if (pdfTranslateBtn) {
