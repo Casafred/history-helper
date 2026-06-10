@@ -119,6 +119,10 @@ let pdfViewState = {
   pendingHighlightRange: null,
   searchMatches: [],
   searchCurrentIdx: -1,
+  selectedBlockIds: [],
+  selecting: false,
+  selectStart: null,
+  selectEnd: null,
 };
 
 let chatHistory = [];
@@ -2878,6 +2882,12 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
 
     const pageBlocks = blocks.filter(b => b.page === pageNum);
     const pageDim = pageDimensions[pageNum];
+
+    // 添加框选矩形层
+    const selectionRect = document.createElement("div");
+    selectionRect.className = "pdf-selection-rect";
+    wrapper.appendChild(selectionRect);
+
     if (pageBlocks.length > 0 && pageDim) {
       const scaleX = viewport.width / pageDim.width;
       const scaleY = viewport.height / pageDim.height;
@@ -2899,18 +2909,127 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
         tooltip.textContent = b.block_id + " [" + (b.label || "text") + "]";
         overlay.appendChild(tooltip);
 
-        overlay.addEventListener("click", () => {
-          document.querySelectorAll(".pdf-block-overlay.highlight").forEach(el => el.classList.remove("highlight"));
-          overlay.classList.add("highlight");
-          setTimeout(() => overlay.classList.remove("highlight"), 3000);
+        overlay.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          // 单击切换选中状态（选中后保持持久，用于翻译范围选择）
+          const blockId = b.block_id;
+          const idx = pdfViewState.selectedBlockIds.indexOf(blockId);
+          if (idx >= 0) {
+            pdfViewState.selectedBlockIds.splice(idx, 1);
+            overlay.classList.remove("block-selected");
+          } else {
+            pdfViewState.selectedBlockIds.push(blockId);
+            overlay.classList.add("block-selected");
+          }
+          updatePdfSelectionInfo();
+        });
+
+        overlay.addEventListener("contextmenu", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          // 右键：如果此框已在选中集合中，翻译整个范围；否则先选中此框再翻译
+          const blockId = b.block_id;
+          const isInSelection = pdfViewState.selectedBlockIds.includes(blockId);
+          if (!isInSelection) {
+            if (!ev.shiftKey) {
+              clearPdfBlockSelection();
+            }
+            pdfViewState.selectedBlockIds.push(blockId);
+            refreshPdfBlockSelectionVisual();
+            updatePdfSelectionInfo();
+          }
+          showPdfBlockContextMenu(ev.clientX, ev.clientY, blockId);
         });
 
         wrapper.appendChild(overlay);
       });
     }
 
+    // 框选：在 wrapper 内按住鼠标左键拖动
+    wrapper.addEventListener("mousedown", (ev) => {
+      if (ev.button !== 0) return;
+      if (ev.target.classList && ev.target.classList.contains("pdf-block-overlay")) return;
+      ev.preventDefault();
+      const rect = wrapper.getBoundingClientRect();
+      const startX = ev.clientX - rect.left;
+      const startY = ev.clientY - rect.top;
+      pdfViewState.selecting = true;
+      pdfViewState.selectStart = { x: startX, y: startY, page: pageNum };
+      pdfViewState.selectEnd = { x: startX, y: startY, page: pageNum };
+      // 如果不按 Shift，先清除之前的选择
+      if (!ev.shiftKey) {
+        clearPdfBlockSelection();
+      }
+      selectionRect.style.display = "block";
+      selectionRect.style.left = startX + "px";
+      selectionRect.style.top = startY + "px";
+      selectionRect.style.width = "0px";
+      selectionRect.style.height = "0px";
+    });
+
     readerPdfContainer.appendChild(wrapper);
     pdfViewState.renderedPages[pageNum] = wrapper;
+  }
+
+  // 全局 mousemove / mouseup 用于框选
+  if (readerPdfContainer._selectionHandlersInstalled) return;
+  readerPdfContainer._selectionHandlersInstalled = true;
+
+  document.addEventListener("mousemove", (ev) => {
+    if (!pdfViewState.selecting || !pdfViewState.selectStart) return;
+    const page = pdfViewState.selectStart.page;
+    const wrapper = pdfViewState.renderedPages[page];
+    if (!wrapper) return;
+    const rect = wrapper.getBoundingClientRect();
+    const x = Math.max(0, Math.min(ev.clientX - rect.left, rect.width));
+    const y = Math.max(0, Math.min(ev.clientY - rect.top, rect.height));
+    pdfViewState.selectEnd = { x, y, page };
+    const selectionRect = wrapper.querySelector(".pdf-selection-rect");
+    if (selectionRect) {
+      const left = Math.min(pdfViewState.selectStart.x, x);
+      const top = Math.min(pdfViewState.selectStart.y, y);
+      const width = Math.abs(x - pdfViewState.selectStart.x);
+      const height = Math.abs(y - pdfViewState.selectStart.y);
+      selectionRect.style.left = left + "px";
+      selectionRect.style.top = top + "px";
+      selectionRect.style.width = width + "px";
+      selectionRect.style.height = height + "px";
+    }
+    // 实时高亮被框中的 blocks（仅视觉预览）
+    refreshPdfBoxSelectionVisual(left, top, width, height, page);
+  });
+
+  document.addEventListener("mouseup", (ev) => {
+    if (!pdfViewState.selecting) return;
+    pdfViewState.selecting = false;
+    const page = pdfViewState.selectStart ? pdfViewState.selectStart.page : null;
+    if (page) {
+      const wrapper = pdfViewState.renderedPages[page];
+      if (wrapper) {
+        const selectionRect = wrapper.querySelector(".pdf-selection-rect");
+        if (selectionRect) selectionRect.style.display = "none";
+      }
+      const s = pdfViewState.selectStart;
+      const e = pdfViewState.selectEnd;
+      if (s && e) {
+        const left = Math.min(s.x, e.x);
+        const top = Math.min(s.y, e.y);
+        const width = Math.abs(e.x - s.x);
+        const height = Math.abs(e.y - s.y);
+        if (width > 5 && height > 5) {
+          // 真正的框选，将框中的 blocks 加入选中集合
+          selectBlocksInRect(left, top, width, height, page);
+        } else {
+          // 过小的拖动视为点击空白，清除选择
+          clearPdfBlockSelection();
+        }
+      }
+    }
+    pdfViewState.selectStart = null;
+    pdfViewState.selectEnd = null;
+    refreshPdfBlockSelectionVisual();
+    updatePdfSelectionInfo();
+  });
   }
 }
 
@@ -2967,6 +3086,141 @@ function highlightPdfBlock(blockId) {
     setTimeout(() => overlay.classList.remove("highlight"), 3000);
   }
 }
+
+function clearPdfBlockSelection() {
+  pdfViewState.selectedBlockIds = [];
+  document.querySelectorAll(".pdf-block-overlay.block-selected").forEach(el => el.classList.remove("block-selected"));
+  document.querySelectorAll(".pdf-block-overlay.block-preview").forEach(el => el.classList.remove("block-preview"));
+  updatePdfSelectionInfo();
+}
+
+function refreshPdfBlockSelectionVisual() {
+  document.querySelectorAll(".pdf-block-overlay").forEach(el => {
+    const bid = el.dataset.blockId;
+    if (pdfViewState.selectedBlockIds.includes(bid)) {
+      el.classList.add("block-selected");
+    } else {
+      el.classList.remove("block-selected");
+    }
+    el.classList.remove("block-preview");
+  });
+}
+
+function refreshPdfBoxSelectionVisual(left, top, width, height, page) {
+  const wrapper = pdfViewState.renderedPages[page];
+  if (!wrapper) return;
+  const overlays = wrapper.querySelectorAll(".pdf-block-overlay");
+  overlays.forEach(el => {
+    const bx = parseFloat(el.style.left);
+    const by = parseFloat(el.style.top);
+    const bw = parseFloat(el.style.width);
+    const bh = parseFloat(el.style.height);
+    const cx = bx + bw / 2;
+    const cy = by + bh / 2;
+    const inside = cx >= left && cx <= left + width && cy >= top && cy <= top + height;
+    if (inside) {
+      el.classList.add("block-preview");
+    } else {
+      el.classList.remove("block-preview");
+    }
+  });
+}
+
+function selectBlocksInRect(left, top, width, height, page) {
+  const wrapper = pdfViewState.renderedPages[page];
+  if (!wrapper) return;
+  const overlays = wrapper.querySelectorAll(".pdf-block-overlay");
+  overlays.forEach(el => {
+    const bx = parseFloat(el.style.left);
+    const by = parseFloat(el.style.top);
+    const bw = parseFloat(el.style.width);
+    const bh = parseFloat(el.style.height);
+    const cx = bx + bw / 2;
+    const cy = by + bh / 2;
+    const inside = cx >= left && cx <= left + width && cy >= top && cy <= top + height;
+    if (inside) {
+      const bid = el.dataset.blockId;
+      if (!pdfViewState.selectedBlockIds.includes(bid)) {
+        pdfViewState.selectedBlockIds.push(bid);
+      }
+    }
+  });
+  refreshPdfBlockSelectionVisual();
+  updatePdfSelectionInfo();
+}
+
+function updatePdfSelectionInfo() {
+  const info = document.getElementById("pdf-selection-info");
+  if (!info) return;
+  const n = pdfViewState.selectedBlockIds.length;
+  info.textContent = n > 0 ? `已选 ${n} 块` : "";
+  info.classList.toggle("hidden", n === 0);
+  const clearBtn = document.getElementById("pdf-clear-selection-btn");
+  if (clearBtn) {
+    clearBtn.style.display = n > 0 ? "" : "none";
+  }
+  const translateSelBtn = document.getElementById("pdf-translate-selection-btn");
+  if (translateSelBtn) {
+    translateSelBtn.style.display = n > 0 ? "" : "none";
+  }
+}
+
+// 右键菜单
+let _pdfCtxMenu = null;
+
+function showPdfBlockContextMenu(clientX, clientY, blockId) {
+  hidePdfBlockContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "pdf-block-context-menu";
+  menu.style.left = clientX + "px";
+  menu.style.top = clientY + "px";
+
+  const n = pdfViewState.selectedBlockIds.length;
+  const translateAllItem = document.createElement("div");
+  translateAllItem.className = "pdf-ctx-menu-item";
+  translateAllItem.textContent = n > 1 ? `翻译已选 ${n} 块` : "翻译此文本块";
+  translateAllItem.addEventListener("click", () => {
+    hidePdfBlockContextMenu();
+    translateSelectedBlocks();
+  });
+  menu.appendChild(translateAllItem);
+
+  if (n > 0) {
+    const clearItem = document.createElement("div");
+    clearItem.className = "pdf-ctx-menu-item";
+    clearItem.textContent = "清除选择";
+    clearItem.addEventListener("click", () => {
+      hidePdfBlockContextMenu();
+      clearPdfBlockSelection();
+    });
+    menu.appendChild(clearItem);
+  }
+
+  document.body.appendChild(menu);
+  _pdfCtxMenu = menu;
+
+  // 菜单显示后如果超出视口，向左/上调整
+  const r = menu.getBoundingClientRect();
+  const maxX = window.innerWidth - 16;
+  const maxY = window.innerHeight - 16;
+  if (r.right > maxX) menu.style.left = (maxX - r.width) + "px";
+  if (r.bottom > maxY) menu.style.top = (maxY - r.height) + "px";
+}
+
+function hidePdfBlockContextMenu() {
+  if (_pdfCtxMenu && _pdfCtxMenu.parentNode) {
+    _pdfCtxMenu.parentNode.removeChild(_pdfCtxMenu);
+  }
+  _pdfCtxMenu = null;
+}
+
+document.addEventListener("mousedown", (ev) => {
+  if (_pdfCtxMenu && !_pdfCtxMenu.contains(ev.target)) {
+    hidePdfBlockContextMenu();
+  }
+});
+document.addEventListener("scroll", () => hidePdfBlockContextMenu(), true);
+window.addEventListener("resize", () => hidePdfBlockContextMenu());
 
 // ===== PDF keyword search =====
 
@@ -3158,6 +3412,119 @@ async function ocrPdf() {
 
 // ===== PDF Translation =====
 
+function _buildBlockText(blocks, rangeLabel) {
+  const cleanOcrText = (text) => {
+    return text
+      .replace(/\$\s*\\Box\s*\$/g, '☐')
+      .replace(/\$\s*\\surd\s*\$/g, '☑')
+      .replace(/\$\s*\\§\s*(\d+)\s*\$/g, '§$1')
+      .replace(/\$\s*\\[^$]+\$/g, '')
+      .replace(/\$\{[^}]+\}/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  };
+  const typeLabels = { title: "标题", table: "表格", formula: "公式", figure: "图注", caption: "说明" };
+  const originalParts = [];
+  blocks.forEach(b => {
+    if (b.content && b.content.trim()) {
+      const cleaned = cleanOcrText(b.content);
+      if (!cleaned) return;
+      const typeHint = typeLabels[b.label];
+      if (typeHint) {
+        originalParts.push(`[${typeHint}] ${cleaned}`);
+      } else {
+        originalParts.push(cleaned);
+      }
+  });
+  return originalParts.join("\n\n");
+}
+
+async function _doTranslateBlocks(idx, blocks, targetLang, langNames, cacheKey, loadingHint) {
+  const config = window.AI.loadAIConfig();
+  const translateProvider = window.AI.getTranslateProvider(config);
+  if (!translateProvider || !translateProvider.apiKey) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">请先在设置中配置 AI 服务的 API Key</p>';
+    }
+    return;
+  }
+
+  const text = _buildBlockText(blocks);
+  if (!text.trim()) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder">选中范围内无有效文字内容</p>';
+    }
+    return;
+  }
+
+  if (translatePageCache[cacheKey]) {
+    renderTranslateContent(translatePageCache[cacheKey]);
+    return;
+  }
+
+  if (pdfTranslateContent) {
+    pdfTranslateContent.innerHTML = loadingHint || '<div class="pdf-translate-translating-hint">正在翻译，请稍候...</div>';
+  }
+  if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译中..."; pdfTranslateBtn.disabled = true; }
+  translateAbortController = new AbortController();
+
+  try {
+    const systemPrompt = `你是一个专业的专利文档翻译专家。请将以下专利文档内容翻译为${langNames[targetLang] || "中文"}。
+
+## 翻译规则
+
+1. 原文中部分段落前标有[类型]标记，表示该段落的版面类型：
+   - [标题]：文档标题、章节标题，翻译时保持简洁有力
+   - [表格]：表格内容，保持行列结构，用 | 分隔各列
+   - [公式]：数学公式或化学式，保留原始公式符号，仅翻译公式旁的文字说明
+   - [图注]：图片说明文字，简洁翻译
+   - [说明]：图表说明，准确翻译
+   - 无标记的段落为正文，逐句准确翻译，保持技术术语一致性
+
+2. 翻译时请去掉所有[类型]标记，直接输出翻译后的连续文档
+3. 保持原文的段落结构，每个段落对应一段翻译
+4. 只输出翻译结果，不要添加任何解释或注释
+5. 如果原文已经是目标语言，则直接返回原文
+6. 专利技术术语请使用该领域的标准译法
+7. 原文中的☐表示空复选框，☑表示已勾选复选框，§表示条款号，请保留这些符号
+8. 请将所有页面的内容整合翻译，输出完整连贯的译文`;
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: text },
+    ];
+
+    let fullResponse = "";
+    const stream = window.AI.streamChat(translateProvider.type, translateProvider.apiKey, translateProvider.baseUrl, {
+      model: translateProvider.model,
+      messages: messages,
+      temperature: 0.1,
+      maxTokens: 16384,
+    }, translateAbortController.signal);
+
+    for await (const chunk of stream) {
+      if (translateAbortController.signal.aborted) break;
+      if (chunk.content) {
+        fullResponse += chunk.content;
+        if (pdfTranslateContent) {
+          pdfTranslateContent.innerHTML = `<div class="pdf-translate-result">${renderMarkdown(fullResponse)}</div>`;
+        }
+      }
+    }
+
+    translatePageCache[cacheKey] = { translated: fullResponse };
+    renderTranslateContent(translatePageCache[cacheKey]);
+
+  } catch (e) {
+    if (e.name !== "AbortError") {
+      showError("翻译出错: " + e.message);
+    }
+  } finally {
+    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译"; pdfTranslateBtn.disabled = false; }
+    translateAbortController = null;
+  }
+}
+
 async function translatePdfPage() {
   const idx = pdfViewState.currentDocIdx;
   if (idx == null) {
@@ -3165,17 +3532,14 @@ async function translatePdfPage() {
     return;
   }
 
-  // Show translate panel immediately for visual feedback
   if (pdfTranslatePanel) pdfTranslatePanel.classList.remove("hidden");
   enterReadingMode("translate");
   if (pdfTranslateContent) {
     pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">准备中...</p>';
   }
 
-  // Check if OCR extraction exists, if not, auto-OCR first
   let extraction = kanbanState.extractions[idx];
   if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
-    // Auto-OCR: run ocrPdf and wait for it
     if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "OCR中..."; pdfTranslateBtn.disabled = true; }
     if (pdfTranslateContent) {
       pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">正在 OCR 提取文字，请稍候...</p>';
@@ -3205,7 +3569,6 @@ async function translatePdfPage() {
   const targetLang = pdfTranslateLang ? pdfTranslateLang.value : (config.translate && config.translate.defaultLang) || "zh";
   const langNames = { zh: "中文", en: "English", ja: "日本語", ko: "한국어" };
 
-  // Get ALL blocks from all pages, merge into one continuous document
   const allBlocks = extraction.blocks || [];
   if (allBlocks.length === 0) {
     if (pdfTranslateContent) {
@@ -3214,113 +3577,69 @@ async function translatePdfPage() {
     return;
   }
 
-  // Clean OCR artifact symbols
-  const cleanOcrText = (text) => {
-    return text
-      .replace(/\$\s*\\Box\s*\$/g, '☐')
-      .replace(/\$\s*\\surd\s*\$/g, '☑')
-      .replace(/\$\s*\\§\s*(\d+)\s*\$/g, '§$1')
-      .replace(/\$\s*\\[^$]+\$/g, '')
-      .replace(/\$\{[^}]+\}/g, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-  };
-
-  // Build full document text by merging all pages, with type hints only for non-text types
-  const typeLabels = { title: "标题", table: "表格", formula: "公式", figure: "图注", caption: "说明" };
-  const originalParts = [];
-  allBlocks.forEach(b => {
-    if (b.content && b.content.trim()) {
-      const cleaned = cleanOcrText(b.content);
-      if (!cleaned) return;
-      const typeHint = typeLabels[b.label];
-      if (typeHint) {
-        originalParts.push(`[${typeHint}] ${cleaned}`);
-      } else {
-        originalParts.push(cleaned);
-      }
-    }
-  });
-  const originalFullText = originalParts.join("\n\n");
-  if (!originalFullText.trim()) {
-    if (pdfTranslateContent) {
-      pdfTranslateContent.innerHTML = '<p class="placeholder">当前文档无有效文字内容</p>';
-    }
-    return;
-  }
-
-  // Check cache (whole document, not per-page)
   const cacheKey = `${idx}_${targetLang}_full`;
-  if (translatePageCache[cacheKey]) {
-    renderTranslateContent(translatePageCache[cacheKey]);
+  await _doTranslateBlocks(idx, allBlocks, targetLang, langNames, cacheKey, '<div class="pdf-translate-translating-hint">正在翻译全文，请稍候...</div>');
+}
+
+async function translateSelectedBlocks() {
+  const idx = pdfViewState.currentDocIdx;
+  if (idx == null) {
+    showError("请先选择一个文档");
     return;
   }
 
-  // Show loading state - translation only view
+  if (pdfViewState.selectedBlockIds.length === 0) {
+    showError("请先在 PDF 中选中要翻译的文本块");
+    return;
+  }
+
+  if (pdfTranslatePanel) pdfTranslatePanel.classList.remove("hidden");
+  enterReadingMode("translate");
   if (pdfTranslateContent) {
-    pdfTranslateContent.innerHTML = '<div class="pdf-translate-translating-hint">正在翻译全文，请稍候...</div>';
+    pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">准备中...</p>';
   }
 
-  if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译中..."; pdfTranslateBtn.disabled = true; }
-  translateAbortController = new AbortController();
-
-  try {
-    const systemPrompt = `你是一个专业的专利文档翻译专家。请将以下专利文档内容翻译为${langNames[targetLang] || "中文"}。
-
-## 翻译规则
-
-1. 原文中部分段落前标有[类型]标记，表示该段落的版面类型：
-   - [标题]：文档标题、章节标题，翻译时保持简洁有力
-   - [表格]：表格内容，保持行列结构，用 | 分隔各列
-   - [公式]：数学公式或化学式，保留原始公式符号，仅翻译公式旁的文字说明
-   - [图注]：图片说明文字，简洁翻译
-   - [说明]：图表说明，准确翻译
-   - 无标记的段落为正文，逐句准确翻译，保持技术术语一致性
-
-2. 翻译时请去掉所有[类型]标记，直接输出翻译后的连续文档
-3. 保持原文的段落结构，每个段落对应一段翻译
-4. 只输出翻译结果，不要添加任何解释或注释
-5. 如果原文已经是目标语言，则直接返回原文
-6. 专利技术术语请使用该领域的标准译法
-7. 原文中的☐表示空复选框，☑表示已勾选复选框，§表示条款号，请保留这些符号
-8. 请将所有页面的内容整合翻译，输出完整连贯的译文`;
-
-    const messages = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: originalFullText },
-    ];
-
-    let fullResponse = "";
-    const stream = window.AI.streamChat(translateProvider.type, translateProvider.apiKey, translateProvider.baseUrl, {
-      model: translateProvider.model,
-      messages: messages,
-      temperature: 0.1,
-      maxTokens: 16384,
-    }, translateAbortController.signal);
-
-    for await (const chunk of stream) {
-      if (translateAbortController.signal.aborted) break;
-      if (chunk.content) {
-        fullResponse += chunk.content;
-        // Update translation in real-time
-        if (pdfTranslateContent) {
-          pdfTranslateContent.innerHTML = `<div class="pdf-translate-result">${renderMarkdown(fullResponse)}</div>`;
-        }
+  let extraction = kanbanState.extractions[idx];
+  if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">正在 OCR 提取文字，请稍候...</p>';
+    }
+    await ocrPdf();
+    extraction = kanbanState.extractions[idx];
+    if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
+      if (pdfTranslateContent) {
+        pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">OCR 提取失败，无法翻译</p>';
       }
+      return;
     }
-
-    // Cache the result
-    translatePageCache[cacheKey] = { translated: fullResponse };
-    renderTranslateContent(translatePageCache[cacheKey]);
-
-  } catch (e) {
-    if (e.name !== "AbortError") {
-      showError("翻译出错: " + e.message);
-    }
-  } finally {
-    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译"; pdfTranslateBtn.disabled = false; }
-    translateAbortController = null;
   }
+
+  const config = window.AI.loadAIConfig();
+  const translateProvider = window.AI.getTranslateProvider(config);
+  if (!translateProvider || !translateProvider.apiKey) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">请先在设置中配置 AI 服务的 API Key</p>';
+    }
+    return;
+  }
+
+  const targetLang = pdfTranslateLang ? pdfTranslateLang.value : (config.translate && config.translate.defaultLang) || "zh";
+  const langNames = { zh: "中文", en: "English", ja: "日本語", ko: "한국어" };
+
+  // 按 block 出现顺序保留选中的 blocks
+  const idSet = new Set(pdfViewState.selectedBlockIds);
+  const selectedBlocks = (extraction.blocks || []).filter(b => idSet.has(b.block_id));
+  if (selectedBlocks.length === 0) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder">选中的文本块无有效内容</p>';
+    }
+    return;
+  }
+
+  const sortedIds = pdfViewState.selectedBlockIds.slice().sort().join(",");
+  const cacheKey = `${idx}_${targetLang}_sel_${sortedIds}`;
+  const loadingHint = `<div class="pdf-translate-translating-hint">正在翻译已选 ${selectedBlocks.length} 个文本块，请稍候...</div>`;
+  await _doTranslateBlocks(idx, selectedBlocks, targetLang, langNames, cacheKey, loadingHint);
 }
 
 function renderTranslateContent(data) {
@@ -4137,6 +4456,18 @@ document.addEventListener("DOMContentLoaded", () => {
   // PDF translate button
   if (pdfTranslateBtn) {
     pdfTranslateBtn.addEventListener("click", translatePdfPage);
+  }
+
+  // PDF translate selected blocks button
+  const translateSelBtn = document.getElementById("pdf-translate-selection-btn");
+  if (translateSelBtn) {
+    translateSelBtn.addEventListener("click", translateSelectedBlocks);
+  }
+
+  // PDF clear selection button
+  const clearSelBtn = document.getElementById("pdf-clear-selection-btn");
+  if (clearSelBtn) {
+    clearSelBtn.addEventListener("click", clearPdfBlockSelection);
   }
 
   // Right panel close button (exits reading mode entirely)
