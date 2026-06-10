@@ -3030,7 +3030,6 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
     refreshPdfBlockSelectionVisual();
     updatePdfSelectionInfo();
   });
-  }
 }
 
 async function rerenderPdfPages() {
@@ -3041,6 +3040,9 @@ async function rerenderPdfPages() {
   const pageDimensions = ext ? (ext.pageDimensions || {}) : {};
   await renderAllPdfPages(pdfViewState.pdfDoc, blocks, pageDimensions, pdfViewState.scale);
   updatePdfToolbar();
+  // Restore selection visual after re-render
+  refreshPdfBlockSelectionVisual();
+  updatePdfSelectionInfo();
 }
 
 function updatePdfToolbar() {
@@ -3435,6 +3437,7 @@ function _buildBlockText(blocks, rangeLabel) {
       } else {
         originalParts.push(cleaned);
       }
+    }
   });
   return originalParts.join("\n\n");
 }
@@ -4311,6 +4314,8 @@ document.addEventListener("DOMContentLoaded", () => {
       pdfViewState.renderedPages = {};
       pdfViewState.pendingHighlight = null;
       pdfViewState.pendingHighlightRange = null;
+      pdfViewState.selectedBlockIds = [];
+      pdfViewState.selecting = false;
       // Reset docked state
       const content = document.querySelector(".reader-modal-content");
       if (content) content.classList.remove("docked");
@@ -4348,6 +4353,8 @@ document.addEventListener("DOMContentLoaded", () => {
         pdfViewState.renderedPages = {};
         pdfViewState.pendingHighlight = null;
         pdfViewState.pendingHighlightRange = null;
+        pdfViewState.selectedBlockIds = [];
+        pdfViewState.selecting = false;
         if (content) content.classList.remove("docked");
         if (readerFullscreenBtn) readerFullscreenBtn.classList.add("hidden");
         if (readerDockBtn) readerDockBtn.classList.remove("hidden");
