@@ -123,6 +123,7 @@ let pdfViewState = {
   selectStart: null,
   selectEnd: null,
   traceJumpPending: false,
+  renderVersion: 0,
 };
 
 let chatHistory = [];
@@ -2488,19 +2489,23 @@ function onTraceClick(blockIdStr) {
     showError("溯源信息不存在: " + primaryBlockId);
     return;
   }
-  if (readerModal.classList.contains("hidden")) {
-    openReader(true);
-  }
-  // Auto-switch to PDF view
-  if (!pdfViewState.active) {
-    togglePdfView();
-  }
-  // Always set pending highlight - will be applied after renderPdfView completes
-  // (whether from this call or from auto-OCR re-render)
+
+  // Set pending highlight before any view switching
   pdfViewState.pendingHighlight = primaryBlockId;
   pdfViewState.pendingHighlightRange = blockIds;
-  // Mark that this is a trace jump to prevent auto-OCR from interfering
   pdfViewState.traceJumpPending = true;
+
+  // Set the correct doc index BEFORE toggling PDF view,
+  // so togglePdfView renders the right document if it triggers renderPdfView
+  pdfViewState.currentDocIdx = info.docIdx;
+
+  if (readerModal.classList.contains("hidden")) {
+    openReader(true, true); // skipRender=true — selectReaderDoc will handle the render
+  }
+  // Auto-switch to PDF view (skipRender=true to avoid double render — selectReaderDoc will handle it)
+  if (!pdfViewState.active) {
+    togglePdfView(true);
+  }
 
   selectReaderDoc(info.docIdx);
 
@@ -2648,7 +2653,7 @@ function parseDate(dateStr) {
   return new Date(dateStr).getTime();
 }
 
-function openReader(defaultToPdf = false) {
+function openReader(defaultToPdf = false, skipRender = false) {
   if (!readerModal) return;
   const items = kanbanState.documents;
   if (!items || items.length === 0) {
@@ -2658,7 +2663,7 @@ function openReader(defaultToPdf = false) {
 
   readerModal.classList.remove("hidden");
   if (defaultToPdf && !pdfViewState.active) {
-    togglePdfView();
+    togglePdfView(skipRender);
   }
 
   const readerItems = items;
@@ -2775,7 +2780,7 @@ function selectReaderAnalysis() {
 
 // ============ PDF Viewer with Overlay Blocks ============
 
-function togglePdfView() {
+function togglePdfView(skipRender) {
   if (pdfViewState.active) {
     pdfViewState.active = false;
     readerPdfView.classList.add("hidden");
@@ -2788,7 +2793,7 @@ function togglePdfView() {
     readerContent.classList.add("hidden");
     readerPdfToggle.classList.add("active");
     readerPdfToggle.textContent = "文本视图";
-    if (pdfViewState.currentDocIdx !== null) {
+    if (!skipRender && pdfViewState.currentDocIdx !== null) {
       renderPdfView(pdfViewState.currentDocIdx);
     }
   }
@@ -2805,6 +2810,8 @@ async function renderPdfView(idx) {
   }
 
   pdfViewState.currentDocIdx = idx;
+  // Increment render version to cancel any stale render
+  const thisVersion = ++pdfViewState.renderVersion;
 
   if (typeof pdfjsLib === "undefined") {
     readerPdfContainer.innerHTML = '<p class="pdf-error">PDF.js 库未加载，无法显示 PDF 视图。请检查网络连接后刷新页面。</p>';
@@ -2824,8 +2831,13 @@ async function renderPdfView(idx) {
 
   readerPdfContainer.innerHTML = '<p class="pdf-loading">正在加载 PDF 文件...</p>';
 
+  // Clear stale pdfDoc while loading to prevent rerenderPdfPages from using wrong doc
+  pdfViewState.pdfDoc = null;
+
   try {
     const resp = await fetch(pdfUrl, { headers: { "Accept": "application/pdf,*/*" } });
+    // Check if a newer render has started — abort this one
+    if (pdfViewState.renderVersion !== thisVersion) return;
     if (!resp.ok) throw new Error("PDF 下载失败: HTTP " + resp.status);
 
     const contentType = resp.headers.get("content-type") || "";
@@ -2837,11 +2849,13 @@ async function renderPdfView(idx) {
     }
 
     const arrayBuffer = await resp.arrayBuffer();
+    if (pdfViewState.renderVersion !== thisVersion) return;
     if (arrayBuffer.byteLength < 100) {
       throw new Error("下载的文件过小，文档可能暂不可用");
     }
 
     const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    if (pdfViewState.renderVersion !== thisVersion) return;
     pdfViewState.pdfDoc = pdfDoc;
     pdfViewState.totalPages = pdfDoc.numPages;
     pdfViewState.currentPage = 1;
@@ -2849,14 +2863,20 @@ async function renderPdfView(idx) {
 
     readerPdfContainer.innerHTML = "";
 
-    const containerWidth = readerPdfContainer.clientWidth - 32;
+    // Wait for layout to stabilize if container is not yet visible
+    let containerWidth = readerPdfContainer.clientWidth - 32;
+    if (containerWidth <= 0) {
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      containerWidth = readerPdfContainer.clientWidth - 32;
+    }
     const firstPage = await pdfDoc.getPage(1);
     const viewport = firstPage.getViewport({ scale: 1.0 });
-    pdfViewState.baseScale = Math.min(containerWidth / viewport.width, 1.5);
+    pdfViewState.baseScale = containerWidth > 0 ? Math.min(containerWidth / viewport.width, 1.5) : 1.0;
     pdfViewState.scale = pdfViewState.baseScale;
 
     updatePdfToolbar();
     await renderAllPdfPages(pdfDoc, blocks, pageDimensions, pdfViewState.scale);
+    if (pdfViewState.renderVersion !== thisVersion) return;
 
     // Apply pending highlight from onTraceClick if set
     // Only consume pendingHighlight if blocks are available (overlay elements exist)
@@ -2889,6 +2909,7 @@ async function renderPdfView(idx) {
       pdfViewState.traceJumpPending = false;
     }
   } catch (e) {
+    if (pdfViewState.renderVersion !== thisVersion) return;
     pdfViewState.pendingHighlight = null;
     pdfViewState.pendingHighlightRange = null;
     readerPdfContainer.innerHTML = '<p class="pdf-error">' + escapeHtml(e.message) + '<br><small>请切换到文本视图查看提取的内容</small></p>';
@@ -3734,7 +3755,9 @@ function switchRightPanelTab(panelName) {
 // ===== Open reader for specific document from kanban =====
 
 function openReaderForDoc(idx, defaultToPdf) {
-  openReader(defaultToPdf);
+  // Set the correct doc index before opening to avoid rendering the wrong document
+  pdfViewState.currentDocIdx = idx;
+  openReader(defaultToPdf, true); // skipRender=true — selectReaderDoc will handle the render
   // Select the document after reader opens
   setTimeout(() => {
     selectReaderDoc(idx);
