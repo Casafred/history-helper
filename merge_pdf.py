@@ -70,6 +70,13 @@ def create_cover_page(output_path, original_title, chinese_title, date, doc_code
     c.setLineWidth(3)
     c.line(40, PAGE_H - 90, PAGE_W - 40, PAGE_H - 90)
 
+    # Header: "by PatentLens" in italic bold artistic style
+    c.saveState()
+    c.setFont('Helvetica-BoldOblique', 13)
+    c.setFillColor(COLOR_ACCENT)
+    c.drawRightString(PAGE_W - 40, PAGE_H - 108, "by PatentLens")
+    c.restoreState()
+
     # Chinese title (large, prominent)
     y_pos = PAGE_H - 160
     if chinese_title:

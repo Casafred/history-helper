@@ -399,8 +399,9 @@
           <button id="merge-export-close-btn" class="btn-icon">&times;</button>
         </div>
         <div class="modal-body">
-          <p class="merge-export-hint">选择需要合并导出的文档，按文件日期排序，每个文档前将插入带标题的封面页作为分隔。</p>
+          <p class="merge-export-hint">选择需要合并导出的文档，按文件日期倒序排列，每个文档前将插入带标题的封面页作为分隔。</p>
           <div class="merge-export-toolbar">
+            <input type="text" id="merge-search-input" class="merge-search-input" placeholder="搜索文档名称、代码、日期...">
             <label class="merge-select-all"><input type="checkbox" id="merge-select-all-cb" checked> 全选</label>
             <span id="merge-selected-count" class="merge-selected-count">已选 0 份</span>
           </div>

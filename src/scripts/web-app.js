@@ -4990,8 +4990,8 @@ function openMergeExportModal() {
 
   if (!modal || !list) return;
 
-  // Sort all documents by date
-  const items = [...(kanbanState.documents || [])].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  // Sort all documents by date descending (newest first)
+  const items = [...(kanbanState.documents || [])].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   // Build list
   let html = "";
@@ -5004,7 +5004,7 @@ function openMergeExportModal() {
     };
 
     html += `
-      <div class="merge-export-item ${canDownload ? '' : 'disabled'}" data-idx="${it.idx}" data-date="${escapeHtml(it.date || '')}" data-url="${downloadUrl || ''}">
+      <div class="merge-export-item ${canDownload ? '' : 'disabled'}" data-idx="${it.idx}" data-date="${escapeHtml(it.date || '')}" data-url="${downloadUrl || ''}" data-search-text="${escapeHtml((it.name + ' ' + it.desc + ' ' + it.docCode + ' ' + it.date + ' ' + (typeNames[it.type] || '')).toLowerCase())}">
         <input type="checkbox" class="merge-item-cb" ${canDownload ? 'checked' : 'disabled'} data-idx="${it.idx}">
         <div class="merge-export-item-info">
           <div class="merge-export-item-title">${escapeHtml(it.name || it.desc || it.docCode)}</div>
@@ -5048,6 +5048,23 @@ function openMergeExportModal() {
       updateMergeSelectedCount();
     };
   });
+
+  // Bind search filter
+  const searchInput = document.getElementById("merge-search-input");
+  if (searchInput) {
+    searchInput.value = "";
+    searchInput.oninput = () => {
+      const keyword = searchInput.value.trim().toLowerCase();
+      list.querySelectorAll(".merge-export-item").forEach(item => {
+        if (!keyword) {
+          item.style.display = "";
+          return;
+        }
+        const searchText = item.dataset.searchText || "";
+        item.style.display = searchText.includes(keyword) ? "" : "none";
+      });
+    };
+  }
 }
 
 function updateMergeSelectedCount() {
