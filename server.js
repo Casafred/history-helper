@@ -371,6 +371,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.url.startsWith("/api/merge-pdf") && req.method === "POST") {
+    mergePdfDocs(req, res);
+    return;
+  }
+
   if (req.url.startsWith("/api/gd/extract-text/")) {
     extractPdfText(req, res);
     return;
@@ -511,6 +516,201 @@ async function extractPdfText(req, res) {
       "Access-Control-Allow-Origin": "*",
     });
     res.end(JSON.stringify({ text: "", markdown: "", engine: "none", error: e.message }));
+  }
+}
+
+async function mergePdfDocs(req, res) {
+  const corsHeaders = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+
+  try {
+    const body = await new Promise((resolve, reject) => {
+      let data = "";
+      req.on("data", (chunk) => { data += chunk; });
+      req.on("end", () => resolve(data));
+      req.on("error", reject);
+    });
+
+    const params = JSON.parse(body);
+    const items = params.items; // [{downloadUrl, originalTitle, chineseTitle, date, docCode}]
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      res.writeHead(400, corsHeaders);
+      res.end(JSON.stringify({ error: "No items provided" }));
+      return;
+    }
+
+    const tempDir = "/tmp";
+    const mergeId = `merge_${Date.now()}`;
+    const downloadPromises = items.map(async (item, idx) => {
+      const pdfPath = path.join(tempDir, `${mergeId}_doc${idx}.pdf`);
+      let downloadUrl = item.downloadUrl;
+
+      // For GD API URLs, convert to direct CloudFront URL
+      if (downloadUrl.startsWith("/api/gd/")) {
+        downloadUrl = GD_API_BASE + downloadUrl.replace("/api/gd", "");
+      }
+
+      // For JPO URLs, we need to handle token auth separately
+      if (downloadUrl.startsWith("/api/jpo/")) {
+        // JPO docs require auth token - use the proxy function approach
+        try {
+          const parts = downloadUrl.replace("/api/jpo/doc/", "").split("/");
+          const docType = parts[0] || "dispatch";
+          const appNumber = parts.slice(1).join("/");
+          const token = await getJpoToken();
+          if (!token) {
+            return { success: false, pdfPath, error: "JPO API not configured" };
+          }
+          const jpoUrl = `${JPO_API_BASE}/api/patent/v1/${{refusal_reason: "app_doc_cont_refusal_reason", dispatch: "app_doc_cont_dispatch", submission: "app_doc_cont_submission", trial: "app_doc_cont_trial"}[docType] || "app_doc_cont_dispatch"}/${appNumber}`;
+          const jpoArgs = ["-s", "-w", " HTTP_CODE_%{http_code}", "--max-time", "60", "-o", pdfPath, "-H", `Authorization: Bearer ${token}`, "-H", "Host: ip-data.jpo.go.jp", "-H", "Accept: application/zip,*/*", jpoUrl];
+          const jpoResult = await new Promise((resolve) => {
+            execFile("curl", jpoArgs, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout) => {
+              if (err) { resolve({ success: false, error: err.message }); return; }
+              const match = (stdout || "").match(/HTTP_CODE_(\d+)/);
+              const httpCode = match ? parseInt(match[1], 10) : 0;
+              resolve({ success: httpCode === 200, httpCode });
+            });
+          });
+          if (!jpoResult.success) {
+            return { success: false, pdfPath, error: `JPO HTTP ${jpoResult.httpCode}` };
+          }
+          // Verify PDF
+          try {
+            const stat = fs.statSync(pdfPath);
+            if (stat.size < 100) return { success: false, pdfPath, error: "File too small" };
+          } catch (e) {
+            return { success: false, pdfPath, error: e.message };
+          }
+          return { success: true, pdfPath };
+        } catch (e) {
+          return { success: false, pdfPath, error: e.message };
+        }
+      }
+
+      // GD API direct download
+      const curlArgs = [
+        "-s", "-w", " HTTP_CODE_%{http_code}",
+        "--max-time", "60",
+        "-o", pdfPath,
+        "-H", "user-type: external",
+        "-H", "Accept: application/pdf,*/*",
+        "-H", "Referer: https://globaldossier.uspto.gov/",
+        "-H", "Origin: https://globaldossier.uspto.gov",
+        "-H", "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        downloadUrl,
+      ];
+
+      return new Promise((resolve) => {
+        execFile("curl", curlArgs, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout) => {
+          if (err) {
+            resolve({ success: false, pdfPath, error: err.message });
+            return;
+          }
+          const match = (stdout || "").match(/HTTP_CODE_(\d+)/);
+          const httpCode = match ? parseInt(match[1], 10) : 0;
+          if (httpCode !== 200) {
+            resolve({ success: false, pdfPath, error: `HTTP ${httpCode}` });
+            return;
+          }
+          // Verify file exists and is a valid PDF
+          try {
+            const stat = fs.statSync(pdfPath);
+            if (stat.size < 100) {
+              resolve({ success: false, pdfPath, error: "File too small" });
+              return;
+            }
+            const header = fs.readFileSync(pdfPath, { length: 5 });
+            if (header[0] !== 0x25 || header[1] !== 0x50) {
+              resolve({ success: false, pdfPath, error: "Not a valid PDF" });
+              return;
+            }
+          } catch (e) {
+            resolve({ success: false, pdfPath, error: e.message });
+            return;
+          }
+          resolve({ success: true, pdfPath });
+        });
+      });
+    });
+
+    const downloadResults = await Promise.all(downloadPromises);
+    const mergeItems = [];
+    const failedItems = [];
+
+    downloadResults.forEach((result, idx) => {
+      if (result.success) {
+        mergeItems.push({
+          pdf_path: result.pdfPath,
+          original_title: items[idx].originalTitle || "",
+          chinese_title: items[idx].chineseTitle || "",
+          date: items[idx].date || "",
+          doc_code: items[idx].docCode || "",
+        });
+      } else {
+        failedItems.push({ index: idx, error: result.error });
+      }
+    });
+
+    if (mergeItems.length === 0) {
+      res.writeHead(200, corsHeaders);
+      res.end(JSON.stringify({ error: "All PDF downloads failed", failedItems }));
+      return;
+    }
+
+    // Call merge_pdf.py
+    const outputPath = path.join(tempDir, `${mergeId}_merged.pdf`);
+    const mergeArgs = [
+      path.join(__dirname, "merge_pdf.py"),
+      "--output", outputPath,
+      "--items", JSON.stringify(mergeItems),
+    ];
+
+    const mergeResult = await new Promise((resolve) => {
+      execFile("python3", mergeArgs, { maxBuffer: 50 * 1024 * 1024, timeout: 120000 }, (err, stdout, stderr) => {
+        if (err) {
+          console.error("Merge error:", stderr || err.message);
+          resolve({ success: false, error: stderr || err.message });
+          return;
+        }
+        try {
+          resolve(JSON.parse(stdout));
+        } catch {
+          resolve({ success: false, error: stdout });
+        }
+      });
+    });
+
+    if (!mergeResult.success) {
+      res.writeHead(200, corsHeaders);
+      res.end(JSON.stringify({ error: "Merge failed: " + (mergeResult.error || "unknown"), failedItems }));
+      return;
+    }
+
+    // Read the merged PDF and send it
+    fs.readFile(outputPath, (readErr, pdfData) => {
+      // Cleanup temp files
+      mergeItems.forEach((item) => {
+        try { fs.unlinkSync(item.pdf_path); } catch {}
+      });
+      try { fs.unlinkSync(outputPath); } catch {}
+
+      if (readErr) {
+        res.writeHead(200, corsHeaders);
+        res.end(JSON.stringify({ error: "Failed to read merged PDF" }));
+        return;
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Access-Control-Allow-Origin": "*",
+        "Content-Disposition": 'attachment; filename="merged_patent_docs.pdf"',
+      });
+      res.end(pdfData);
+    });
+  } catch (e) {
+    console.error("Merge PDF error:", e);
+    res.writeHead(200, corsHeaders);
+    res.end(JSON.stringify({ error: e.message }));
   }
 }
 

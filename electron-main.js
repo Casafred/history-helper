@@ -3,6 +3,7 @@ const http = require("http");
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
+const { execFile } = require("child_process");
 
 const GD_API_BASE = "https://d1kazzu6rbodne.cloudfront.net";
 const PADDLE_OCR_VL_URL = "https://k2neb1qcy1u6g4k5.aistudio-app.com/layout-parsing";
@@ -334,6 +335,139 @@ function ocrWithGlm(pdfBase64, apiKey) {
   });
 }
 
+async function mergePdfDocs(req, res) {
+  const corsHeaders = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+
+  try {
+    const body = await new Promise((resolve, reject) => {
+      let data = "";
+      req.on("data", (chunk) => { data += chunk; });
+      req.on("end", () => resolve(data));
+      req.on("error", reject);
+    });
+
+    const params = JSON.parse(body);
+    const items = params.items;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      res.writeHead(400, corsHeaders);
+      res.end(JSON.stringify({ error: "No items provided" }));
+      return;
+    }
+
+    const tempDir = require("os").tmpdir();
+    const mergeId = `merge_${Date.now()}`;
+    const downloadPromises = items.map(async (item, idx) => {
+      const pdfPath = path.join(tempDir, `${mergeId}_doc${idx}.pdf`);
+      let downloadUrl = item.downloadUrl;
+
+      // Convert relative URLs to absolute GD API URLs
+      if (downloadUrl.startsWith("/api/gd/")) {
+        downloadUrl = GD_API_BASE + downloadUrl.replace("/api/gd", "");
+      }
+
+      // JPO URLs need token auth
+      if (downloadUrl.startsWith("/api/jpo/")) {
+        // JPO not supported in merge export for Electron version yet
+        return { success: false, pdfPath, error: "JPO docs not supported in merge export" };
+      }
+
+      try {
+        const result = await httpsGet(downloadUrl, { Accept: "application/pdf,*/*" }, 60000);
+        if (result.statusCode !== 200) {
+          return { success: false, pdfPath, error: `HTTP ${result.statusCode}` };
+        }
+        if (result.body.length < 100) {
+          return { success: false, pdfPath, error: "File too small" };
+        }
+        if (result.body[0] !== 0x25 || result.body[1] !== 0x50) {
+          return { success: false, pdfPath, error: "Not a valid PDF" };
+        }
+        fs.writeFileSync(pdfPath, result.body);
+        return { success: true, pdfPath };
+      } catch (e) {
+        return { success: false, pdfPath, error: e.message };
+      }
+    });
+
+    const downloadResults = await Promise.all(downloadPromises);
+    const mergeItems = [];
+    const failedItems = [];
+
+    downloadResults.forEach((result, idx) => {
+      if (result.success) {
+        mergeItems.push({
+          pdf_path: result.pdfPath,
+          original_title: items[idx].originalTitle || "",
+          chinese_title: items[idx].chineseTitle || "",
+          date: items[idx].date || "",
+          doc_code: items[idx].docCode || "",
+        });
+      } else {
+        failedItems.push({ index: idx, error: result.error });
+      }
+    });
+
+    if (mergeItems.length === 0) {
+      res.writeHead(200, corsHeaders);
+      res.end(JSON.stringify({ error: "All PDF downloads failed", failedItems }));
+      return;
+    }
+
+    const outputPath = path.join(tempDir, `${mergeId}_merged.pdf`);
+    const mergeArgs = [
+      path.join(__dirname, "merge_pdf.py"),
+      "--output", outputPath,
+      "--items", JSON.stringify(mergeItems),
+    ];
+
+    const mergeResult = await new Promise((resolve) => {
+      execFile("python3", mergeArgs, { maxBuffer: 50 * 1024 * 1024, timeout: 120000 }, (err, stdout, stderr) => {
+        if (err) {
+          console.error("Merge error:", stderr || err.message);
+          resolve({ success: false, error: stderr || err.message });
+          return;
+        }
+        try {
+          resolve(JSON.parse(stdout));
+        } catch {
+          resolve({ success: false, error: stdout });
+        }
+      });
+    });
+
+    if (!mergeResult.success) {
+      res.writeHead(200, corsHeaders);
+      res.end(JSON.stringify({ error: "Merge failed: " + (mergeResult.error || "unknown"), failedItems }));
+      return;
+    }
+
+    fs.readFile(outputPath, (readErr, pdfData) => {
+      mergeItems.forEach((item) => {
+        try { fs.unlinkSync(item.pdf_path); } catch {}
+      });
+      try { fs.unlinkSync(outputPath); } catch {};
+
+      if (readErr) {
+        res.writeHead(200, corsHeaders);
+        res.end(JSON.stringify({ error: "Failed to read merged PDF" }));
+        return;
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Access-Control-Allow-Origin": "*",
+        "Content-Disposition": 'attachment; filename="merged_patent_docs.pdf"',
+      });
+      res.end(pdfData);
+    });
+  } catch (e) {
+    console.error("Merge PDF error:", e);
+    res.writeHead(200, corsHeaders);
+    res.end(JSON.stringify({ error: e.message }));
+  }
+}
+
 async function extractPdfText(req, res) {
   const urlObj = new URL(req.url, "http://localhost");
   const urlPath = urlObj.pathname.replace("/api/gd/extract-text", "");
@@ -499,6 +633,11 @@ function startServer() {
       // ── 浏览器插件接口 ──
       if (req.url.startsWith("/api/extension/")) {
         handleExtensionApi(req, res);
+        return;
+      }
+
+      if (req.url.startsWith("/api/merge-pdf") && req.method === "POST") {
+        mergePdfDocs(req, res);
         return;
       }
 

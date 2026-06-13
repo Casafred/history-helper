@@ -397,6 +397,13 @@ function renderKanban(data) {
   kanbanState.analysisSystemPrompt = "";
   kanbanState.analysisUserMessage = "";
   kanbanState.traceIndex = {};
+
+  // Show merge export button if there are documents with download URLs
+  const mergeExportBtn = document.getElementById("merge-export-btn");
+  if (mergeExportBtn) {
+    const hasDownloadable = items.some(it => it.docId && data.office !== "DE");
+    mergeExportBtn.style.display = hasDownloadable ? "" : "none";
+  }
   analysisChatHistory = [];
   const analysisChatFloatBall = document.getElementById("analysis-chat-float-ball");
   if (analysisChatFloatBall) analysisChatFloatBall.classList.add("hidden");
@@ -4614,6 +4621,20 @@ document.addEventListener("DOMContentLoaded", () => {
       if (blockId) onTraceClick(blockId);
     }
   });
+
+  // ── Merge export events ──
+  const mergeExportBtn = document.getElementById("merge-export-btn");
+  const mergeExportCloseBtn = document.getElementById("merge-export-close-btn");
+  const mergeExportCancelBtn = document.getElementById("merge-export-cancel-btn");
+  const mergeExportDoBtn = document.getElementById("merge-export-do-btn");
+  const mergeExportModal = document.getElementById("merge-export-modal");
+  const mergeExportOverlay = mergeExportModal ? mergeExportModal.querySelector(".modal-overlay") : null;
+
+  if (mergeExportBtn) mergeExportBtn.addEventListener("click", openMergeExportModal);
+  if (mergeExportCloseBtn) mergeExportCloseBtn.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
+  if (mergeExportCancelBtn) mergeExportCancelBtn.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
+  if (mergeExportOverlay) mergeExportOverlay.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
+  if (mergeExportDoBtn) mergeExportDoBtn.addEventListener("click", doMergeExport);
 });
 
 async function sendChatMessage() {
@@ -4935,5 +4956,201 @@ async function kanbanManualExtract(url, idx, docType) {
     `;
   } catch (e) {
     container.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
+  }
+}
+
+// ── Merge Export ────────────────────────────────────────────────────────────
+
+function buildMergeDownloadUrl(item) {
+  if (!currentData || !item.docId) return null;
+  const isJP = currentData.office === "JP";
+  const isDE = currentData.office === "DE";
+  if (isDE) return null;
+
+  const isUS = currentData.office === "US";
+  const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+  const encodedDocId = encodeURIComponent(item.docId);
+
+  if (isJP) {
+    const jpDocType = mapJpDocType(item.docCode, item.type);
+    if (!jpDocType) return null;
+    return `/api/jpo/doc/${jpDocType}/${urlDocNum}`;
+  }
+
+  return `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${item.numberOfPages}/${item.docFormat}`;
+}
+
+function openMergeExportModal() {
+  const modal = document.getElementById("merge-export-modal");
+  const list = document.getElementById("merge-export-list");
+  const selectAllCb = document.getElementById("merge-select-all-cb");
+  const countEl = document.getElementById("merge-selected-count");
+  const doBtn = document.getElementById("merge-export-do-btn");
+  const progressEl = document.getElementById("merge-export-progress");
+
+  if (!modal || !list) return;
+
+  // Sort all documents by date
+  const items = [...(kanbanState.documents || [])].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+
+  // Build list
+  let html = "";
+  items.forEach((it, idx) => {
+    const downloadUrl = buildMergeDownloadUrl(it);
+    const canDownload = !!downloadUrl;
+    const typeNames = {
+      "office_action": "审查意见", "response": "答复", "request": "请求",
+      "allowance": "授权", "notification": "通知", "misc": "其他"
+    };
+
+    html += `
+      <div class="merge-export-item ${canDownload ? '' : 'disabled'}" data-idx="${it.idx}" data-date="${escapeHtml(it.date || '')}" data-url="${downloadUrl || ''}">
+        <input type="checkbox" class="merge-item-cb" ${canDownload ? 'checked' : 'disabled'} data-idx="${it.idx}">
+        <div class="merge-export-item-info">
+          <div class="merge-export-item-title">${escapeHtml(it.name || it.desc || it.docCode)}</div>
+          <div class="merge-export-item-meta">
+            <span class="merge-export-item-code">${escapeHtml(it.docCode)}</span>
+            ${it.date ? '<span>' + escapeHtml(it.date) + '</span>' : ''}
+            <span>${typeNames[it.type] || it.type || ''}</span>
+            ${!canDownload ? '<span style="color:#e74c3c">不可下载</span>' : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  list.innerHTML = html;
+
+  // Update select all state
+  const checkboxes = list.querySelectorAll(".merge-item-cb:not(:disabled)");
+  selectAllCb.checked = checkboxes.length > 0 && [...checkboxes].every(cb => cb.checked);
+
+  // Update count
+  updateMergeSelectedCount();
+
+  // Reset progress
+  if (progressEl) progressEl.classList.add("hidden");
+  if (doBtn) { doBtn.disabled = false; doBtn.textContent = "合并导出 PDF"; }
+
+  // Show modal
+  modal.classList.remove("hidden");
+
+  // Bind events
+  selectAllCb.onchange = () => {
+    const cbs = list.querySelectorAll(".merge-item-cb:not(:disabled)");
+    cbs.forEach(cb => { cb.checked = selectAllCb.checked; });
+    updateMergeSelectedCount();
+  };
+
+  list.querySelectorAll(".merge-item-cb").forEach(cb => {
+    cb.onchange = () => {
+      const allCbs = list.querySelectorAll(".merge-item-cb:not(:disabled)");
+      selectAllCb.checked = allCbs.length > 0 && [...allCbs].every(c => c.checked);
+      updateMergeSelectedCount();
+    };
+  });
+}
+
+function updateMergeSelectedCount() {
+  const list = document.getElementById("merge-export-list");
+  const countEl = document.getElementById("merge-selected-count");
+  const doBtn = document.getElementById("merge-export-do-btn");
+  if (!list || !countEl) return;
+
+  const checked = list.querySelectorAll(".merge-item-cb:checked").length;
+  countEl.textContent = `已选 ${checked} 份`;
+  if (doBtn) doBtn.disabled = checked === 0;
+}
+
+async function doMergeExport() {
+  const list = document.getElementById("merge-export-list");
+  const doBtn = document.getElementById("merge-export-do-btn");
+  const progressEl = document.getElementById("merge-export-progress");
+  const progressFill = document.getElementById("merge-progress-fill");
+  const progressText = document.getElementById("merge-progress-text");
+
+  if (!list) return;
+
+  // Collect selected items
+  const selectedItems = [];
+  list.querySelectorAll(".merge-item-cb:checked").forEach(cb => {
+    const row = cb.closest(".merge-export-item");
+    if (!row) return;
+    const idx = parseInt(cb.dataset.idx);
+    const it = kanbanState.documents.find(d => d.idx === idx);
+    if (!it) return;
+    const downloadUrl = row.dataset.url;
+    if (!downloadUrl) return;
+
+    // Extract original title from the name field (e.g. "非最终驳回 (Non-Final Rejection)")
+    const name = it.name || it.desc || it.docCode || "";
+    // Split Chinese and English parts
+    const match = name.match(/^(.+?)\s*\((.+)\)$/);
+    const chineseTitle = match ? match[1] : name;
+    const originalTitle = match ? match[2] : "";
+
+    selectedItems.push({
+      idx,
+      downloadUrl,
+      originalTitle,
+      chineseTitle,
+      date: it.date || "",
+      docCode: it.docCode || "",
+    });
+  });
+
+  if (selectedItems.length === 0) {
+    showError("请至少选择一份文档");
+    return;
+  }
+
+  // Show progress
+  if (doBtn) { doBtn.disabled = true; doBtn.textContent = "导出中..."; }
+  if (progressEl) progressEl.classList.remove("hidden");
+  if (progressFill) progressFill.style.width = "10%";
+  if (progressText) progressText.textContent = `正在下载 ${selectedItems.length} 份文档...`;
+
+  try {
+    const resp = await fetch("/api/merge-pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: selectedItems }),
+    });
+
+    if (progressFill) progressFill.style.width = "80%";
+    if (progressText) progressText.textContent = "正在合并 PDF...";
+
+    const contentType = resp.headers.get("Content-Type") || "";
+
+    if (contentType.includes("application/pdf")) {
+      // Success - download the PDF
+      const blob = await resp.blob();
+      if (progressFill) progressFill.style.width = "100%";
+      if (progressText) progressText.textContent = "导出完成！";
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `merged_patent_docs_${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      // Close modal after a brief delay
+      setTimeout(() => {
+        const modal = document.getElementById("merge-export-modal");
+        if (modal) modal.classList.add("hidden");
+      }, 1500);
+    } else {
+      // Error response
+      const data = await resp.json();
+      throw new Error(data.error || "合并导出失败");
+    }
+  } catch (e) {
+    if (progressText) progressText.textContent = "导出失败: " + e.message;
+    if (progressFill) { progressFill.style.width = "100%"; progressFill.style.background = "#e74c3c"; }
+    showError("合并导出失败: " + e.message);
+  } finally {
+    if (doBtn) { doBtn.disabled = false; doBtn.textContent = "合并导出 PDF"; }
   }
 }

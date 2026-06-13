@@ -26,6 +26,7 @@
     "files": [
       "electron-main.js",
       "extract_pdf.py",
+      "merge_pdf.py",
       {
         "from": "src",
         "to": "src",
@@ -46,7 +47,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "src-tauri/icons/icon.ico"
@@ -54,7 +57,9 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "installerLanguages": ["zh-CN"],
+      "installerLanguages": [
+        "zh-CN"
+      ],
       "language": 2052,
       "perMachine": false,
       "allowElevation": false,
@@ -64,5 +69,9 @@
     },
     "asar": true,
     "asarUnpack": []
+  },
+  "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
+    "pdf-lib": "^1.17.1"
   }
 }

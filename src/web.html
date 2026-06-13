@@ -63,6 +63,7 @@
             <div class="kanban-header">
               <span class="kanban-title">审查状态看板</span>
               <span id="kanban-status" class="kanban-status"></span>
+              <button id="merge-export-btn" class="btn-secondary" style="margin-left:auto;display:none;" title="合并导出审查文档 PDF"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg> 合并导出</button>
             </div>
             <div id="kanban-filter-bar" class="doc-filter-bar"></div>
             <div id="kanban-board" class="kanban-board">
@@ -390,7 +391,33 @@
     </footer>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <div id="merge-export-modal" class="modal hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-content merge-export-modal-content">
+        <div class="modal-header">
+          <h2>合并导出审查文档</h2>
+          <button id="merge-export-close-btn" class="btn-icon">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="merge-export-hint">选择需要合并导出的文档，按文件日期排序，每个文档前将插入带标题的封面页作为分隔。</p>
+          <div class="merge-export-toolbar">
+            <label class="merge-select-all"><input type="checkbox" id="merge-select-all-cb" checked> 全选</label>
+            <span id="merge-selected-count" class="merge-selected-count">已选 0 份</span>
+          </div>
+          <div id="merge-export-list" class="merge-export-list"></div>
+        </div>
+        <div class="modal-footer">
+          <button id="merge-export-cancel-btn" class="btn-secondary">取消</button>
+          <button id="merge-export-do-btn" class="btn-primary" disabled>合并导出 PDF</button>
+        </div>
+        <div id="merge-export-progress" class="merge-export-progress hidden">
+          <div class="merge-progress-bar"><div id="merge-progress-fill" class="merge-progress-fill"></div></div>
+          <span id="merge-progress-text" class="merge-progress-text">准备中...</span>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="scripts/marked.min.js?v=20260612"></script>
   <script src="scripts/docx.umd.js?v=20260612"></script>
   <script src="scripts/FileSaver.min.js?v=20260612"></script>
