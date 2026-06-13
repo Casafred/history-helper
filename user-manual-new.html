@@ -61,7 +61,7 @@
   <div class="subtitle">PatentLens · 用户使用说明书</div>
   <div class="divider-line"></div>
   <div class="version-info">
-    版本 V0.2.0<br/>
+    版本 V0.3.0<br/>
     2026 年 6 月
   </div>
 </div>
@@ -105,6 +105,8 @@
     <li class="level2"><span>5.10 OCR 文字提取</span></li>
     <li class="level2"><span>5.11 全文翻译</span></li>
     <li class="level2"><span>5.12 阅读模式</span></li>
+    <li class="level2"><span>5.13 合并导出 PDF</span></li>
+    <li class="level2"><span>5.14 OCR 选区翻译</span></li>
     <li class="level1"><span>6 常见问题</span></li>
     <li class="level1"><span>7 附录</span></li>
   </ul>
@@ -146,6 +148,10 @@
     <rect x="460" y="340" width="120" height="45" rx="8" fill="#fcffe6" stroke="#a0d911" stroke-width="1.5"/>
     <text x="520" y="368" text-anchor="middle" fill="#a0d911" font-size="11" font-weight="bold">阅读模式</text>
     <line x1="410" y1="225" x2="520" y2="340" stroke="#a0d911" stroke-width="1.5" marker-end="url(#arrow-lime)"/>
+    <rect x="530" y="340" width="130" height="45" rx="8" fill="#f0f5ff" stroke="#597ef7" stroke-width="1.5"/>
+    <text x="595" y="362" text-anchor="middle" fill="#597ef7" font-size="10" font-weight="bold">合并导出 PDF</text>
+    <text x="595" y="376" text-anchor="middle" fill="#597ef7" font-size="8">OCR 选区翻译</text>
+    <line x1="430" y1="225" x2="595" y2="340" stroke="#597ef7" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
     <rect x="170" y="85" width="130" height="45" rx="8" fill="#fff1b8" stroke="#d4b106" stroke-width="1.5"/>
     <text x="235" y="113" text-anchor="middle" fill="#d4b106" font-size="11" font-weight="bold">AI 文档对话</text>
     <line x1="235" y1="130" x2="290" y2="155" stroke="#d4b106" stroke-width="1.5" marker-end="url(#arrow-gold)"/>
@@ -566,6 +572,9 @@
   <li><strong>组合筛选</strong> — 关键词和类型筛选可同时使用，实现精确过滤</li>
 </ul>
 
+<h3>合并导出</h3>
+<p>审查看板标题栏右侧提供"合并导出"按钮，可将多个审查文档 PDF 合并为一个文件，详见 5.13 节。</p>
+
 <h3>卡片操作</h3>
 <ul>
   <li><strong>点击展开</strong> — 点击卡片可展开查看提取的文本内容，再次点击收起</li>
@@ -719,6 +728,7 @@
   <li><strong>PDF 视图</strong> — 点击"PDF 视图"切换到 PDF 渲染模式，支持翻页、缩放、适应宽度</li>
   <li><strong>OCR 提取</strong> — 工具栏"OCR 提取"按钮，对当前 PDF 文档进行版面识别和文字提取（详见 5.10 节）</li>
   <li><strong>翻译</strong> — 工具栏"翻译"按钮，全文合并翻译，自动先 OCR 再翻译（详见 5.11 节）</li>
+  <li><strong>OCR 选区翻译</strong> — 在 PDF 视图中框选 OCR 文本块后，可翻译选中区域（详见 5.14 节）</li>
   <li><strong>AI 对话</strong> — 工具栏"AI 对话"按钮，基于当前文档与 AI 实时对话</li>
   <li><strong>阅读模式</strong> — 点击翻译或 AI 对话时自动进入，左侧文件列表收起，右侧 Tab 面板显示翻译/AI 对话（详见 5.12 节）</li>
   <li><strong>半屏模式</strong> — 点击"半屏"按钮，阅读器下拉固定为半屏对照模式</li>
@@ -945,6 +955,105 @@
 
 <div class="tip-box"><div class="tip-title">提示</div>阅读模式下，PDF 阅读器与右侧面板采用 flex 布局，完全分离不遮挡，确保阅读体验流畅。左侧文件列表收起时带有过渡动画，退出阅读模式后自动恢复。</div>
 
+<h2>5.13 合并导出 PDF</h2>
+<p>合并导出功能可将审查看板中多个文档的 PDF 合并为一个文件，每个文档前自动插入封面页作为分隔，方便整体阅读和归档。</p>
+
+<div class="diagram">
+  <svg width="520" height="80" viewBox="0 0 520 80">
+    <rect x="5" y="18" width="100" height="40" rx="6" fill="#2d6aa6"/><text x="55" y="43" text-anchor="middle" fill="white" font-size="10" font-weight="bold">审查看板</text>
+    <text x="120" y="43" text-anchor="middle" fill="#2d6aa6" font-size="16">&#x2192;</text>
+    <rect x="135" y="13" width="100" height="50" rx="6" fill="#e8f4fd" stroke="#1890FF" stroke-width="1.5"/><text x="185" y="33" text-anchor="middle" fill="#1890FF" font-size="9" font-weight="bold">勾选文档</text><text x="185" y="48" text-anchor="middle" fill="#1890FF" font-size="8">搜索筛选</text>
+    <text x="250" y="43" text-anchor="middle" fill="#2d6aa6" font-size="16">&#x2192;</text>
+    <rect x="265" y="13" width="100" height="50" rx="6" fill="#fff7e6" stroke="#fa8c16" stroke-width="1.5"/><text x="315" y="33" text-anchor="middle" fill="#fa8c16" font-size="9" font-weight="bold">合并导出</text><text x="315" y="48" text-anchor="middle" fill="#fa8c16" font-size="8">自动封面页</text>
+    <text x="380" y="43" text-anchor="middle" fill="#2d6aa6" font-size="16">&#x2192;</text>
+    <rect x="395" y="18" width="120" height="40" rx="6" fill="#f6ffed" stroke="#52c41a" stroke-width="1.5"/><text x="455" y="43" text-anchor="middle" fill="#52c41a" font-size="10" font-weight="bold">下载合并 PDF</text>
+  </svg>
+  <div class="diagram-caption">图 5-13 合并导出 PDF 流程</div>
+</div>
+
+<h3>操作步骤</h3>
+<ol class="steps">
+  <li class="step-item"><div class="step-content">在审查看板标题栏点击<strong>"合并导出"</strong>按钮，打开文档选择弹窗</div></li>
+  <li class="step-item"><div class="step-content">弹窗中列出所有可下载文档，按日期<strong>倒序排列</strong>（最新在前）</div></li>
+  <li class="step-item"><div class="step-content">使用<strong>搜索框</strong>输入关键词快速筛选文档（支持文档名称、代码、日期等多字段匹配）</div></li>
+  <li class="step-item"><div class="step-content">勾选需要导出的文档，支持<strong>全选/取消全选</strong>快捷操作</div></li>
+  <li class="step-item"><div class="step-content">点击<strong>"合并导出 PDF"</strong>按钮，系统自动下载并合并所选文档</div></li>
+</ol>
+
+<h3>封面页</h3>
+<p>合并后的 PDF 中，每个文档前会自动插入一页封面，包含以下信息：</p>
+<table>
+  <tr><th>封面元素</th><th>说明</th></tr>
+  <tr><td>文档标题</td><td>原文档的英文标题（如 Non-Final Rejection）</td></tr>
+  <tr><td>中文标题</td><td>自动翻译的中文标题（如 非最终驳回）</td></tr>
+  <tr><td>文档代码</td><td>文档类型代码（如 CTNF）</td></tr>
+  <tr><td>日期</td><td>文档日期</td></tr>
+  <tr><td>页眉标记</td><td><em><strong>by PatentLens</strong></em> 斜体加粗艺术字，标识生成工具</td></tr>
+</table>
+
+<div class="diagram">
+  <svg width="300" height="380" viewBox="0 0 300 380">
+    <rect x="20" y="10" width="260" height="360" rx="4" fill="#fff" stroke="#ddd" stroke-width="1.5"/>
+    <text x="260" y="35" text-anchor="end" fill="#4a90d9" font-size="10" font-style="italic" font-weight="bold">by PatentLens</text>
+    <line x1="40" y1="50" x2="260" y2="50" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="150" y="100" text-anchor="middle" fill="#1a3a5c" font-size="14" font-weight="bold">Non-Final Rejection</text>
+    <text x="150" y="130" text-anchor="middle" fill="#2d6aa6" font-size="12">非最终驳回</text>
+    <rect x="100" y="155" width="100" height="24" rx="12" fill="#fde8e8" stroke="#e74c3c" stroke-width="1"/><text x="150" y="171" text-anchor="middle" fill="#e74c3c" font-size="10" font-weight="bold">CTNF</text>
+    <text x="150" y="210" text-anchor="middle" fill="#888" font-size="10">2025-01-14</text>
+    <line x1="80" y1="240" x2="220" y2="240" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="150" y="280" text-anchor="middle" fill="#ccc" font-size="9">PatentLens 合并导出</text>
+    <text x="150" y="300" text-anchor="middle" fill="#ccc" font-size="8">自动生成封面页</text>
+  </svg>
+  <div class="diagram-caption">图 5-14 合并导出封面页示意</div>
+</div>
+
+<h3>搜索筛选</h3>
+<p>文档选择弹窗顶部提供搜索输入框，支持以下筛选方式：</p>
+<ul>
+  <li><strong>关键词搜索</strong> — 输入关键词实时过滤，匹配文档名称、代码、描述、日期等字段</li>
+  <li><strong>多次搜索</strong> — 可反复修改搜索词，分别勾选不同搜索结果中的文档</li>
+  <li><strong>清空搜索</strong> — 清空搜索框恢复显示全部文档，已勾选状态保持不变</li>
+</ul>
+
+<div class="tip-box"><div class="tip-title">提示</div>合并导出功能不支持 DE（德国）专利局的文档，因为该专利局不提供 PDF 下载接口。DE 专利的"合并导出"按钮会自动隐藏。</div>
+
+<h2>5.14 OCR 选区翻译</h2>
+<p>OCR 选区翻译功能允许用户在 PDF 视图中选择特定的 OCR 文本块，仅翻译选中部分，而非整篇文档。适用于只需翻译特定段落或图表说明的场景。</p>
+
+<div class="diagram">
+  <svg width="520" height="80" viewBox="0 0 520 80">
+    <rect x="5" y="18" width="90" height="40" rx="6" fill="#13c2c2"/><text x="50" y="43" text-anchor="middle" fill="white" font-size="10" font-weight="bold">OCR 提取</text>
+    <text x="110" y="43" text-anchor="middle" fill="#2d6aa6" font-size="16">&#x2192;</text>
+    <rect x="125" y="13" width="100" height="50" rx="6" fill="#e6f7ff" stroke="#13c2c2" stroke-width="1.5"/><text x="175" y="33" text-anchor="middle" fill="#13c2c2" font-size="9" font-weight="bold">框选文本块</text><text x="175" y="48" text-anchor="middle" fill="#13c2c2" font-size="8">点击/拖选</text>
+    <text x="240" y="43" text-anchor="middle" fill="#2d6aa6" font-size="16">&#x2192;</text>
+    <rect x="255" y="13" width="100" height="50" rx="6" fill="#fff0f6" stroke="#eb2f96" stroke-width="1.5"/><text x="305" y="33" text-anchor="middle" fill="#eb2f96" font-size="9" font-weight="bold">翻译选中块</text><text x="305" y="48" text-anchor="middle" fill="#eb2f96" font-size="8">右键/工具栏</text>
+    <text x="370" y="43" text-anchor="middle" fill="#2d6aa6" font-size="16">&#x2192;</text>
+    <rect x="385" y="18" width="130" height="40" rx="6" fill="#f6ffed" stroke="#52c41a" stroke-width="1.5"/><text x="450" y="43" text-anchor="middle" fill="#52c41a" font-size="10" font-weight="bold">对照翻译面板</text>
+  </svg>
+  <div class="diagram-caption">图 5-15 OCR 选区翻译流程</div>
+</div>
+
+<h3>操作方式</h3>
+<ol class="steps">
+  <li class="step-item"><div class="step-content">在溯源对照阅读器中，先对文档执行<strong>OCR 提取</strong>（PDF 视图会显示 OCR 识别的文本块色块）</div></li>
+  <li class="step-item"><div class="step-content"><strong>单击</strong>某个文本块色块选中它，或<strong>拖拽框选</strong>多个文本块</div></li>
+  <li class="step-item"><div class="step-content">选中后，底部出现操作栏，显示"已选 N 块"，提供<strong>"翻译"</strong>和<strong>"清除"</strong>按钮</div></li>
+  <li class="step-item"><div class="step-content">也可<strong>右键点击</strong>文本块，在上下文菜单中选择"翻译此文本块"或"翻译已选 N 块"</div></li>
+  <li class="step-item"><div class="step-content">翻译结果自动显示在右侧<strong>对照翻译面板</strong>中，进入阅读模式</div></li>
+</ol>
+
+<h3>选区操作</h3>
+<table>
+  <tr><th>操作</th><th>方式</th><th>说明</th></tr>
+  <tr><td>选中单个块</td><td>单击 OCR 色块</td><td>再次单击取消选中</td></tr>
+  <tr><td>框选多个块</td><td>在 PDF 页面上拖拽矩形</td><td>矩形范围内的文本块被选中</td></tr>
+  <tr><td>追加选择</td><td>按住 Ctrl/Cmd 键单击</td><td>在已有选区基础上追加文本块</td></tr>
+  <tr><td>清除选区</td><td>点击"清除"按钮</td><td>清除所有已选文本块</td></tr>
+  <tr><td>翻译选区</td><td>点击"翻译"按钮或右键菜单</td><td>翻译所有选中的文本块内容</td></tr>
+</table>
+
+<div class="tip-box"><div class="tip-title">提示</div>OCR 选区翻译使用与全文翻译相同的翻译模型配置，翻译结果会缓存，重复翻译相同选区时直接使用缓存，无需重复调用 API。选区翻译会自动进入阅读模式，左侧文件列表收起，右侧显示对照翻译面板。</div>
+
 <!-- ==================== 第6章 常见问题 ==================== -->
 <h1 class="page-break">6 常见问题</h1>
 
@@ -1056,7 +1165,7 @@
     <line x1="240" y1="438" x2="240" y2="458" stroke="#2d6aa6" stroke-width="1.5" marker-end="url(#arr)"/>
     <rect x="155" y="458" width="170" height="36" rx="6" fill="#f0f5ff" stroke="#597ef7" stroke-width="1.5"/><text x="240" y="481" text-anchor="middle" fill="#597ef7" font-size="10" font-weight="bold">悬浮球继续对话</text>
     <line x1="240" y1="494" x2="240" y2="514" stroke="#2d6aa6" stroke-width="1.5" marker-end="url(#arr)"/>
-    <rect x="130" y="514" width="220" height="36" rx="6" fill="#f9f0ff" stroke="#722ed1" stroke-width="1.5"/><text x="240" y="537" text-anchor="middle" fill="#722ed1" font-size="10" font-weight="bold">导出 Word（含概览信息表格）</text>
+    <rect x="130" y="514" width="220" height="36" rx="6" fill="#f9f0ff" stroke="#722ed1" stroke-width="1.5"/><text x="240" y="537" text-anchor="middle" fill="#722ed1" font-size="10" font-weight="bold">导出 Word / 合并导出 PDF</text>
     <defs><marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2d6aa6"/></marker></defs>
   </svg>
   <div class="diagram-caption">图 7-1 完整操作流程图</div>
@@ -1115,6 +1224,15 @@
 </div>
 
 <h2>7.5 版本更新清单</h2>
+
+<h3>V0.3.0 (2026-06)</h3>
+<table>
+  <tr><th>字段</th><th>内容</th></tr>
+  <tr><td>变更类型</td><td>功能更新</td></tr>
+  <tr><td>影响章节</td><td>1.2、5.4、5.7、5.13（新增）、5.14（新增）、7.1、7.5</td></tr>
+  <tr><td>变更说明</td><td>新增合并导出 PDF 功能（支持搜索筛选、封面页含中英文标题和 by PatentLens 页眉、日期倒序排列）；新增 OCR 选区翻译功能（支持单击/框选/右键翻译特定文本块）；补充 US 文档中文翻译映射（Preliminary Amendment、Welcome Letter 等 12 项）；修复 AI 溯源链接跳转 PDF 阅读器时页面崩坏和缩放后 OCR 块消失的竞态条件问题</td></tr>
+  <tr><td>图示更新</td><td>新增图 5-13、5-14、5-15</td></tr>
+</table>
 
 <h3>V0.2.0 (2026-06)</h3>
 <table>
