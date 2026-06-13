@@ -2845,7 +2845,7 @@ async function renderPdfView(idx) {
     const containerWidth = readerPdfContainer.clientWidth - 32;
     const firstPage = await pdfDoc.getPage(1);
     const viewport = firstPage.getViewport({ scale: 1.0 });
-    pdfViewState.baseScale = containerWidth / viewport.width;
+    pdfViewState.baseScale = Math.min(containerWidth / viewport.width, 1.5);
     pdfViewState.scale = pdfViewState.baseScale;
 
     updatePdfToolbar();
