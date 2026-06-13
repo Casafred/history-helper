@@ -414,24 +414,41 @@ async function mergePdfDocs(req, res) {
       return;
     }
 
+    // Write items JSON to a temp file to avoid command line length limits and encoding issues
+    const itemsJsonPath = path.join(tempDir, `${mergeId}_items.json`);
+    fs.writeFileSync(itemsJsonPath, JSON.stringify(mergeItems), "utf-8");
+
     const outputPath = path.join(tempDir, `${mergeId}_merged.pdf`);
+
+    // Resolve merge_pdf.py path - handle asar unpacking
+    let scriptPath = path.join(__dirname, "merge_pdf.py");
+    // If running from asar, the unpacked files are in app.asar.unpacked
+    if (scriptPath.includes(".asar" + path.sep)) {
+      scriptPath = scriptPath.replace(".asar" + path.sep, ".asar.unpacked" + path.sep);
+    }
+
     const mergeArgs = [
-      path.join(__dirname, "merge_pdf.py"),
+      scriptPath,
       "--output", outputPath,
-      "--items", JSON.stringify(mergeItems),
+      "--items-file", itemsJsonPath,
     ];
 
+    // Use "python" on Windows, "python3" on other platforms
+    const pythonCmd = process.platform === "win32" ? "python" : "python3";
+
     const mergeResult = await new Promise((resolve) => {
-      execFile("python3", mergeArgs, { maxBuffer: 50 * 1024 * 1024, timeout: 120000 }, (err, stdout, stderr) => {
+      execFile(pythonCmd, mergeArgs, { maxBuffer: 50 * 1024 * 1024, timeout: 120000 }, (err, stdout, stderr) => {
+        // Clean up items JSON file
+        try { fs.unlinkSync(itemsJsonPath); } catch {}
         if (err) {
           console.error("Merge error:", stderr || err.message);
-          resolve({ success: false, error: stderr || err.message });
+          resolve({ success: false, error: (stderr || err.message).substring(0, 500) });
           return;
         }
         try {
           resolve(JSON.parse(stdout));
         } catch {
-          resolve({ success: false, error: stdout });
+          resolve({ success: false, error: stdout.substring(0, 500) });
         }
       });
     });

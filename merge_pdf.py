@@ -191,10 +191,19 @@ def merge_pdfs(items, output_path):
 def main():
     parser = argparse.ArgumentParser(description='Merge PDFs with cover pages')
     parser.add_argument('--output', required=True, help='Output PDF path')
-    parser.add_argument('--items', required=True, help='JSON array of items')
+    parser.add_argument('--items', required=False, help='JSON array of items (inline)')
+    parser.add_argument('--items-file', required=False, help='Path to JSON file containing items array')
     args = parser.parse_args()
 
-    items = json.loads(args.items)
+    if args.items_file:
+        with open(args.items_file, 'r', encoding='utf-8') as f:
+            items = json.load(f)
+    elif args.items:
+        items = json.loads(args.items)
+    else:
+        print("Error: Either --items or --items-file must be provided", file=sys.stderr)
+        sys.exit(1)
+
     merge_pdfs(items, args.output)
     print(json.dumps({"success": True, "output": args.output, "count": len(items)}))
 

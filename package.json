@@ -68,7 +68,10 @@
       "artifactName": "${productName}-${version}-setup.${ext}"
     },
     "asar": true,
-    "asarUnpack": []
+    "asarUnpack": [
+      "extract_pdf.py",
+      "merge_pdf.py"
+    ]
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",
