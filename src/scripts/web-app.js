@@ -122,6 +122,7 @@ let pdfViewState = {
   selecting: false,
   selectStart: null,
   selectEnd: null,
+  traceJumpPending: false,
 };
 
 let chatHistory = [];
@@ -2487,56 +2488,70 @@ function onTraceClick(blockIdStr) {
   if (!pdfViewState.active) {
     togglePdfView();
   }
-  // Set pending highlight before selectReaderDoc so renderPdfView can apply it
-  // after async PDF rendering completes
-  if (pdfViewState.active) {
-    pdfViewState.pendingHighlight = primaryBlockId;
-    pdfViewState.pendingHighlightRange = blockIds;
-  }
+  // Always set pending highlight - will be applied after renderPdfView completes
+  // (whether from this call or from auto-OCR re-render)
+  pdfViewState.pendingHighlight = primaryBlockId;
+  pdfViewState.pendingHighlightRange = blockIds;
+  // Mark that this is a trace jump to prevent auto-OCR from interfering
+  pdfViewState.traceJumpPending = true;
+
   selectReaderDoc(info.docIdx);
+
+  // Fallback: try to highlight after a delay if PDF was already rendered
+  // (covers the case where renderPdfView already completed before we get here)
   setTimeout(() => {
-    // If PDF view is active, highlight the overlay block
-    if (pdfViewState.active) {
-      highlightPdfBlock(primaryBlockId);
-      // Also highlight range blocks with a lighter highlight
-      blockIds.forEach(id => {
-        if (id !== primaryBlockId) {
-          const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
-          if (overlay) overlay.classList.add("highlight-range");
-        }
-      });
+    if (pdfViewState.active && !pdfViewState.pendingHighlight) {
+      // pendingHighlight was already consumed by renderPdfView, highlight is done
       return;
     }
-
-    const md = kanbanState.extractions[info.docIdx];
-    if (!md) return;
-    const content = md.markdown || md.text || "";
-    const blocks = md.blocks || [];
-    const targetBlock = blocks.find(b => b.block_id === primaryBlockId);
-    if (targetBlock && targetBlock.content) {
-      const snippet = targetBlock.content.substring(0, 80);
-      const el = readerContent.querySelector(`[data-block-id="${primaryBlockId}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        el.classList.add("trace-highlight");
-        setTimeout(() => el.classList.remove("trace-highlight"), 3000);
-        return;
+    // If pendingHighlight is still set, try direct highlight
+    if (pdfViewState.active) {
+      const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${primaryBlockId}"]`);
+      if (overlay) {
+        highlightPdfBlock(primaryBlockId);
+        blockIds.forEach(id => {
+          if (id !== primaryBlockId) {
+            const el = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
+            if (el) el.classList.add("highlight-range");
+          }
+        });
+        pdfViewState.pendingHighlight = null;
+        pdfViewState.pendingHighlightRange = null;
+        pdfViewState.traceJumpPending = false;
       }
     }
-    const traceEl = document.createElement("div");
-    traceEl.className = "trace-locator";
-    traceEl.innerHTML = `
-      <div class="trace-locator-header">
-        <span class="trace-locator-id">${escapeHtml(primaryBlockId)}</span>
-        <span class="trace-locator-page">第 ${info.page} 页</span>
-        <button class="trace-locator-close" onclick="this.parentElement.parentElement.remove()">×</button>
-      </div>
-      <div class="trace-locator-content">${escapeHtml((info.content || "").substring(0, 300))}${info.content && info.content.length > 300 ? "..." : ""}</div>
-      ${info.bbox ? '<div class="trace-locator-bbox">区域坐标: [' + info.bbox.join(", ") + "]</div>" : ""}
-    `;
-    readerContent.insertBefore(traceEl, readerContent.firstChild);
-    traceEl.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, 500);
+
+    // Text view fallback
+    if (!pdfViewState.active) {
+      const md = kanbanState.extractions[info.docIdx];
+      if (!md) return;
+      const content = md.markdown || md.text || "";
+      const blocks = md.blocks || [];
+      const targetBlock = blocks.find(b => b.block_id === primaryBlockId);
+      if (targetBlock && targetBlock.content) {
+        const el = readerContent.querySelector(`[data-block-id="${primaryBlockId}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.add("trace-highlight");
+          setTimeout(() => el.classList.remove("trace-highlight"), 3000);
+          return;
+        }
+      }
+      const traceEl = document.createElement("div");
+      traceEl.className = "trace-locator";
+      traceEl.innerHTML = `
+        <div class="trace-locator-header">
+          <span class="trace-locator-id">${escapeHtml(primaryBlockId)}</span>
+          <span class="trace-locator-page">第 ${info.page} 页</span>
+          <button class="trace-locator-close" onclick="this.parentElement.parentElement.remove()">×</button>
+        </div>
+        <div class="trace-locator-content">${escapeHtml((info.content || "").substring(0, 300))}${info.content && info.content.length > 300 ? "..." : ""}</div>
+        ${info.bbox ? '<div class="trace-locator-bbox">区域坐标: [' + info.bbox.join(", ") + "]</div>" : ""}
+      `;
+      readerContent.insertBefore(traceEl, readerContent.firstChild);
+      traceEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, 800);
 }
 
 function renderTimeline(data) {
@@ -2837,11 +2852,13 @@ async function renderPdfView(idx) {
     await renderAllPdfPages(pdfDoc, blocks, pageDimensions, pdfViewState.scale);
 
     // Apply pending highlight from onTraceClick if set
-    if (pdfViewState.pendingHighlight) {
+    // Only consume pendingHighlight if blocks are available (overlay elements exist)
+    if (pdfViewState.pendingHighlight && blocks.length > 0) {
       const blockId = pdfViewState.pendingHighlight;
       const rangeIds = pdfViewState.pendingHighlightRange || [];
       pdfViewState.pendingHighlight = null;
       pdfViewState.pendingHighlightRange = null;
+      pdfViewState.traceJumpPending = false;
       highlightPdfBlock(blockId);
       rangeIds.forEach(id => {
         if (id !== blockId) {
@@ -2852,12 +2869,17 @@ async function renderPdfView(idx) {
     }
 
     // Auto-OCR: if no extraction exists and autoOcr is enabled, trigger OCR
-    if (blocks.length === 0) {
+    // But skip if this is a trace jump (document should already have OCR data from analysis)
+    if (blocks.length === 0 && !pdfViewState.traceJumpPending) {
       const config = window.AI.loadAIConfig();
       const ocrConfig = window.AI.getOCRConfig(config);
       if (ocrConfig.autoOcr !== false) {
         ocrPdf(); // fire-and-forget, will re-render on completion
       }
+    }
+    // Clear trace jump flag after renderPdfView has processed it
+    if (pdfViewState.traceJumpPending && blocks.length > 0) {
+      pdfViewState.traceJumpPending = false;
     }
   } catch (e) {
     pdfViewState.pendingHighlight = null;
@@ -4320,6 +4342,7 @@ document.addEventListener("DOMContentLoaded", () => {
       pdfViewState.pendingHighlightRange = null;
       pdfViewState.selectedBlockIds = [];
       pdfViewState.selecting = false;
+      pdfViewState.traceJumpPending = false;
       // Reset docked state
       const content = document.querySelector(".reader-modal-content");
       if (content) content.classList.remove("docked");
@@ -4359,6 +4382,7 @@ document.addEventListener("DOMContentLoaded", () => {
         pdfViewState.pendingHighlightRange = null;
         pdfViewState.selectedBlockIds = [];
         pdfViewState.selecting = false;
+        pdfViewState.traceJumpPending = false;
         if (content) content.classList.remove("docked");
         if (readerFullscreenBtn) readerFullscreenBtn.classList.add("hidden");
         if (readerDockBtn) readerDockBtn.classList.remove("hidden");
