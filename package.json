@@ -33,6 +33,8 @@
         "filter": [
           "web.html",
           "icon.png",
+          "PATENTLENS.webp",
+          "99c2c4d6f830e85591f804b5d781cd85.gif",
           "styles/**",
           "scripts/marked.min.js",
           "scripts/docx.umd.js",

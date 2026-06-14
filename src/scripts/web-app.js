@@ -4301,6 +4301,29 @@ async function exportToWord() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Theme toggle
+  const themeToggleBtn = document.getElementById("theme-toggle-btn");
+  const savedTheme = localStorage.getItem("patentlens-theme") || "dark";
+  document.documentElement.setAttribute("data-theme", savedTheme);
+  function updateThemeIcon(theme) {
+    const darkIcon = themeToggleBtn ? themeToggleBtn.querySelector(".theme-icon-dark") : null;
+    const lightIcon = themeToggleBtn ? themeToggleBtn.querySelector(".theme-icon-light") : null;
+    if (darkIcon && lightIcon) {
+      darkIcon.style.display = theme === "dark" ? "" : "none";
+      lightIcon.style.display = theme === "light" ? "" : "none";
+    }
+  }
+  updateThemeIcon(savedTheme);
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme") || "dark";
+      const next = current === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      localStorage.setItem("patentlens-theme", next);
+      updateThemeIcon(next);
+    });
+  }
+
   loadAISettingsToForm();
 
   // ── 监听浏览器插件发送的数据（通过 Electron 主进程注入） ──
@@ -4658,6 +4681,15 @@ document.addEventListener("DOMContentLoaded", () => {
   if (mergeExportCancelBtn) mergeExportCancelBtn.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
   if (mergeExportOverlay) mergeExportOverlay.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
   if (mergeExportDoBtn) mergeExportDoBtn.addEventListener("click", doMergeExport);
+
+  // Splash screen
+  setTimeout(() => {
+    const splash = document.getElementById("splash-screen");
+    if (splash) {
+      splash.style.opacity = "0";
+      setTimeout(() => splash.remove(), 500);
+    }
+  }, 1800);
 });
 
 async function sendChatMessage() {
