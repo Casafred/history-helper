@@ -269,6 +269,12 @@ searchBtn.addEventListener("click", async () => {
   const input = patentInput.value.trim();
   if (!input) return;
 
+  // 退出首页居中模式，平滑过渡到紧凑布局
+  const appEl = document.getElementById("app");
+  if (appEl && appEl.classList.contains("home-mode")) {
+    appEl.classList.remove("home-mode");
+  }
+
   const pn = parsePatentNumber(input);
   if (!pn) { showError("无法识别专利号格式: " + input); return; }
 
@@ -4331,10 +4337,14 @@ document.addEventListener("DOMContentLoaded", () => {
     if (event.source !== window) return;
     if (event.data && event.data.type === "extension-data") {
       console.log("[Extension] 收到插件数据:", event.data.payload);
+      const appEl = document.getElementById("app");
+      if (appEl) appEl.classList.remove("home-mode");
       handleExtensionData(event.data.payload);
     }
     if (event.data && event.data.type === "extension-analyze") {
       console.log("[Extension] 收到分析请求:", event.data.payload);
+      const appEl = document.getElementById("app");
+      if (appEl) appEl.classList.remove("home-mode");
       handleExtensionAnalyze(event.data.payload);
     }
   });

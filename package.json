@@ -55,7 +55,7 @@
           ]
         }
       ],
-      "icon": "src-tauri/icons/icon.ico"
+      "icon": "src/icon.png"
     },
     "nsis": {
       "oneClick": false,
