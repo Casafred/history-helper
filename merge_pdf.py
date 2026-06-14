@@ -46,7 +46,7 @@ COLOR_LIGHT = HexColor('#888888')
 COLOR_LINE = HexColor('#cccccc')
 
 
-def create_cover_page(output_path, original_title, chinese_title, date, doc_code, index, total):
+def create_cover_page(output_path, original_title, chinese_title, date, doc_code, index, total, logo_path=None):
     """Create a single cover page PDF."""
     c = canvas.Canvas(output_path, pagesize=A4)
 
@@ -54,11 +54,27 @@ def create_cover_page(output_path, original_title, chinese_title, date, doc_code
     c.setFillColor(COLOR_PRIMARY)
     c.rect(0, PAGE_H - 80, PAGE_W, 80, fill=1, stroke=0)
 
+    # Logo in top-left of accent bar
+    logo_drawn = False
+    if logo_path and os.path.exists(logo_path):
+        try:
+            from reportlab.lib.utils import ImageReader
+            logo_img = ImageReader(logo_path)
+            iw, ih = logo_img.getSize()
+            # Fit logo into 36x36 area within the top bar
+            max_size = 36
+            scale = min(max_size / iw, max_size / ih)
+            lw, lh = iw * scale, ih * scale
+            c.drawImage(logo_img, 40, PAGE_H - 58, width=lw, height=lh, mask='auto')
+            logo_drawn = True
+        except Exception:
+            pass
+
     # Document index badge
     c.setFillColor(HexColor('#ffffff'))
     c.setFont('Helvetica-Bold', 14)
-    badge_text = f"Document {index} / {total}"
-    c.drawString(40, PAGE_H - 35, badge_text)
+    badge_x = 84 if logo_drawn else 40
+    c.drawString(badge_x, PAGE_H - 35, f"Document {index} / {total}")
 
     # Date in top bar
     if date:
@@ -144,7 +160,7 @@ def _draw_wrapped_text(c, text, x, y, max_width, font_size, font_name):
     return y
 
 
-def merge_pdfs(items, output_path):
+def merge_pdfs(items, output_path, logo_path=None):
     """Merge multiple PDFs with cover pages into a single PDF."""
     writer = PdfWriter()
     total = len(items)
@@ -165,7 +181,8 @@ def merge_pdfs(items, output_path):
             date=date,
             doc_code=doc_code,
             index=i + 1,
-            total=total
+            total=total,
+            logo_path=logo_path
         )
 
         # Add cover page
@@ -200,6 +217,7 @@ def main():
     parser.add_argument('--output', required=True, help='Output PDF path')
     parser.add_argument('--items', required=False, help='JSON array of items (inline)')
     parser.add_argument('--items-file', required=False, help='Path to JSON file containing items array')
+    parser.add_argument('--logo', required=False, help='Path to logo image for cover pages')
     args = parser.parse_args()
 
     if args.items_file:
@@ -211,7 +229,7 @@ def main():
         print("Error: Either --items or --items-file must be provided", file=sys.stderr)
         sys.exit(1)
 
-    merge_pdfs(items, args.output)
+    merge_pdfs(items, args.output, logo_path=args.logo)
     print(json.dumps({"success": True, "output": args.output, "count": len(items)}))
 
 

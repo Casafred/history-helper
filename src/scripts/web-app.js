@@ -3942,6 +3942,22 @@ async function exportToWord() {
     return;
   }
 
+  // Load logo image for header
+  let logoBase64 = null;
+  try {
+    const logoResp = await fetch("PATENTLENSNEWLOGO.png");
+    if (logoResp.ok) {
+      const logoBlob = await logoResp.blob();
+      logoBase64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result.split(",")[1]);
+        reader.readAsDataURL(logoBlob);
+      });
+    }
+  } catch (e) {
+    // Logo loading failed, continue without it
+  }
+
   // ── Inline markdown parser (recursive) ──
   function parseInlineMarkdown(text) {
     const runs = [];
@@ -4113,7 +4129,22 @@ async function exportToWord() {
 
   const children = [];
 
-  // ── Title ──
+  // ── Logo + Title ──
+  if (logoBase64) {
+    children.push(
+      new docx.Paragraph({
+        children: [
+          new docx.ImageRun({
+            data: Uint8Array.from(atob(logoBase64), c => c.charCodeAt(0)),
+            transformation: { width: 60, height: 60 },
+            type: "png",
+          }),
+        ],
+        spacing: { after: 100 },
+      })
+    );
+  }
+
   children.push(
     new docx.Paragraph({
       children: [new docx.TextRun({ text: "专利审查历史分析报告", bold: true, size: 36, font: "Microsoft YaHei" })],
@@ -4281,13 +4312,26 @@ async function exportToWord() {
   }
 
   // ── Create document with header ──
+  const headerChildren = [];
+  if (logoBase64) {
+    headerChildren.push(
+      new docx.ImageRun({
+        data: Uint8Array.from(atob(logoBase64), c => c.charCodeAt(0)),
+        transformation: { width: 18, height: 18 },
+        type: "png",
+      })
+    );
+    headerChildren.push(new docx.TextRun({ text: "  ", size: 16 }));
+  }
+  headerChildren.push(new docx.TextRun({ text: "由PatentLens工具制作", italics: true, size: 16, color: "999999", font: "Microsoft YaHei" }));
+
   const doc = new docx.Document({
     sections: [{
       headers: {
         default: new docx.Header({
           children: [new docx.Paragraph({
             alignment: docx.AlignmentType.RIGHT,
-            children: [new docx.TextRun({ text: "由PatentLens工具制作", italics: true, size: 16, color: "999999", font: "Microsoft YaHei" })],
+            children: headerChildren,
           })],
         }),
       },

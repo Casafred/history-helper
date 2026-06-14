@@ -427,10 +427,17 @@ async function mergePdfDocs(req, res) {
       scriptPath = scriptPath.replace(".asar" + path.sep, ".asar.unpacked" + path.sep);
     }
 
+    // Resolve logo path for cover pages
+    let logoPath = path.join(__dirname, "src", "PATENTLENSNEWLOGO.png");
+    if (logoPath.includes(".asar" + path.sep)) {
+      logoPath = logoPath.replace(".asar" + path.sep, ".asar.unpacked" + path.sep);
+    }
+
     const mergeArgs = [
       scriptPath,
       "--output", outputPath,
       "--items-file", itemsJsonPath,
+      "--logo", logoPath,
     ];
 
     // Use "python" on Windows, "python3" on other platforms
