@@ -4710,14 +4710,14 @@ document.addEventListener("DOMContentLoaded", () => {
   if (mergeExportOverlay) mergeExportOverlay.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
   if (mergeExportDoBtn) mergeExportDoBtn.addEventListener("click", doMergeExport);
 
-  // Splash screen
+  // Splash screen - wait for GIF animation to complete at least one loop (~4.5s)
   setTimeout(() => {
     const splash = document.getElementById("splash-screen");
     if (splash) {
       splash.style.opacity = "0";
       setTimeout(() => splash.remove(), 500);
     }
-  }, 1800);
+  }, 4500);
 });
 
 async function sendChatMessage() {
