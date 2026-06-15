@@ -1965,6 +1965,54 @@ body {
   font-size: 12px;
 }
 
+.ai-manual-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ai-manual-toolbar .merge-search-input {
+  flex: 1;
+}
+
+.ai-manual-toolbar .ai-manual-select-all {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+  flex-shrink: 0;
+}
+
+.manual-selected-summary {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.manual-selected-summary .summary-label {
+  font-weight: 600;
+  color: var(--accent);
+  margin-right: 4px;
+}
+
+.manual-selected-summary .summary-empty {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.manual-selected-summary .summary-sep {
+  color: var(--text-tertiary);
+  margin: 0 2px;
+}
+
 /* ── PDF Viewer ── */
 .reader-pdf-view {
   display: flex;

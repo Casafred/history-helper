@@ -403,6 +403,10 @@ searchBtn.addEventListener("click", async () => {
   if (citedRefsManualBtn) citedRefsManualBtn.disabled = false;
   const manualSelectBtn = document.getElementById("kanban-manual-select-btn");
   if (manualSelectBtn) manualSelectBtn.disabled = false;
+  // Auto-expand review manual selection panel when documents are loaded
+  if (typeof buildReviewManualSelectPanel === "function") {
+    try { buildReviewManualSelectPanel(); } catch (e) { console.error("auto-expand review panel:", e); }
+  }
   resultSection.classList.remove("hidden");
   searchBtn.disabled = false;
   loading.classList.add("hidden");
@@ -1783,6 +1787,11 @@ if (citedRefsAbortBtn) {
 
 // Manual select button - now in HTML
 const manualSelectBtn = document.getElementById("kanban-manual-select-btn");
+if (manualSelectBtn) {
+  manualSelectBtn.addEventListener("click", () => {
+    buildReviewManualSelectPanel();
+  });
+}
 
 // Cited refs manual select button - now in HTML
 const citedRefsManualBtn = document.getElementById("cited-refs-manual-btn");
@@ -1797,17 +1806,19 @@ if (citedRefsManualBtn) {
       abortActiveProcess();
     }
 
-    manualSelectPanel.classList.remove("hidden");
-
     const items = kanbanState.documents;
     const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
 
-    let html = '<div class="ai-manual-header"><span class="ai-manual-title">手动选择引用文献文件范围</span></div>';
+    let html = '<div class="ai-manual-header"><span class="ai-manual-title">选择引用文献文件范围</span></div>';
+    html += '<div class="ai-manual-toolbar">';
+    html += '<input type="text" id="cited-manual-search-input" class="merge-search-input" placeholder="搜索文档名称、代码、日期...">';
     html += '<div class="ai-manual-select-all"><button id="cited-manual-select-all" class="btn-small btn-extract">全选</button><button id="cited-manual-select-none" class="btn-small btn-extract">全不选</button><button id="cited-manual-select-default" class="btn-small btn-extract">默认选择</button></div>';
+    html += '</div>';
     html += '<div class="ai-manual-docs">';
     items.forEach(it => {
+      const searchText = ((it.name || '') + ' ' + (it.docCode || '') + ' ' + (it.date || '')).toLowerCase();
       html += `
-        <label class="ai-manual-doc-item">
+        <label class="ai-manual-doc-item" data-search-text="${escapeHtml(searchText)}">
           <input type="checkbox" class="cited-manual-select-checkbox" data-idx="${it.idx}" ${CITED_DOC_CODES.includes(it.docCode) ? 'checked' : ''}>
           <div class="ai-manual-doc-info">
             <span class="ai-manual-doc-code">${escapeHtml(it.docCode)}</span>
@@ -1818,6 +1829,7 @@ if (citedRefsManualBtn) {
       `;
     });
     html += '</div>';
+    html += '<div id="cited-manual-selected-summary" class="manual-selected-summary"></div>';
     html += '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">';
     html += '<button id="cited-manual-select-cancel" class="btn-secondary">取消</button>';
     html += '<button id="cited-manual-select-merge-btn" class="btn-secondary">合并导出选中文档</button>';
@@ -1825,17 +1837,62 @@ if (citedRefsManualBtn) {
     html += '</div>';
 
     manualSelectPanel.innerHTML = html;
+    manualSelectPanel.classList.remove("hidden");
 
     // Try to load saved selections, fall back to defaults
     if (!loadManualSelection("cited", items, ".cited-manual-select-checkbox", manualSelectPanel, null)) {
       // Apply default checks (already set in HTML via CITED_DOC_CODES)
     }
 
+    // Update selected summary
+    function updateCitedSummary() {
+      const summaryEl = document.getElementById("cited-manual-selected-summary");
+      if (!summaryEl) return;
+      const checkedIdxs = [];
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox:checked").forEach(cb => {
+        checkedIdxs.push(parseInt(cb.dataset.idx));
+      });
+      if (checkedIdxs.length === 0) {
+        summaryEl.innerHTML = '<span class="summary-empty">未选择任何文档</span>';
+      } else {
+        const names = checkedIdxs.map(idx => {
+          const it = items.find(d => d.idx === idx);
+          return it ? escapeHtml(it.docCode + ' - ' + (it.name || '')) : '';
+        }).filter(Boolean);
+        summaryEl.innerHTML = '<span class="summary-label">已选 ' + checkedIdxs.length + ' 份：</span>' + names.join('<span class="summary-sep">、</span>');
+      }
+    }
+    updateCitedSummary();
+
+    // Auto-save on every checkbox change
+    function onCitedCheckboxChange() {
+      saveManualSelection("cited", items, ".cited-manual-select-checkbox", manualSelectPanel);
+      updateCitedSummary();
+    }
+    manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => {
+      cb.addEventListener("change", onCitedCheckboxChange);
+    });
+
+    // Search filter
+    const searchInput = document.getElementById("cited-manual-search-input");
+    if (searchInput) {
+      searchInput.oninput = () => {
+        const keyword = searchInput.value.trim().toLowerCase();
+        manualSelectPanel.querySelectorAll(".ai-manual-doc-item").forEach(item => {
+          if (!keyword) { item.style.display = ""; return; }
+          const st = item.dataset.searchText || "";
+          item.style.display = st.includes(keyword) ? "" : "none";
+        });
+      };
+    }
+
     document.getElementById("cited-manual-select-all").addEventListener("click", () => {
       manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => cb.checked = true);
+      onCitedCheckboxChange();
     });
     document.getElementById("cited-manual-select-none").addEventListener("click", () => {
       manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => cb.checked = false);
+      onCitedCheckboxChange();
     });
     document.getElementById("cited-manual-select-default").addEventListener("click", () => {
       manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => {
@@ -1843,6 +1900,7 @@ if (citedRefsManualBtn) {
         const it = items.find(d => d.idx === idx);
         cb.checked = it && CITED_DOC_CODES.includes(it.docCode);
       });
+      onCitedCheckboxChange();
     });
     document.getElementById("cited-manual-select-cancel").addEventListener("click", () => {
       manualSelectPanel.classList.add("hidden");
@@ -1879,36 +1937,30 @@ if (citedRefsManualBtn) {
   });
 }
 
-manualSelectBtn.addEventListener("click", () => {
+// ── Build review manual selection panel ──
+function buildReviewManualSelectPanel() {
   const items = kanbanState.documents;
-  if (!items || items.length === 0) {
-    showError("请先查询专利并加载审查文档");
-    return;
-  }
+  if (!items || items.length === 0) return;
 
   const manualSelectPanel = document.getElementById("ai-manual-select");
   if (!manualSelectPanel) return;
 
-  // Interrupt any existing process
-  if (activeAnalysisProcess) {
-    abortActiveProcess();
-  }
-
   const canDownload = currentData && (currentData.office === "US" || currentData.office === "EP");
-  if (!canDownload) {
-    showError("CN / DE / JP 专利暂不支持文档下载与提取，无法进行 AI 梳理");
-    return;
-  }
+  if (!canDownload) return;
 
   // Build checkbox list
   const typeLabels = { office_action: "审查意见", response: "答复", request: "请求", allowance: "授权", notification: "通知", misc: "其他" };
-  let html = '<div class="ai-manual-header"><span class="ai-manual-title">手动选择分析文件范围</span></div>';
+  let html = '<div class="ai-manual-header"><span class="ai-manual-title">选择分析文件范围</span></div>';
+  html += '<div class="ai-manual-toolbar">';
+  html += '<input type="text" id="manual-search-input" class="merge-search-input" placeholder="搜索文档名称、代码、日期...">';
   html += '<div class="ai-manual-select-all"><button id="manual-select-all" class="btn-small btn-extract">全选</button><button id="manual-select-none" class="btn-small btn-extract">全不选</button><button id="manual-select-default" class="btn-small btn-extract">默认选择</button></div>';
+  html += '</div>';
   html += '<div class="ai-manual-docs">';
   items.forEach(it => {
     const typeLabel = typeLabels[it.type] || it.type;
+    const searchText = ((it.name || '') + ' ' + (it.docCode || '') + ' ' + (it.date || '') + ' ' + typeLabel).toLowerCase();
     html += `
-      <label class="ai-manual-doc-item">
+      <label class="ai-manual-doc-item" data-search-text="${escapeHtml(searchText)}">
         <input type="checkbox" class="manual-select-checkbox" data-idx="${it.idx}" ${shouldIncludeInAIAnalysis(currentData.office, it.type) ? 'checked' : ''}>
         <div class="ai-manual-doc-info">
           <span class="ai-manual-doc-code">${escapeHtml(it.docCode)}</span>
@@ -1920,6 +1972,7 @@ manualSelectBtn.addEventListener("click", () => {
     `;
   });
   html += '</div>';
+  html += '<div id="manual-selected-summary" class="manual-selected-summary"></div>';
   html += '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">';
   html += '<button id="manual-select-cancel" class="btn-secondary">取消</button>';
   html += '<button id="manual-select-merge-btn" class="btn-secondary">合并导出选中文档</button>';
@@ -1934,11 +1987,55 @@ manualSelectBtn.addEventListener("click", () => {
     // Apply default checks (already set in HTML via shouldIncludeInAIAnalysis)
   }
 
+  // Update selected summary
+  function updateReviewSummary() {
+    const summaryEl = document.getElementById("manual-selected-summary");
+    if (!summaryEl) return;
+    const checkedIdxs = [];
+    manualSelectPanel.querySelectorAll(".manual-select-checkbox:checked").forEach(cb => {
+      checkedIdxs.push(parseInt(cb.dataset.idx));
+    });
+    if (checkedIdxs.length === 0) {
+      summaryEl.innerHTML = '<span class="summary-empty">未选择任何文档</span>';
+    } else {
+      const names = checkedIdxs.map(idx => {
+        const it = items.find(d => d.idx === idx);
+        return it ? escapeHtml(it.docCode + ' - ' + (it.name || '')) : '';
+      }).filter(Boolean);
+      summaryEl.innerHTML = '<span class="summary-label">已选 ' + checkedIdxs.length + ' 份：</span>' + names.join('<span class="summary-sep">、</span>');
+    }
+  }
+  updateReviewSummary();
+
+  // Auto-save on every checkbox change
+  function onCheckboxChange() {
+    saveManualSelection("review", items, ".manual-select-checkbox", manualSelectPanel);
+    updateReviewSummary();
+  }
+  manualSelectPanel.querySelectorAll(".manual-select-checkbox").forEach(cb => {
+    cb.addEventListener("change", onCheckboxChange);
+  });
+
+  // Search filter
+  const searchInput = document.getElementById("manual-search-input");
+  if (searchInput) {
+    searchInput.oninput = () => {
+      const keyword = searchInput.value.trim().toLowerCase();
+      manualSelectPanel.querySelectorAll(".ai-manual-doc-item").forEach(item => {
+        if (!keyword) { item.style.display = ""; return; }
+        const st = item.dataset.searchText || "";
+        item.style.display = st.includes(keyword) ? "" : "none";
+      });
+    };
+  }
+
   document.getElementById("manual-select-all").addEventListener("click", () => {
     manualSelectPanel.querySelectorAll(".manual-select-checkbox").forEach(cb => cb.checked = true);
+    onCheckboxChange();
   });
   document.getElementById("manual-select-none").addEventListener("click", () => {
     manualSelectPanel.querySelectorAll(".manual-select-checkbox").forEach(cb => cb.checked = false);
+    onCheckboxChange();
   });
   document.getElementById("manual-select-default").addEventListener("click", () => {
     manualSelectPanel.querySelectorAll(".manual-select-checkbox").forEach(cb => {
@@ -1946,6 +2043,7 @@ manualSelectBtn.addEventListener("click", () => {
       const it = items.find(d => d.idx === idx);
       cb.checked = it && shouldIncludeInAIAnalysis(currentData.office, it.type);
     });
+    onCheckboxChange();
   });
 
   document.getElementById("manual-select-cancel").addEventListener("click", () => {
@@ -2221,7 +2319,7 @@ manualSelectBtn.addEventListener("click", () => {
       kanbanAutoAbortController = null;
     }
   });
-});
+}
 
 function renderMarkdown(text) {
   if (!text) return "";
