@@ -532,32 +532,55 @@ async function mergePdfDocs(req, res) {
           x: pw - 40 - byWidth, y: ph - 55, size: 10, font, color: rgb(0.85, 0.88, 0.92),
         });
 
-        // Chinese title (centered, large)
+        // Chinese title (centered, large) - auto-truncate if too wide
         const cnTitle = item.chinese_title || item.doc_code || "Document";
         const cnTitleSize = 28;
+        const maxTitleWidth = pw - 80; // 40px margin each side
         if (cjkFont) {
           // Use CJK font for proper Chinese rendering
-          const cnTitleWidth = cjkFont.widthOfTextAtSize(cnTitle, cnTitleSize);
-          coverPage.drawText(cnTitle, {
+          let displayTitle = cnTitle;
+          if (cjkFont.widthOfTextAtSize(displayTitle, cnTitleSize) > maxTitleWidth) {
+            while (displayTitle.length > 1 && cjkFont.widthOfTextAtSize(displayTitle + "...", cnTitleSize) > maxTitleWidth) {
+              displayTitle = displayTitle.slice(0, -1);
+            }
+            displayTitle += "...";
+          }
+          const cnTitleWidth = cjkFont.widthOfTextAtSize(displayTitle, cnTitleSize);
+          coverPage.drawText(displayTitle, {
             x: (pw - cnTitleWidth) / 2, y: ph - 220, size: cnTitleSize, font: cjkFont, color: PRIMARY_COLOR,
           });
         } else {
           // No CJK font available - use doc_code (English) as fallback
           const safeTitle = item.doc_code || cnTitle.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/g, "").trim() || "Document";
-          const cnTitleWidth = fontBold.widthOfTextAtSize(safeTitle, cnTitleSize);
-          coverPage.drawText(safeTitle, {
+          let displayTitle = safeTitle;
+          if (fontBold.widthOfTextAtSize(displayTitle, cnTitleSize) > maxTitleWidth) {
+            while (displayTitle.length > 1 && fontBold.widthOfTextAtSize(displayTitle + "...", cnTitleSize) > maxTitleWidth) {
+              displayTitle = displayTitle.slice(0, -1);
+            }
+            displayTitle += "...";
+          }
+          const cnTitleWidth = fontBold.widthOfTextAtSize(displayTitle, cnTitleSize);
+          coverPage.drawText(displayTitle, {
             x: (pw - cnTitleWidth) / 2, y: ph - 220, size: cnTitleSize, font: fontBold, color: PRIMARY_COLOR,
           });
         }
 
-        // Original title (centered, smaller)
+        // Original title (centered, smaller) - auto-truncate if too wide
         if (item.original_title) {
           const enTitle = item.original_title;
           const enTitleSize = 16;
           const hasCjk = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(enTitle);
           const titleFont = (hasCjk && cjkFont) ? cjkFont : font;
-          const enTitleWidth = titleFont.widthOfTextAtSize(enTitle, enTitleSize);
-          coverPage.drawText(enTitle, {
+          let displayTitle = enTitle;
+          const maxEnWidth = pw - 80;
+          if (titleFont.widthOfTextAtSize(displayTitle, enTitleSize) > maxEnWidth) {
+            while (displayTitle.length > 1 && titleFont.widthOfTextAtSize(displayTitle + "...", enTitleSize) > maxEnWidth) {
+              displayTitle = displayTitle.slice(0, -1);
+            }
+            displayTitle += "...";
+          }
+          const enTitleWidth = titleFont.widthOfTextAtSize(displayTitle, enTitleSize);
+          coverPage.drawText(displayTitle, {
             x: (pw - enTitleWidth) / 2, y: ph - 260, size: enTitleSize, font: titleFont, color: rgb(0.4, 0.4, 0.5),
           });
         }
