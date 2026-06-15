@@ -2066,21 +2066,21 @@ if (citedRefsManualBtn) {
 
     let html = '<div class="ai-manual-header"><span class="ai-manual-title">手动选择引用文献文件范围</span></div>';
     html += '<div class="ai-manual-select-all"><button id="cited-manual-select-all" class="btn-small btn-extract">全选</button><button id="cited-manual-select-none" class="btn-small btn-extract">全不选</button><button id="cited-manual-select-default" class="btn-small btn-extract">默认选择</button></div>';
-    html += '<div class="ai-manual-checkboxes">';
+    html += '<div class="ai-manual-docs">';
     items.forEach(it => {
       html += `
-        <label class="ai-manual-item">
+        <label class="ai-manual-doc-item">
           <input type="checkbox" class="cited-manual-select-checkbox" data-idx="${it.idx}" ${CITED_DOC_CODES.includes(it.docCode) ? 'checked' : ''}>
-          <span class="ai-manual-item-info">
-            <span class="ai-manual-item-code">${escapeHtml(it.docCode)}</span>
-            <span class="ai-manual-item-name">${escapeHtml(it.name)}</span>
-            <span class="ai-manual-item-date">${escapeHtml(it.date)}</span>
-          </span>
+          <div class="ai-manual-doc-info">
+            <span class="ai-manual-doc-code">${escapeHtml(it.docCode)}</span>
+            <span class="ai-manual-doc-name">${escapeHtml(it.name)}</span>
+            <span class="ai-manual-doc-date">${escapeHtml(it.date)}</span>
+          </div>
         </label>
       `;
     });
     html += '</div>';
-    html += '<div class="ai-manual-actions">';
+    html += '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">';
     html += '<button id="cited-manual-select-cancel" class="btn-secondary">取消</button>';
     html += '<button id="cited-manual-select-confirm" class="btn-primary">确认选择并开始引用文献梳理</button>';
     html += '</div>';

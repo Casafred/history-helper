@@ -470,10 +470,17 @@ async function mergePdfDocs(req, res) {
       if (cjkFontPath) {
         try {
           const cjkFontBytes = fs.readFileSync(cjkFontPath);
-          cjkFont = await mergedPdf.embedFont(cjkFontBytes);
-          console.log("[Merge] Loaded CJK font:", cjkFontPath);
+          cjkFont = await mergedPdf.embedFont(cjkFontBytes, { subset: true });
+          // Verify the CJK font actually works by testing layout
+          if (cjkFont && typeof cjkFont.widthOfTextAtSize !== "function") {
+            console.warn("[Merge] CJK font embedded but missing layout methods, discarding");
+            cjkFont = null;
+          } else {
+            console.log("[Merge] Loaded CJK font:", cjkFontPath);
+          }
         } catch (e) {
           console.warn("[Merge] Failed to load CJK font:", cjkFontPath, e.message);
+          cjkFont = null;
         }
       } else {
         console.warn("[Merge] No system CJK font found, Chinese titles will use doc_code fallback");
@@ -536,21 +543,28 @@ async function mergePdfDocs(req, res) {
         const cnTitle = item.chinese_title || item.doc_code || "Document";
         const cnTitleSize = 28;
         const maxTitleWidth = pw - 80; // 40px margin each side
+        let titleDrawn = false;
         if (cjkFont) {
-          // Use CJK font for proper Chinese rendering
-          let displayTitle = cnTitle;
-          if (cjkFont.widthOfTextAtSize(displayTitle, cnTitleSize) > maxTitleWidth) {
-            while (displayTitle.length > 1 && cjkFont.widthOfTextAtSize(displayTitle + "...", cnTitleSize) > maxTitleWidth) {
-              displayTitle = displayTitle.slice(0, -1);
+          try {
+            // Use CJK font for proper Chinese rendering
+            let displayTitle = cnTitle;
+            if (cjkFont.widthOfTextAtSize(displayTitle, cnTitleSize) > maxTitleWidth) {
+              while (displayTitle.length > 1 && cjkFont.widthOfTextAtSize(displayTitle + "...", cnTitleSize) > maxTitleWidth) {
+                displayTitle = displayTitle.slice(0, -1);
+              }
+              displayTitle += "...";
             }
-            displayTitle += "...";
+            const cnTitleWidth = cjkFont.widthOfTextAtSize(displayTitle, cnTitleSize);
+            coverPage.drawText(displayTitle, {
+              x: (pw - cnTitleWidth) / 2, y: ph - 220, size: cnTitleSize, font: cjkFont, color: PRIMARY_COLOR,
+            });
+            titleDrawn = true;
+          } catch (e) {
+            console.warn("[Merge] CJK font drawText failed, falling back to English:", e.message);
           }
-          const cnTitleWidth = cjkFont.widthOfTextAtSize(displayTitle, cnTitleSize);
-          coverPage.drawText(displayTitle, {
-            x: (pw - cnTitleWidth) / 2, y: ph - 220, size: cnTitleSize, font: cjkFont, color: PRIMARY_COLOR,
-          });
-        } else {
-          // No CJK font available - use doc_code (English) as fallback
+        }
+        if (!titleDrawn) {
+          // No CJK font available or CJK rendering failed - use doc_code (English) as fallback
           const safeTitle = item.doc_code || cnTitle.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/g, "").trim() || "Document";
           let displayTitle = safeTitle;
           if (fontBold.widthOfTextAtSize(displayTitle, cnTitleSize) > maxTitleWidth) {
@@ -571,18 +585,29 @@ async function mergePdfDocs(req, res) {
           const enTitleSize = 16;
           const hasCjk = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(enTitle);
           const titleFont = (hasCjk && cjkFont) ? cjkFont : font;
-          let displayTitle = enTitle;
-          const maxEnWidth = pw - 80;
-          if (titleFont.widthOfTextAtSize(displayTitle, enTitleSize) > maxEnWidth) {
-            while (displayTitle.length > 1 && titleFont.widthOfTextAtSize(displayTitle + "...", enTitleSize) > maxEnWidth) {
-              displayTitle = displayTitle.slice(0, -1);
+          try {
+            let displayTitle = enTitle;
+            const maxEnWidth = pw - 80;
+            if (titleFont.widthOfTextAtSize(displayTitle, enTitleSize) > maxEnWidth) {
+              while (displayTitle.length > 1 && titleFont.widthOfTextAtSize(displayTitle + "...", enTitleSize) > maxEnWidth) {
+                displayTitle = displayTitle.slice(0, -1);
+              }
+              displayTitle += "...";
             }
-            displayTitle += "...";
+            const enTitleWidth = titleFont.widthOfTextAtSize(displayTitle, enTitleSize);
+            coverPage.drawText(displayTitle, {
+              x: (pw - enTitleWidth) / 2, y: ph - 260, size: enTitleSize, font: titleFont, color: rgb(0.4, 0.4, 0.5),
+            });
+          } catch (e) {
+            // Fallback: strip CJK characters and use standard font
+            const safeEnTitle = enTitle.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/g, "").trim();
+            if (safeEnTitle) {
+              const enTitleWidth = font.widthOfTextAtSize(safeEnTitle, enTitleSize);
+              coverPage.drawText(safeEnTitle, {
+                x: (pw - enTitleWidth) / 2, y: ph - 260, size: enTitleSize, font, color: rgb(0.4, 0.4, 0.5),
+              });
+            }
           }
-          const enTitleWidth = titleFont.widthOfTextAtSize(displayTitle, enTitleSize);
-          coverPage.drawText(displayTitle, {
-            x: (pw - enTitleWidth) / 2, y: ph - 260, size: enTitleSize, font: titleFont, color: rgb(0.4, 0.4, 0.5),
-          });
         }
 
         // Date
