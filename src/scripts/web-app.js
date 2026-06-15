@@ -15,6 +15,31 @@ let currentData = null;
 let kanbanAutoAbortController = null;
 let citedRefsAbortController = null;
 
+// Process management: allows new process to interrupt existing one
+let activeAnalysisProcess = null; // "review" | "citedRefs" | null
+function abortActiveProcess() {
+  if (kanbanAutoAbortController) {
+    kanbanAutoAbortController.abort();
+    kanbanAutoAbortController = null;
+  }
+  if (citedRefsAbortController) {
+    citedRefsAbortController.abort();
+    citedRefsAbortController = null;
+  }
+  // Reset all button states
+  const btns = ["kanban-auto-btn", "kanban-manual-select-btn", "cited-refs-btn", "cited-refs-manual-btn"];
+  btns.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.disabled = false; el.classList.remove("hidden"); }
+  });
+  const abortBtns = ["kanban-auto-abort-btn", "cited-refs-abort-btn"];
+  abortBtns.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hidden");
+  });
+  activeAnalysisProcess = null;
+}
+
 // Map JP document codes to JPO API doc type endpoints
 function mapJpDocType(docCode, type) {
   if (!docCode) return null;
@@ -94,15 +119,13 @@ const pdfNextPage = document.getElementById("pdf-next-page");
 const pdfZoomIn = document.getElementById("pdf-zoom-in");
 const pdfZoomOut = document.getElementById("pdf-zoom-out");
 const pdfZoomFit = document.getElementById("pdf-zoom-fit");
-const pdfTranslateBtn = document.getElementById("pdf-translate-btn");
-const pdfTranslatePanel = document.getElementById("pdf-translate-panel");
-const pdfTranslateLang = document.getElementById("pdf-translate-lang");
-const pdfTranslateContent = document.getElementById("pdf-translate-content");
+const pdfOcrBtn = document.getElementById("pdf-ocr-btn");
 
 const readerChatPanel = document.getElementById("reader-chat-panel");
 const chatMessages = document.getElementById("chat-messages");
 const chatInput = document.getElementById("chat-input");
 const chatSendBtn = document.getElementById("chat-send-btn");
+const chatCloseBtn = document.getElementById("chat-close-btn");
 const readerChatToggle = document.getElementById("reader-chat-toggle");
 
 let pdfViewState = {
@@ -116,22 +139,12 @@ let pdfViewState = {
   renderedPages: {},
   pendingHighlight: null,
   pendingHighlightRange: null,
-  searchMatches: [],
-  searchCurrentIdx: -1,
-  selectedBlockIds: [],
-  selecting: false,
-  selectStart: null,
-  selectEnd: null,
-  traceJumpPending: false,
-  renderVersion: 0,
 };
 
 let chatHistory = [];
 let chatAbortController = null;
 let analysisChatHistory = [];
 let analysisChatAbortController = null;
-let translateAbortController = null;
-let translatePageCache = {};
 
 function showError(msg) {
   errorToast.textContent = msg;
@@ -269,12 +282,6 @@ searchBtn.addEventListener("click", async () => {
   const input = patentInput.value.trim();
   if (!input) return;
 
-  // 退出首页居中模式，平滑过渡到紧凑布局
-  const appEl = document.getElementById("app");
-  if (appEl && appEl.classList.contains("home-mode")) {
-    appEl.classList.remove("home-mode");
-  }
-
   const pn = parsePatentNumber(input);
   if (!pn) { showError("无法识别专利号格式: " + input); return; }
 
@@ -298,15 +305,6 @@ searchBtn.addEventListener("click", async () => {
     // 后续的文档列表查询必须使用申请号
     if (familyData && familyData.corrAppNum) {
       result.applicationNumber = familyData.corrAppNum;
-    } else if (familyData && familyData.list && Array.isArray(familyData.list)) {
-      // corrAppNum 为 null 时，从 family.list 中查找当前局的申请号
-      // EP 专利通过公开号/专利号查询时，corrAppNum 经常为 null
-      const ownEntry = familyData.list.find(item => item.countryCode === office);
-      if (ownEntry && ownEntry.appNum) {
-        result.applicationNumber = ownEntry.appNum;
-      } else if (ownEntry && ownEntry.docNum && ownEntry.docNum.docNumber) {
-        result.applicationNumber = ownEntry.docNum.docNumber;
-      }
     }
   } catch (e) {
     warnings.push("同族查询失败: " + e.message);
@@ -345,10 +343,10 @@ searchBtn.addEventListener("click", async () => {
   kanbanAutoBtn.disabled = false;
   const citedRefsBtn = document.getElementById("cited-refs-btn");
   if (citedRefsBtn) citedRefsBtn.disabled = false;
-  const citedRefsManualBtn = document.getElementById("cited-refs-manual-select-btn");
-  if (citedRefsManualBtn) citedRefsManualBtn.disabled = false;
   const manualSelectBtn = document.getElementById("kanban-manual-select-btn");
   if (manualSelectBtn) manualSelectBtn.disabled = false;
+  const citedRefsManualBtn = document.getElementById("cited-refs-manual-btn");
+  if (citedRefsManualBtn) citedRefsManualBtn.disabled = false;
   resultSection.classList.remove("hidden");
   searchBtn.disabled = false;
   loading.classList.add("hidden");
@@ -404,16 +402,9 @@ function renderKanban(data) {
   kanbanState.analysisSystemPrompt = "";
   kanbanState.analysisUserMessage = "";
   kanbanState.traceIndex = {};
-
-  // Show merge export button if there are documents with download URLs
-  const mergeExportBtn = document.getElementById("merge-export-btn");
-  if (mergeExportBtn) {
-    const hasDownloadable = items.some(it => it.docId && data.office !== "DE");
-    mergeExportBtn.style.display = hasDownloadable ? "" : "none";
-  }
   analysisChatHistory = [];
-  const analysisChatFloatBall = document.getElementById("analysis-chat-float-ball");
-  if (analysisChatFloatBall) analysisChatFloatBall.classList.add("hidden");
+  const analysisChatToggleBtn = document.getElementById("analysis-chat-toggle-btn");
+  if (analysisChatToggleBtn) analysisChatToggleBtn.classList.add("hidden");
   const analysisChatPanel = document.getElementById("analysis-chat-panel");
   if (analysisChatPanel) analysisChatPanel.classList.add("hidden");
 
@@ -531,7 +522,6 @@ function renderKanban(data) {
             <div class="kanban-card-actions">
               ${extractUrl ? '<button class="btn-small btn-extract" data-action="kanban-extract" data-url="' + extractUrl + '" data-idx="' + it.idx + '" data-doctype="' + escapeHtml(it.docCode) + '">提取内容</button>' : ''}
               ${downloadUrl ? '<button class="btn-small btn-download" data-action="kanban-download" data-url="' + downloadUrl + '" data-filename="' + escapeHtml(it.docCode) + '_' + escapeHtml(it.date.replace(/\//g, '-')) + '.pdf">下载</button>' : ''}
-              ${downloadUrl ? '<button class="btn-small btn-view-pdf" data-action="kanban-view-pdf" data-idx="' + it.idx + '">查看PDF</button>' : ''}
             </div>
             <div id="kanban-extracted-${it.idx}" class="kanban-extracted hidden"></div>
           </div>
@@ -559,77 +549,10 @@ function renderOverview(data) {
   const office = OFFICE_NAMES[data.office] || data.office;
 
   let title = "";
-  let inventors = "";
-  let applicants = "";
-  let filingDate = "";
-  let publicationDate = "";
-  let priorityDate = "";
-  let ipcClasses = "";
-  let cpcClasses = "";
-  let legalStatus = "";
-
-  if (data.family) {
-    const members = extractFamilyMembers(data.family);
-    if (members.length > 0) {
-      // Find the member matching the queried office, fall back to first member
-      let m = members.find(mem => mem.countryCode === data.office) || members[0];
-      // Also check docList for richer data (US members store title/applicants in docList)
-      const dl = m.docList || {};
-      title = m.title || dl.title || m.inventionTitle || "";
-      // applicantNames in GD API actually contains inventor names for US patents
-      // The field is misleadingly named - it returns first/last name format which is inventors
-      const applicantNamesArr = m.applicantNames || dl.applicantNames || [];
-      const namesStr = Array.isArray(applicantNamesArr) ? applicantNamesArr.join(", ") : (applicantNamesArr || "");
-      // For US patents, applicantNames = inventors; for EP/CN/JP it may be actual applicants
-      if (data.office === "US") {
-        inventors = namesStr || m.inventors || m.inventorName || "";
-      } else {
-        applicants = namesStr || m.applicants || m.applicantName || "";
-        inventors = m.inventors || m.inventorName || "";
-      }
-      // filing date: appDateStr or appDate (epoch ms)
-      filingDate = m.appDateStr || m.filingDate || m.applicationDate || "";
-      if (!filingDate && m.appDate) {
-        try { filingDate = new Date(m.appDate).toLocaleDateString("en-US"); } catch(e) {}
-      }
-      // publication date: from pubList
-      if (m.pubList && Array.isArray(m.pubList) && m.pubList.length > 0) {
-        publicationDate = m.pubList[0].pubDateStr || "";
-        if (!publicationDate && m.pubList[0].pubDate) {
-          try { publicationDate = new Date(m.pubList[0].pubDate).toLocaleDateString("en-US"); } catch(e2) {}
-        }
-      }
-      publicationDate = publicationDate || m.publicationDate || m.pubDate || "";
-      // priority date: from docNum.date or priorityClaimList
-      if (m.docNum && m.docNum.date) {
-        priorityDate = m.docNum.date;
-      }
-      if (!priorityDate && m.priorityClaimList && Array.isArray(m.priorityClaimList) && m.priorityClaimList.length > 0) {
-        priorityDate = m.priorityClaimList[0].date || "";
-      }
-      // IPC/CPC not available in GD family API
-      ipcClasses = m.ipc || m.ipcClass || m.classification || "";
-      if (Array.isArray(ipcClasses)) ipcClasses = ipcClasses.join(", ");
-      cpcClasses = m.cpcClass || m.cpc || "";
-      if (Array.isArray(cpcClasses)) cpcClasses = cpcClasses.join(", ");
-      // Infer legal status from document types
-      const docItems = kanbanState.documents || [];
-      const hasAllowance = docItems.some(it => it.type === "allowance");
-      const hasOA = docItems.some(it => it.type === "office_action");
-      const hasResponse = docItems.some(it => it.type === "response");
-      if (hasAllowance) {
-        legalStatus = "已授权 (Granted)";
-      } else if (hasOA && !hasResponse) {
-        legalStatus = "待答复 (Pending Response)";
-      } else if (hasOA && hasResponse) {
-        legalStatus = "审查中 (Under Examination)";
-      } else {
-        legalStatus = m.legalStatus || m.status || "";
-      }
-    }
-  }
-  if (data.documents && data.documents.title && !title) {
+  if (data.documents && data.documents.title) {
     title = data.documents.title;
+  } else if (data.family && data.family.list && data.family.list.length > 0) {
+    title = data.family.list[0].title || "";
   }
 
   const queryTypeLabel = data.queryType === "publication" ? "公开号/专利号" : "申请号";
@@ -639,44 +562,19 @@ function renderOverview(data) {
     <div class="info-row"><span class="info-label">${queryTypeLabel}</span><span class="info-value">${data.applicationNumber || "-"}</span></div>
     ${data.documents && data.documents.docNumber ? '<div class="info-row"><span class="info-label">文档编号</span><span class="info-value">' + escapeHtml(data.documents.docNumber) + '</span></div>' : ''}
     ${title ? '<div class="info-row"><span class="info-label">标题</span><span class="info-value">' + escapeHtml(title) + '</span></div>' : ''}
-    ${inventors ? '<div class="info-row"><span class="info-label">发明人</span><span class="info-value">' + escapeHtml(inventors) + '</span></div>' : ''}
-    ${applicants ? '<div class="info-row"><span class="info-label">申请人</span><span class="info-value">' + escapeHtml(applicants) + '</span></div>' : ''}
-    ${filingDate ? '<div class="info-row"><span class="info-label">申请日</span><span class="info-value">' + escapeHtml(filingDate) + '</span></div>' : ''}
-    ${publicationDate ? '<div class="info-row"><span class="info-label">公开日</span><span class="info-value">' + escapeHtml(publicationDate) + '</span></div>' : ''}
-    ${priorityDate ? '<div class="info-row"><span class="info-label">优先权日</span><span class="info-value">' + escapeHtml(priorityDate) + '</span></div>' : ''}
-    ${ipcClasses ? '<div class="info-row"><span class="info-label">IPC分类</span><span class="info-value">' + escapeHtml(ipcClasses) + '</span></div>' : ''}
-    ${cpcClasses ? '<div class="info-row"><span class="info-label">CPC分类</span><span class="info-value">' + escapeHtml(cpcClasses) + '</span></div>' : ''}
   `;
 
   const family = data.family;
-  const items = kanbanState.documents;
-  const famCount = family ? countFamilyMembers(family) : 0;
-  const docCount = family ? countDocuments(data.documents) : 0;
-  const oaCount = items.filter(it => it.type === "office_action").length;
-  const respCount = items.filter(it => it.type === "response").length;
-  const allowCount = items.filter(it => it.type === "allowance").length;
-
-  let statusHtml = '';
-  if (legalStatus) {
-    statusHtml += '<div class="info-row"><span class="info-label">法律状态</span><span class="info-value">' + escapeHtml(legalStatus) + '</span></div>';
+  if (family) {
+    const famCount = countFamilyMembers(family);
+    const docCount = countDocuments(data.documents);
+    appStatus.innerHTML = `
+      <div class="info-row"><span class="info-label">同族成员</span><span class="info-value">${famCount} 个</span></div>
+      <div class="info-row"><span class="info-label">审查文档</span><span class="info-value">${docCount} 份</span></div>
+    `;
+  } else {
+    appStatus.innerHTML = '<p class="placeholder">暂无状态信息</p>';
   }
-  if (famCount > 0) {
-    statusHtml += '<div class="info-row"><span class="info-label">同族成员</span><span class="info-value">' + famCount + ' 个</span></div>';
-  }
-  if (docCount > 0) {
-    statusHtml += '<div class="info-row"><span class="info-label">审查文档</span><span class="info-value">' + docCount + ' 份</span></div>';
-  }
-  if (items.length > 0) {
-    statusHtml += '<div class="info-row"><span class="info-label">审查意见</span><span class="info-value">' + oaCount + ' 份</span></div>';
-    statusHtml += '<div class="info-row"><span class="info-label">申请人答复</span><span class="info-value">' + respCount + ' 份</span></div>';
-    if (allowCount > 0) {
-      statusHtml += '<div class="info-row"><span class="info-label">授权通知</span><span class="info-value">' + allowCount + ' 份</span></div>';
-    }
-  }
-  if (!statusHtml) {
-    statusHtml = '<p class="placeholder">暂无状态信息</p>';
-  }
-  appStatus.innerHTML = statusHtml;
 }
 
 function countFamilyMembers(family) {
@@ -1123,7 +1021,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.classList.add("active");
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
     const app = document.getElementById("app");
-    const wideTabs = ["kanban", "ai-analysis"];
+    const wideTabs = ["kanban", "ai-analysis", "timeline"];
     if (wideTabs.includes(btn.dataset.tab)) {
       app.classList.add("wide-layout");
     } else {
@@ -1175,125 +1073,38 @@ aiSaveBtn.addEventListener("click", () => {
     config[type].baseUrl = aiBaseUrlInput.value.trim();
     config[type].model = aiModelSelect.value;
   }
-  window.AI.saveAIConfig(config);
-  aiTestResult.classList.add("hidden");
-  aiSettingsModal.classList.add("hidden");
-});
+  const ocrConfig = window.AI.getOCRConfig(config);
+  ocrConfig.engine = ocrEngineSelect.value;
+  ocrConfig.glmKey = ocrGlmKeyInput.value.trim();
 
-// OCR save button
-const ocrSaveBtn = document.getElementById("ocr-save-btn");
-if (ocrSaveBtn) {
-  ocrSaveBtn.addEventListener("click", () => {
-    const config = window.AI.loadAIConfig();
-    const ocrConfig = window.AI.getOCRConfig(config);
-    ocrConfig.engine = ocrEngineSelect.value;
-    ocrConfig.glmKey = ocrGlmKeyInput.value.trim();
-    const autoCheckbox = document.getElementById("ocr-auto-checkbox");
-    ocrConfig.autoOcr = autoCheckbox ? autoCheckbox.checked : true;
-    window.AI.saveAIConfig(config);
-    aiSettingsModal.classList.add("hidden");
-  });
-}
-
-// Translate save button
-const translateSaveBtn = document.getElementById("translate-save-btn");
-if (translateSaveBtn) {
-  translateSaveBtn.addEventListener("click", () => {
-    const config = window.AI.loadAIConfig();
-    const translateProviderSelect = document.getElementById("translate-provider-select");
-    const translateApiKeyInput = document.getElementById("translate-api-key-input");
-    const translateModelSelect = document.getElementById("translate-model-select");
-    const translateDefaultLang = document.getElementById("translate-default-lang");
-
-    if (!config.translate) config.translate = {};
-    config.translate.provider = translateProviderSelect ? translateProviderSelect.value : "";
-    config.translate.apiKey = translateApiKeyInput ? translateApiKeyInput.value.trim() : "";
-    config.translate.model = translateModelSelect ? translateModelSelect.value : "";
-    config.translate.defaultLang = translateDefaultLang ? translateDefaultLang.value : "zh";
-    window.AI.saveAIConfig(config);
-    aiSettingsModal.classList.add("hidden");
-  });
-}
-
-// Prompts save button
-const promptsSaveBtn = document.getElementById("prompts-save-btn");
-if (promptsSaveBtn) {
-  promptsSaveBtn.addEventListener("click", () => {
-    const config = window.AI.loadAIConfig();
-    const promptKeys = [
-      { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
-      { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
-      { id: "prompt-doc-analysis", key: "docAnalysis" },
-      { id: "prompt-history-summary", key: "historySummary" },
-      { id: "prompt-cited-refs-analysis", key: "citedRefsAnalysis" },
-    ];
-    promptKeys.forEach(p => {
-      const el = document.getElementById(p.id);
-      if (el) {
-        const val = el.value.trim();
-        const defaultVal = window.AI.getDefaultPrompt(p.key);
-        if (val && val !== defaultVal) {
-          window.AI.saveCustomPrompt(config, p.key, val);
-        } else {
-          window.AI.resetPrompt(config, p.key);
-        }
+  // Save custom prompts
+  const promptKeys = [
+    { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
+    { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
+    { id: "prompt-doc-analysis", key: "docAnalysis" },
+    { id: "prompt-history-summary", key: "historySummary" },
+  ];
+  promptKeys.forEach(p => {
+    const el = document.getElementById(p.id);
+    if (el) {
+      const val = el.value.trim();
+      const defaultVal = window.AI.getDefaultPrompt(p.key);
+      if (val && val !== defaultVal) {
+        window.AI.saveCustomPrompt(config, p.key, val);
+      } else {
+        window.AI.resetPrompt(config, p.key);
       }
-    });
-    window.AI.saveAIConfig(config);
-    aiSettingsModal.classList.add("hidden");
-  });
-}
-
-// Settings tab switching
-document.querySelectorAll(".settings-tab-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const tabId = btn.dataset.settingsTab;
-    document.querySelectorAll(".settings-tab-btn").forEach(b => b.classList.remove("active"));
-    document.querySelectorAll(".settings-tab-content").forEach(c => c.classList.remove("active"));
-    btn.classList.add("active");
-    const tabContent = document.getElementById("settings-tab-" + tabId);
-    if (tabContent) tabContent.classList.add("active");
-  });
-});
-
-// Translate provider select change
-const translateProviderSelectEl = document.getElementById("translate-provider-select");
-if (translateProviderSelectEl) {
-  translateProviderSelectEl.addEventListener("change", () => {
-    const type = translateProviderSelectEl.value;
-    const translateApiKeyGroup = document.getElementById("translate-api-key-group");
-    const translateModelSelect = document.getElementById("translate-model-select");
-
-    if (type) {
-      if (translateApiKeyGroup) translateApiKeyGroup.style.display = "";
-      updateTranslateModelOptions(type);
-    } else {
-      if (translateApiKeyGroup) translateApiKeyGroup.style.display = "none";
-      if (translateModelSelect) translateModelSelect.innerHTML = '<option value="">跟随 AI 服务模型</option>';
     }
   });
-}
 
-function updateTranslateModelOptions(type) {
-  const translateModelSelect = document.getElementById("translate-model-select");
-  if (!translateModelSelect) return;
-  const models = window.AI.getAvailableModels(type);
-  const defaultModel = window.AI.getDefaultTranslateModel(type);
-  translateModelSelect.innerHTML = "";
-  models.forEach(model => {
-    const option = document.createElement("option");
-    option.value = model.value;
-    option.textContent = model.label + (model.value === defaultModel ? " (推荐)" : "");
-    translateModelSelect.appendChild(option);
-  });
-  // Set default
-  translateModelSelect.value = defaultModel;
-}
+  window.AI.saveAIConfig(config);
+  aiSettingsModal.classList.add("hidden");
+});
 
 function loadAISettingsToForm() {
   const config = window.AI.loadAIConfig();
   let type = aiProviderSelect.value;
-  if (!config[type]) type = Object.keys(config).find(k => k !== "ocr" && k !== "prompts" && k !== "translate") || "zhipu";
+  if (!config[type]) type = Object.keys(config).find(k => k !== "ocr" && k !== "prompts") || "zhipu";
   if (config[type]) {
     aiApiKeyInput.value = config[type].apiKey || "";
     aiBaseUrlInput.value = config[type].baseUrl || "";
@@ -1306,31 +1117,7 @@ function loadAISettingsToForm() {
   const ocrConfig = window.AI.getOCRConfig(config);
   if (ocrEngineSelect) ocrEngineSelect.value = ocrConfig.engine || "paddle_ocr_vl";
   if (ocrGlmKeyInput) ocrGlmKeyInput.value = ocrConfig.glmKey || "";
-  const autoCheckbox = document.getElementById("ocr-auto-checkbox");
-  if (autoCheckbox) autoCheckbox.checked = ocrConfig.autoOcr !== false;
   toggleOcrGlmKeyVisibility();
-
-  // Load translate settings
-  const translateProviderSelect = document.getElementById("translate-provider-select");
-  const translateApiKeyInput = document.getElementById("translate-api-key-input");
-  const translateDefaultLang = document.getElementById("translate-default-lang");
-  const translateApiKeyGroup = document.getElementById("translate-api-key-group");
-  const translate = config.translate || {};
-  if (translateProviderSelect) {
-    translateProviderSelect.value = translate.provider || "";
-    if (translate.provider) {
-      if (translateApiKeyGroup) translateApiKeyGroup.style.display = "";
-      updateTranslateModelOptions(translate.provider);
-      const translateModelSelect = document.getElementById("translate-model-select");
-      if (translateModelSelect && translate.model) translateModelSelect.value = translate.model;
-    } else {
-      if (translateApiKeyGroup) translateApiKeyGroup.style.display = "none";
-      const translateModelSelect = document.getElementById("translate-model-select");
-      if (translateModelSelect) translateModelSelect.innerHTML = '<option value="">跟随 AI 服务模型</option>';
-    }
-  }
-  if (translateApiKeyInput) translateApiKeyInput.value = translate.apiKey || "";
-  if (translateDefaultLang) translateDefaultLang.value = translate.defaultLang || "zh";
 
   // Load custom prompts
   const promptKeys = [
@@ -1338,7 +1125,6 @@ function loadAISettingsToForm() {
     { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
     { id: "prompt-doc-analysis", key: "docAnalysis" },
     { id: "prompt-history-summary", key: "historySummary" },
-    { id: "prompt-cited-refs-analysis", key: "citedRefsAnalysis" },
   ];
   promptKeys.forEach(p => {
     const el = document.getElementById(p.id);
@@ -1360,7 +1146,6 @@ document.querySelectorAll("[id^='reset-prompt-']").forEach(btn => {
       "kanban-simple": "kanbanAnalysisSimple",
       "doc-analysis": "docAnalysis",
       "history-summary": "historySummary",
-      "cited-refs-analysis": "citedRefsAnalysis",
     };
     const key = keyMap[promptId];
     if (!key) return;
@@ -1548,9 +1333,18 @@ kanbanAutoBtn.addEventListener("click", async () => {
   if (!items || items.length === 0) { showError("请先查询专利并加载审查文档"); return; }
 
   kanbanAutoBtn.disabled = true;
+    // Interrupt any existing process
+    if (activeAnalysisProcess) {
+      abortActiveProcess();
+    }
+    activeAnalysisProcess = "review";
   kanbanAutoAbortController = new AbortController();
   const kanbanAutoAbortBtn = document.getElementById("kanban-auto-abort-btn");
-  kanbanAutoBtn.classList.add("hidden");
+  // Hide all action buttons, show abort
+  ["kanban-auto-btn", "kanban-manual-select-btn", "cited-refs-btn", "cited-refs-manual-btn"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hidden");
+  });
   if (kanbanAutoAbortBtn) kanbanAutoAbortBtn.classList.remove("hidden");
 
   const analysisSection = document.getElementById("kanban-analysis");
@@ -1678,6 +1472,7 @@ kanbanAutoBtn.addEventListener("click", async () => {
     const it = missing[i];
     if (statusEl) statusEl.textContent = "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
     await extractWithRetry(it, primaryEngine, MAX_RETRIES);
+      if (kanbanAutoAbortController && kanbanAutoAbortController.signal.aborted) break;
   }
 
   const successCount = extractReport.success.length;
@@ -1791,8 +1586,11 @@ kanbanAutoBtn.addEventListener("click", async () => {
     analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
     if (statusEl) statusEl.textContent = "AI 整理失败 ✗";
   } finally {
-    kanbanAutoBtn.disabled = false;
-    kanbanAutoBtn.classList.remove("hidden");
+    activeAnalysisProcess = null;
+    ["kanban-auto-btn", "kanban-manual-select-btn", "cited-refs-btn", "cited-refs-manual-btn"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.disabled = false; el.classList.remove("hidden"); }
+    });
     const kanbanAutoAbortBtn = document.getElementById("kanban-auto-abort-btn");
     if (kanbanAutoAbortBtn) kanbanAutoAbortBtn.classList.add("hidden");
     kanbanAutoAbortController = null;
@@ -1802,13 +1600,7 @@ kanbanAutoBtn.addEventListener("click", async () => {
 const kanbanAutoAbortBtn = document.getElementById("kanban-auto-abort-btn");
 if (kanbanAutoAbortBtn) {
   kanbanAutoAbortBtn.addEventListener("click", () => {
-    if (kanbanAutoAbortController) {
-      kanbanAutoAbortController.abort();
-      kanbanAutoAbortController = null;
-    }
-    kanbanAutoAbortBtn.classList.add("hidden");
-    kanbanAutoBtn.classList.remove("hidden");
-    kanbanAutoBtn.disabled = false;
+    abortActiveProcess();
     const statusEl = document.getElementById("ai-analysis-status");
     if (statusEl) statusEl.textContent = "梳理已中止";
   });
@@ -1818,280 +1610,201 @@ const citedRefsBtn = document.getElementById("cited-refs-btn");
 if (citedRefsBtn) {
   citedRefsBtn.addEventListener("click", async () => {
     if (!currentData || !kanbanState.documents.length) return;
-    const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
-    const citedDocs = kanbanState.documents.filter(d => CITED_DOC_CODES.includes(d.docCode));
-    if (citedDocs.length === 0) {
-      showError("未找到引用文献相关文档（FOR/892/1449/IDS/SRNT/SRFW）");
-      return;
+    citedRefsBtn.disabled = true;
+    // Interrupt any existing process
+    if (activeAnalysisProcess) {
+      abortActiveProcess();
     }
-    const selectedIdxs = citedDocs.map(d => d.idx);
-    await runCitedRefsAnalysis(selectedIdxs);
-  });
-}
-
-async function runCitedRefsAnalysis(selectedIdxs) {
-  if (!currentData || !kanbanState.documents.length) return;
-
-  const config = window.AI.loadAIConfig();
-  const provider = window.AI.getCurrentProvider(config);
-  if (!provider) {
-    showError("请先在 AI 设置中配置并选择一个 AI 服务商");
-    return;
-  }
-
-  citedRefsBtn.disabled = true;
-  citedRefsAbortController = new AbortController();
-  const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
-  citedRefsBtn.classList.add("hidden");
-  if (citedRefsAbortBtn) citedRefsAbortBtn.classList.remove("hidden");
-
-  try {
-    const citedDocs = kanbanState.documents.filter(d => selectedIdxs.includes(d.idx));
-
-    const analysisSection = document.getElementById("kanban-analysis");
-    const analysisContent = document.getElementById("kanban-analysis-content");
-    if (!analysisSection || !analysisContent) {
-      showError("分析区域未找到");
-      return;
-    }
-    analysisSection.classList.remove("hidden");
-    analysisContent.innerHTML = '<p class="extracting">正在提取引用文献内容并分析...</p>';
-
-    // 先提取引用文献文档内容（如果尚未提取）
-    const ocrConfig = window.AI.getOCRConfig(config);
-    const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
-    const glmApiKey = window.AI.getGlmOcrApiKey(config);
-    const isUS = currentData.office === "US";
-    const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
-
-    for (const doc of citedDocs) {
-      if (kanbanState.extractions[doc.idx] && kanbanState.extractions[doc.idx].text) continue;
-
-      // 需要先提取此文档
-      const extractUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${doc.docId}/${doc.numberOfPages}/${doc.docFormat}`;
-      try {
-        analysisContent.innerHTML = `<p class="extracting">正在提取 ${doc.docCode} - ${doc.name}...</p>`;
-        const resp = await fetch(extractUrl);
-        if (!resp.ok) {
-          kanbanState.extractions[doc.idx] = { text: "", error: `HTTP ${resp.status}` };
-          continue;
-        }
-        const arrayBuf = await resp.arrayBuffer();
-        const b64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
-
-        const ocrResp = await fetch("/api/gd/extract-text/ocr", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pdf_base64: b64, engine: primaryEngine }),
-        });
-        if (!ocrResp.ok) {
-          kanbanState.extractions[doc.idx] = { text: "", error: `OCR HTTP ${ocrResp.status}` };
-          continue;
-        }
-        const ocrResult = await ocrResp.json();
-        if (ocrResult.error) {
-          // 降级尝试 GLM OCR
-          if (glmApiKey && primaryEngine !== "glm_ocr") {
-            try {
-              const glmResp = await fetch("/api/gd/extract-text/ocr", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ pdf_base64: b64, engine: "glm_ocr", glm_api_key: glmApiKey }),
-              });
-              const glmResult = await glmResp.json();
-              if (!glmResult.error && glmResult.text) {
-                kanbanState.extractions[doc.idx] = {
-                  markdown: glmResult.markdown || "",
-                  text: glmResult.text || "",
-                  blocks: glmResult.blocks || [],
-                  pageDims: glmResult.pageDims || {},
-                  engine: "glm_ocr",
-                };
-                continue;
-              }
-            } catch {}
-          }
-          kanbanState.extractions[doc.idx] = { text: "", error: ocrResult.error };
-          continue;
-        }
-        kanbanState.extractions[doc.idx] = {
-          markdown: ocrResult.markdown || "",
-          text: ocrResult.text || "",
-          blocks: ocrResult.blocks || [],
-          pageDims: ocrResult.pageDims || {},
-          engine: ocrResult.engine || primaryEngine,
-        };
-      } catch (e) {
-        kanbanState.extractions[doc.idx] = { text: "", error: e.message };
-      }
-    }
-
-    // 构建分析内容
-    const lines = [];
-    lines.push(`# 引用文献梳理\n\n专利号: ${currentData.applicationNumber}\n\n`);
-    lines.push("## 引用文献相关文档\n");
-
-    let hasContent = false;
-    for (const doc of citedDocs) {
-      const extraction = kanbanState.extractions[doc.idx];
-      if (extraction && extraction.text) {
-        lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n${extraction.text}\n`);
-        hasContent = true;
-      } else {
-        lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n[未能提取内容]\n`);
-      }
-    }
-
-    if (!hasContent) {
-      analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有引用文献文档均未能提取到内容</p>';
-      return;
-    }
-
-    // 使用自定义提示词
-    const citedRefsPrompt = window.AI.getCustomPrompt(config, "citedRefsAnalysis");
-
-    lines.push("\n## 分析要求\n");
-    lines.push(citedRefsPrompt || "请对以上引用文献相关文档进行分析，包括：\n1. 审查员引用了哪些文献？列出每篇引用文献的编号、类型和相关性说明\n2. 申请人引用了哪些文献？与审查员引用有何异同\n3. 引用文献的技术领域分布，是否涉及竞争对手专利\n4. 引用文献对本专利权利要求的影响评估\n5. 建议关注的引用文献和潜在风险");
-
-    const prompt = `你是一位资深专利分析师，专注于引用文献分析。请根据以下引用文献相关文档，进行系统梳理和分析。\n\n${lines.join("\n")}`;
-
-    analysisContent.innerHTML = '';
-    let fullText = "";
-    for await (const chunk of window.AI.streamChat(
-      provider.type, provider.apiKey, provider.baseUrl,
-      {
-        model: provider.model,
-        messages: [
-          { role: "system", content: "你是一位资深专利分析师，专注于引用文献分析。" },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.3,
-        maxTokens: 32768,
-      },
-      citedRefsAbortController ? citedRefsAbortController.signal : undefined
-    )) {
-      if (chunk.content) {
-        fullText += chunk.content;
-        analysisContent.innerHTML = marked.parse(fullText);
-        analysisSection.scrollTop = analysisSection.scrollHeight;
-      }
-    }
-
-    kanbanState.citedRefsAnalysis = fullText;
-  } catch (e) {
-    const analysisContent = document.getElementById("kanban-analysis-content");
-    if (analysisContent) analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + '</p>';
-    showError("引用文献梳理失败: " + e.message);
-  } finally {
-    citedRefsBtn.disabled = false;
-    citedRefsBtn.classList.remove("hidden");
+    activeAnalysisProcess = "citedRefs";
+    citedRefsAbortController = new AbortController();
     const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
-    if (citedRefsAbortBtn) citedRefsAbortBtn.classList.add("hidden");
-    citedRefsAbortController = null;
-  }
+    // Hide all action buttons, show abort
+    ["kanban-auto-btn", "kanban-manual-select-btn", "cited-refs-btn", "cited-refs-manual-btn"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add("hidden");
+    });
+    if (citedRefsAbortBtn) citedRefsAbortBtn.classList.remove("hidden");
+
+    try {
+      const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
+      const citedDocs = kanbanState.documents.filter(d => CITED_DOC_CODES.includes(d.docCode));
+
+      if (citedDocs.length === 0) {
+        showError("未找到引用文献相关文档（FOR/892/1449/IDS/SRNT/SRFW）");
+        return;
+      }
+
+      const analysisSection = document.getElementById("kanban-analysis");
+      const analysisContent = document.getElementById("kanban-analysis-content");
+      if (!analysisSection || !analysisContent) {
+        showError("分析区域未找到");
+        return;
+      }
+      analysisSection.classList.remove("hidden");
+      analysisContent.innerHTML = '<p class="extracting">正在提取引用文献内容并分析...</p>';
+
+      // 先提取引用文献文档内容（如果尚未提取）
+      const config = window.AI.loadAIConfig();
+      const ocrConfig = window.AI.getOCRConfig(config);
+      const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
+      const glmApiKey = window.AI.getGlmOcrApiKey(config);
+      const isUS = currentData.office === "US";
+      const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+
+      for (const doc of citedDocs) {
+        if (kanbanState.extractions[doc.idx] && kanbanState.extractions[doc.idx].text) continue;
+
+        // 需要先提取此文档
+        const extractUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${doc.docId}/${doc.numberOfPages}/${doc.docFormat}`;
+        try {
+          analysisContent.innerHTML = `<p class="extracting">正在提取 ${doc.docCode} - ${doc.name}...</p>`;
+          const resp = await fetch(extractUrl);
+          if (!resp.ok) {
+            kanbanState.extractions[doc.idx] = { text: "", error: `HTTP ${resp.status}` };
+            continue;
+          }
+          const arrayBuf = await resp.arrayBuffer();
+          const b64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
+
+          const ocrResp = await fetch("/api/gd/extract-text/ocr", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pdf_base64: b64, engine: primaryEngine }),
+          });
+          if (!ocrResp.ok) {
+            kanbanState.extractions[doc.idx] = { text: "", error: `OCR HTTP ${ocrResp.status}` };
+            continue;
+          }
+          const ocrResult = await ocrResp.json();
+          if (ocrResult.error) {
+            // 降级尝试 GLM OCR
+            if (glmApiKey && primaryEngine !== "glm_ocr") {
+              try {
+                const glmResp = await fetch("/api/gd/extract-text/ocr", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ pdf_base64: b64, engine: "glm_ocr", glm_api_key: glmApiKey }),
+                });
+                const glmResult = await glmResp.json();
+                if (!glmResult.error && glmResult.text) {
+                  kanbanState.extractions[doc.idx] = {
+                    markdown: glmResult.markdown || "",
+                    text: glmResult.text || "",
+                    blocks: glmResult.blocks || [],
+                    pageDims: glmResult.pageDims || {},
+                    engine: "glm_ocr",
+                  };
+                  continue;
+                }
+              } catch {}
+            }
+            kanbanState.extractions[doc.idx] = { text: "", error: ocrResult.error };
+            continue;
+          }
+          kanbanState.extractions[doc.idx] = {
+            markdown: ocrResult.markdown || "",
+            text: ocrResult.text || "",
+            blocks: ocrResult.blocks || [],
+            pageDims: ocrResult.pageDims || {},
+            engine: ocrResult.engine || primaryEngine,
+          };
+        } catch (e) {
+          kanbanState.extractions[doc.idx] = { text: "", error: e.message };
+        }
+        if (citedRefsAbortController && citedRefsAbortController.signal.aborted) break;
+      }
+
+      // 构建分析内容
+      const lines = [];
+      lines.push(`# 引用文献梳理\n\n专利号: ${currentData.applicationNumber}\n\n`);
+      lines.push("## 引用文献相关文档\n");
+
+      let hasContent = false;
+      for (const doc of citedDocs) {
+        const extraction = kanbanState.extractions[doc.idx];
+        if (extraction && extraction.text) {
+          lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n${extraction.text}\n`);
+          hasContent = true;
+        } else {
+          lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n[未能提取内容]\n`);
+        }
+      }
+
+      if (!hasContent) {
+        analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有引用文献文档均未能提取到内容</p>';
+        return;
+      }
+
+      lines.push("\n## 分析要求\n");
+      lines.push("请对以上引用文献相关文档进行分析，包括：");
+      lines.push("1. 审查员引用了哪些文献？列出每篇引用文献的编号、类型和相关性说明");
+      lines.push("2. 申请人引用了哪些文献？与审查员引用有何异同");
+      lines.push("3. 引用文献的技术领域分布，是否涉及竞争对手专利");
+      lines.push("4. 引用文献对本专利权利要求的影响评估");
+      lines.push("5. 建议关注的引用文献和潜在风险");
+
+      const provider = window.AI.getCurrentProvider(config);
+      if (!provider) {
+        analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">请先配置 AI 服务（设置 → AI 配置）</p>';
+        return;
+      }
+
+      const prompt = `你是一位资深专利分析师，专注于引用文献分析。请根据以下引用文献相关文档，进行系统梳理和分析。
+
+${lines.join("\n")}`;
+
+      analysisContent.innerHTML = '';
+      let fullText = "";
+      for await (const chunk of window.AI.streamChat(
+        provider.type, provider.apiKey, provider.baseUrl,
+        {
+          model: provider.model,
+          messages: [
+            { role: "system", content: "你是一位资深专利分析师，专注于引用文献分析。" },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0.3,
+          maxTokens: 32768,
+        },
+        citedRefsAbortController ? citedRefsAbortController.signal : undefined
+      )) {
+        if (chunk.content) {
+          fullText += chunk.content;
+          analysisContent.innerHTML = marked.parse(fullText);
+          analysisSection.scrollTop = analysisSection.scrollHeight;
+        }
+      }
+
+      kanbanState.citedRefsAnalysis = fullText;
+    } catch (e) {
+      const analysisContent = document.getElementById("kanban-analysis-content");
+      if (analysisContent) analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + '</p>';
+      showError("引用文献梳理失败: " + e.message);
+    } finally {
+      activeAnalysisProcess = null;
+      ["kanban-auto-btn", "kanban-manual-select-btn", "cited-refs-btn", "cited-refs-manual-btn"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.disabled = false; el.classList.remove("hidden"); }
+      });
+      const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
+      if (citedRefsAbortBtn) citedRefsAbortBtn.classList.add("hidden");
+      citedRefsAbortController = null;
+    }
+  });
 }
 
 // Cited refs abort button handler
 const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
 if (citedRefsAbortBtn) {
   citedRefsAbortBtn.addEventListener("click", () => {
-    if (citedRefsAbortController) {
-      citedRefsAbortController.abort();
-      citedRefsAbortController = null;
-    }
-    citedRefsAbortBtn.classList.add("hidden");
-    citedRefsBtn.classList.remove("hidden");
-    citedRefsBtn.disabled = false;
+    abortActiveProcess();
     const statusEl = document.getElementById("ai-analysis-status");
     if (statusEl) statusEl.textContent = "引用文献梳理已中止";
   });
 }
 
-// Manual select button - add it dynamically next to kanbanAutoBtn
-const manualSelectBtn = document.createElement("button");
-manualSelectBtn.id = "kanban-manual-select-btn";
-manualSelectBtn.className = "btn-secondary";
-manualSelectBtn.innerHTML = '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> 手动选择';
-manualSelectBtn.disabled = true;
-const aiAnalysisActions = document.querySelector(".ai-analysis-actions");
-if (aiAnalysisActions) {
-  aiAnalysisActions.insertBefore(manualSelectBtn, citedRefsBtn);
-}
-
-// Cited refs manual select button
-const citedRefsManualBtn = document.createElement("button");
-citedRefsManualBtn.id = "cited-refs-manual-select-btn";
-citedRefsManualBtn.className = "btn-secondary";
-citedRefsManualBtn.innerHTML = '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> 手动选择引用文献';
-citedRefsManualBtn.disabled = true;
-if (aiAnalysisActions) {
-  aiAnalysisActions.insertBefore(citedRefsManualBtn, citedRefsBtn);
-}
-
-if (citedRefsManualBtn) {
-  citedRefsManualBtn.addEventListener("click", () => {
-    const manualSelectPanel = document.getElementById("ai-manual-select");
-    if (!manualSelectPanel) return;
-    manualSelectPanel.classList.remove("hidden");
-
-    const items = kanbanState.documents;
-    const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
-
-    let html = '<div class="ai-manual-header"><span class="ai-manual-title">手动选择引用文献文件范围</span></div>';
-    html += '<div class="ai-manual-select-all"><button id="cited-manual-select-all" class="btn-small btn-extract">全选</button><button id="cited-manual-select-none" class="btn-small btn-extract">全不选</button><button id="cited-manual-select-default" class="btn-small btn-extract">默认选择</button></div>';
-    html += '<div class="ai-manual-checkboxes">';
-    items.forEach(it => {
-      html += `
-        <label class="ai-manual-item">
-          <input type="checkbox" class="cited-manual-select-checkbox" data-idx="${it.idx}" ${CITED_DOC_CODES.includes(it.docCode) ? 'checked' : ''}>
-          <span class="ai-manual-item-info">
-            <span class="ai-manual-item-code">${escapeHtml(it.docCode)}</span>
-            <span class="ai-manual-item-name">${escapeHtml(it.name)}</span>
-            <span class="ai-manual-item-date">${escapeHtml(it.date)}</span>
-          </span>
-        </label>
-      `;
-    });
-    html += '</div>';
-    html += '<div class="ai-manual-actions">';
-    html += '<button id="cited-manual-select-cancel" class="btn-secondary">取消</button>';
-    html += '<button id="cited-manual-select-confirm" class="btn-primary">确认选择并开始引用文献梳理</button>';
-    html += '</div>';
-
-    manualSelectPanel.innerHTML = html;
-
-    document.getElementById("cited-manual-select-all").addEventListener("click", () => {
-      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => cb.checked = true);
-    });
-    document.getElementById("cited-manual-select-none").addEventListener("click", () => {
-      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => cb.checked = false);
-    });
-    document.getElementById("cited-manual-select-default").addEventListener("click", () => {
-      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => {
-        const idx = parseInt(cb.dataset.idx);
-        const it = items.find(d => d.idx === idx);
-        cb.checked = it && CITED_DOC_CODES.includes(it.docCode);
-      });
-    });
-    document.getElementById("cited-manual-select-cancel").addEventListener("click", () => {
-      manualSelectPanel.classList.add("hidden");
-    });
-    document.getElementById("cited-manual-select-confirm").addEventListener("click", async () => {
-      const selectedIdxs = [];
-      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox:checked").forEach(cb => {
-        selectedIdxs.push(parseInt(cb.dataset.idx));
-      });
-      if (selectedIdxs.length === 0) {
-        showError("请至少选择一个文档");
-        return;
-      }
-      manualSelectPanel.classList.add("hidden");
-
-      // Run cited refs analysis with selected documents
-      await runCitedRefsAnalysis(selectedIdxs);
-    });
-  });
-}
+// Manual select button - now in HTML
+const manualSelectBtn = document.getElementById("kanban-manual-select-btn");
 
 manualSelectBtn.addEventListener("click", () => {
   const items = kanbanState.documents;
@@ -2102,6 +1815,11 @@ manualSelectBtn.addEventListener("click", () => {
 
   const manualSelectPanel = document.getElementById("ai-manual-select");
   if (!manualSelectPanel) return;
+
+  // Interrupt any existing process
+  if (activeAnalysisProcess) {
+    abortActiveProcess();
+  }
 
   const canDownload = currentData && (currentData.office === "US" || currentData.office === "EP");
   if (!canDownload) {
@@ -2176,9 +1894,18 @@ manualSelectBtn.addEventListener("click", () => {
     }
 
     kanbanAutoBtn.disabled = true;
+    // Interrupt any existing process
+    if (activeAnalysisProcess) {
+      abortActiveProcess();
+    }
+    activeAnalysisProcess = "review";
     kanbanAutoAbortController = new AbortController();
     const kanbanAutoAbortBtn = document.getElementById("kanban-auto-abort-btn");
-    kanbanAutoBtn.classList.add("hidden");
+    // Hide all action buttons, show abort
+    ["kanban-auto-btn", "kanban-manual-select-btn", "cited-refs-btn", "cited-refs-manual-btn"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add("hidden");
+    });
     if (kanbanAutoAbortBtn) kanbanAutoAbortBtn.classList.remove("hidden");
 
     const analysisSection = document.getElementById("kanban-analysis");
@@ -2282,6 +2009,7 @@ manualSelectBtn.addEventListener("click", () => {
       const it = missing[i];
       if (statusEl) statusEl.textContent = "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
       await extractWithRetry(it, primaryEngine, MAX_RETRIES);
+      if (kanbanAutoAbortController && kanbanAutoAbortController.signal.aborted) break;
     }
 
     const successCount = extractReport.success.length;
@@ -2385,13 +2113,296 @@ manualSelectBtn.addEventListener("click", () => {
       analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
       if (statusEl) statusEl.textContent = "AI 整理失败 ✗";
     } finally {
-      kanbanAutoBtn.disabled = false;
-      kanbanAutoBtn.classList.remove("hidden");
+      activeAnalysisProcess = null;
+      ["kanban-auto-btn", "kanban-manual-select-btn", "cited-refs-btn", "cited-refs-manual-btn"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.disabled = false; el.classList.remove("hidden"); }
+      });
       if (kanbanAutoAbortBtn) kanbanAutoAbortBtn.classList.add("hidden");
       kanbanAutoAbortController = null;
     }
   });
 });
+
+// Cited refs manual select button
+const citedRefsManualBtn = document.getElementById("cited-refs-manual-btn");
+if (citedRefsManualBtn) {
+  citedRefsManualBtn.addEventListener("click", () => {
+    const items = kanbanState.documents;
+    if (!items || items.length === 0) {
+      showError("请先查询专利并加载审查文档");
+      return;
+    }
+
+    const manualSelectPanel = document.getElementById("ai-manual-select");
+    if (!manualSelectPanel) return;
+
+    const canDownload = currentData && (currentData.office === "US" || currentData.office === "EP");
+    if (!canDownload) {
+      showError("CN / DE / JP 专利暂不支持文档下载与提取，无法进行 AI 梳理");
+      return;
+    }
+
+    // Interrupt any existing process
+    if (activeAnalysisProcess) {
+      abortActiveProcess();
+    }
+
+    const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
+    const citedDocs = items.filter(d => CITED_DOC_CODES.includes(d.docCode));
+
+    if (citedDocs.length === 0) {
+      showError("未找到引用文献相关文档（FOR/892/1449/IDS/SRNT/SRFW）");
+      return;
+    }
+
+    const typeLabels = { office_action: "审查意见", response: "答复", request: "请求", allowance: "授权", notification: "通知", misc: "其他" };
+    let html = '<div class="ai-manual-header"><span class="ai-manual-title">手动选择引用文献分析范围</span></div>';
+    html += '<div class="ai-manual-select-all"><button id="cited-manual-select-all" class="btn-small btn-extract">全选</button><button id="cited-manual-select-none" class="btn-small btn-extract">全不选</button></div>';
+    html += '<div class="ai-manual-docs">';
+    citedDocs.forEach(it => {
+      const typeLabel = typeLabels[it.type] || it.type;
+      html += `
+        <label class="ai-manual-doc-item">
+          <input type="checkbox" class="cited-manual-select-checkbox" data-idx="${it.idx}" checked>
+          <div class="ai-manual-doc-info">
+            <span class="ai-manual-doc-code">${escapeHtml(it.docCode)}</span>
+            <span class="ai-manual-doc-name">${escapeHtml(it.name)}</span>
+            <span class="ai-manual-doc-date">${escapeHtml(it.date)}</span>
+          </div>
+          <span class="ai-manual-doc-type">${typeLabel}</span>
+        </label>
+      `;
+    });
+    html += '</div>';
+    html += '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">';
+    html += '<button id="cited-manual-select-cancel" class="btn-secondary">取消</button>';
+    html += '<button id="cited-manual-select-confirm" class="btn-primary">确认选择并梳理引用文献</button>';
+    html += '</div>';
+
+    manualSelectPanel.innerHTML = html;
+    manualSelectPanel.classList.remove("hidden");
+
+    document.getElementById("cited-manual-select-all").addEventListener("click", () => {
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => cb.checked = true);
+    });
+    document.getElementById("cited-manual-select-none").addEventListener("click", () => {
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => cb.checked = false);
+    });
+
+    document.getElementById("cited-manual-select-cancel").addEventListener("click", () => {
+      manualSelectPanel.classList.add("hidden");
+    });
+
+    document.getElementById("cited-manual-select-confirm").addEventListener("click", async () => {
+      const selectedIdxs = [];
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox:checked").forEach(cb => {
+        selectedIdxs.push(parseInt(cb.dataset.idx));
+      });
+      if (selectedIdxs.length === 0) {
+        showError("请至少选择一个文档");
+        return;
+      }
+      manualSelectPanel.classList.add("hidden");
+
+      // Interrupt any existing process
+      if (activeAnalysisProcess) {
+        abortActiveProcess();
+      }
+      activeAnalysisProcess = "citedRefs";
+
+      const config = window.AI.loadAIConfig();
+      const provider = window.AI.getCurrentProvider(config);
+      if (!provider) {
+        showError("请先在 AI 设置中配置并选择一个 AI 服务商");
+        aiSettingsBtn.click();
+        return;
+      }
+
+      citedRefsAbortController = new AbortController();
+      const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
+      // Hide all action buttons, show abort
+      ["kanban-auto-btn", "kanban-manual-select-btn", "cited-refs-btn", "cited-refs-manual-btn"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add("hidden");
+      });
+      if (citedRefsAbortBtn) citedRefsAbortBtn.classList.remove("hidden");
+
+      const analysisSection = document.getElementById("kanban-analysis");
+      const analysisContent = document.getElementById("kanban-analysis-content");
+      analysisSection.classList.remove("hidden");
+      analysisContent.innerHTML = '<p class="extracting">正在提取手动选择的引用文献内容...</p>';
+
+      const selectedDocs = items.filter(it => selectedIdxs.includes(it.idx));
+      const ocrConfig = window.AI.getOCRConfig(config);
+      const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
+      const glmApiKey = window.AI.getGlmOcrApiKey(config);
+      const statusEl = document.getElementById("ai-analysis-status");
+      const isUS = currentData.office === "US";
+      const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+
+      // Extract documents
+      for (const doc of selectedDocs) {
+        if (kanbanState.extractions[doc.idx] && kanbanState.extractions[doc.idx].text) continue;
+        const extractUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${doc.docId}/${doc.numberOfPages}/${doc.docFormat}`;
+        try {
+          if (statusEl) statusEl.textContent = "提取中: " + doc.docCode + " - " + doc.name;
+          const resp = await fetch(extractUrl);
+          if (!resp.ok) {
+            kanbanState.extractions[doc.idx] = { text: "", error: `HTTP ${resp.status}` };
+            continue;
+          }
+          const arrayBuf = await resp.arrayBuffer();
+          const b64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
+          const ocrResp = await fetch("/api/gd/extract-text/ocr", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pdf_base64: b64, engine: primaryEngine }),
+          });
+          if (!ocrResp.ok) {
+            kanbanState.extractions[doc.idx] = { text: "", error: `OCR HTTP ${ocrResp.status}` };
+            continue;
+          }
+          const ocrResult = await ocrResp.json();
+          if (ocrResult.error) {
+            if (glmApiKey && primaryEngine !== "glm_ocr") {
+              try {
+                const glmResp = await fetch("/api/gd/extract-text/ocr", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ pdf_base64: b64, engine: "glm_ocr", glm_api_key: glmApiKey }),
+                });
+                const glmResult = await glmResp.json();
+                if (!glmResult.error && glmResult.text) {
+                  kanbanState.extractions[doc.idx] = {
+                    markdown: glmResult.markdown || "",
+                    text: glmResult.text || "",
+                    blocks: glmResult.blocks || [],
+                    pageDims: glmResult.pageDims || {},
+                    engine: "glm_ocr",
+                  };
+                  continue;
+                }
+              } catch {}
+            }
+            kanbanState.extractions[doc.idx] = { text: "", error: ocrResult.error };
+            continue;
+          }
+          kanbanState.extractions[doc.idx] = {
+            markdown: ocrResult.markdown || "",
+            text: ocrResult.text || "",
+            blocks: ocrResult.blocks || [],
+            pageDims: ocrResult.pageDims || {},
+            engine: ocrResult.engine || primaryEngine,
+          };
+        } catch (e) {
+          kanbanState.extractions[doc.idx] = { text: "", error: e.message };
+        }
+        if (citedRefsAbortController && citedRefsAbortController.signal.aborted) break;
+      }
+
+      if (citedRefsAbortController && citedRefsAbortController.signal.aborted) {
+        activeAnalysisProcess = null;
+        ["kanban-auto-btn", "kanban-manual-select-btn", "cited-refs-btn", "cited-refs-manual-btn"].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) { el.disabled = false; el.classList.remove("hidden"); }
+        });
+        if (citedRefsAbortBtn) citedRefsAbortBtn.classList.add("hidden");
+        citedRefsAbortController = null;
+        return;
+      }
+
+      // Build analysis content
+      const lines = [];
+      lines.push(`# 引用文献梳理\n\n专利号: ${currentData.applicationNumber}\n\n`);
+      lines.push("## 引用文献相关文档\n");
+
+      let hasContent = false;
+      for (const doc of selectedDocs) {
+        const extraction = kanbanState.extractions[doc.idx];
+        if (extraction && extraction.text) {
+          lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n${extraction.text}\n`);
+          hasContent = true;
+        } else {
+          lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n[未能提取内容]\n`);
+        }
+      }
+
+      if (!hasContent) {
+        analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有引用文献文档均未能提取到内容</p>';
+        activeAnalysisProcess = null;
+        ["kanban-auto-btn", "kanban-manual-select-btn", "cited-refs-btn", "cited-refs-manual-btn"].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) { el.disabled = false; el.classList.remove("hidden"); }
+        });
+        if (citedRefsAbortBtn) citedRefsAbortBtn.classList.add("hidden");
+        citedRefsAbortController = null;
+        return;
+      }
+
+      lines.push("\n## 分析要求\n");
+      lines.push("请对以上引用文献相关文档进行分析，包括：");
+      lines.push("1. 审查员引用了哪些文献？列出每篇引用文献的编号、类型和相关性说明");
+      lines.push("2. 申请人引用了哪些文献？与审查员引用有何异同");
+      lines.push("3. 引用文献的技术领域分布，是否涉及竞争对手专利");
+      lines.push("4. 引用文献对本专利权利要求的影响评估");
+      lines.push("5. 建议关注的引用文献和潜在风险");
+
+      if (!provider) {
+        analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">请先配置 AI 服务（设置 → AI 配置）</p>';
+        activeAnalysisProcess = null;
+        ["kanban-auto-btn", "kanban-manual-select-btn", "cited-refs-btn", "cited-refs-manual-btn"].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) { el.disabled = false; el.classList.remove("hidden"); }
+        });
+        if (citedRefsAbortBtn) citedRefsAbortBtn.classList.add("hidden");
+        citedRefsAbortController = null;
+        return;
+      }
+
+      const prompt = `你是一位资深专利分析师，专注于引用文献分析。请根据以下引用文献相关文档，进行系统梳理和分析。
+
+${lines.join("\n")}`;
+
+      analysisContent.innerHTML = '';
+      let fullText = "";
+      try {
+        for await (const chunk of window.AI.streamChat(
+          provider.type, provider.apiKey, provider.baseUrl,
+          {
+            model: provider.model,
+            messages: [
+              { role: "system", content: "你是一位资深专利分析师，专注于引用文献分析。" },
+              { role: "user", content: prompt },
+            ],
+            temperature: 0.3,
+            maxTokens: 32768,
+          },
+          citedRefsAbortController ? citedRefsAbortController.signal : undefined
+        )) {
+          if (chunk.content) {
+            fullText += chunk.content;
+            analysisContent.innerHTML = marked.parse(fullText);
+            analysisSection.scrollTop = analysisSection.scrollHeight;
+          }
+        }
+        kanbanState.citedRefsAnalysis = fullText;
+        if (statusEl) statusEl.textContent = "引用文献梳理完成 ✓";
+      } catch (e) {
+        analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + '</p>';
+        showError("引用文献梳理失败: " + e.message);
+      } finally {
+        activeAnalysisProcess = null;
+        ["kanban-auto-btn", "kanban-manual-select-btn", "cited-refs-btn", "cited-refs-manual-btn"].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) { el.disabled = false; el.classList.remove("hidden"); }
+        });
+        if (citedRefsAbortBtn) citedRefsAbortBtn.classList.add("hidden");
+        citedRefsAbortController = null;
+      }
+    });
+  });
+}
 
 function renderMarkdown(text) {
   if (!text) return "";
@@ -2495,81 +2506,63 @@ function onTraceClick(blockIdStr) {
     showError("溯源信息不存在: " + primaryBlockId);
     return;
   }
-
-  // Set pending highlight before any view switching
-  pdfViewState.pendingHighlight = primaryBlockId;
-  pdfViewState.pendingHighlightRange = blockIds;
-  pdfViewState.traceJumpPending = true;
-
-  // Set the correct doc index BEFORE toggling PDF view,
-  // so togglePdfView renders the right document if it triggers renderPdfView
-  pdfViewState.currentDocIdx = info.docIdx;
-
   if (readerModal.classList.contains("hidden")) {
-    openReader(true, true); // skipRender=true — selectReaderDoc will handle the render
+    openReader(true);
   }
-  // Auto-switch to PDF view (skipRender=true to avoid double render — selectReaderDoc will handle it)
+  // Auto-switch to PDF view
   if (!pdfViewState.active) {
-    togglePdfView(true);
+    togglePdfView();
   }
-
+  // Set pending highlight before selectReaderDoc so renderPdfView can apply it
+  // after async PDF rendering completes
+  if (pdfViewState.active) {
+    pdfViewState.pendingHighlight = primaryBlockId;
+    pdfViewState.pendingHighlightRange = blockIds;
+  }
   selectReaderDoc(info.docIdx);
-
-  // Fallback: try to highlight after a delay if PDF was already rendered
-  // (covers the case where renderPdfView already completed before we get here)
   setTimeout(() => {
-    if (pdfViewState.active && !pdfViewState.pendingHighlight) {
-      // pendingHighlight was already consumed by renderPdfView, highlight is done
+    // If PDF view is active, highlight the overlay block
+    if (pdfViewState.active) {
+      highlightPdfBlock(primaryBlockId);
+      // Also highlight range blocks with a lighter highlight
+      blockIds.forEach(id => {
+        if (id !== primaryBlockId) {
+          const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
+          if (overlay) overlay.classList.add("highlight-range");
+        }
+      });
       return;
     }
-    // If pendingHighlight is still set, try direct highlight
-    if (pdfViewState.active) {
-      const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${primaryBlockId}"]`);
-      if (overlay) {
-        highlightPdfBlock(primaryBlockId);
-        blockIds.forEach(id => {
-          if (id !== primaryBlockId) {
-            const el = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
-            if (el) el.classList.add("highlight-range");
-          }
-        });
-        pdfViewState.pendingHighlight = null;
-        pdfViewState.pendingHighlightRange = null;
-        pdfViewState.traceJumpPending = false;
-      }
-    }
 
-    // Text view fallback
-    if (!pdfViewState.active) {
-      const md = kanbanState.extractions[info.docIdx];
-      if (!md) return;
-      const content = md.markdown || md.text || "";
-      const blocks = md.blocks || [];
-      const targetBlock = blocks.find(b => b.block_id === primaryBlockId);
-      if (targetBlock && targetBlock.content) {
-        const el = readerContent.querySelector(`[data-block-id="${primaryBlockId}"]`);
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-          el.classList.add("trace-highlight");
-          setTimeout(() => el.classList.remove("trace-highlight"), 3000);
-          return;
-        }
+    const md = kanbanState.extractions[info.docIdx];
+    if (!md) return;
+    const content = md.markdown || md.text || "";
+    const blocks = md.blocks || [];
+    const targetBlock = blocks.find(b => b.block_id === primaryBlockId);
+    if (targetBlock && targetBlock.content) {
+      const snippet = targetBlock.content.substring(0, 80);
+      const el = readerContent.querySelector(`[data-block-id="${primaryBlockId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("trace-highlight");
+        setTimeout(() => el.classList.remove("trace-highlight"), 3000);
+        return;
       }
-      const traceEl = document.createElement("div");
-      traceEl.className = "trace-locator";
-      traceEl.innerHTML = `
-        <div class="trace-locator-header">
-          <span class="trace-locator-id">${escapeHtml(primaryBlockId)}</span>
-          <span class="trace-locator-page">第 ${info.page} 页</span>
-          <button class="trace-locator-close" onclick="this.parentElement.parentElement.remove()">×</button>
-        </div>
-        <div class="trace-locator-content">${escapeHtml((info.content || "").substring(0, 300))}${info.content && info.content.length > 300 ? "..." : ""}</div>
-        ${info.bbox ? '<div class="trace-locator-bbox">区域坐标: [' + info.bbox.join(", ") + "]</div>" : ""}
-      `;
-      readerContent.insertBefore(traceEl, readerContent.firstChild);
-      traceEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }, 800);
+    const traceEl = document.createElement("div");
+    traceEl.className = "trace-locator";
+    traceEl.innerHTML = `
+      <div class="trace-locator-header">
+        <span class="trace-locator-id">${escapeHtml(primaryBlockId)}</span>
+        <span class="trace-locator-page">第 ${info.page} 页</span>
+        <button class="trace-locator-close" onclick="this.parentElement.parentElement.remove()">×</button>
+      </div>
+      <div class="trace-locator-content">${escapeHtml((info.content || "").substring(0, 300))}${info.content && info.content.length > 300 ? "..." : ""}</div>
+      ${info.bbox ? '<div class="trace-locator-bbox">区域坐标: [' + info.bbox.join(", ") + "]</div>" : ""}
+    `;
+    readerContent.insertBefore(traceEl, readerContent.firstChild);
+    traceEl.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 500);
 }
 
 function renderTimeline(data) {
@@ -2659,7 +2652,7 @@ function parseDate(dateStr) {
   return new Date(dateStr).getTime();
 }
 
-function openReader(defaultToPdf = false, skipRender = false) {
+function openReader(defaultToPdf = false) {
   if (!readerModal) return;
   const items = kanbanState.documents;
   if (!items || items.length === 0) {
@@ -2669,10 +2662,11 @@ function openReader(defaultToPdf = false, skipRender = false) {
 
   readerModal.classList.remove("hidden");
   if (defaultToPdf && !pdfViewState.active) {
-    togglePdfView(skipRender);
+    togglePdfView();
   }
 
-  const readerItems = items;
+  const importantTypes = ["office_action", "response", "allowance"];
+  const readerItems = items.filter(it => importantTypes.indexOf(it.type) !== -1);
 
   let listHtml = "";
   readerItems.forEach((it, idx) => {
@@ -2703,9 +2697,6 @@ function selectReaderDoc(idx) {
   chatHistory = [];
   if (chatMessages) chatMessages.innerHTML = "";
 
-  // Hide any OCR progress overlay from previous document
-  hideOcrProgressOverlay();
-
   const items = kanbanState.documents;
   const it = items.find(d => d.idx === idx);
   if (!it) return;
@@ -2717,12 +2708,6 @@ function selectReaderDoc(idx) {
   // Track the currently selected document for PDF view
   pdfViewState.currentDocIdx = idx;
 
-  // Reset search state
-  pdfViewState.searchMatches = [];
-  pdfViewState.searchCurrentIdx = -1;
-  const searchInfo = document.getElementById("pdf-search-info");
-  if (searchInfo) searchInfo.textContent = "";
-
   // Reset OCR/search state for new document
   const ext = kanbanState.extractions[idx];
   const searchInput = document.getElementById("pdf-search-input");
@@ -2730,14 +2715,12 @@ function selectReaderDoc(idx) {
   if (ext && ext.blocks && ext.blocks.length > 0) {
     if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
     if (searchBtn) searchBtn.disabled = false;
+    if (pdfOcrBtn) { pdfOcrBtn.textContent = "已提取"; pdfOcrBtn.disabled = true; }
   } else {
     if (searchInput) { searchInput.disabled = true; searchInput.placeholder = "请先OCR提取..."; }
     if (searchBtn) searchBtn.disabled = true;
+    if (pdfOcrBtn) { pdfOcrBtn.textContent = "OCR 提取"; pdfOcrBtn.disabled = false; }
   }
-  // Translate button always enabled (auto-OCR if needed)
-  // Reset translate panel
-  if (pdfTranslatePanel) pdfTranslatePanel.classList.add("hidden");
-  if (pdfTranslateContent) pdfTranslateContent.innerHTML = '<p class="placeholder">点击"翻译全文档"按钮翻译当前文档</p>';
 
   // Render PDF view if active
   if (pdfViewState.active) {
@@ -2789,7 +2772,7 @@ function selectReaderAnalysis() {
 
 // ============ PDF Viewer with Overlay Blocks ============
 
-function togglePdfView(skipRender) {
+function togglePdfView() {
   if (pdfViewState.active) {
     pdfViewState.active = false;
     readerPdfView.classList.add("hidden");
@@ -2802,25 +2785,10 @@ function togglePdfView(skipRender) {
     readerContent.classList.add("hidden");
     readerPdfToggle.classList.add("active");
     readerPdfToggle.textContent = "文本视图";
-    if (!skipRender && pdfViewState.currentDocIdx !== null) {
+    if (pdfViewState.currentDocIdx !== null) {
       renderPdfView(pdfViewState.currentDocIdx);
     }
   }
-}
-
-function showOcrProgressOverlay() {
-  // Remove existing overlay if any
-  hideOcrProgressOverlay();
-  const overlay = document.createElement("div");
-  overlay.id = "ocr-progress-overlay";
-  overlay.style.cssText = "position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;padding:8px 16px;background:var(--accent-dim);border-bottom:2px solid var(--accent);font-size:13px;color:var(--accent);";
-  overlay.innerHTML = '<div class="ocr-progress-spinner" style="width:16px;height:16px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></div><span>正在 OCR 识别中，PDF 已可浏览...</span>';
-  readerPdfContainer.prepend(overlay);
-}
-
-function hideOcrProgressOverlay() {
-  const existing = document.getElementById("ocr-progress-overlay");
-  if (existing) existing.remove();
 }
 
 async function renderPdfView(idx) {
@@ -2834,8 +2802,6 @@ async function renderPdfView(idx) {
   }
 
   pdfViewState.currentDocIdx = idx;
-  // Increment render version to cancel any stale render
-  const thisVersion = ++pdfViewState.renderVersion;
 
   if (typeof pdfjsLib === "undefined") {
     readerPdfContainer.innerHTML = '<p class="pdf-error">PDF.js 库未加载，无法显示 PDF 视图。请检查网络连接后刷新页面。</p>';
@@ -2855,13 +2821,8 @@ async function renderPdfView(idx) {
 
   readerPdfContainer.innerHTML = '<p class="pdf-loading">正在加载 PDF 文件...</p>';
 
-  // Clear stale pdfDoc while loading to prevent rerenderPdfPages from using wrong doc
-  pdfViewState.pdfDoc = null;
-
   try {
     const resp = await fetch(pdfUrl, { headers: { "Accept": "application/pdf,*/*" } });
-    // Check if a newer render has started — abort this one
-    if (pdfViewState.renderVersion !== thisVersion) return;
     if (!resp.ok) throw new Error("PDF 下载失败: HTTP " + resp.status);
 
     const contentType = resp.headers.get("content-type") || "";
@@ -2873,13 +2834,11 @@ async function renderPdfView(idx) {
     }
 
     const arrayBuffer = await resp.arrayBuffer();
-    if (pdfViewState.renderVersion !== thisVersion) return;
     if (arrayBuffer.byteLength < 100) {
       throw new Error("下载的文件过小，文档可能暂不可用");
     }
 
     const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    if (pdfViewState.renderVersion !== thisVersion) return;
     pdfViewState.pdfDoc = pdfDoc;
     pdfViewState.totalPages = pdfDoc.numPages;
     pdfViewState.currentPage = 1;
@@ -2887,30 +2846,23 @@ async function renderPdfView(idx) {
 
     readerPdfContainer.innerHTML = "";
 
-    // Wait for layout to stabilize if container is not yet visible
-    let containerWidth = readerPdfContainer.clientWidth - 32;
-    if (containerWidth <= 0) {
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-      containerWidth = readerPdfContainer.clientWidth - 32;
-    }
+    const containerWidth = readerPdfContainer.clientWidth - 32;
     const firstPage = await pdfDoc.getPage(1);
     const viewport = firstPage.getViewport({ scale: 1.0 });
-    pdfViewState.baseScale = containerWidth > 0 ? Math.min(containerWidth / viewport.width, 1.5) : 1.0;
+    pdfViewState.baseScale = containerWidth / viewport.width;
     pdfViewState.scale = pdfViewState.baseScale;
 
     updatePdfToolbar();
     await renderAllPdfPages(pdfDoc, blocks, pageDimensions, pdfViewState.scale);
-    if (pdfViewState.renderVersion !== thisVersion) return;
 
     // Apply pending highlight from onTraceClick if set
-    // Only consume pendingHighlight if blocks are available (overlay elements exist)
-    if (pdfViewState.pendingHighlight && blocks.length > 0) {
+    if (pdfViewState.pendingHighlight) {
       const blockId = pdfViewState.pendingHighlight;
       const rangeIds = pdfViewState.pendingHighlightRange || [];
       pdfViewState.pendingHighlight = null;
       pdfViewState.pendingHighlightRange = null;
-      pdfViewState.traceJumpPending = false;
       highlightPdfBlock(blockId);
+      // Also highlight range blocks with a lighter highlight
       rangeIds.forEach(id => {
         if (id !== blockId) {
           const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
@@ -2918,24 +2870,7 @@ async function renderPdfView(idx) {
         }
       });
     }
-
-    // Auto-OCR: if no extraction exists and autoOcr is enabled, trigger OCR
-    // But skip if this is a trace jump (document should already have OCR data from analysis)
-    if (blocks.length === 0 && !pdfViewState.traceJumpPending) {
-      const config = window.AI.loadAIConfig();
-      const ocrConfig = window.AI.getOCRConfig(config);
-      if (ocrConfig.autoOcr !== false) {
-        // Show OCR progress overlay on top of the already-rendered PDF
-        showOcrProgressOverlay();
-        ocrPdf(); // fire-and-forget, will re-render on completion
-      }
-    }
-    // Clear trace jump flag after renderPdfView has processed it
-    if (pdfViewState.traceJumpPending && blocks.length > 0) {
-      pdfViewState.traceJumpPending = false;
-    }
   } catch (e) {
-    if (pdfViewState.renderVersion !== thisVersion) return;
     pdfViewState.pendingHighlight = null;
     pdfViewState.pendingHighlightRange = null;
     readerPdfContainer.innerHTML = '<p class="pdf-error">' + escapeHtml(e.message) + '<br><small>请切换到文本视图查看提取的内容</small></p>';
@@ -2967,12 +2902,6 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
 
     const pageBlocks = blocks.filter(b => b.page === pageNum);
     const pageDim = pageDimensions[pageNum];
-
-    // 添加框选矩形层
-    const selectionRect = document.createElement("div");
-    selectionRect.className = "pdf-selection-rect";
-    wrapper.appendChild(selectionRect);
-
     if (pageBlocks.length > 0 && pageDim) {
       const scaleX = viewport.width / pageDim.width;
       const scaleY = viewport.height / pageDim.height;
@@ -2994,127 +2923,19 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
         tooltip.textContent = b.block_id + " [" + (b.label || "text") + "]";
         overlay.appendChild(tooltip);
 
-        overlay.addEventListener("click", (ev) => {
-          ev.stopPropagation();
-          // 单击切换选中状态（选中后保持持久，用于翻译范围选择）
-          const blockId = b.block_id;
-          const idx = pdfViewState.selectedBlockIds.indexOf(blockId);
-          if (idx >= 0) {
-            pdfViewState.selectedBlockIds.splice(idx, 1);
-            overlay.classList.remove("block-selected");
-          } else {
-            pdfViewState.selectedBlockIds.push(blockId);
-            overlay.classList.add("block-selected");
-          }
-          updatePdfSelectionInfo();
-        });
-
-        overlay.addEventListener("contextmenu", (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          // 右键：如果此框已在选中集合中，翻译整个范围；否则先选中此框再翻译
-          const blockId = b.block_id;
-          const isInSelection = pdfViewState.selectedBlockIds.includes(blockId);
-          if (!isInSelection) {
-            if (!ev.shiftKey) {
-              clearPdfBlockSelection();
-            }
-            pdfViewState.selectedBlockIds.push(blockId);
-            refreshPdfBlockSelectionVisual();
-            updatePdfSelectionInfo();
-          }
-          showPdfBlockContextMenu(ev.clientX, ev.clientY, blockId);
+        overlay.addEventListener("click", () => {
+          document.querySelectorAll(".pdf-block-overlay.highlight").forEach(el => el.classList.remove("highlight"));
+          overlay.classList.add("highlight");
+          setTimeout(() => overlay.classList.remove("highlight"), 3000);
         });
 
         wrapper.appendChild(overlay);
       });
     }
 
-    // 框选：在 wrapper 内按住鼠标左键拖动
-    wrapper.addEventListener("mousedown", (ev) => {
-      if (ev.button !== 0) return;
-      if (ev.target.classList && ev.target.classList.contains("pdf-block-overlay")) return;
-      ev.preventDefault();
-      const rect = wrapper.getBoundingClientRect();
-      const startX = ev.clientX - rect.left;
-      const startY = ev.clientY - rect.top;
-      pdfViewState.selecting = true;
-      pdfViewState.selectStart = { x: startX, y: startY, page: pageNum };
-      pdfViewState.selectEnd = { x: startX, y: startY, page: pageNum };
-      // 如果不按 Shift，先清除之前的选择
-      if (!ev.shiftKey) {
-        clearPdfBlockSelection();
-      }
-      selectionRect.style.display = "block";
-      selectionRect.style.left = startX + "px";
-      selectionRect.style.top = startY + "px";
-      selectionRect.style.width = "0px";
-      selectionRect.style.height = "0px";
-    });
-
     readerPdfContainer.appendChild(wrapper);
     pdfViewState.renderedPages[pageNum] = wrapper;
   }
-
-  // 全局 mousemove / mouseup 用于框选
-  if (readerPdfContainer._selectionHandlersInstalled) return;
-  readerPdfContainer._selectionHandlersInstalled = true;
-
-  document.addEventListener("mousemove", (ev) => {
-    if (!pdfViewState.selecting || !pdfViewState.selectStart) return;
-    const page = pdfViewState.selectStart.page;
-    const wrapper = pdfViewState.renderedPages[page];
-    if (!wrapper) return;
-    const rect = wrapper.getBoundingClientRect();
-    const x = Math.max(0, Math.min(ev.clientX - rect.left, rect.width));
-    const y = Math.max(0, Math.min(ev.clientY - rect.top, rect.height));
-    pdfViewState.selectEnd = { x, y, page };
-    const selectionRect = wrapper.querySelector(".pdf-selection-rect");
-    if (selectionRect) {
-      const left = Math.min(pdfViewState.selectStart.x, x);
-      const top = Math.min(pdfViewState.selectStart.y, y);
-      const width = Math.abs(x - pdfViewState.selectStart.x);
-      const height = Math.abs(y - pdfViewState.selectStart.y);
-      selectionRect.style.left = left + "px";
-      selectionRect.style.top = top + "px";
-      selectionRect.style.width = width + "px";
-      selectionRect.style.height = height + "px";
-    }
-    // 实时高亮被框中的 blocks（仅视觉预览）
-    refreshPdfBoxSelectionVisual(left, top, width, height, page);
-  });
-
-  document.addEventListener("mouseup", (ev) => {
-    if (!pdfViewState.selecting) return;
-    pdfViewState.selecting = false;
-    const page = pdfViewState.selectStart ? pdfViewState.selectStart.page : null;
-    if (page) {
-      const wrapper = pdfViewState.renderedPages[page];
-      if (wrapper) {
-        const selectionRect = wrapper.querySelector(".pdf-selection-rect");
-        if (selectionRect) selectionRect.style.display = "none";
-      }
-      const s = pdfViewState.selectStart;
-      const e = pdfViewState.selectEnd;
-      if (s && e) {
-        const left = Math.min(s.x, e.x);
-        const top = Math.min(s.y, e.y);
-        const width = Math.abs(e.x - s.x);
-        const height = Math.abs(e.y - s.y);
-        if (width > 5 && height > 5) {
-          // 真正的框选，将框中的 blocks 加入选中集合
-          selectBlocksInRect(left, top, width, height, page);
-        } else {
-          // 过小的拖动视为点击空白，清除选择
-          clearPdfBlockSelection();
-        }
-      }
-    }
-    pdfViewState.selectStart = null;
-    pdfViewState.selectEnd = null;
-    refreshPdfBlockSelectionVisual();
-    updatePdfSelectionInfo();
-  });
 }
 
 async function rerenderPdfPages() {
@@ -3125,9 +2946,6 @@ async function rerenderPdfPages() {
   const pageDimensions = ext ? (ext.pageDimensions || {}) : {};
   await renderAllPdfPages(pdfViewState.pdfDoc, blocks, pageDimensions, pdfViewState.scale);
   updatePdfToolbar();
-  // Restore selection visual after re-render
-  refreshPdfBlockSelectionVisual();
-  updatePdfSelectionInfo();
 }
 
 function updatePdfToolbar() {
@@ -3172,638 +2990,6 @@ function highlightPdfBlock(blockId) {
     overlay.scrollIntoView({ behavior: "smooth", block: "center" });
     setTimeout(() => overlay.classList.remove("highlight"), 3000);
   }
-}
-
-function clearPdfBlockSelection() {
-  pdfViewState.selectedBlockIds = [];
-  document.querySelectorAll(".pdf-block-overlay.block-selected").forEach(el => el.classList.remove("block-selected"));
-  document.querySelectorAll(".pdf-block-overlay.block-preview").forEach(el => el.classList.remove("block-preview"));
-  updatePdfSelectionInfo();
-}
-
-function refreshPdfBlockSelectionVisual() {
-  document.querySelectorAll(".pdf-block-overlay").forEach(el => {
-    const bid = el.dataset.blockId;
-    if (pdfViewState.selectedBlockIds.includes(bid)) {
-      el.classList.add("block-selected");
-    } else {
-      el.classList.remove("block-selected");
-    }
-    el.classList.remove("block-preview");
-  });
-}
-
-function refreshPdfBoxSelectionVisual(left, top, width, height, page) {
-  const wrapper = pdfViewState.renderedPages[page];
-  if (!wrapper) return;
-  const overlays = wrapper.querySelectorAll(".pdf-block-overlay");
-  overlays.forEach(el => {
-    const bx = parseFloat(el.style.left);
-    const by = parseFloat(el.style.top);
-    const bw = parseFloat(el.style.width);
-    const bh = parseFloat(el.style.height);
-    const cx = bx + bw / 2;
-    const cy = by + bh / 2;
-    const inside = cx >= left && cx <= left + width && cy >= top && cy <= top + height;
-    if (inside) {
-      el.classList.add("block-preview");
-    } else {
-      el.classList.remove("block-preview");
-    }
-  });
-}
-
-function selectBlocksInRect(left, top, width, height, page) {
-  const wrapper = pdfViewState.renderedPages[page];
-  if (!wrapper) return;
-  const overlays = wrapper.querySelectorAll(".pdf-block-overlay");
-  overlays.forEach(el => {
-    const bx = parseFloat(el.style.left);
-    const by = parseFloat(el.style.top);
-    const bw = parseFloat(el.style.width);
-    const bh = parseFloat(el.style.height);
-    const cx = bx + bw / 2;
-    const cy = by + bh / 2;
-    const inside = cx >= left && cx <= left + width && cy >= top && cy <= top + height;
-    if (inside) {
-      const bid = el.dataset.blockId;
-      if (!pdfViewState.selectedBlockIds.includes(bid)) {
-        pdfViewState.selectedBlockIds.push(bid);
-      }
-    }
-  });
-  refreshPdfBlockSelectionVisual();
-  updatePdfSelectionInfo();
-}
-
-function updatePdfSelectionInfo() {
-  const info = document.getElementById("pdf-selection-info");
-  if (!info) return;
-  const n = pdfViewState.selectedBlockIds.length;
-  info.textContent = n > 0 ? `已选 ${n} 块` : "";
-  info.classList.toggle("hidden", n === 0);
-  const clearBtn = document.getElementById("pdf-clear-selection-btn");
-  if (clearBtn) {
-    clearBtn.style.display = n > 0 ? "" : "none";
-  }
-  const translateSelBtn = document.getElementById("pdf-translate-selection-btn");
-  if (translateSelBtn) {
-    translateSelBtn.style.display = n > 0 ? "" : "none";
-  }
-}
-
-// 右键菜单
-let _pdfCtxMenu = null;
-
-function showPdfBlockContextMenu(clientX, clientY, blockId) {
-  hidePdfBlockContextMenu();
-  const menu = document.createElement("div");
-  menu.className = "pdf-block-context-menu";
-  menu.style.left = clientX + "px";
-  menu.style.top = clientY + "px";
-
-  const n = pdfViewState.selectedBlockIds.length;
-  const translateAllItem = document.createElement("div");
-  translateAllItem.className = "pdf-ctx-menu-item";
-  translateAllItem.textContent = n > 1 ? `翻译已选 ${n} 块` : "翻译此文本块";
-  translateAllItem.addEventListener("click", () => {
-    hidePdfBlockContextMenu();
-    translateSelectedBlocks();
-  });
-  menu.appendChild(translateAllItem);
-
-  if (n > 0) {
-    const clearItem = document.createElement("div");
-    clearItem.className = "pdf-ctx-menu-item";
-    clearItem.textContent = "清除选择";
-    clearItem.addEventListener("click", () => {
-      hidePdfBlockContextMenu();
-      clearPdfBlockSelection();
-    });
-    menu.appendChild(clearItem);
-  }
-
-  document.body.appendChild(menu);
-  _pdfCtxMenu = menu;
-
-  // 菜单显示后如果超出视口，向左/上调整
-  const r = menu.getBoundingClientRect();
-  const maxX = window.innerWidth - 16;
-  const maxY = window.innerHeight - 16;
-  if (r.right > maxX) menu.style.left = (maxX - r.width) + "px";
-  if (r.bottom > maxY) menu.style.top = (maxY - r.height) + "px";
-}
-
-function hidePdfBlockContextMenu() {
-  if (_pdfCtxMenu && _pdfCtxMenu.parentNode) {
-    _pdfCtxMenu.parentNode.removeChild(_pdfCtxMenu);
-  }
-  _pdfCtxMenu = null;
-}
-
-document.addEventListener("mousedown", (ev) => {
-  if (_pdfCtxMenu && !_pdfCtxMenu.contains(ev.target)) {
-    hidePdfBlockContextMenu();
-  }
-});
-document.addEventListener("scroll", () => hidePdfBlockContextMenu(), true);
-window.addEventListener("resize", () => hidePdfBlockContextMenu());
-
-// ===== PDF keyword search =====
-
-function searchPdfKeyword() {
-  const input = document.getElementById("pdf-search-input");
-  if (!input) return;
-  const keyword = input.value.trim().toLowerCase();
-  if (!keyword) return;
-
-  const idx = pdfViewState.currentDocIdx;
-  if (idx == null) return;
-  const ext = kanbanState.extractions[idx];
-  if (!ext || !ext.blocks || ext.blocks.length === 0) {
-    showError("请先提取文档内容（OCR提取）");
-    return;
-  }
-
-  // Clear previous search highlights
-  document.querySelectorAll(".pdf-block-overlay.pdf-search-match").forEach(el => el.classList.remove("pdf-search-match", "pdf-search-current"));
-  pdfViewState.searchMatches = [];
-  pdfViewState.searchCurrentIdx = -1;
-
-  // Find matching blocks
-  ext.blocks.forEach(b => {
-    if (b.content && b.content.toLowerCase().includes(keyword)) {
-      pdfViewState.searchMatches.push(b.block_id);
-    }
-  });
-
-  const searchInfo = document.getElementById("pdf-search-info");
-  if (pdfViewState.searchMatches.length === 0) {
-    if (searchInfo) searchInfo.textContent = "0/0";
-    return;
-  }
-
-  // Highlight all matches
-  pdfViewState.searchMatches.forEach(id => {
-    const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
-    if (overlay) overlay.classList.add("pdf-search-match");
-  });
-
-  // Jump to first match
-  pdfViewState.searchCurrentIdx = 0;
-  const firstId = pdfViewState.searchMatches[0];
-  const firstOverlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${firstId}"]`);
-  if (firstOverlay) {
-    firstOverlay.classList.add("pdf-search-current");
-    firstOverlay.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
-  updateSearchInfo();
-}
-
-function searchPdfNext() {
-  if (pdfViewState.searchMatches.length === 0) {
-    searchPdfKeyword();
-    return;
-  }
-
-  // Remove current highlight
-  document.querySelectorAll(".pdf-block-overlay.pdf-search-current").forEach(el => el.classList.remove("pdf-search-current"));
-
-  pdfViewState.searchCurrentIdx = (pdfViewState.searchCurrentIdx + 1) % pdfViewState.searchMatches.length;
-  const id = pdfViewState.searchMatches[pdfViewState.searchCurrentIdx];
-  const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
-  if (overlay) {
-    overlay.classList.add("pdf-search-current");
-    overlay.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
-  updateSearchInfo();
-}
-
-function searchPdfPrev() {
-  if (pdfViewState.searchMatches.length === 0) return;
-
-  // Remove current highlight
-  document.querySelectorAll(".pdf-block-overlay.pdf-search-current").forEach(el => el.classList.remove("pdf-search-current"));
-
-  pdfViewState.searchCurrentIdx = (pdfViewState.searchCurrentIdx - 1 + pdfViewState.searchMatches.length) % pdfViewState.searchMatches.length;
-  const id = pdfViewState.searchMatches[pdfViewState.searchCurrentIdx];
-  const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
-  if (overlay) {
-    overlay.classList.add("pdf-search-current");
-    overlay.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
-  updateSearchInfo();
-}
-
-function updateSearchInfo() {
-  const searchInfo = document.getElementById("pdf-search-info");
-  if (searchInfo) searchInfo.textContent = `${pdfViewState.searchCurrentIdx + 1}/${pdfViewState.searchMatches.length}`;
-  const prevBtn = document.getElementById("pdf-search-prev-btn");
-  const nextBtn = document.getElementById("pdf-search-next-btn");
-  if (prevBtn) prevBtn.disabled = pdfViewState.searchMatches.length === 0;
-  if (nextBtn) nextBtn.disabled = pdfViewState.searchMatches.length === 0;
-}
-
-// ===== OCR extract button for single document =====
-
-async function ocrPdf() {
-  const idx = pdfViewState.currentDocIdx;
-  if (idx == null) {
-    showError("请先选择一个文档");
-    return;
-  }
-
-  const it = kanbanState.documents.find(d => d.idx === idx);
-  if (!it) {
-    showError("找不到文档信息");
-    return;
-  }
-
-  if (!currentData) { showError("请先查询专利"); return; }
-
-  const config = window.AI.loadAIConfig();
-  const ocrConfig = window.AI.getOCRConfig(config);
-  const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
-  const glmApiKey = window.AI.getGlmOcrApiKey(config);
-
-  const isUS = currentData.office === "US";
-  const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
-
-  const MAX_RETRIES = 2;
-  let success = false;
-
-  async function tryExtract(engine, retriesLeft) {
-    try {
-      const useApiKey = engine === "glm_ocr" ? glmApiKey : "";
-      const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, useApiKey);
-      if (result.error) {
-        if (retriesLeft > 0) {
-          const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
-          if (fallbackEngine === "glm_ocr" && !glmApiKey) return false;
-          return await tryExtract(fallbackEngine, retriesLeft - 1);
-        }
-        showError("OCR 提取失败: " + result.error);
-        return false;
-      }
-      const text = result.text || "";
-      const markdown = result.markdown || "";
-      if (!text && !markdown) {
-        if (retriesLeft > 0) {
-          const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
-          if (fallbackEngine === "glm_ocr" && !glmApiKey) return false;
-          return await tryExtract(fallbackEngine, retriesLeft - 1);
-        }
-        showError("OCR 提取内容为空");
-        return false;
-      }
-      const blocks = result.blocks || [];
-      const pageDimensions = result.page_dimensions || {};
-      kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
-      if (blocks.length > 0) {
-        blocks.forEach(b => {
-          kanbanState.traceIndex[b.block_id] = {
-            docIdx: it.idx, page: b.page, bbox: b.bbox,
-            content: b.content, label: b.label,
-            pageDimensions: pageDimensions[b.page] || null,
-          };
-        });
-      }
-      return true;
-    } catch (e) {
-      if (retriesLeft > 0) {
-        return await tryExtract(engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl", retriesLeft - 1);
-      }
-      showError("OCR 提取失败: " + e.message);
-      return false;
-    }
-  }
-
-  success = await tryExtract(primaryEngine, MAX_RETRIES);
-
-  if (success) {
-    const searchInput = document.getElementById("pdf-search-input");
-    const searchBtn = document.getElementById("pdf-search-btn");
-    if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
-    if (searchBtn) searchBtn.disabled = false;
-    // Re-render PDF with block overlays, preserving scroll position
-    if (pdfViewState.active) {
-      // Save current scroll position
-      const scrollTop = readerPdfContainer.scrollTop;
-      const scrollRatio = readerPdfContainer.scrollHeight > 0 ? scrollTop / readerPdfContainer.scrollHeight : 0;
-      await renderPdfView(idx);
-      // Restore scroll position after re-render
-      requestAnimationFrame(() => {
-        const newScrollTop = Math.round(scrollRatio * readerPdfContainer.scrollHeight);
-        readerPdfContainer.scrollTop = newScrollTop;
-      });
-    }
-    // Hide OCR progress overlay
-    hideOcrProgressOverlay();
-  } else {
-    // Hide OCR progress overlay on failure too
-    hideOcrProgressOverlay();
-  }
-}
-
-// ===== PDF Translation =====
-
-function _buildBlockText(blocks, rangeLabel) {
-  const cleanOcrText = (text) => {
-    return text
-      .replace(/\$\s*\\Box\s*\$/g, '☐')
-      .replace(/\$\s*\\surd\s*\$/g, '☑')
-      .replace(/\$\s*\\§\s*(\d+)\s*\$/g, '§$1')
-      .replace(/\$\s*\\[^$]+\$/g, '')
-      .replace(/\$\{[^}]+\}/g, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-  };
-  const typeLabels = { title: "标题", table: "表格", formula: "公式", figure: "图注", caption: "说明" };
-  const originalParts = [];
-  blocks.forEach(b => {
-    if (b.content && b.content.trim()) {
-      const cleaned = cleanOcrText(b.content);
-      if (!cleaned) return;
-      const typeHint = typeLabels[b.label];
-      if (typeHint) {
-        originalParts.push(`[${typeHint}] ${cleaned}`);
-      } else {
-        originalParts.push(cleaned);
-      }
-    }
-  });
-  return originalParts.join("\n\n");
-}
-
-async function _doTranslateBlocks(idx, blocks, targetLang, langNames, cacheKey, loadingHint) {
-  const config = window.AI.loadAIConfig();
-  const translateProvider = window.AI.getTranslateProvider(config);
-  if (!translateProvider || !translateProvider.apiKey) {
-    if (pdfTranslateContent) {
-      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">请先在设置中配置 AI 服务的 API Key</p>';
-    }
-    return;
-  }
-
-  const text = _buildBlockText(blocks);
-  if (!text.trim()) {
-    if (pdfTranslateContent) {
-      pdfTranslateContent.innerHTML = '<p class="placeholder">选中范围内无有效文字内容</p>';
-    }
-    return;
-  }
-
-  if (translatePageCache[cacheKey]) {
-    renderTranslateContent(translatePageCache[cacheKey]);
-    return;
-  }
-
-  if (pdfTranslateContent) {
-    pdfTranslateContent.innerHTML = loadingHint || '<div class="pdf-translate-translating-hint">正在翻译，请稍候...</div>';
-  }
-  if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译中..."; pdfTranslateBtn.disabled = true; }
-  translateAbortController = new AbortController();
-
-  try {
-    const systemPrompt = `你是一个专业的专利文档翻译专家。请将以下专利文档内容翻译为${langNames[targetLang] || "中文"}。
-
-## 翻译规则
-
-1. 原文中部分段落前标有[类型]标记，表示该段落的版面类型：
-   - [标题]：文档标题、章节标题，翻译时保持简洁有力
-   - [表格]：表格内容，保持行列结构，用 | 分隔各列
-   - [公式]：数学公式或化学式，保留原始公式符号，仅翻译公式旁的文字说明
-   - [图注]：图片说明文字，简洁翻译
-   - [说明]：图表说明，准确翻译
-   - 无标记的段落为正文，逐句准确翻译，保持技术术语一致性
-
-2. 翻译时请去掉所有[类型]标记，直接输出翻译后的连续文档
-3. 保持原文的段落结构，每个段落对应一段翻译
-4. 只输出翻译结果，不要添加任何解释或注释
-5. 如果原文已经是目标语言，则直接返回原文
-6. 专利技术术语请使用该领域的标准译法
-7. 原文中的☐表示空复选框，☑表示已勾选复选框，§表示条款号，请保留这些符号
-8. 请将所有页面的内容整合翻译，输出完整连贯的译文`;
-
-    const messages = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: text },
-    ];
-
-    let fullResponse = "";
-    const stream = window.AI.streamChat(translateProvider.type, translateProvider.apiKey, translateProvider.baseUrl, {
-      model: translateProvider.model,
-      messages: messages,
-      temperature: 0.1,
-      maxTokens: 16384,
-    }, translateAbortController.signal);
-
-    for await (const chunk of stream) {
-      if (translateAbortController.signal.aborted) break;
-      if (chunk.content) {
-        fullResponse += chunk.content;
-        if (pdfTranslateContent) {
-          pdfTranslateContent.innerHTML = `<div class="pdf-translate-result">${renderMarkdown(fullResponse)}</div>`;
-        }
-      }
-    }
-
-    translatePageCache[cacheKey] = { translated: fullResponse };
-    renderTranslateContent(translatePageCache[cacheKey]);
-
-  } catch (e) {
-    if (e.name !== "AbortError") {
-      showError("翻译出错: " + e.message);
-    }
-  } finally {
-    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译全文档"; pdfTranslateBtn.disabled = false; }
-    translateAbortController = null;
-  }
-}
-
-async function translatePdfPage() {
-  const idx = pdfViewState.currentDocIdx;
-  if (idx == null) {
-    showError("请先选择一个文档");
-    return;
-  }
-
-  if (pdfTranslatePanel) pdfTranslatePanel.classList.remove("hidden");
-  enterReadingMode("translate");
-  if (pdfTranslateContent) {
-    pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">准备中...</p>';
-  }
-
-  let extraction = kanbanState.extractions[idx];
-  if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
-    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "OCR中..."; pdfTranslateBtn.disabled = true; }
-    if (pdfTranslateContent) {
-      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">正在 OCR 提取文字，请稍候...</p>';
-    }
-    await ocrPdf();
-    extraction = kanbanState.extractions[idx];
-    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译中..."; pdfTranslateBtn.disabled = true; }
-    if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
-      if (pdfTranslateContent) {
-        pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">OCR 提取失败，无法翻译</p>';
-      }
-      if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译全文档"; pdfTranslateBtn.disabled = false; }
-      return;
-    }
-  }
-
-  const config = window.AI.loadAIConfig();
-  const translateProvider = window.AI.getTranslateProvider(config);
-  if (!translateProvider || !translateProvider.apiKey) {
-    if (pdfTranslateContent) {
-      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">请先在设置中配置 AI 服务的 API Key</p>';
-    }
-    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译全文档"; pdfTranslateBtn.disabled = false; }
-    return;
-  }
-
-  const targetLang = pdfTranslateLang ? pdfTranslateLang.value : (config.translate && config.translate.defaultLang) || "zh";
-  const langNames = { zh: "中文", en: "English", ja: "日本語", ko: "한국어" };
-
-  const allBlocks = extraction.blocks || [];
-  if (allBlocks.length === 0) {
-    if (pdfTranslateContent) {
-      pdfTranslateContent.innerHTML = '<p class="placeholder">当前文档无 OCR 文字内容</p>';
-    }
-    return;
-  }
-
-  const cacheKey = `${idx}_${targetLang}_full`;
-  await _doTranslateBlocks(idx, allBlocks, targetLang, langNames, cacheKey, '<div class="pdf-translate-translating-hint">正在翻译全文，请稍候...</div>');
-}
-
-async function translateSelectedBlocks() {
-  const idx = pdfViewState.currentDocIdx;
-  if (idx == null) {
-    showError("请先选择一个文档");
-    return;
-  }
-
-  if (pdfViewState.selectedBlockIds.length === 0) {
-    showError("请先在 PDF 中选中要翻译的文本块");
-    return;
-  }
-
-  if (pdfTranslatePanel) pdfTranslatePanel.classList.remove("hidden");
-  enterReadingMode("translate");
-  if (pdfTranslateContent) {
-    pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">准备中...</p>';
-  }
-
-  let extraction = kanbanState.extractions[idx];
-  if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
-    if (pdfTranslateContent) {
-      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">正在 OCR 提取文字，请稍候...</p>';
-    }
-    await ocrPdf();
-    extraction = kanbanState.extractions[idx];
-    if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
-      if (pdfTranslateContent) {
-        pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">OCR 提取失败，无法翻译</p>';
-      }
-      return;
-    }
-  }
-
-  const config = window.AI.loadAIConfig();
-  const translateProvider = window.AI.getTranslateProvider(config);
-  if (!translateProvider || !translateProvider.apiKey) {
-    if (pdfTranslateContent) {
-      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">请先在设置中配置 AI 服务的 API Key</p>';
-    }
-    return;
-  }
-
-  const targetLang = pdfTranslateLang ? pdfTranslateLang.value : (config.translate && config.translate.defaultLang) || "zh";
-  const langNames = { zh: "中文", en: "English", ja: "日本語", ko: "한국어" };
-
-  // 按 block 出现顺序保留选中的 blocks
-  const idSet = new Set(pdfViewState.selectedBlockIds);
-  const selectedBlocks = (extraction.blocks || []).filter(b => idSet.has(b.block_id));
-  if (selectedBlocks.length === 0) {
-    if (pdfTranslateContent) {
-      pdfTranslateContent.innerHTML = '<p class="placeholder">选中的文本块无有效内容</p>';
-    }
-    return;
-  }
-
-  const sortedIds = pdfViewState.selectedBlockIds.slice().sort().join(",");
-  const cacheKey = `${idx}_${targetLang}_sel_${sortedIds}`;
-  const loadingHint = `<div class="pdf-translate-translating-hint">正在翻译已选 ${selectedBlocks.length} 个文本块，请稍候...</div>`;
-  await _doTranslateBlocks(idx, selectedBlocks, targetLang, langNames, cacheKey, loadingHint);
-}
-
-function renderTranslateContent(data) {
-  if (!pdfTranslateContent) return;
-  pdfTranslateContent.innerHTML = `<div class="pdf-translate-result">${renderMarkdown(data.translated)}</div>`;
-  pdfTranslateContent.scrollTop = 0;
-}
-
-// ===== Reading Mode Management =====
-
-function enterReadingMode(activePanel) {
-  const readerBody = document.querySelector(".reader-body");
-  const rightPanel = document.getElementById("reader-right-panel");
-  if (readerBody) readerBody.classList.add("reading-mode");
-  if (rightPanel) rightPanel.classList.remove("hidden");
-  // Switch to the specified panel tab
-  if (activePanel) {
-    switchRightPanelTab(activePanel);
-  }
-}
-
-function exitReadingMode() {
-  const readerBody = document.querySelector(".reader-body");
-  const rightPanel = document.getElementById("reader-right-panel");
-  const translatePanel = document.getElementById("pdf-translate-panel");
-  const chatPanel = document.getElementById("reader-chat-panel");
-  // Hide both panels
-  if (translatePanel) translatePanel.classList.add("hidden");
-  if (chatPanel) chatPanel.classList.add("hidden");
-  if (readerBody) readerBody.classList.remove("reading-mode");
-  if (rightPanel) rightPanel.classList.add("hidden");
-  // Deactivate chat toggle button
-  if (readerChatToggle) readerChatToggle.classList.remove("active");
-}
-
-function switchRightPanelTab(panelName) {
-  const translatePanel = document.getElementById("pdf-translate-panel");
-  const chatPanel = document.getElementById("reader-chat-panel");
-  const tabs = document.querySelectorAll(".right-panel-tab");
-
-  // Update tab active states
-  tabs.forEach(tab => {
-    tab.classList.toggle("active", tab.dataset.panel === panelName);
-  });
-
-  // Show/hide panels
-  if (panelName === "translate") {
-    if (translatePanel) translatePanel.classList.remove("hidden");
-    if (chatPanel) chatPanel.classList.add("hidden");
-  } else if (panelName === "chat") {
-    if (chatPanel) chatPanel.classList.remove("hidden");
-    if (translatePanel) translatePanel.classList.add("hidden");
-  }
-}
-
-// ===== Open reader for specific document from kanban =====
-
-function openReaderForDoc(idx, defaultToPdf) {
-  // Set the correct doc index before opening to avoid rendering the wrong document
-  pdfViewState.currentDocIdx = idx;
-  openReader(defaultToPdf, true); // skipRender=true — selectReaderDoc will handle the render
-  // Select the document after reader opens
-  setTimeout(() => {
-    selectReaderDoc(idx);
-    if (defaultToPdf && !pdfViewState.active) {
-      togglePdfView();
-    }
-  }, 100);
 }
 
 // ============ 浏览器插件数据处理 ============
@@ -3975,98 +3161,7 @@ async function exportToWord() {
     return;
   }
 
-  // Load logo image for header
-  let logoBase64 = null;
-  try {
-    const logoResp = await fetch("PATENTLENSNEWLOGO.png");
-    if (logoResp.ok) {
-      const logoBlob = await logoResp.blob();
-      logoBase64 = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result.split(",")[1]);
-        reader.readAsDataURL(logoBlob);
-      });
-    }
-  } catch (e) {
-    // Logo loading failed, continue without it
-  }
-
-  // ── Inline markdown parser (recursive) ──
-  function parseInlineMarkdown(text) {
-    const runs = [];
-    let remaining = text;
-    while (remaining.length > 0) {
-      // Bold **text**
-      let m = remaining.match(/^(.*?)\*\*(.+?)\*\*(.*)/s);
-      if (m) {
-        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
-        runs.push(new docx.TextRun({ text: m[2], bold: true, size: 20, font: "Microsoft YaHei" }));
-        remaining = m[3];
-        continue;
-      }
-      // Italic *text*
-      m = remaining.match(/^(.*?)\*([^*]+?)\*(.*)/s);
-      if (m) {
-        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
-        runs.push(new docx.TextRun({ text: m[2], italics: true, size: 20, font: "Microsoft YaHei" }));
-        remaining = m[3];
-        continue;
-      }
-      // Code `text`
-      m = remaining.match(/^(.*?)`([^`]+?)`(.*)/s);
-      if (m) {
-        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
-        runs.push(new docx.TextRun({ text: m[2], size: 18, font: "Consolas", shading: { fill: "f0f0f0" } }));
-        remaining = m[3];
-        continue;
-      }
-      // Trace marks 【来源: ...】
-      m = remaining.match(/^(.*?)【来源:\s*([^】]+)】(.*)/s);
-      if (m) {
-        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
-        // Convert trace IDs to readable format
-        const ids = m[2].split(",").map(s => s.trim());
-        const readableIds = [];
-        let currentDoc = null;
-        let currentPage = null;
-        let rangeStart = null;
-        let rangeEnd = null;
-        ids.forEach(id => {
-          const trace = kanbanState.traceIndex[id];
-          if (trace) {
-            const doc = kanbanState.documents.find(d => d.idx === trace.docIdx);
-            const docName = doc ? doc.name : "";
-            if (docName !== currentDoc || trace.page !== currentPage) {
-              if (currentDoc !== null && rangeStart !== null) {
-                readableIds.push(`${currentDoc} 第${currentPage}页§${rangeStart}${rangeEnd !== rangeStart ? "-" + rangeEnd : ""}`);
-              }
-              currentDoc = docName;
-              currentPage = trace.page;
-              const blockMatch = id.match(/B_p\d+_(\d+)/);
-              rangeStart = blockMatch ? parseInt(blockMatch[1]) : 0;
-              rangeEnd = rangeStart;
-            } else {
-              const blockMatch = id.match(/B_p\d+_(\d+)/);
-              if (blockMatch) rangeEnd = parseInt(blockMatch[1]);
-            }
-          }
-        });
-        if (currentDoc !== null && rangeStart !== null) {
-          readableIds.push(`${currentDoc} 第${currentPage}页§${rangeStart}${rangeEnd !== rangeStart ? "-" + rangeEnd : ""}`);
-        }
-        const label = readableIds.length > 0 ? readableIds.join("; ") : m[2];
-        runs.push(new docx.TextRun({ text: `[来源: ${label}]`, italics: true, size: 18, color: "4A90D9", font: "Microsoft YaHei" }));
-        remaining = m[3];
-        continue;
-      }
-      // No more patterns, push rest as plain text
-      runs.push(new docx.TextRun({ text: remaining, size: 20, font: "Microsoft YaHei" }));
-      remaining = "";
-    }
-    return runs;
-  }
-
-  // ── Parse markdown table ──
+  // Parse markdown table helper
   function parseMarkdownTable(lines, startIdx) {
     const tableLines = [];
     let i = startIdx;
@@ -4076,107 +3171,47 @@ async function exportToWord() {
     }
     if (tableLines.length < 2) return { elements: [], nextIdx: i };
 
+    // Parse header
     const headerCells = tableLines[0].split("|").map(c => c.trim()).filter(c => c);
+    // Skip separator line (line with ---)
     const dataStartIdx = (tableLines.length > 1 && tableLines[1].match(/^\|[\s\-:|]+\|$/)) ? 2 : 1;
 
     const rows = [];
+    // Header row
     rows.push(headerCells.map(cell => new docx.TableCell({
-      children: [new docx.Paragraph({ children: [new docx.TextRun({ text: cell.replace(/\*+/g, ""), bold: true, size: 20, font: "Microsoft YaHei" })] })],
+      children: [new docx.Paragraph({ children: [new docx.TextRun({ text: cell, bold: true, size: 20, font: "Microsoft YaHei" })] })],
       shading: { fill: "2e3348" },
     })));
 
+    // Data rows
     for (let r = dataStartIdx; r < tableLines.length; r++) {
       const cells = tableLines[r].split("|").map(c => c.trim()).filter(c => c);
-      rows.push(cells.map(cell => new docx.TableCell({
-        children: [new docx.Paragraph({ children: parseInlineMarkdown(cell) })],
-      })));
+      rows.push(cells.map(cell => {
+        // Handle bold text in cells
+        const boldParts = cell.split(/\*\*(.*?)\*\*/g);
+        const runs = boldParts.map((part, j) => {
+          if (j % 2 === 1) return new docx.TextRun({ text: part, bold: true, size: 18, font: "Microsoft YaHei" });
+          return new docx.TextRun({ text: part, size: 18, font: "Microsoft YaHei" });
+        });
+        return new docx.TableCell({
+          children: [new docx.Paragraph({ children: runs })],
+        });
+      }));
     }
 
     const table = new docx.Table({
       rows: rows.map(cells => new docx.TableRow({ children: cells })),
       width: { size: 100, type: docx.WidthType.PERCENTAGE },
     });
+
     return { elements: [table], nextIdx: i };
   }
 
-  // ── Process markdown lines with full support ──
-  function processMarkdownLines(lines) {
-    const elements = [];
-    let i = 0;
-    while (i < lines.length) {
-      const trimmed = lines[i].trim();
-      if (!trimmed) {
-        elements.push(new docx.Paragraph({ children: [] }));
-        i++;
-        continue;
-      }
-      // Table
-      if (trimmed.startsWith("|") && trimmed.includes("|")) {
-        const { elements: tableEls, nextIdx } = parseMarkdownTable(lines, i);
-        tableEls.forEach(el => elements.push(el));
-        i = nextIdx;
-        continue;
-      }
-      // Headings (clean * from heading text)
-      if (trimmed.startsWith("#### ")) {
-        elements.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(5).replace(/\*+/g, ""), bold: true, size: 21, font: "Microsoft YaHei" })],
-          spacing: { before: 100, after: 50 },
-        }));
-      } else if (trimmed.startsWith("### ")) {
-        elements.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(4).replace(/\*+/g, ""), bold: true, size: 22, font: "Microsoft YaHei" })],
-          spacing: { before: 120, after: 60 },
-        }));
-      } else if (trimmed.startsWith("## ")) {
-        elements.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(3).replace(/\*+/g, ""), bold: true, size: 24, font: "Microsoft YaHei" })],
-          spacing: { before: 160, after: 80 },
-        }));
-      } else if (trimmed.startsWith("# ")) {
-        elements.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(2).replace(/\*+/g, ""), bold: true, size: 28, font: "Microsoft YaHei" })],
-          spacing: { before: 200, after: 100 },
-        }));
-      } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-        elements.push(new docx.Paragraph({
-          children: parseInlineMarkdown(trimmed.slice(2)),
-          bullet: { level: 0 },
-        }));
-      } else if (/^\d+\.\s/.test(trimmed)) {
-        const text = trimmed.replace(/^\d+\.\s/, "");
-        elements.push(new docx.Paragraph({
-          children: parseInlineMarkdown(text),
-          numbering: { reference: "ordered-list", level: 0 },
-        }));
-      } else {
-        elements.push(new docx.Paragraph({
-          children: parseInlineMarkdown(trimmed),
-          spacing: { after: 60 },
-        }));
-      }
-      i++;
-    }
-    return elements;
-  }
+  const items = kanbanState.documents;
+  const importantTypes = ["office_action", "response", "allowance"];
+  const exportItems = items ? items.filter(it => importantTypes.indexOf(it.type) !== -1) : [];
 
   const children = [];
-
-  // ── Logo + Title ──
-  if (logoBase64) {
-    children.push(
-      new docx.Paragraph({
-        children: [
-          new docx.ImageRun({
-            data: Uint8Array.from(atob(logoBase64), c => c.charCodeAt(0)),
-            transformation: { width: 60, height: 60 },
-            type: "png",
-          }),
-        ],
-        spacing: { after: 100 },
-      })
-    );
-  }
 
   children.push(
     new docx.Paragraph({
@@ -4185,197 +3220,108 @@ async function exportToWord() {
     })
   );
 
-  // ── Patent overview table ──
   if (currentData) {
+    const info = `专利号: ${currentData.docNumber || ""} | 申请号: ${currentData.applicationNumber || ""} | 申请人: ${currentData.applicantName || ""}`;
     children.push(
       new docx.Paragraph({
-        children: [new docx.TextRun({ text: "专利概览", bold: true, size: 26, font: "Microsoft YaHei" })],
-        spacing: { before: 200, after: 100 },
+        children: [new docx.TextRun({ text: info, size: 20, color: "666666", font: "Microsoft YaHei" })],
+        spacing: { after: 400 },
       })
     );
-
-    const overviewRows = [];
-    const addRow = (label, value) => {
-      overviewRows.push(new docx.TableRow({
-        children: [
-          new docx.TableCell({
-            children: [new docx.Paragraph({ children: [new docx.TextRun({ text: label, bold: true, size: 20, font: "Microsoft YaHei" })] })],
-            shading: { fill: "f0f0f0" },
-            width: { size: 25, type: docx.WidthType.PERCENTAGE },
-          }),
-          new docx.TableCell({
-            children: [new docx.Paragraph({ children: [new docx.TextRun({ text: value || "-", size: 20, font: "Microsoft YaHei" })] })],
-          }),
-        ],
-      }));
-    };
-
-    addRow("专利号", currentData.docNumber || "");
-    addRow("申请号", currentData.applicationNumber || "");
-    addRow("申请局", OFFICE_NAMES[currentData.office] || currentData.office || "");
-
-    // Get title, inventor, dates from family data (same logic as renderOverview)
-    let title = "";
-    let inventors = "";
-    let applicants = "";
-    let filingDate = "";
-    let publicationDate = "";
-    let priorityDate = "";
-    let ipcClasses = "";
-    let cpcClasses = "";
-    let legalStatus = "";
-
-    if (currentData.family) {
-      const members = extractFamilyMembers(currentData.family);
-      if (members.length > 0) {
-        let m = members.find(mem => mem.countryCode === currentData.office) || members[0];
-        const dl = m.docList || {};
-        title = m.title || dl.title || m.inventionTitle || "";
-        const applicantNamesArr = m.applicantNames || dl.applicantNames || [];
-        const namesStr = Array.isArray(applicantNamesArr) ? applicantNamesArr.join(", ") : (applicantNamesArr || "");
-        if (currentData.office === "US") {
-          inventors = namesStr || m.inventors || m.inventorName || "";
-        } else {
-          applicants = namesStr || m.applicants || m.applicantName || "";
-          inventors = m.inventors || m.inventorName || "";
-        }
-        filingDate = m.appDateStr || m.filingDate || m.applicationDate || "";
-        if (!filingDate && m.appDate) {
-          try { filingDate = new Date(m.appDate).toLocaleDateString("en-US"); } catch(e) {}
-        }
-        if (m.pubList && Array.isArray(m.pubList) && m.pubList.length > 0) {
-          publicationDate = m.pubList[0].pubDateStr || "";
-          if (!publicationDate && m.pubList[0].pubDate) {
-            try { publicationDate = new Date(m.pubList[0].pubDate).toLocaleDateString("en-US"); } catch(e2) {}
-          }
-        }
-        publicationDate = publicationDate || m.publicationDate || m.pubDate || "";
-        if (m.docNum && m.docNum.date) {
-          priorityDate = m.docNum.date;
-        }
-        if (!priorityDate && m.priorityClaimList && Array.isArray(m.priorityClaimList) && m.priorityClaimList.length > 0) {
-          priorityDate = m.priorityClaimList[0].date || "";
-        }
-        ipcClasses = m.ipc || m.ipcClass || m.classification || "";
-        if (Array.isArray(ipcClasses)) ipcClasses = ipcClasses.join(", ");
-        cpcClasses = m.cpcClass || m.cpc || "";
-        if (Array.isArray(cpcClasses)) cpcClasses = cpcClasses.join(", ");
-        const docItems = kanbanState.documents || [];
-        const hasAllowance = docItems.some(it => it.type === "allowance");
-        const hasOA = docItems.some(it => it.type === "office_action");
-        const hasResponse = docItems.some(it => it.type === "response");
-        if (hasAllowance) {
-          legalStatus = "已授权 (Granted)";
-        } else if (hasOA && !hasResponse) {
-          legalStatus = "待答复 (Pending Response)";
-        } else if (hasOA && hasResponse) {
-          legalStatus = "审查中 (Under Examination)";
-        } else {
-          legalStatus = m.legalStatus || m.status || "";
-        }
-      }
-    }
-
-    addRow("标题", title);
-    addRow("发明人", inventors);
-    addRow("申请人", applicants);
-    addRow("申请日", filingDate);
-    addRow("公开日", publicationDate);
-    if (priorityDate) addRow("优先权日", priorityDate);
-    if (ipcClasses) addRow("IPC分类", ipcClasses);
-    if (cpcClasses) addRow("CPC分类", cpcClasses);
-    if (legalStatus) addRow("法律状态", legalStatus);
-
-    children.push(new docx.Table({
-      rows: overviewRows,
-      width: { size: 100, type: docx.WidthType.PERCENTAGE },
-    }));
   }
 
-  // ── Timeline table ──
-  if (currentData && kanbanState.documents && kanbanState.documents.length > 0) {
-    children.push(
-      new docx.Paragraph({
-        children: [new docx.TextRun({ text: "审查时间线", bold: true, size: 26, font: "Microsoft YaHei" })],
-        spacing: { before: 300, after: 100 },
-      })
-    );
-
-    const tlHeader = ["序号", "日期", "文档代码", "文档名称", "类型", "阶段"].map(h =>
-      new docx.TableCell({
-        children: [new docx.Paragraph({ children: [new docx.TextRun({ text: h, bold: true, size: 18, color: "FFFFFF", font: "Microsoft YaHei" })] })],
-        shading: { fill: "2e3348" },
-      })
-    );
-    const tlRows = [new docx.TableRow({ children: tlHeader })];
-
-    const sortedDocs = [...kanbanState.documents].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-    sortedDocs.forEach((it, idx) => {
-      const typeNames = { "office_action": "审查意见", "response": "答复", "request": "请求", "allowance": "授权", "notification": "通知", "misc": "其他" };
-      tlRows.push(new docx.TableRow({
-        children: [
-          new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(idx + 1), size: 18, font: "Microsoft YaHei" })] })] }),
-          new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: it.date || "", size: 18, font: "Microsoft YaHei" })] })] }),
-          new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: it.docCode || "", size: 18, font: "Microsoft YaHei" })] })] }),
-          new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: it.name || "", size: 18, font: "Microsoft YaHei" })] })] }),
-          new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: typeNames[it.type] || it.type || "", size: 18, font: "Microsoft YaHei" })] })] }),
-          new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: it.stage || "", size: 18, font: "Microsoft YaHei" })] })] }),
-        ],
-      }));
-    });
-
-    children.push(new docx.Table({
-      rows: tlRows,
-      width: { size: 100, type: docx.WidthType.PERCENTAGE },
-    }));
-  }
-
-  // ── AI Analysis content ──
   if (kanbanState.analysis) {
     children.push(
       new docx.Paragraph({
         children: [new docx.TextRun({ text: "审查历史综合分析", bold: true, size: 28, font: "Microsoft YaHei" })],
-        spacing: { before: 300, after: 100 },
+        spacing: { before: 200, after: 100 },
       })
     );
 
-    const analysisLines = kanbanState.analysis.split("\n");
-    const analysisElements = processMarkdownLines(analysisLines);
-    analysisElements.forEach(el => children.push(el));
+    const lines = kanbanState.analysis.split("\n");
+    let i = 0;
+    while (i < lines.length) {
+      const trimmed = lines[i].trim();
+      if (!trimmed) {
+        children.push(new docx.Paragraph({ children: [] }));
+        i++;
+        continue;
+      }
+      // Check for markdown table
+      if (trimmed.startsWith("|") && trimmed.includes("|")) {
+        const { elements, nextIdx } = parseMarkdownTable(lines, i);
+        elements.forEach(el => children.push(el));
+        i = nextIdx;
+        continue;
+      }
+      if (trimmed.startsWith("# ")) {
+        children.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(2), bold: true, size: 28, font: "Microsoft YaHei" })],
+          spacing: { before: 200, after: 100 },
+        }));
+      } else if (trimmed.startsWith("## ")) {
+        children.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(3), bold: true, size: 24, font: "Microsoft YaHei" })],
+          spacing: { before: 160, after: 80 },
+        }));
+      } else if (trimmed.startsWith("### ")) {
+        children.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(4), bold: true, size: 22, font: "Microsoft YaHei" })],
+          spacing: { before: 120, after: 60 },
+        }));
+      } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+        children.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(2), size: 20, font: "Microsoft YaHei" })],
+          bullet: { level: 0 },
+        }));
+      } else {
+        const boldParts = trimmed.split(/\*\*(.*?)\*\*/g);
+        const runs = boldParts.map((part, idx) => {
+          if (idx % 2 === 1) {
+            return new docx.TextRun({ text: part, bold: true, size: 20, font: "Microsoft YaHei" });
+          }
+          return new docx.TextRun({ text: part, size: 20, font: "Microsoft YaHei" });
+        });
+        children.push(new docx.Paragraph({ children: runs, spacing: { after: 60 } }));
+      }
+      i++;
+    }
   }
 
-  // ── Create document with header ──
-  const headerChildren = [];
-  if (logoBase64) {
-    headerChildren.push(
-      new docx.ImageRun({
-        data: Uint8Array.from(atob(logoBase64), c => c.charCodeAt(0)),
-        transformation: { width: 18, height: 18 },
-        type: "png",
+  children.push(
+    new docx.Paragraph({
+      children: [new docx.TextRun({ text: "审查文档详情", bold: true, size: 28, font: "Microsoft YaHei" })],
+      spacing: { before: 400, after: 100 },
+    })
+  );
+
+  for (const it of exportItems) {
+    children.push(
+      new docx.Paragraph({
+        children: [new docx.TextRun({ text: `${it.docCode} - ${it.name}（${it.date}）`, bold: true, size: 22, font: "Microsoft YaHei" })],
+        spacing: { before: 200, after: 60 },
       })
     );
-    headerChildren.push(new docx.TextRun({ text: "  ", size: 16 }));
+
+    const ext = kanbanState.extractions[it.idx];
+    if (ext) {
+      const content = ext.markdown || ext.text || "";
+      const contentLines = content.split("\n").slice(0, 100);
+      for (const line of contentLines) {
+        children.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: line, size: 18, font: "Microsoft YaHei" })],
+          spacing: { after: 30 },
+        }));
+      }
+    } else {
+      children.push(new docx.Paragraph({
+        children: [new docx.TextRun({ text: "（未提取内容）", italics: true, size: 18, color: "999999", font: "Microsoft YaHei" })],
+      }));
+    }
   }
-  headerChildren.push(new docx.TextRun({ text: "由PatentLens工具制作", italics: true, size: 16, color: "999999", font: "Microsoft YaHei" }));
 
   const doc = new docx.Document({
-    sections: [{
-      headers: {
-        default: new docx.Header({
-          children: [new docx.Paragraph({
-            alignment: docx.AlignmentType.RIGHT,
-            children: headerChildren,
-          })],
-        }),
-      },
-      children,
-    }],
-    numbering: {
-      config: [{
-        reference: "ordered-list",
-        levels: [{ level: 0, format: docx.LevelFormat.DECIMAL, text: "%1.", alignment: docx.AlignmentType.START }],
-      }],
-    },
+    sections: [{ children }],
   });
 
   const blob = await docx.Packer.toBlob(doc);
@@ -4384,29 +3330,6 @@ async function exportToWord() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Theme toggle
-  const themeToggleBtn = document.getElementById("theme-toggle-btn");
-  const savedTheme = localStorage.getItem("patentlens-theme") || "dark";
-  document.documentElement.setAttribute("data-theme", savedTheme);
-  function updateThemeIcon(theme) {
-    const darkIcon = themeToggleBtn ? themeToggleBtn.querySelector(".theme-icon-dark") : null;
-    const lightIcon = themeToggleBtn ? themeToggleBtn.querySelector(".theme-icon-light") : null;
-    if (darkIcon && lightIcon) {
-      darkIcon.style.display = theme === "dark" ? "" : "none";
-      lightIcon.style.display = theme === "light" ? "" : "none";
-    }
-  }
-  updateThemeIcon(savedTheme);
-  if (themeToggleBtn) {
-    themeToggleBtn.addEventListener("click", () => {
-      const current = document.documentElement.getAttribute("data-theme") || "dark";
-      const next = current === "dark" ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", next);
-      localStorage.setItem("patentlens-theme", next);
-      updateThemeIcon(next);
-    });
-  }
-
   loadAISettingsToForm();
 
   // ── 监听浏览器插件发送的数据（通过 Electron 主进程注入） ──
@@ -4414,14 +3337,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (event.source !== window) return;
     if (event.data && event.data.type === "extension-data") {
       console.log("[Extension] 收到插件数据:", event.data.payload);
-      const appEl = document.getElementById("app");
-      if (appEl) appEl.classList.remove("home-mode");
       handleExtensionData(event.data.payload);
     }
     if (event.data && event.data.type === "extension-analyze") {
       console.log("[Extension] 收到分析请求:", event.data.payload);
-      const appEl = document.getElementById("app");
-      if (appEl) appEl.classList.remove("home-mode");
       handleExtensionAnalyze(event.data.payload);
     }
   });
@@ -4452,8 +3371,6 @@ document.addEventListener("DOMContentLoaded", () => {
         downloadDocument(btn.dataset.url, btn.dataset.filename);
       } else if (action === "kanban-extract") {
         kanbanManualExtract(btn.dataset.url, parseInt(btn.dataset.idx), btn.dataset.doctype);
-      } else if (action === "kanban-view-pdf") {
-        openReaderForDoc(parseInt(btn.dataset.idx), true);
       } else if (action === "ai-analyze-doc") {
         aiAnalyzeDocument(parseInt(btn.dataset.idx), btn.dataset.doctype);
       }
@@ -4480,9 +3397,6 @@ document.addEventListener("DOMContentLoaded", () => {
       pdfViewState.renderedPages = {};
       pdfViewState.pendingHighlight = null;
       pdfViewState.pendingHighlightRange = null;
-      pdfViewState.selectedBlockIds = [];
-      pdfViewState.selecting = false;
-      pdfViewState.traceJumpPending = false;
       // Reset docked state
       const content = document.querySelector(".reader-modal-content");
       if (content) content.classList.remove("docked");
@@ -4493,8 +3407,6 @@ document.addEventListener("DOMContentLoaded", () => {
       if (readerChatToggle) readerChatToggle.classList.remove("active");
       chatHistory = [];
       if (chatMessages) chatMessages.innerHTML = "";
-      // Exit reading mode
-      exitReadingMode();
     });
   }
 
@@ -4520,9 +3432,6 @@ document.addEventListener("DOMContentLoaded", () => {
         pdfViewState.renderedPages = {};
         pdfViewState.pendingHighlight = null;
         pdfViewState.pendingHighlightRange = null;
-        pdfViewState.selectedBlockIds = [];
-        pdfViewState.selecting = false;
-        pdfViewState.traceJumpPending = false;
         if (content) content.classList.remove("docked");
         if (readerFullscreenBtn) readerFullscreenBtn.classList.add("hidden");
         if (readerDockBtn) readerDockBtn.classList.remove("hidden");
@@ -4570,32 +3479,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Sidebar toggle
-  const readerSidebarToggle = document.getElementById("reader-sidebar-toggle");
-  const readerSidebar = document.getElementById("reader-sidebar");
-  const readerMain = document.querySelector(".reader-main");
-  if (readerSidebarToggle && readerSidebar) {
-    readerSidebarToggle.addEventListener("click", () => {
-      readerSidebar.classList.toggle("collapsed");
-      if (readerSidebar.classList.contains("collapsed")) {
-        // Add expand button
-        const expandBtn = document.createElement("button");
-        expandBtn.id = "reader-sidebar-expand";
-        expandBtn.className = "reader-sidebar-expand-btn";
-        expandBtn.innerHTML = '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>';
-        expandBtn.title = "展开文档列表";
-        if (readerMain) readerMain.appendChild(expandBtn);
-        expandBtn.addEventListener("click", () => {
-          readerSidebar.classList.remove("collapsed");
-          expandBtn.remove();
-        });
-      } else {
-        const expandBtn = document.getElementById("reader-sidebar-expand");
-        if (expandBtn) expandBtn.remove();
-      }
-    });
-  }
-
   if (readerFullscreenBtn) {
     readerFullscreenBtn.addEventListener("click", () => {
       const content = document.querySelector(".reader-modal-content");
@@ -4623,92 +3506,6 @@ document.addEventListener("DOMContentLoaded", () => {
     pdfZoomFit.addEventListener("click", pdfZoomFitAction);
   }
 
-  // PDF OCR button
-  const pdfOcrBtn = document.getElementById("pdf-ocr-btn");
-  if (pdfOcrBtn) {
-    pdfOcrBtn.addEventListener("click", async () => {
-      if (pdfOcrBtn.disabled) return;
-      pdfOcrBtn.disabled = true;
-      pdfOcrBtn.textContent = "OCR中...";
-      showOcrProgressOverlay();
-      await ocrPdf();
-      pdfOcrBtn.disabled = false;
-      pdfOcrBtn.textContent = "OCR 提取";
-    });
-  }
-
-  // PDF translate button
-  if (pdfTranslateBtn) {
-    pdfTranslateBtn.addEventListener("click", translatePdfPage);
-  }
-
-  // PDF translate selected blocks button
-  const translateSelBtn = document.getElementById("pdf-translate-selection-btn");
-  if (translateSelBtn) {
-    translateSelBtn.addEventListener("click", translateSelectedBlocks);
-  }
-
-  // PDF clear selection button
-  const clearSelBtn = document.getElementById("pdf-clear-selection-btn");
-  if (clearSelBtn) {
-    clearSelBtn.addEventListener("click", clearPdfBlockSelection);
-  }
-
-  // Right panel close button (exits reading mode entirely)
-  const rightPanelCloseBtn = document.getElementById("right-panel-close-btn");
-  if (rightPanelCloseBtn) {
-    rightPanelCloseBtn.addEventListener("click", () => {
-      exitReadingMode();
-    });
-  }
-
-  // Right panel tab switching
-  document.querySelectorAll(".right-panel-tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-      const panelName = tab.dataset.panel;
-      switchRightPanelTab(panelName);
-    });
-  });
-
-  // Reader sidebar doc search filter
-  const readerDocSearch = document.getElementById("reader-doc-search");
-  if (readerDocSearch) {
-    readerDocSearch.addEventListener("input", () => {
-      const keyword = readerDocSearch.value.trim().toLowerCase();
-      document.querySelectorAll(".reader-doc-item").forEach(el => {
-        const text = el.textContent.toLowerCase();
-        el.style.display = (!keyword || text.includes(keyword)) ? "" : "none";
-      });
-    });
-  }
-
-  // PDF search
-  const pdfSearchBtn = document.getElementById("pdf-search-btn");
-  const pdfSearchInput = document.getElementById("pdf-search-input");
-  const pdfSearchPrevBtn = document.getElementById("pdf-search-prev-btn");
-  const pdfSearchNextBtn = document.getElementById("pdf-search-next-btn");
-  if (pdfSearchBtn) {
-    pdfSearchBtn.addEventListener("click", searchPdfKeyword);
-  }
-  if (pdfSearchPrevBtn) {
-    pdfSearchPrevBtn.addEventListener("click", searchPdfPrev);
-  }
-  if (pdfSearchNextBtn) {
-    pdfSearchNextBtn.addEventListener("click", searchPdfNext);
-  }
-  if (pdfSearchInput) {
-    pdfSearchInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        if (pdfViewState.searchMatches.length > 0) {
-          searchPdfNext();
-        } else {
-          searchPdfKeyword();
-        }
-      }
-    });
-  }
-
   // Minimize to floating ball
   if (readerMinimizeBtn) {
     readerMinimizeBtn.addEventListener("click", () => {
@@ -4725,25 +3522,60 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Floating ball click to restore reader
-  if (readerChatToggle) {
-    readerChatToggle.addEventListener("click", () => {
-      if (readerChatPanel) {
-        const wasHidden = readerChatPanel.classList.contains("hidden");
-        if (wasHidden) {
-          readerChatPanel.classList.remove("hidden");
-          readerChatToggle.classList.add("active");
-          enterReadingMode("chat");
-        } else {
-          // Chat panel is visible, toggle off exits reading mode
-          exitReadingMode();
+  // OCR extract button in PDF toolbar
+  if (pdfOcrBtn) {
+    pdfOcrBtn.addEventListener("click", async () => {
+      if (pdfViewState.currentDocIdx == null) return;
+      const idx = pdfViewState.currentDocIdx;
+      const items = kanbanState.documents;
+      const it = items.find(d => d.idx === idx);
+      if (!it) return;
+
+      pdfOcrBtn.disabled = true;
+      pdfOcrBtn.textContent = "提取中...";
+
+      try {
+        const isUS = currentData.office === "US";
+        const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+        const encodedDocId = encodeURIComponent(it.docId);
+        const extractUrl = `/api/gd/extract-text/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+        await extractDocumentText(extractUrl, idx, it.type);
+        // Enable search after extraction
+        const searchInput = document.getElementById("pdf-search-input");
+        const searchBtn = document.getElementById("pdf-search-btn");
+        if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
+        if (searchBtn) searchBtn.disabled = false;
+        pdfOcrBtn.textContent = "已提取";
+        pdfOcrBtn.disabled = true;
+
+        // Re-render PDF view with overlays if active
+        if (pdfViewState.active) {
+          renderPdfView(idx);
         }
+      } catch (e) {
+        pdfOcrBtn.textContent = "OCR 提取";
+        pdfOcrBtn.disabled = false;
+        showError("OCR 提取失败: " + e.message);
       }
     });
   }
 
-  // Chat close button is now handled by the right panel close button
-  // No separate chatCloseBtn needed
+  // Chat toggle
+  if (readerChatToggle) {
+    readerChatToggle.addEventListener("click", () => {
+      if (readerChatPanel) {
+        readerChatPanel.classList.toggle("hidden");
+        readerChatToggle.classList.toggle("active");
+      }
+    });
+  }
+
+  if (chatCloseBtn) {
+    chatCloseBtn.addEventListener("click", () => {
+      if (readerChatPanel) readerChatPanel.classList.add("hidden");
+      if (readerChatToggle) readerChatToggle.classList.remove("active");
+    });
+  }
 
   // Chat send
   if (chatSendBtn) {
@@ -4766,29 +3598,6 @@ document.addEventListener("DOMContentLoaded", () => {
       if (blockId) onTraceClick(blockId);
     }
   });
-
-  // ── Merge export events ──
-  const mergeExportBtn = document.getElementById("merge-export-btn");
-  const mergeExportCloseBtn = document.getElementById("merge-export-close-btn");
-  const mergeExportCancelBtn = document.getElementById("merge-export-cancel-btn");
-  const mergeExportDoBtn = document.getElementById("merge-export-do-btn");
-  const mergeExportModal = document.getElementById("merge-export-modal");
-  const mergeExportOverlay = mergeExportModal ? mergeExportModal.querySelector(".modal-overlay") : null;
-
-  if (mergeExportBtn) mergeExportBtn.addEventListener("click", openMergeExportModal);
-  if (mergeExportCloseBtn) mergeExportCloseBtn.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
-  if (mergeExportCancelBtn) mergeExportCancelBtn.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
-  if (mergeExportOverlay) mergeExportOverlay.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
-  if (mergeExportDoBtn) mergeExportDoBtn.addEventListener("click", doMergeExport);
-
-  // Splash screen
-  setTimeout(() => {
-    const splash = document.getElementById("splash-screen");
-    if (splash) {
-      splash.style.opacity = "0";
-      setTimeout(() => splash.remove(), 500);
-    }
-  }, 1800);
 });
 
 async function sendChatMessage() {
@@ -4853,7 +3662,8 @@ async function sendChatMessage() {
         fullResponse += chunk.content;
         if (assistantMsgEl) {
           const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
-          contentEl.innerHTML = renderMarkdown(fullResponse);
+          contentEl.textContent = fullResponse;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
         }
       }
     }
@@ -4874,7 +3684,7 @@ function appendChatMessage(role, content) {
   const msgEl = document.createElement("div");
   msgEl.className = `chat-msg ${role}`;
   if (role === "assistant") {
-    msgEl.innerHTML = `<div class="chat-msg-content markdown-body">${renderMarkdown(content)}</div>`;
+    msgEl.innerHTML = `<div class="chat-msg-content">${escapeHtml(content)}</div>`;
   } else if (role === "system") {
     msgEl.textContent = content;
   } else {
@@ -4888,8 +3698,8 @@ function appendChatMessage(role, content) {
 // ===== Analysis Chat (continued conversation with AI analysis report) =====
 
 function showAnalysisChatToggle() {
-  const floatBall = document.getElementById("analysis-chat-float-ball");
-  if (floatBall) floatBall.classList.remove("hidden");
+  const toggleBtn = document.getElementById("analysis-chat-toggle-btn");
+  if (toggleBtn) toggleBtn.classList.remove("hidden");
 }
 
 function appendAnalysisChatMessage(role, content) {
@@ -4898,7 +3708,7 @@ function appendAnalysisChatMessage(role, content) {
   const msgEl = document.createElement("div");
   msgEl.className = `chat-msg ${role}`;
   if (role === "assistant") {
-    msgEl.innerHTML = `<div class="chat-msg-content markdown-body">${renderMarkdown(content)}</div>`;
+    msgEl.innerHTML = `<div class="chat-msg-content">${escapeHtml(content)}</div>`;
   } else if (role === "system") {
     msgEl.textContent = content;
   } else {
@@ -4964,7 +3774,8 @@ async function sendAnalysisChatMessage() {
         fullResponse += chunk.content;
         if (assistantMsgEl) {
           const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
-          contentEl.innerHTML = renderMarkdown(fullResponse);
+          contentEl.textContent = fullResponse;
+          if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
     }
@@ -4983,7 +3794,7 @@ async function sendAnalysisChatMessage() {
 
 // Analysis chat event listeners (script loaded at end of body, DOM is ready)
 (function initAnalysisChat() {
-  const analysisChatFloatBall = document.getElementById("analysis-chat-float-ball");
+  const analysisChatToggleBtn = document.getElementById("analysis-chat-toggle-btn");
   const analysisChatPanel = document.getElementById("analysis-chat-panel");
   const analysisChatCloseBtn = document.getElementById("analysis-chat-close-btn");
   const analysisChatClearBtn = document.getElementById("analysis-chat-clear-btn");
@@ -4991,8 +3802,8 @@ async function sendAnalysisChatMessage() {
   const analysisChatAbortBtnEl = document.getElementById("analysis-chat-abort-btn");
   const analysisChatInput = document.getElementById("analysis-chat-input");
 
-  if (analysisChatFloatBall) {
-    analysisChatFloatBall.addEventListener("click", () => {
+  if (analysisChatToggleBtn) {
+    analysisChatToggleBtn.addEventListener("click", () => {
       if (analysisChatPanel) {
         analysisChatPanel.classList.toggle("hidden");
         if (!analysisChatPanel.classList.contains("hidden")) {
@@ -5110,218 +3921,5 @@ async function kanbanManualExtract(url, idx, docType) {
     `;
   } catch (e) {
     container.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
-  }
-}
-
-// ── Merge Export ────────────────────────────────────────────────────────────
-
-function buildMergeDownloadUrl(item) {
-  if (!currentData || !item.docId) return null;
-  const isJP = currentData.office === "JP";
-  const isDE = currentData.office === "DE";
-  if (isDE) return null;
-
-  const isUS = currentData.office === "US";
-  const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
-  const encodedDocId = encodeURIComponent(item.docId);
-
-  if (isJP) {
-    const jpDocType = mapJpDocType(item.docCode, item.type);
-    if (!jpDocType) return null;
-    return `/api/jpo/doc/${jpDocType}/${urlDocNum}`;
-  }
-
-  return `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${item.numberOfPages}/${item.docFormat}`;
-}
-
-function openMergeExportModal() {
-  const modal = document.getElementById("merge-export-modal");
-  const list = document.getElementById("merge-export-list");
-  const selectAllCb = document.getElementById("merge-select-all-cb");
-  const countEl = document.getElementById("merge-selected-count");
-  const doBtn = document.getElementById("merge-export-do-btn");
-  const progressEl = document.getElementById("merge-export-progress");
-
-  if (!modal || !list) return;
-
-  // Sort all documents by date descending (newest first)
-  const items = [...(kanbanState.documents || [])].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-
-  // Build list
-  let html = "";
-  items.forEach((it, idx) => {
-    const downloadUrl = buildMergeDownloadUrl(it);
-    const canDownload = !!downloadUrl;
-    const typeNames = {
-      "office_action": "审查意见", "response": "答复", "request": "请求",
-      "allowance": "授权", "notification": "通知", "misc": "其他"
-    };
-
-    html += `
-      <div class="merge-export-item ${canDownload ? '' : 'disabled'}" data-idx="${it.idx}" data-date="${escapeHtml(it.date || '')}" data-url="${downloadUrl || ''}" data-search-text="${escapeHtml((it.name + ' ' + it.desc + ' ' + it.docCode + ' ' + it.date + ' ' + (typeNames[it.type] || '')).toLowerCase())}">
-        <input type="checkbox" class="merge-item-cb" ${canDownload ? 'checked' : 'disabled'} data-idx="${it.idx}">
-        <div class="merge-export-item-info">
-          <div class="merge-export-item-title">${escapeHtml(it.name || it.desc || it.docCode)}</div>
-          <div class="merge-export-item-meta">
-            <span class="merge-export-item-code">${escapeHtml(it.docCode)}</span>
-            ${it.date ? '<span>' + escapeHtml(it.date) + '</span>' : ''}
-            <span>${typeNames[it.type] || it.type || ''}</span>
-            ${!canDownload ? '<span style="color:#e74c3c">不可下载</span>' : ''}
-          </div>
-        </div>
-      </div>
-    `;
-  });
-  list.innerHTML = html;
-
-  // Update select all state
-  const checkboxes = list.querySelectorAll(".merge-item-cb:not(:disabled)");
-  selectAllCb.checked = checkboxes.length > 0 && [...checkboxes].every(cb => cb.checked);
-
-  // Update count
-  updateMergeSelectedCount();
-
-  // Reset progress
-  if (progressEl) progressEl.classList.add("hidden");
-  if (doBtn) { doBtn.disabled = false; doBtn.textContent = "合并导出 PDF"; }
-
-  // Show modal
-  modal.classList.remove("hidden");
-
-  // Bind events
-  selectAllCb.onchange = () => {
-    const cbs = list.querySelectorAll(".merge-item-cb:not(:disabled)");
-    cbs.forEach(cb => { cb.checked = selectAllCb.checked; });
-    updateMergeSelectedCount();
-  };
-
-  list.querySelectorAll(".merge-item-cb").forEach(cb => {
-    cb.onchange = () => {
-      const allCbs = list.querySelectorAll(".merge-item-cb:not(:disabled)");
-      selectAllCb.checked = allCbs.length > 0 && [...allCbs].every(c => c.checked);
-      updateMergeSelectedCount();
-    };
-  });
-
-  // Bind search filter
-  const searchInput = document.getElementById("merge-search-input");
-  if (searchInput) {
-    searchInput.value = "";
-    searchInput.oninput = () => {
-      const keyword = searchInput.value.trim().toLowerCase();
-      list.querySelectorAll(".merge-export-item").forEach(item => {
-        if (!keyword) {
-          item.style.display = "";
-          return;
-        }
-        const searchText = item.dataset.searchText || "";
-        item.style.display = searchText.includes(keyword) ? "" : "none";
-      });
-    };
-  }
-}
-
-function updateMergeSelectedCount() {
-  const list = document.getElementById("merge-export-list");
-  const countEl = document.getElementById("merge-selected-count");
-  const doBtn = document.getElementById("merge-export-do-btn");
-  if (!list || !countEl) return;
-
-  const checked = list.querySelectorAll(".merge-item-cb:checked").length;
-  countEl.textContent = `已选 ${checked} 份`;
-  if (doBtn) doBtn.disabled = checked === 0;
-}
-
-async function doMergeExport() {
-  const list = document.getElementById("merge-export-list");
-  const doBtn = document.getElementById("merge-export-do-btn");
-  const progressEl = document.getElementById("merge-export-progress");
-  const progressFill = document.getElementById("merge-progress-fill");
-  const progressText = document.getElementById("merge-progress-text");
-
-  if (!list) return;
-
-  // Collect selected items
-  const selectedItems = [];
-  list.querySelectorAll(".merge-item-cb:checked").forEach(cb => {
-    const row = cb.closest(".merge-export-item");
-    if (!row) return;
-    const idx = parseInt(cb.dataset.idx);
-    const it = kanbanState.documents.find(d => d.idx === idx);
-    if (!it) return;
-    const downloadUrl = row.dataset.url;
-    if (!downloadUrl) return;
-
-    // Extract original title from the name field (e.g. "非最终驳回 (Non-Final Rejection)")
-    const name = it.name || it.desc || it.docCode || "";
-    // Split Chinese and English parts
-    const match = name.match(/^(.+?)\s*\((.+)\)$/);
-    const chineseTitle = match ? match[1] : name;
-    const originalTitle = match ? match[2] : "";
-
-    selectedItems.push({
-      idx,
-      downloadUrl,
-      originalTitle,
-      chineseTitle,
-      date: it.date || "",
-      docCode: it.docCode || "",
-    });
-  });
-
-  if (selectedItems.length === 0) {
-    showError("请至少选择一份文档");
-    return;
-  }
-
-  // Show progress
-  if (doBtn) { doBtn.disabled = true; doBtn.textContent = "导出中..."; }
-  if (progressEl) progressEl.classList.remove("hidden");
-  if (progressFill) progressFill.style.width = "10%";
-  if (progressText) progressText.textContent = `正在下载 ${selectedItems.length} 份文档...`;
-
-  try {
-    const resp = await fetch("/api/merge-pdf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: selectedItems }),
-    });
-
-    if (progressFill) progressFill.style.width = "80%";
-    if (progressText) progressText.textContent = "正在合并 PDF...";
-
-    const contentType = resp.headers.get("Content-Type") || "";
-
-    if (contentType.includes("application/pdf")) {
-      // Success - download the PDF
-      const blob = await resp.blob();
-      if (progressFill) progressFill.style.width = "100%";
-      if (progressText) progressText.textContent = "导出完成！";
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `merged_patent_docs_${new Date().toISOString().slice(0, 10)}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      // Close modal after a brief delay
-      setTimeout(() => {
-        const modal = document.getElementById("merge-export-modal");
-        if (modal) modal.classList.add("hidden");
-      }, 1500);
-    } else {
-      // Error response
-      const data = await resp.json();
-      throw new Error(data.error || "合并导出失败");
-    }
-  } catch (e) {
-    if (progressText) progressText.textContent = "导出失败: " + e.message;
-    if (progressFill) { progressFill.style.width = "100%"; progressFill.style.background = "#e74c3c"; }
-    showError("合并导出失败: " + e.message);
-  } finally {
-    if (doBtn) { doBtn.disabled = false; doBtn.textContent = "合并导出 PDF"; }
   }
 }
