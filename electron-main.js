@@ -440,8 +440,21 @@ async function mergePdfDocs(req, res) {
       "--logo", logoPath,
     ];
 
-    // Use "python" on Windows, "python3" on other platforms
-    const pythonCmd = process.platform === "win32" ? "python" : "python3";
+    // Try multiple Python commands on Windows, fall back to python3 on others
+    let pythonCmd = "python3";
+    if (process.platform === "win32") {
+      // On Windows, try: python, python3, py (Python Launcher)
+      const candidates = ["python", "python3", "py"];
+      for (const cmd of candidates) {
+        try {
+          require("child_process").execSync(`${cmd} --version`, { stdio: "pipe", timeout: 5000, windowsHide: true });
+          pythonCmd = cmd;
+          break;
+        } catch {
+          continue;
+        }
+      }
+    }
 
     const mergeResult = await new Promise((resolve) => {
       execFile(pythonCmd, mergeArgs, { maxBuffer: 50 * 1024 * 1024, timeout: 120000 }, (err, stdout, stderr) => {
@@ -449,7 +462,13 @@ async function mergePdfDocs(req, res) {
         try { fs.unlinkSync(itemsJsonPath); } catch {}
         if (err) {
           console.error("Merge error:", stderr || err.message);
-          resolve({ success: false, error: (stderr || err.message).substring(0, 500) });
+          const errMsg = (stderr || err.message || "").substring(0, 500);
+          // Detect Python not found
+          if (errMsg.includes("Python was not found") || errMsg.includes("not recognized") || errMsg.includes("ENOENT")) {
+            resolve({ success: false, error: "未找到 Python 环境，请安装 Python 3 并确保已安装 reportlab 和 PyPDF2 库（pip install reportlab PyPDF2）" });
+          } else {
+            resolve({ success: false, error: errMsg });
+          }
           return;
         }
         try {
