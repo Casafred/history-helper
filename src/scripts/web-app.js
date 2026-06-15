@@ -5237,13 +5237,38 @@ async function doMergeExportWithItems(selectedIdxs, progressCallback) {
     return;
   }
 
+  // Build patent bibliographic info for cover pages
+  const patentInfo = {};
+  if (currentData) {
+    patentInfo.patentNumber = patentInput ? patentInput.value.trim() : (currentData.applicationNumber || currentData.docNumber || "");
+    patentInfo.office = currentData.office || "";
+    patentInfo.applicationNumber = currentData.applicationNumber || "";
+    if (currentData.family) {
+      const members = extractFamilyMembers(currentData.family);
+      if (members.length > 0) {
+        const m = members.find(mem => mem.countryCode === currentData.office) || members[0];
+        const dl = m.docList || {};
+        patentInfo.title = m.title || dl.title || m.inventionTitle || "";
+        const applicantNamesArr = m.applicantNames || dl.applicantNames || [];
+        const namesStr = Array.isArray(applicantNamesArr) ? applicantNamesArr.join(", ") : (applicantNamesArr || "");
+        if (currentData.office === "US") {
+          patentInfo.inventors = namesStr || m.inventors || m.inventorName || "";
+        } else {
+          patentInfo.applicants = namesStr || m.applicants || m.applicantName || "";
+          patentInfo.inventors = m.inventors || m.inventorName || "";
+        }
+        patentInfo.filingDate = m.appDateStr || m.filingDate || m.applicationDate || "";
+      }
+    }
+  }
+
   if (progressCallback) progressCallback("start", selectedItems.length);
 
   try {
     const resp = await fetch("/api/merge-pdf", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: selectedItems }),
+      body: JSON.stringify({ items: selectedItems, patentInfo }),
     });
 
     if (progressCallback) progressCallback("merging");

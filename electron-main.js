@@ -403,6 +403,7 @@ async function mergePdfDocs(req, res) {
 
     const params = JSON.parse(body);
     const items = params.items;
+    const patentInfo = params.patentInfo || {};
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       res.writeHead(400, corsHeaders);
@@ -524,9 +525,10 @@ async function mergePdfDocs(req, res) {
         const coverPage = mergedPdf.addPage([595.28, 841.89]); // A4
         const { width: pw, height: ph } = coverPage.getSize();
 
-        // Top accent bar
+        // Top accent bar (taller to accommodate patent info)
+        const barHeight = patentInfo.patentNumber ? 110 : 80;
         coverPage.drawRectangle({
-          x: 0, y: ph - 80, width: pw, height: 80,
+          x: 0, y: ph - barHeight, width: pw, height: barHeight,
           color: PRIMARY_COLOR,
         });
 
@@ -552,10 +554,85 @@ async function mergePdfDocs(req, res) {
           x: pw - 40 - byWidth, y: ph - 55, size: 10, font, color: rgb(0.85, 0.88, 0.92),
         });
 
+        // Patent number in accent bar (second line, left-aligned)
+        if (patentInfo.patentNumber) {
+          const pnLabel = `Patent: ${patentInfo.patentNumber}`;
+          const pnOffice = patentInfo.office ? `  (${patentInfo.office})` : "";
+          const pnText = pnLabel + pnOffice;
+          coverPage.drawText(pnText, {
+            x: badgeX, y: ph - 55, size: 12, font: fontBold, color: rgb(0.9, 0.92, 0.96),
+          });
+        }
+
+        // Patent title below accent bar
+        let patentTitleBottom = ph - barHeight; // track Y position after patent info
+        if (patentInfo.title) {
+          const ptSize = 13;
+          const maxPtWidth = pw - 80;
+          const hasCjkPt = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(patentInfo.title);
+          const ptFont = (hasCjkPt && cjkFont) ? cjkFont : font;
+          try {
+            let displayPt = patentInfo.title;
+            if (ptFont.widthOfTextAtSize(displayPt, ptSize) > maxPtWidth) {
+              while (displayPt.length > 1 && ptFont.widthOfTextAtSize(displayPt + "...", ptSize) > maxPtWidth) {
+                displayPt = displayPt.slice(0, -1);
+              }
+              displayPt += "...";
+            }
+            const ptWidth = ptFont.widthOfTextAtSize(displayPt, ptSize);
+            coverPage.drawText(displayPt, {
+              x: (pw - ptWidth) / 2, y: ph - barHeight - 25, size: ptSize, font: ptFont, color: rgb(0.35, 0.35, 0.45),
+            });
+            patentTitleBottom = ph - barHeight - 25;
+          } catch (e) {
+            // fallback: strip CJK
+            const safePt = patentInfo.title.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/g, "").trim();
+            if (safePt) {
+              const ptWidth = font.widthOfTextAtSize(safePt, ptSize);
+              coverPage.drawText(safePt, {
+                x: (pw - ptWidth) / 2, y: ph - barHeight - 25, size: ptSize, font, color: rgb(0.35, 0.35, 0.45),
+              });
+              patentTitleBottom = ph - barHeight - 25;
+            }
+          }
+        }
+
+        // Inventors / Applicants line
+        const inventorStr = patentInfo.inventors || "";
+        const applicantStr = patentInfo.applicants || "";
+        if (inventorStr || applicantStr) {
+          const infoSize = 10;
+          let infoText = "";
+          if (inventorStr) infoText += `Inventor: ${inventorStr}`;
+          if (applicantStr) infoText += (infoText ? "  |  " : "") + `Applicant: ${applicantStr}`;
+          if (patentInfo.filingDate) infoText += `  |  Filed: ${patentInfo.filingDate}`;
+          const maxInfoWidth = pw - 80;
+          if (font.widthOfTextAtSize(infoText, infoSize) > maxInfoWidth) {
+            while (infoText.length > 1 && font.widthOfTextAtSize(infoText + "...", infoSize) > maxInfoWidth) {
+              infoText = infoText.slice(0, -1);
+            }
+            infoText += "...";
+          }
+          const infoWidth = font.widthOfTextAtSize(infoText, infoSize);
+          coverPage.drawText(infoText, {
+            x: (pw - infoWidth) / 2, y: patentTitleBottom - 18, size: infoSize, font, color: rgb(0.5, 0.5, 0.6),
+          });
+        }
+
+        // Thin separator line
+        const sepY = patentTitleBottom - 35;
+        coverPage.drawLine({
+          start: { x: 60, y: sepY },
+          end: { x: pw - 60, y: sepY },
+          thickness: 0.5,
+          color: rgb(0.8, 0.8, 0.85),
+        });
+
         // Chinese title (centered, large) - auto-truncate if too wide
         const cnTitle = item.chinese_title || item.doc_code || "Document";
         const cnTitleSize = 28;
         const maxTitleWidth = pw - 80; // 40px margin each side
+        const cnTitleY = sepY - 50;
         let titleDrawn = false;
         if (cjkFont) {
           try {
@@ -569,7 +646,7 @@ async function mergePdfDocs(req, res) {
             }
             const cnTitleWidth = cjkFont.widthOfTextAtSize(displayTitle, cnTitleSize);
             coverPage.drawText(displayTitle, {
-              x: (pw - cnTitleWidth) / 2, y: ph - 220, size: cnTitleSize, font: cjkFont, color: PRIMARY_COLOR,
+              x: (pw - cnTitleWidth) / 2, y: cnTitleY, size: cnTitleSize, font: cjkFont, color: PRIMARY_COLOR,
             });
             titleDrawn = true;
           } catch (e) {
@@ -588,11 +665,12 @@ async function mergePdfDocs(req, res) {
           }
           const cnTitleWidth = fontBold.widthOfTextAtSize(displayTitle, cnTitleSize);
           coverPage.drawText(displayTitle, {
-            x: (pw - cnTitleWidth) / 2, y: ph - 220, size: cnTitleSize, font: fontBold, color: PRIMARY_COLOR,
+            x: (pw - cnTitleWidth) / 2, y: cnTitleY, size: cnTitleSize, font: fontBold, color: PRIMARY_COLOR,
           });
         }
 
         // Original title (centered, smaller) - auto-truncate if too wide
+        const enTitleY = cnTitleY - 40;
         if (item.original_title) {
           const enTitle = item.original_title;
           const enTitleSize = 16;
@@ -609,7 +687,7 @@ async function mergePdfDocs(req, res) {
             }
             const enTitleWidth = titleFont.widthOfTextAtSize(displayTitle, enTitleSize);
             coverPage.drawText(displayTitle, {
-              x: (pw - enTitleWidth) / 2, y: ph - 260, size: enTitleSize, font: titleFont, color: rgb(0.4, 0.4, 0.5),
+              x: (pw - enTitleWidth) / 2, y: enTitleY, size: enTitleSize, font: titleFont, color: rgb(0.4, 0.4, 0.5),
             });
           } catch (e) {
             // Fallback: strip CJK characters and use standard font
@@ -617,7 +695,7 @@ async function mergePdfDocs(req, res) {
             if (safeEnTitle) {
               const enTitleWidth = font.widthOfTextAtSize(safeEnTitle, enTitleSize);
               coverPage.drawText(safeEnTitle, {
-                x: (pw - enTitleWidth) / 2, y: ph - 260, size: enTitleSize, font, color: rgb(0.4, 0.4, 0.5),
+                x: (pw - enTitleWidth) / 2, y: enTitleY, size: enTitleSize, font, color: rgb(0.4, 0.4, 0.5),
               });
             }
           }
@@ -628,7 +706,7 @@ async function mergePdfDocs(req, res) {
           const dateText = `Date: ${item.date}`;
           const dateWidth = font.widthOfTextAtSize(dateText, 12);
           coverPage.drawText(dateText, {
-            x: (pw - dateWidth) / 2, y: ph - 310, size: 12, font, color: rgb(0.5, 0.5, 0.6),
+            x: (pw - dateWidth) / 2, y: enTitleY - 50, size: 12, font, color: rgb(0.5, 0.5, 0.6),
           });
         }
 
@@ -637,7 +715,7 @@ async function mergePdfDocs(req, res) {
           const codeText = `Code: ${item.doc_code}`;
           const codeWidth = font.widthOfTextAtSize(codeText, 12);
           coverPage.drawText(codeText, {
-            x: (pw - codeWidth) / 2, y: ph - 335, size: 12, font, color: rgb(0.5, 0.5, 0.6),
+            x: (pw - codeWidth) / 2, y: enTitleY - 75, size: 12, font, color: rgb(0.5, 0.5, 0.6),
           });
         }
 
