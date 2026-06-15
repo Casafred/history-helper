@@ -2734,7 +2734,7 @@ function selectReaderDoc(idx) {
   // Translate button always enabled (auto-OCR if needed)
   // Reset translate panel
   if (pdfTranslatePanel) pdfTranslatePanel.classList.add("hidden");
-  if (pdfTranslateContent) pdfTranslateContent.innerHTML = '<p class="placeholder">点击"翻译"按钮翻译当前页面</p>';
+  if (pdfTranslateContent) pdfTranslateContent.innerHTML = '<p class="placeholder">点击"翻译全文档"按钮翻译当前文档</p>';
 
   // Render PDF view if active
   if (pdfViewState.active) {
@@ -3583,7 +3583,7 @@ async function _doTranslateBlocks(idx, blocks, targetLang, langNames, cacheKey, 
       showError("翻译出错: " + e.message);
     }
   } finally {
-    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译"; pdfTranslateBtn.disabled = false; }
+    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译全文档"; pdfTranslateBtn.disabled = false; }
     translateAbortController = null;
   }
 }
@@ -3614,7 +3614,7 @@ async function translatePdfPage() {
       if (pdfTranslateContent) {
         pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">OCR 提取失败，无法翻译</p>';
       }
-      if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译"; pdfTranslateBtn.disabled = false; }
+      if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译全文档"; pdfTranslateBtn.disabled = false; }
       return;
     }
   }
@@ -3625,7 +3625,7 @@ async function translatePdfPage() {
     if (pdfTranslateContent) {
       pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">请先在设置中配置 AI 服务的 API Key</p>';
     }
-    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译"; pdfTranslateBtn.disabled = false; }
+    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译全文档"; pdfTranslateBtn.disabled = false; }
     return;
   }
 
@@ -4590,7 +4590,18 @@ document.addEventListener("DOMContentLoaded", () => {
     pdfZoomFit.addEventListener("click", pdfZoomFitAction);
   }
 
-  // OCR extract button removed - auto-OCR on PDF open
+  // PDF OCR button
+  const pdfOcrBtn = document.getElementById("pdf-ocr-btn");
+  if (pdfOcrBtn) {
+    pdfOcrBtn.addEventListener("click", async () => {
+      if (pdfOcrBtn.disabled) return;
+      pdfOcrBtn.disabled = true;
+      pdfOcrBtn.textContent = "OCR中...";
+      await ocrPdf();
+      pdfOcrBtn.disabled = false;
+      pdfOcrBtn.textContent = "OCR 提取";
+    });
+  }
 
   // PDF translate button
   if (pdfTranslateBtn) {
