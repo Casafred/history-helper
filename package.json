@@ -29,6 +29,7 @@
     },
     "files": [
       "electron-main.js",
+      "fonts/**",
       {
         "from": "src",
         "to": "src",
@@ -76,7 +77,8 @@
     },
     "asar": true,
     "asarUnpack": [
-      "src/PATENTLENSNEWLOGO.png"
+      "src/PATENTLENSNEWLOGO.png",
+      "fonts/**"
     ]
   }
 }

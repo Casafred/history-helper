@@ -34,39 +34,52 @@ const MIME_TYPES = {
   ".svg": "image/svg+xml",
 };
 
-// ── System CJK font detection (zero extra app size) ──
-function findSystemCjkFont() {
+// ── CJK font detection: bundled font first, then system fonts ──
+function findCjkFont() {
+  // 1. Bundled NotoSansSC (TTF, most reliable with pdf-lib)
+  const bundledPaths = [
+    path.join(__dirname, "fonts", "NotoSansSC-Regular.ttf"),
+    path.join(__dirname, "src", "fonts", "NotoSansSC-Regular.ttf"),
+  ];
+  // In asar-packed app, fonts may need unpack path
+  for (const p of bundledPaths) {
+    try {
+      const resolved = p.includes(".asar" + path.sep) ? p.replace(".asar" + path.sep, ".asar.unpacked" + path.sep) : p;
+      if (fs.existsSync(resolved)) return resolved;
+      if (fs.existsSync(p)) return p;
+    } catch {}
+  }
+
+  // 2. System CJK fonts (TTC files may cause "layout is not a function" with pdf-lib)
   const platform = process.platform;
   const candidates = [];
 
   if (platform === "win32") {
     const windir = process.env.WINDIR || "C:\\Windows";
     candidates.push(
-      path.join(windir, "Fonts", "msyh.ttc"),       // Microsoft YaHei (微软雅黑)
-      path.join(windir, "Fonts", "msyhbd.ttc"),      // Microsoft YaHei Bold
-      path.join(windir, "Fonts", "simhei.ttf"),      // SimHei (黑体)
-      path.join(windir, "Fonts", "simsun.ttc"),      // SimSun (宋体)
+      path.join(windir, "Fonts", "simhei.ttf"),       // SimHei (黑体) - TTF, most compatible
+      path.join(windir, "Fonts", "msyh.ttc"),          // Microsoft YaHei - TTC, may fail
+      path.join(windir, "Fonts", "msyhbd.ttc"),        // Microsoft YaHei Bold - TTC
+      path.join(windir, "Fonts", "simsun.ttc"),        // SimSun (宋体) - TTC
     );
   } else if (platform === "darwin") {
     candidates.push(
-      "/System/Library/Fonts/PingFang.ttc",           // PingFang SC (苹方)
-      "/System/Library/Fonts/STHeiti Light.ttc",      // STHeiti
-      "/Library/Fonts/Arial Unicode.ttf",             // Arial Unicode MS
+      "/Library/Fonts/Arial Unicode.ttf",              // Arial Unicode MS - TTF
+      "/System/Library/Fonts/PingFang.ttc",            // PingFang SC - TTC
+      "/System/Library/Fonts/STHeiti Light.ttc",       // STHeiti - TTC
     );
   } else {
     candidates.push(
-      "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-      "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-      "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-      "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+      "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",  // TTF
+      "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",            // TTC
+      "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",     // TTC
+      "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",     // TTC
     );
   }
 
   for (const fontPath of candidates) {
     try {
-      if (fs.existsSync(fontPath)) {
-        return fontPath;
-      }
+      if (fs.existsSync(fontPath)) return fontPath;
     } catch {}
   }
   return null;
@@ -466,11 +479,11 @@ async function mergePdfDocs(req, res) {
 
       // Try to load system CJK font for Chinese title rendering
       let cjkFont = null;
-      const cjkFontPath = findSystemCjkFont();
+      const cjkFontPath = findCjkFont();
       if (cjkFontPath) {
         try {
           const cjkFontBytes = fs.readFileSync(cjkFontPath);
-          cjkFont = await mergedPdf.embedFont(cjkFontBytes, { subset: true });
+          cjkFont = await mergedPdf.embedFont(cjkFontBytes);
           // Verify the CJK font actually works by testing layout
           if (cjkFont && typeof cjkFont.widthOfTextAtSize !== "function") {
             console.warn("[Merge] CJK font embedded but missing layout methods, discarding");
