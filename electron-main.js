@@ -3,7 +3,9 @@ const http = require("http");
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
-const { execFile } = require("child_process");
+
+const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
+const fontkit = require("@pdf-lib/fontkit");
 
 const GD_API_BASE = "https://d1kazzu6rbodne.cloudfront.net";
 const PADDLE_OCR_VL_URL = "https://k2neb1qcy1u6g4k5.aistudio-app.com/layout-parsing";
@@ -27,8 +29,48 @@ const MIME_TYPES = {
   ".woff2": "font/woff2",
   ".woff": "font/woff",
   ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".ttc": "font/collection",
   ".svg": "image/svg+xml",
 };
+
+// ── System CJK font detection (zero extra app size) ──
+function findSystemCjkFont() {
+  const platform = process.platform;
+  const candidates = [];
+
+  if (platform === "win32") {
+    const windir = process.env.WINDIR || "C:\\Windows";
+    candidates.push(
+      path.join(windir, "Fonts", "msyh.ttc"),       // Microsoft YaHei (微软雅黑)
+      path.join(windir, "Fonts", "msyhbd.ttc"),      // Microsoft YaHei Bold
+      path.join(windir, "Fonts", "simhei.ttf"),      // SimHei (黑体)
+      path.join(windir, "Fonts", "simsun.ttc"),      // SimSun (宋体)
+    );
+  } else if (platform === "darwin") {
+    candidates.push(
+      "/System/Library/Fonts/PingFang.ttc",           // PingFang SC (苹方)
+      "/System/Library/Fonts/STHeiti Light.ttc",      // STHeiti
+      "/Library/Fonts/Arial Unicode.ttf",             // Arial Unicode MS
+    );
+  } else {
+    candidates.push(
+      "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+      "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+      "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+      "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+    );
+  }
+
+  for (const fontPath of candidates) {
+    try {
+      if (fs.existsSync(fontPath)) {
+        return fontPath;
+      }
+    } catch {}
+  }
+  return null;
+}
 
 let mainWindow;
 let server;
@@ -414,96 +456,157 @@ async function mergePdfDocs(req, res) {
       return;
     }
 
-    // Write items JSON to a temp file to avoid command line length limits and encoding issues
-    const itemsJsonPath = path.join(tempDir, `${mergeId}_items.json`);
-    fs.writeFileSync(itemsJsonPath, JSON.stringify(mergeItems), "utf-8");
+    // ── Merge PDFs using pdf-lib (pure JS, no Python needed) ──
+    try {
+      const mergedPdf = await PDFDocument.create();
+      mergedPdf.registerFontkit(fontkit);
 
-    const outputPath = path.join(tempDir, `${mergeId}_merged.pdf`);
+      const font = await mergedPdf.embedFont(StandardFonts.Helvetica);
+      const fontBold = await mergedPdf.embedFont(StandardFonts.HelveticaBold);
 
-    // Resolve merge_pdf.py path - handle asar unpacking
-    let scriptPath = path.join(__dirname, "merge_pdf.py");
-    // If running from asar, the unpacked files are in app.asar.unpacked
-    if (scriptPath.includes(".asar" + path.sep)) {
-      scriptPath = scriptPath.replace(".asar" + path.sep, ".asar.unpacked" + path.sep);
-    }
-
-    // Resolve logo path for cover pages
-    let logoPath = path.join(__dirname, "src", "PATENTLENSNEWLOGO.png");
-    if (logoPath.includes(".asar" + path.sep)) {
-      logoPath = logoPath.replace(".asar" + path.sep, ".asar.unpacked" + path.sep);
-    }
-
-    const mergeArgs = [
-      scriptPath,
-      "--output", outputPath,
-      "--items-file", itemsJsonPath,
-      "--logo", logoPath,
-    ];
-
-    // Try multiple Python commands on Windows, fall back to python3 on others
-    let pythonCmd = "python3";
-    if (process.platform === "win32") {
-      // On Windows, try: python, python3, py (Python Launcher)
-      const candidates = ["python", "python3", "py"];
-      for (const cmd of candidates) {
+      // Try to load system CJK font for Chinese title rendering
+      let cjkFont = null;
+      const cjkFontPath = findSystemCjkFont();
+      if (cjkFontPath) {
         try {
-          require("child_process").execSync(`${cmd} --version`, { stdio: "pipe", timeout: 5000, windowsHide: true });
-          pythonCmd = cmd;
-          break;
-        } catch {
-          continue;
+          const cjkFontBytes = fs.readFileSync(cjkFontPath);
+          cjkFont = await mergedPdf.embedFont(cjkFontBytes);
+          console.log("[Merge] Loaded CJK font:", cjkFontPath);
+        } catch (e) {
+          console.warn("[Merge] Failed to load CJK font:", cjkFontPath, e.message);
         }
+      } else {
+        console.warn("[Merge] No system CJK font found, Chinese titles will use doc_code fallback");
       }
-    }
 
-    const mergeResult = await new Promise((resolve) => {
-      execFile(pythonCmd, mergeArgs, { maxBuffer: 50 * 1024 * 1024, timeout: 120000 }, (err, stdout, stderr) => {
-        // Clean up items JSON file
-        try { fs.unlinkSync(itemsJsonPath); } catch {}
-        if (err) {
-          console.error("Merge error:", stderr || err.message);
-          const errMsg = (stderr || err.message || "").substring(0, 500);
-          // Detect Python not found
-          if (errMsg.includes("Python was not found") || errMsg.includes("not recognized") || errMsg.includes("ENOENT")) {
-            resolve({ success: false, error: "未找到 Python 环境，请安装 Python 3 并确保已安装 reportlab 和 PyPDF2 库（pip install reportlab PyPDF2）" });
-          } else {
-            resolve({ success: false, error: errMsg });
-          }
-          return;
+      // Load logo image
+      let logoImage = null;
+      try {
+        let logoPath = path.join(__dirname, "src", "PATENTLENSNEWLOGO.png");
+        if (logoPath.includes(".asar" + path.sep)) {
+          logoPath = logoPath.replace(".asar" + path.sep, ".asar.unpacked" + path.sep);
         }
+        if (fs.existsSync(logoPath)) {
+          const logoBytes = fs.readFileSync(logoPath);
+          logoImage = await mergedPdf.embedPng(logoBytes);
+        }
+      } catch (e) {
+        console.error("Logo load error:", e.message);
+      }
+
+      const total = mergeItems.length;
+      const PRIMARY_COLOR = rgb(0.29, 0.44, 0.65);
+
+      for (let i = 0; i < total; i++) {
+        const item = mergeItems[i];
+
+        // ── Create cover page ──
+        const coverPage = mergedPdf.addPage([595.28, 841.89]); // A4
+        const { width: pw, height: ph } = coverPage.getSize();
+
+        // Top accent bar
+        coverPage.drawRectangle({
+          x: 0, y: ph - 80, width: pw, height: 80,
+          color: PRIMARY_COLOR,
+        });
+
+        // Logo in top-left of accent bar
+        let badgeX = 40;
+        if (logoImage) {
+          const logoDims = logoImage.scale(36 / Math.max(logoImage.width, logoImage.height));
+          coverPage.drawImage(logoImage, {
+            x: 40, y: ph - 58, width: logoDims.width, height: logoDims.height,
+          });
+          badgeX = 40 + logoDims.width + 12;
+        }
+
+        // Document index badge
+        coverPage.drawText(`Document ${i + 1} / ${total}`, {
+          x: badgeX, y: ph - 35, size: 14, font: fontBold, color: rgb(1, 1, 1),
+        });
+
+        // "by PatentLens" in top-right
+        const byText = "by PatentLens";
+        const byWidth = font.widthOfTextAtSize(byText, 10);
+        coverPage.drawText(byText, {
+          x: pw - 40 - byWidth, y: ph - 55, size: 10, font, color: rgb(0.85, 0.88, 0.92),
+        });
+
+        // Chinese title (centered, large)
+        const cnTitle = item.chinese_title || item.doc_code || "Document";
+        const cnTitleSize = 28;
+        if (cjkFont) {
+          // Use CJK font for proper Chinese rendering
+          const cnTitleWidth = cjkFont.widthOfTextAtSize(cnTitle, cnTitleSize);
+          coverPage.drawText(cnTitle, {
+            x: (pw - cnTitleWidth) / 2, y: ph - 220, size: cnTitleSize, font: cjkFont, color: PRIMARY_COLOR,
+          });
+        } else {
+          // No CJK font available - use doc_code (English) as fallback
+          const safeTitle = item.doc_code || cnTitle.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/g, "").trim() || "Document";
+          const cnTitleWidth = fontBold.widthOfTextAtSize(safeTitle, cnTitleSize);
+          coverPage.drawText(safeTitle, {
+            x: (pw - cnTitleWidth) / 2, y: ph - 220, size: cnTitleSize, font: fontBold, color: PRIMARY_COLOR,
+          });
+        }
+
+        // Original title (centered, smaller)
+        if (item.original_title) {
+          const enTitle = item.original_title;
+          const enTitleSize = 16;
+          const hasCjk = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(enTitle);
+          const titleFont = (hasCjk && cjkFont) ? cjkFont : font;
+          const enTitleWidth = titleFont.widthOfTextAtSize(enTitle, enTitleSize);
+          coverPage.drawText(enTitle, {
+            x: (pw - enTitleWidth) / 2, y: ph - 260, size: enTitleSize, font: titleFont, color: rgb(0.4, 0.4, 0.5),
+          });
+        }
+
+        // Date
+        if (item.date) {
+          const dateText = `Date: ${item.date}`;
+          const dateWidth = font.widthOfTextAtSize(dateText, 12);
+          coverPage.drawText(dateText, {
+            x: (pw - dateWidth) / 2, y: ph - 310, size: 12, font, color: rgb(0.5, 0.5, 0.6),
+          });
+        }
+
+        // Doc code
+        if (item.doc_code) {
+          const codeText = `Code: ${item.doc_code}`;
+          const codeWidth = font.widthOfTextAtSize(codeText, 12);
+          coverPage.drawText(codeText, {
+            x: (pw - codeWidth) / 2, y: ph - 335, size: 12, font, color: rgb(0.5, 0.5, 0.6),
+          });
+        }
+
+        // ── Append source PDF pages ──
         try {
-          resolve(JSON.parse(stdout));
-        } catch {
-          resolve({ success: false, error: stdout.substring(0, 500) });
+          const pdfBytes = fs.readFileSync(item.pdf_path);
+          const srcDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+          const pages = await mergedPdf.copyPages(srcDoc, srcDoc.getPageIndices());
+          pages.forEach(p => mergedPdf.addPage(p));
+        } catch (e) {
+          console.error(`Failed to load PDF ${item.pdf_path}:`, e.message);
         }
-      });
-    });
 
-    if (!mergeResult.success) {
-      res.writeHead(200, corsHeaders);
-      res.end(JSON.stringify({ error: "Merge failed: " + (mergeResult.error || "unknown"), failedItems }));
-      return;
-    }
-
-    fs.readFile(outputPath, (readErr, pdfData) => {
-      mergeItems.forEach((item) => {
+        // Clean up temp file
         try { fs.unlinkSync(item.pdf_path); } catch {}
-      });
-      try { fs.unlinkSync(outputPath); } catch {};
-
-      if (readErr) {
-        res.writeHead(200, corsHeaders);
-        res.end(JSON.stringify({ error: "Failed to read merged PDF" }));
-        return;
       }
+
+      const mergedBytes = await mergedPdf.save();
 
       res.writeHead(200, {
         "Content-Type": "application/pdf",
         "Access-Control-Allow-Origin": "*",
         "Content-Disposition": 'attachment; filename="merged_patent_docs.pdf"',
       });
-      res.end(pdfData);
-    });
+      res.end(mergedBytes);
+    } catch (mergeErr) {
+      console.error("Merge error:", mergeErr);
+      res.writeHead(200, corsHeaders);
+      res.end(JSON.stringify({ error: "Merge failed: " + (mergeErr.message || "unknown"), failedItems }));
+    }
   } catch (e) {
     console.error("Merge PDF error:", e);
     res.writeHead(200, corsHeaders);
