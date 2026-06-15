@@ -2703,6 +2703,9 @@ function selectReaderDoc(idx) {
   chatHistory = [];
   if (chatMessages) chatMessages.innerHTML = "";
 
+  // Hide any OCR progress overlay from previous document
+  hideOcrProgressOverlay();
+
   const items = kanbanState.documents;
   const it = items.find(d => d.idx === idx);
   if (!it) return;
@@ -2803,6 +2806,21 @@ function togglePdfView(skipRender) {
       renderPdfView(pdfViewState.currentDocIdx);
     }
   }
+}
+
+function showOcrProgressOverlay() {
+  // Remove existing overlay if any
+  hideOcrProgressOverlay();
+  const overlay = document.createElement("div");
+  overlay.id = "ocr-progress-overlay";
+  overlay.style.cssText = "position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;padding:8px 16px;background:var(--accent-dim);border-bottom:2px solid var(--accent);font-size:13px;color:var(--accent);";
+  overlay.innerHTML = '<div class="ocr-progress-spinner" style="width:16px;height:16px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></div><span>正在 OCR 识别中，PDF 已可浏览...</span>';
+  readerPdfContainer.prepend(overlay);
+}
+
+function hideOcrProgressOverlay() {
+  const existing = document.getElementById("ocr-progress-overlay");
+  if (existing) existing.remove();
 }
 
 async function renderPdfView(idx) {
@@ -2907,6 +2925,8 @@ async function renderPdfView(idx) {
       const config = window.AI.loadAIConfig();
       const ocrConfig = window.AI.getOCRConfig(config);
       if (ocrConfig.autoOcr !== false) {
+        // Show OCR progress overlay on top of the already-rendered PDF
+        showOcrProgressOverlay();
         ocrPdf(); // fire-and-forget, will re-render on completion
       }
     }
@@ -3465,10 +3485,23 @@ async function ocrPdf() {
     const searchBtn = document.getElementById("pdf-search-btn");
     if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
     if (searchBtn) searchBtn.disabled = false;
-    // Re-render PDF with block overlays
+    // Re-render PDF with block overlays, preserving scroll position
     if (pdfViewState.active) {
+      // Save current scroll position
+      const scrollTop = readerPdfContainer.scrollTop;
+      const scrollRatio = readerPdfContainer.scrollHeight > 0 ? scrollTop / readerPdfContainer.scrollHeight : 0;
       await renderPdfView(idx);
+      // Restore scroll position after re-render
+      requestAnimationFrame(() => {
+        const newScrollTop = Math.round(scrollRatio * readerPdfContainer.scrollHeight);
+        readerPdfContainer.scrollTop = newScrollTop;
+      });
     }
+    // Hide OCR progress overlay
+    hideOcrProgressOverlay();
+  } else {
+    // Hide OCR progress overlay on failure too
+    hideOcrProgressOverlay();
   }
 }
 
@@ -4597,6 +4630,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (pdfOcrBtn.disabled) return;
       pdfOcrBtn.disabled = true;
       pdfOcrBtn.textContent = "OCR中...";
+      showOcrProgressOverlay();
       await ocrPdf();
       pdfOcrBtn.disabled = false;
       pdfOcrBtn.textContent = "OCR 提取";
