@@ -5190,7 +5190,23 @@ function openMergeExportModal() {
   if (!modal || !list) return;
 
   // Sort all documents by date descending (newest first)
-  const items = [...(kanbanState.documents || [])].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const items = [...(kanbanState.documents || [])].sort((a, b) => {
+    const parseDate = (d) => {
+      if (!d) return 0;
+      // Handle formats: "2024-01-15", "01/15/2024", "2024/01/15", "20240115"
+      const cleaned = d.replace(/[\/\-]/g, "-");
+      const parts = cleaned.split("-");
+      if (parts.length === 3) {
+        const [p1, p2, p3] = parts.map(Number);
+        // If first part is 4 digits, it's YYYY-MM-DD
+        if (p1 > 1000) return new Date(p1, p2 - 1, p3).getTime();
+        // If last part is 4 digits, it's MM-DD-YYYY
+        if (p3 > 1000) return new Date(p3, p1 - 1, p2).getTime();
+      }
+      return new Date(d).getTime() || 0;
+    };
+    return parseDate(b.date) - parseDate(a.date);
+  });
 
   // Build list
   let html = "";
@@ -5297,12 +5313,29 @@ async function doMergeExport() {
     const downloadUrl = row.dataset.url;
     if (!downloadUrl) return;
 
-    // Extract original title from the name field (e.g. "非最终驳回 (Non-Final Rejection)")
+    // Extract Chinese and English title parts from the name field
+    // Format: "中文翻译 (English Original)" e.g. "非最终驳回 (Non-Final Rejection)"
     const name = it.name || it.desc || it.docCode || "";
-    // Split Chinese and English parts
-    const match = name.match(/^(.+?)\s*\((.+)\)$/);
-    const chineseTitle = match ? match[1] : name;
-    const originalTitle = match ? match[2] : "";
+    const hasCjk = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(name);
+    let chineseTitle = "";
+    let originalTitle = "";
+
+    if (hasCjk) {
+      // Name contains Chinese - try to split "中文 (English)" format
+      const match = name.match(/^(.+?)\s*\((.+)\)$/);
+      if (match) {
+        chineseTitle = match[1];
+        originalTitle = match[2];
+      } else {
+        // Chinese text without English in parentheses
+        chineseTitle = name;
+        originalTitle = "";
+      }
+    } else {
+      // Name is pure English - use docCode as Chinese title placeholder, full name as original
+      chineseTitle = it.docCode || name;
+      originalTitle = name;
+    }
 
     selectedItems.push({
       idx,
