@@ -32,6 +32,10 @@ const MIME_TYPES = {
   ".otf": "font/otf",
   ".ttc": "font/collection",
   ".svg": "image/svg+xml",
+  ".gif": "image/gif",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
 };
 
 // ── CJK font detection: bundled font first, then system fonts ──
