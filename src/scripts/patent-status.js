@@ -94,6 +94,10 @@ var PATENT_STATUS = {
       "BRAP": { name: "复审请求书 (Appeal Brief Filed)", type: "request", stage: "复审" },
       "EXBR": { name: "审查员复审答辩意见 (Examiner's Answer to Appeal Brief)", type: "office_action", stage: "复审" },
       "REBR": { name: "复审答复书 (Reply Brief Filed)", type: "response", stage: "复审" },
+      "PABC": { name: "预复审会议请求 (Pre-Appeal Brief Conference Request)", type: "request", stage: "复审" },
+      "PABC.D": { name: "预复审会议决定 (Pre-Brief Appeal Conference Decision)", type: "notification", stage: "复审" },
+      "NOAP": { name: "上诉通知 (Notice of Appeal Filed)", type: "request", stage: "复审" },
+      "RCFR": { name: "更正受理回执请求 (Request for Corrected Filing Receipt)", type: "request", stage: "审查前" },
     },
     typeNames: {
       "office_action": "审查意见",
@@ -124,6 +128,10 @@ var PATENT_STATUS = {
       "appeal brief filed": "复审请求书 (Appeal Brief Filed)",
       "examiner's answer to appeal brief": "审查员复审答辩意见 (Examiner's Answer to Appeal Brief)",
       "reply brief filed": "复审答复书 (Reply Brief Filed)",
+      "pre-appeal brief conference request": "预复审会议请求 (Pre-Appeal Brief Conference Request)",
+      "notice of appeal filed": "上诉通知 (Notice of Appeal Filed)",
+      "pre-brief appeal conference decision": "预复审会议决定 (Pre-Brief Appeal Conference Decision)",
+      "request for corrected filing receipt": "更正受理回执请求 (Request for Corrected Filing Receipt)",
     },
     stageNames: {
       "审查前": "审查前",
@@ -553,6 +561,10 @@ function classifyDocCode(code, desc) {
   if (/applicant argument|applicant remark|remarks made in an amendment/.test(text)) return "response";
   if (/response|amendment|reply|remand/.test(text)) return "response";
   if (/rce|continued examination|request for/.test(text)) return "request";
+  if (/pre-appeal brief conference request/.test(text)) return "request";
+  if (/notice of appeal filed/.test(text)) return "request";
+  if (/pre-brief appeal conference decision/.test(text)) return "notification";
+  if (/corrected filing receipt/.test(text)) return "request";
   if (/notice|notification/.test(text)) return "notification";
   if (/appeal|examiner's answer/.test(text)) return "office_action";
 
