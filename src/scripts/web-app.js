@@ -133,7 +133,7 @@ const aiSummaryResult = null;
 const readerBtn = document.getElementById("reader-btn");
 const readerModal = document.getElementById("reader-modal");
 const readerCloseBtn = document.getElementById("reader-close-btn");
-const readerMinimizeBtn = document.getElementById("reader-minimize-btn");
+const readerMinimizeBtn = null;
 const readerFloatingBall = document.getElementById("reader-floating-ball");
 const readerDocList = document.getElementById("reader-doc-list");
 const readerContent = document.getElementById("reader-content");
@@ -478,6 +478,16 @@ function renderKanban(data) {
   if (analysisChatFloatBall) analysisChatFloatBall.classList.add("hidden");
   const analysisChatPanel = document.getElementById("analysis-chat-panel");
   if (analysisChatPanel) analysisChatPanel.classList.add("hidden");
+
+  // Show reader floating ball when documents are loaded
+  if (readerFloatingBall && items.length > 0) {
+    readerFloatingBall.classList.remove("hidden");
+    const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
+    const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
+    readerFloatingBall.title = "点击打开阅读器";
+    if (iconOpen) iconOpen.classList.remove("hidden");
+    if (iconBack) iconBack.classList.add("hidden");
+  }
 
   // Build filter bar
   const filterBar = document.getElementById("kanban-filter-bar");
@@ -2591,7 +2601,14 @@ function renderTimeline(data) {
 
   const importantTypes = ["office_action", "response", "allowance", "request", "notification"];
   const importantDocCodes = ["IDS", "WDR", "ETCL", "DAFP", "AFCP", "BRAP", "EXBR", "REBR", "CTNF", "CTFR", "CTRA", "CTAL"];
-  const timelineItems = items.filter(it => importantTypes.indexOf(it.type) !== -1 || importantDocCodes.includes(it.docCode));
+  // Exclude receipt and payment types from timeline
+  const excludeDocCodes = ["N417", "N417.PYMT", "APP.FILE.REC", "WFEE", "PTO.FEE", "IFEE", "RCFR", "RECEIPT-OLF", "FEES-RO", "PAYREJ"];
+  const excludeNamePatterns = /回执|缴费|receipt|payment|fee/i;
+  const timelineItems = items.filter(it => {
+    if (excludeDocCodes.includes(it.docCode)) return false;
+    if (excludeNamePatterns.test(it.name || "")) return false;
+    return importantTypes.indexOf(it.type) !== -1 || importantDocCodes.includes(it.docCode);
+  });
 
   const sorted = [...timelineItems].sort((a, b) => {
     const da = parseDate(a.date);
@@ -2674,6 +2691,15 @@ function openReader(defaultToPdf = false, skipRender = false) {
   }
 
   readerModal.classList.remove("hidden");
+  // Update floating ball state: reader is visible
+  if (readerFloatingBall) {
+    readerFloatingBall.classList.remove("hidden");
+    const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
+    const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
+    readerFloatingBall.title = "点击回到报告";
+    if (iconOpen) iconOpen.classList.add("hidden");
+    if (iconBack) iconBack.classList.remove("hidden");
+  }
   if (defaultToPdf && !pdfViewState.active) {
     togglePdfView(skipRender);
   }
@@ -4490,7 +4516,15 @@ document.addEventListener("DOMContentLoaded", () => {
   if (readerCloseBtn) {
     readerCloseBtn.addEventListener("click", () => {
       readerModal.classList.add("hidden");
-      if (readerFloatingBall) readerFloatingBall.classList.add("hidden");
+      // Update floating ball: show "open reader" icon
+      if (readerFloatingBall) {
+        readerFloatingBall.classList.remove("hidden");
+        const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
+        const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
+        readerFloatingBall.title = "点击打开阅读器";
+        if (iconOpen) iconOpen.classList.remove("hidden");
+        if (iconBack) iconBack.classList.add("hidden");
+      }
       // Reset PDF view state when closing
       if (pdfViewState.active) {
         pdfViewState.active = false;
@@ -4527,11 +4561,27 @@ document.addEventListener("DOMContentLoaded", () => {
       if (content && content.classList.contains("docked")) {
         // In docked mode, minimize to floating ball instead of closing
         readerModal.classList.add("hidden");
-        if (readerFloatingBall) readerFloatingBall.classList.remove("hidden");
+        // Update floating ball: show "open reader" icon
+        if (readerFloatingBall) {
+          readerFloatingBall.classList.remove("hidden");
+          const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
+          const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
+          readerFloatingBall.title = "点击打开阅读器";
+          if (iconOpen) iconOpen.classList.remove("hidden");
+          if (iconBack) iconBack.classList.add("hidden");
+        }
       } else {
         // Full screen mode, close fully
         readerModal.classList.add("hidden");
-        if (readerFloatingBall) readerFloatingBall.classList.add("hidden");
+        // Update floating ball: show "open reader" icon
+        if (readerFloatingBall) {
+          readerFloatingBall.classList.remove("hidden");
+          const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
+          const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
+          readerFloatingBall.title = "点击打开阅读器";
+          if (iconOpen) iconOpen.classList.remove("hidden");
+          if (iconBack) iconBack.classList.add("hidden");
+        }
         if (pdfViewState.active) {
           pdfViewState.active = false;
           readerPdfView.classList.add("hidden");
@@ -4732,19 +4782,34 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Minimize to floating ball
-  if (readerMinimizeBtn) {
-    readerMinimizeBtn.addEventListener("click", () => {
-      readerModal.classList.add("hidden");
-      if (readerFloatingBall) readerFloatingBall.classList.remove("hidden");
-    });
+  // Floating ball click: toggle between reader and report view
+  function updateFloatingBallState(readerVisible) {
+    if (!readerFloatingBall) return;
+    const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
+    const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
+    if (readerVisible) {
+      // Reader is visible → ball shows "back to report" icon
+      readerFloatingBall.title = "点击回到报告";
+      if (iconOpen) iconOpen.classList.add("hidden");
+      if (iconBack) iconBack.classList.remove("hidden");
+    } else {
+      // Reader is hidden → ball shows "open reader" icon
+      readerFloatingBall.title = "点击打开阅读器";
+      if (iconOpen) iconOpen.classList.remove("hidden");
+      if (iconBack) iconBack.classList.add("hidden");
+    }
   }
 
-  // Floating ball click to restore reader
   if (readerFloatingBall) {
     readerFloatingBall.addEventListener("click", () => {
-      readerFloatingBall.classList.add("hidden");
-      readerModal.classList.remove("hidden");
+      if (readerModal.classList.contains("hidden")) {
+        // Reader is hidden → open it
+        openReader();
+      } else {
+        // Reader is visible → minimize to report view
+        readerModal.classList.add("hidden");
+        updateFloatingBallState(false);
+      }
     });
   }
 

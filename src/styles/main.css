@@ -1559,6 +1559,11 @@ body {
   display: none;
 }
 
+.reader-floating-ball .reader-fb-icon-open.hidden,
+.reader-floating-ball .reader-fb-icon-back.hidden {
+  display: none;
+}
+
 /* Reader AI Chat */
 .reader-chat-panel {
   display: flex;
