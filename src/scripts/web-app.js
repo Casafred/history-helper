@@ -463,6 +463,10 @@ function renderKanban(data) {
   kanbanState.analysisUserMessage = "";
   kanbanState.traceIndex = {};
 
+  // Clear previous analysis content from DOM
+  const analysisContentEl = document.getElementById("kanban-analysis-content");
+  if (analysisContentEl) analysisContentEl.innerHTML = "";
+
   // Show merge export button if there are documents with download URLs
   const mergeExportBtn = document.getElementById("merge-export-btn");
   if (mergeExportBtn) {
@@ -1074,6 +1078,10 @@ async function aiAnalyzeDocument(idx, docType) {
 
   try {
     let fullText = "";
+    let _rafPending = false;
+    // Create stable container once
+    if (aiSummaryResult) aiSummaryResult.innerHTML = '<div class="ai-summary-content markdown-body"></div>';
+    const streamContainer = aiSummaryResult ? aiSummaryResult.querySelector(".ai-summary-content") : null;
     for await (const chunk of window.AI.streamChat(
       provider.type, provider.apiKey, provider.baseUrl,
       {
@@ -1088,9 +1096,17 @@ async function aiAnalyzeDocument(idx, docType) {
     )) {
       if (chunk.content) {
         fullText += chunk.content;
-        if (aiSummaryResult) aiSummaryResult.innerHTML = '<div class="ai-summary-content markdown-body">' + renderMarkdown(fullText) + "</div>";
+        if (!_rafPending) {
+          _rafPending = true;
+          requestAnimationFrame(() => {
+            if (streamContainer) streamContainer.innerHTML = renderMarkdown(fullText);
+            _rafPending = false;
+          });
+        }
       }
     }
+    // Final render
+    if (streamContainer) streamContainer.innerHTML = renderMarkdown(fullText);
     if (aiStatus) {
       aiStatus.textContent = "分析完成 ✓";
       aiStatus.className = "ai-status ai-status-success";
@@ -1739,9 +1755,11 @@ async function runCitedRefsAnalysis(selectedIdxs) {
 
     const prompt = `你是一位资深专利分析师，专注于引用文献分析。请根据以下引用文献相关文档，进行系统梳理和分析。\n\n${lines.join("\n")}`;
 
-    analysisContent.innerHTML = '';
+    analysisContent.innerHTML = '<div class="kanban-analysis-content markdown-body"></div>';
+    const streamContainer = analysisContent.querySelector(".kanban-analysis-content");
     let fullText = "";
     let _streamRafPending = false;
+    let _lastRenderLen = 0;
     for await (const chunk of window.AI.streamChat(
       provider.type, provider.apiKey, provider.baseUrl,
       {
@@ -1757,16 +1775,20 @@ async function runCitedRefsAnalysis(selectedIdxs) {
     )) {
       if (chunk.content) {
         fullText += chunk.content;
-        if (!_streamRafPending) {
+        if (!_streamRafPending && (fullText.length - _lastRenderLen > 20 || fullText.length < 200)) {
           _streamRafPending = true;
           requestAnimationFrame(() => {
-            analysisContent.innerHTML = marked.parse(fullText);
-            analysisSection.scrollTop = analysisSection.scrollHeight;
+            if (streamContainer) {
+              streamContainer.innerHTML = marked.parse(fullText);
+            }
+            _lastRenderLen = fullText.length;
             _streamRafPending = false;
           });
         }
       }
     }
+    // Final render
+    if (streamContainer) streamContainer.innerHTML = marked.parse(fullText);
 
     kanbanState.citedRefsAnalysis = fullText;
   } catch (e) {
@@ -2301,7 +2323,11 @@ function buildReviewManualSelectPanel() {
 
     try {
       let fullText = "";
+      // Create a stable container once to avoid full DOM replacement on each chunk
+      analysisContent.innerHTML = '<div class="kanban-analysis-content markdown-body"></div>';
+      const streamContainer = analysisContent.querySelector(".kanban-analysis-content");
       let _streamRafPending = false;
+      let _lastRenderLen = 0;
       for await (const chunk of window.AI.streamChat(
         provider.type, provider.apiKey, provider.baseUrl,
         {
@@ -2317,15 +2343,21 @@ function buildReviewManualSelectPanel() {
       )) {
         if (chunk.content) {
           fullText += chunk.content;
-          if (!_streamRafPending) {
+          // Throttle rendering: only render if enough new content or enough time passed
+          if (!_streamRafPending && (fullText.length - _lastRenderLen > 20 || fullText.length < 200)) {
             _streamRafPending = true;
             requestAnimationFrame(() => {
-              analysisContent.innerHTML = '<div class="kanban-analysis-content markdown-body">' + renderMarkdownWithTrace(fullText) + "</div>";
+              if (streamContainer) {
+                streamContainer.innerHTML = renderMarkdownWithTrace(fullText);
+              }
+              _lastRenderLen = fullText.length;
               _streamRafPending = false;
             });
           }
         }
       }
+      // Final render to ensure all content is displayed
+      if (streamContainer) streamContainer.innerHTML = renderMarkdownWithTrace(fullText);
       kanbanState.analysis = fullText;
       // Save context for continued chat
       kanbanState.analysisSystemPrompt = systemPrompt;
@@ -2347,7 +2379,10 @@ function buildReviewManualSelectPanel() {
           reportHtml += '<div class="report-error">✗ 提取失败: ' + extractReport.failed.map(s => escapeHtml(s.name) + ' (' + escapeHtml(s.reason) + ')').join('、') + '</div>';
         }
         reportHtml += '</div>';
-        analysisContent.innerHTML = reportHtml + '<div class="kanban-analysis-content markdown-body">' + renderMarkdownWithTrace(fullText) + "</div>";
+        // Prepend report before the stable stream container
+        const reportDiv = document.createElement("div");
+        reportDiv.innerHTML = reportHtml;
+        analysisContent.insertBefore(reportDiv.firstChild, streamContainer);
       }
     } catch (e) {
       analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
@@ -3562,6 +3597,9 @@ async function _doTranslateBlocks(idx, blocks, targetLang, langNames, cacheKey, 
     ];
 
     let fullResponse = "";
+    let _rafPending = false;
+    if (pdfTranslateContent) pdfTranslateContent.innerHTML = '<div class="pdf-translate-result"></div>';
+    const translateContainer = pdfTranslateContent ? pdfTranslateContent.querySelector(".pdf-translate-result") : null;
     const stream = window.AI.streamChat(translateProvider.type, translateProvider.apiKey, translateProvider.baseUrl, {
       model: translateProvider.model,
       messages: messages,
@@ -3573,11 +3611,16 @@ async function _doTranslateBlocks(idx, blocks, targetLang, langNames, cacheKey, 
       if (translateAbortController.signal.aborted) break;
       if (chunk.content) {
         fullResponse += chunk.content;
-        if (pdfTranslateContent) {
-          pdfTranslateContent.innerHTML = `<div class="pdf-translate-result">${renderMarkdown(fullResponse)}</div>`;
+        if (!_rafPending) {
+          _rafPending = true;
+          requestAnimationFrame(() => {
+            if (translateContainer) translateContainer.innerHTML = renderMarkdown(fullResponse);
+            _rafPending = false;
+          });
         }
       }
     }
+    if (translateContainer) translateContainer.innerHTML = renderMarkdown(fullResponse);
 
     translatePageCache[cacheKey] = { translated: fullResponse };
     renderTranslateContent(translatePageCache[cacheKey]);
@@ -3894,8 +3937,10 @@ function handleExtensionAnalyze(data) {
   // 流式分析
   const readerContent = document.getElementById("reader-content");
   if (readerContent) {
-    readerContent.innerHTML = "<h3>AI 分析中...</h3>";
+    readerContent.innerHTML = '<div class="markdown-body"></div>';
+    const streamContainer = readerContent.querySelector(".markdown-body");
     let fullContent = "";
+    let _rafPending = false;
 
     AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
       model: provider.model,
@@ -3905,9 +3950,16 @@ function handleExtensionAnalyze(data) {
       for await (const chunk of stream) {
         if (chunk.content) {
           fullContent += chunk.content;
-          readerContent.innerHTML = marked.parse(fullContent);
+          if (!_rafPending) {
+            _rafPending = true;
+            requestAnimationFrame(() => {
+              if (streamContainer) streamContainer.innerHTML = marked.parse(fullContent);
+              _rafPending = false;
+            });
+          }
         }
       }
+      if (streamContainer) streamContainer.innerHTML = marked.parse(fullContent);
     }).catch((err) => {
       readerContent.innerHTML = `<p class="error">分析失败: ${err.message}</p>`;
     });
@@ -4812,6 +4864,7 @@ async function sendChatMessage() {
 
   try {
     let fullResponse = "";
+    let _rafPending = false;
     const stream = AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
       model: provider.model,
       messages: messages,
@@ -4822,11 +4875,22 @@ async function sendChatMessage() {
       if (chatAbortController.signal.aborted) break;
       if (chunk.content) {
         fullResponse += chunk.content;
-        if (assistantMsgEl) {
-          const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
-          contentEl.innerHTML = renderMarkdown(fullResponse);
+        if (!_rafPending) {
+          _rafPending = true;
+          requestAnimationFrame(() => {
+            if (assistantMsgEl) {
+              const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+              contentEl.innerHTML = renderMarkdown(fullResponse);
+            }
+            _rafPending = false;
+          });
         }
       }
+    }
+    // Final render
+    if (assistantMsgEl) {
+      const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+      contentEl.innerHTML = renderMarkdown(fullResponse);
     }
 
     chatHistory.push({ role: "assistant", content: fullResponse });
@@ -4929,15 +4993,29 @@ async function sendAnalysisChatMessage() {
     }, analysisChatAbortController.signal);
 
     const messagesEl = document.getElementById("analysis-chat-messages");
+    let _rafPending = false;
+    let _lastRenderLen = 0;
     for await (const chunk of stream) {
       if (analysisChatAbortController.signal.aborted) break;
       if (chunk.content) {
         fullResponse += chunk.content;
-        if (assistantMsgEl) {
-          const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
-          contentEl.innerHTML = renderMarkdown(fullResponse);
+        if (assistantMsgEl && !_rafPending) {
+          _rafPending = true;
+          requestAnimationFrame(() => {
+            _rafPending = false;
+            if (fullResponse.length - _lastRenderLen > 20 || fullResponse.length < 50) {
+              _lastRenderLen = fullResponse.length;
+              const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+              contentEl.innerHTML = renderMarkdown(fullResponse);
+            }
+          });
         }
       }
+    }
+    // Final render to ensure complete content is displayed
+    if (assistantMsgEl) {
+      const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+      contentEl.innerHTML = renderMarkdown(fullResponse);
     }
 
     analysisChatHistory.push({ role: "assistant", content: fullResponse });
