@@ -357,7 +357,6 @@
     <li class="level2"><span>3.5 同族标签页</span></li>
     <li class="level2"><span>3.6 审查看板标签页</span></li>
     <li class="level2"><span>3.7 AI 分析标签页</span></li>
-    <li class="level2"><span>3.8 时间线标签页</span></li>
     <li class="level1"><span>4 快速入门</span></li>
     <li class="level2"><span>4.1 配置 AI 服务</span></li>
     <li class="level2"><span>4.2 搜索专利</span></li>
@@ -370,11 +369,10 @@
     <li class="level2"><span>5.3 同族</span></li>
     <li class="level2"><span>5.4 审查看板</span></li>
     <li class="level2"><span>5.5 AI 分析</span></li>
-    <li class="level2"><span>5.6 时间线</span></li>
-    <li class="level2"><span>5.7 溯源对照阅读器</span></li>
-    <li class="level2"><span>5.8 Word 导出</span></li>
-    <li class="level2"><span>5.9 设置</span></li>
-    <li class="level2"><span>5.10 合并导出 PDF</span></li>
+    <li class="level2"><span>5.6 溯源对照阅读器</span></li>
+    <li class="level2"><span>5.7 Word 导出</span></li>
+    <li class="level2"><span>5.8 设置</span></li>
+    <li class="level2"><span>5.9 合并导出 PDF</span></li>
     <li class="level1"><span>6 常见问题</span></li>
     <li class="level1"><span>7 附录</span></li>
   </ul>
@@ -385,7 +383,7 @@
 
 <h2>1.1 产品简介</h2>
 <p>
-  专利审查梳理工具（History Helper，简称 H2H）是一款面向专利从业人员的专业工具软件，能够自动获取专利审查历史文档，并通过看板式管理和 AI 智能分析，帮助用户高效梳理审查意见、答复策略及引用文献。用户只需输入专利号，软件即可从 USPTO/EPO/JPO/CNIPA 等专利局获取审查历史文档，自动分类归档，并结合 AI 大模型对审查意见和引用文献进行深度分析，大幅提升专利审查应对的效率与质量。
+  专利审查梳理工具（PatentLens）是一款面向专利从业人员的专业工具软件，能够自动获取专利审查历史文档，并通过看板式管理和 AI 智能分析，帮助用户高效梳理审查意见、答复策略及引用文献。用户只需输入专利号，软件即可从 USPTO/EPO/JPO/DPMAregister/CNIPA 等专利局获取审查历史文档，自动分类归档，并结合 AI 大模型对审查意见和引用文献进行深度分析，大幅提升专利审查应对的效率与质量。
 </p>
 
 <h2>1.2 核心功能一览</h2>
@@ -397,7 +395,7 @@
 
 <div class="feature-card">
   <div class="card-title">专利搜索</div>
-  <div class="card-desc">支持 US/EP/JP/CN 多种专利号格式，自动从 USPTO/EPO/JPO/CNIPA 获取审查历史文档，实时显示加载进度。</div>
+  <div class="card-desc">支持 US/EP/JP/DE/CN 多种专利号格式，自动从 USPTO/EPO/JPO/DPMAregister/CNIPA 获取审查历史文档，实时显示加载进度。</div>
 </div>
 <div class="feature-card">
   <div class="card-title">审查看板</div>
@@ -405,7 +403,7 @@
 </div>
 <div class="feature-card">
   <div class="card-title">AI 分析</div>
-  <div class="card-desc">集成 DeepSeek、OpenAI 兼容接口、智谱 GLM 等 AI 服务，自动梳理审查意见和引用文献，支持手动选择文档和流式响应。</div>
+  <div class="card-desc">集成 DeepSeek、OpenAI 兼容接口、智谱 GLM 等 AI 服务，梳理审查意见和引用文献，支持手动选择文档和流式响应。</div>
 </div>
 <div class="feature-card">
   <div class="card-title">溯源对照阅读</div>
@@ -416,8 +414,8 @@
   <div class="card-desc">将 AI 分析结果导出为 .docx 文件，Markdown 表格渲染为可编辑的 Word 表格，标题、粗体、列表格式完整保留。</div>
 </div>
 <div class="feature-card">
-  <div class="card-title">时间线</div>
-  <div class="card-desc">按时间顺序展示审查过程中的关键事件，配有彩色标记和可视化时间轴，一目了然掌握审查进度。</div>
+  <div class="card-title">审查时间线</div>
+  <div class="card-desc">在概览标签页内以可视化时间轴展示审查历程中的关键事件，配有彩色标记区分不同事件类型，一目了然掌握审查进度。</div>
 </div>
 
 <h2>1.3 系统要求</h2>
@@ -435,7 +433,7 @@
 <h2>2.1 安装版安装</h2>
 <div class="steps">
   <div class="step-item">
-    <div class="step-content"><strong>下载安装程序</strong> — 获取 <code>H2H_x.x.x_x64-setup.exe</code> 文件</div>
+    <div class="step-content"><strong>下载安装程序</strong> — 获取 <code>PatentLens_x.x.x_x64-setup.exe</code> 文件</div>
   </div>
   <div class="step-item">
     <div class="step-content"><strong>运行安装程序</strong> — 双击 .exe 文件，按照安装向导提示完成安装</div>
@@ -451,7 +449,7 @@
     <div class="step-content"><strong>解压文件</strong> — 将压缩包解压到任意目录（如桌面、D 盘等）</div>
   </div>
   <div class="step-item">
-    <div class="step-content"><strong>运行程序</strong> — 双击 <code>H2H.exe</code> 即可运行，无需安装</div>
+    <div class="step-content"><strong>运行程序</strong> — 双击 <code>PatentLens.exe</code> 即可运行，无需安装</div>
   </div>
   <div class="step-item">
     <div class="step-content"><strong>卸载</strong> — 直接删除整个文件夹即可完成卸载</div>
@@ -460,7 +458,7 @@
 
 <div class="tip-box warning">
   <div class="tip-title">注意</div>
-  便携版中 <code>H2H.exe</code> 与相关动态库必须位于同一目录下，请勿分开存放。
+  便携版中 <code>PatentLens.exe</code> 与相关动态库必须位于同一目录下，请勿分开存放。
 </div>
 
 <h2>2.3 首次运行注意事项</h2>
@@ -488,18 +486,19 @@
 <h2>3.2 搜索栏</h2>
 <p>搜索栏位于窗口最顶部，是整个应用的入口，包含以下元素：</p>
 <ul>
-  <li><strong>专利号输入框</strong> — 输入专利号或申请号，支持 US、EP、JP、CN 格式</li>
-  <li><strong>专利局选择</strong> — 下拉选择目标专利局（USPTO/EPO/JPO/CNIPA）</li>
+  <li><strong>专利号输入框</strong> — 输入专利号或申请号，支持 US、EP、JP、DE、CN 格式，系统自动识别专利局</li>
   <li><strong>搜索按钮</strong> — 点击后开始获取审查历史文档，搜索过程中显示加载进度</li>
-  <li><strong>设置按钮</strong> — 齿轮图标，点击打开设置对话框（AI 模型配置、API Key 等）</li>
+  <li><strong>AI 设置按钮</strong> — 齿轮图标，点击打开 AI 设置对话框（AI 模型配置、API Key 等）</li>
+  <li><strong>主题切换</strong> — 太阳/月亮图标，切换浅色/深色主题</li>
+  <li><strong>搜索提示</strong> — 输入框下方显示支持的专利局和功能范围提示</li>
 </ul>
 
 <h2>3.3 标签页区域</h2>
-<p>标签页区域位于搜索栏下方，包含 5 个功能标签页：</p>
+<p>标签页区域位于搜索栏下方，包含 4 个功能标签页：</p>
 
 <div class="diagram">
   <img src="manual_images/diagram_3.png" width="460" height="50" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 3-2 五个功能标签页</div>
+  <div class="diagram-caption">图 3-2 四个功能标签页</div>
 </div>
 
 <h2>3.4 概览标签页</h2>
@@ -510,6 +509,7 @@
   <li><strong>申请人</strong> — 专利申请人/专利权人</li>
   <li><strong>申请日</strong> — 专利申请日期</li>
   <li><strong>当前审查状态</strong> — 专利的当前审查进度状态</li>
+  <li><strong>审查时间线</strong> — 以可视化时间轴展示审查历程中的关键事件，配有彩色标记区分不同事件类型</li>
 </ul>
 
 <h2>3.5 同族标签页</h2>
@@ -541,19 +541,11 @@
   <li><strong>手动选择面板（默认展开）</strong> — 进入标签页时自动展开，可勾选需要分析的文档，支持搜索过滤快速定位</li>
   <li><strong>搜索过滤</strong> — 在手动选择面板中输入关键词，实时筛选匹配的文档，方便快速定位目标文档</li>
   <li><strong>已选摘要</strong> — 面板底部显示当前已选文档数量和类型汇总，一目了然掌握选择范围</li>
-  <li><strong>自动梳理审查意见</strong> — 一键启动 AI 分析所有审查文档</li>
-  <li><strong>引用文献梳理</strong> — AI 分析审查意见中引用的对比文献</li>
+  <li><strong>梳理审查意见</strong> — 一键启动 AI 分析所有审查文档</li>
+  <li><strong>梳理引用文献</strong> — AI 分析审查意见中引用的对比文献</li>
   <li><strong>分析结果展示</strong> — 以 Markdown 格式展示 AI 分析结果</li>
   <li><strong>阅读器按钮</strong> — 打开全屏溯源对照阅读器</li>
   <li><strong>导出 Word 按钮</strong> — 将分析结果导出为 .docx 文件</li>
-</ul>
-
-<h2>3.8 时间线标签页</h2>
-<p>时间线标签页以可视化方式展示审查历程：</p>
-<ul>
-  <li><strong>时间轴</strong> — 按时间顺序排列的关键事件</li>
-  <li><strong>事件卡片</strong> — 每个事件显示日期、类型和描述</li>
-  <li><strong>彩色标记</strong> — 不同类型事件使用不同颜色标记</li>
 </ul>
 
 <!-- ==================== 第4章 快速入门 ==================== -->
@@ -597,10 +589,7 @@
 <h2>4.2 搜索专利</h2>
 <div class="steps">
   <div class="step-item">
-    <div class="step-content">在搜索栏的 <strong>专利号输入框</strong> 中输入专利号或申请号</div>
-  </div>
-  <div class="step-item">
-    <div class="step-content">在 <strong>专利局下拉框</strong> 中选择目标专利局（USPTO/EPO/JPO/CNIPA）</div>
+    <div class="step-content">在搜索栏的 <strong>专利号输入框</strong> 中输入专利号或申请号，系统自动识别专利局</div>
   </div>
   <div class="step-item">
     <div class="step-content">点击 <strong>搜索按钮</strong>，软件开始获取审查历史文档</div>
@@ -612,7 +601,7 @@
 
 <div class="tip-box warning">
   <div class="tip-title">注意</div>
-  请确保输入的专利号格式与所选专利局匹配。US 专利号如 US12345678，EP 如 EP12345678，JP 如 JP12345678，CN 如 CN12345678。
+  请确保输入的专利号格式正确。US 专利号如 US12345678，EP 如 EP12345678，JP 如 JP12345678，DE 如 DE12345678，CN 如 CN12345678。系统会根据专利号前缀自动识别对应专利局。
 </div>
 
 <h2>4.3 浏览审查看板</h2>
@@ -643,7 +632,7 @@
     <div class="step-content">查看面板底部的 <strong>已选摘要</strong>，确认当前选择的文档范围</div>
   </div>
   <div class="step-item">
-    <div class="step-content">点击 <strong>"自动梳理审查意见"</strong> 按钮，AI 开始分析选中的审查文档</div>
+    <div class="step-content">点击 <strong>"梳理审查意见"</strong> 按钮，AI 开始分析选中的审查文档</div>
   </div>
   <div class="step-item">
     <div class="step-content">分析过程中可随时点击红色的 <strong>"中止梳理"</strong> 按钮中断</div>
@@ -652,7 +641,7 @@
     <div class="step-content">分析完成后，结果以 <strong>Markdown 格式</strong> 展示在页面中</div>
   </div>
   <div class="step-item">
-    <div class="step-content">（可选）点击 <strong>"引用文献梳理"</strong> 分析审查意见中引用的对比文献</div>
+    <div class="step-content">（可选）点击 <strong>"梳理引用文献"</strong> 分析审查意见中引用的对比文献</div>
   </div>
 </div>
 
@@ -683,6 +672,7 @@
   <tr><td>美国专利商标局</td><td>USPTO</td><td>US12345678</td><td>美国专利/申请号</td></tr>
   <tr><td>欧洲专利局</td><td>EPO</td><td>EP12345678</td><td>欧洲专利/申请号</td></tr>
   <tr><td>日本特许厅</td><td>JPO</td><td>JP12345678</td><td>日本专利/申请号</td></tr>
+  <tr><td>德国专利商标局</td><td>DPMAregister</td><td>DE12345678</td><td>德国专利/申请号（仅支持注册信息查询）</td></tr>
   <tr><td>中国国家知识产权局</td><td>CNIPA</td><td>CN12345678</td><td>中国专利/申请号</td></tr>
 </table>
 
@@ -706,6 +696,21 @@
   <img src="manual_images/diagram_7.png" width="440" height="200" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-2 概览标签页示意</div>
 </div>
+
+<h3>审查时间线</h3>
+<p>概览标签页内还包含审查时间线区域，以可视化方式展示专利审查历程中的关键事件。</p>
+
+<div class="diagram">
+  <img src="manual_images/diagram_11.png" width="440" height="280" alt="示意图" style="max-width:100%; height:auto;">
+  <div class="diagram-caption">图 5-3 审查时间线示意</div>
+</div>
+
+<p>时间线功能特点：</p>
+<ul>
+  <li><strong>按时间排序</strong> — 所有事件按时间先后顺序排列</li>
+  <li><strong>彩色标记</strong> — 不同类型事件使用不同颜色标记（审查意见-红色、答复-蓝色、请求-橙色、授权-绿色、通知-紫色）</li>
+  <li><strong>事件详情</strong> — 每个事件显示日期、类型和描述</li>
+</ul>
 
 <h2>5.3 同族</h2>
 <p>同族标签页展示该专利在不同国家/地区的申请情况，帮助用户了解专利的全球布局。</p>
@@ -794,8 +799,8 @@
   手动选择面板默认展开，方便用户在启动分析前确认和调整文档范围。选择状态会自动记忆，下次进入时无需重新选择。
 </div>
 
-<h3>自动梳理审查意见</h3>
-<p>点击"自动梳理审查意见"按钮，AI 将自动分析所有选中的审查文档，生成综合分析报告。分析内容包括：</p>
+<h3>梳理审查意见</h3>
+<p>点击"梳理审查意见"按钮，AI 将自动分析所有选中的审查文档，生成综合分析报告。分析内容包括：</p>
 <ul>
   <li>各次审查意见的核心要点</li>
   <li>审查员引用的对比文献及其应用</li>
@@ -814,8 +819,8 @@
   SPEC（说明书）文档默认不纳入 AI 分析范围。如需包含，可在手动选择面板中勾选。
 </div>
 
-<h3>引用文献梳理</h3>
-<p>点击"引用文献梳理"按钮，AI 将专门分析审查意见中引用的对比文献：</p>
+<h3>梳理引用文献</h3>
+<p>点击"梳理引用文献"按钮，AI 将专门分析审查意见中引用的对比文献：</p>
 <ul>
   <li>引用文献的基本信息</li>
   <li>审查员如何引用该文献进行对比</li>
@@ -843,31 +848,16 @@
 <h3>分析结果展示</h3>
 <p>AI 分析结果以 Markdown 格式展示，支持以下交互：</p>
 <ul>
-  <li><strong>阅读器按钮</strong> — 打开全屏溯源对照阅读器，详见 5.7 节</li>
-  <li><strong>导出 Word 按钮</strong> — 将分析结果导出为 .docx 文件，详见 5.8 节</li>
+  <li><strong>阅读器按钮</strong> — 打开全屏溯源对照阅读器，详见 5.6 节</li>
+  <li><strong>导出 Word 按钮</strong> — 将分析结果导出为 .docx 文件，详见 5.7 节</li>
 </ul>
 
-<h2>5.6 时间线</h2>
-<p>时间线标签页以可视化方式展示专利审查历程中的关键事件。</p>
-
-<div class="diagram">
-  <img src="manual_images/diagram_11.png" width="440" height="280" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-6 时间线示意</div>
-</div>
-
-<p>时间线功能特点：</p>
-<ul>
-  <li><strong>按时间排序</strong> — 所有事件按时间先后顺序排列</li>
-  <li><strong>彩色标记</strong> — 不同类型事件使用不同颜色标记（审查意见-红色、答复-蓝色、请求-橙色、授权-绿色、通知-紫色）</li>
-  <li><strong>事件详情</strong> — 每个事件显示日期、类型和描述</li>
-</ul>
-
-<h2>5.7 溯源对照阅读器</h2>
+<h2>5.6 溯源对照阅读器</h2>
 <p>溯源对照阅读器是一个全屏模态窗口，用于对照查看原始文档和 AI 分析结果。</p>
 
 <div class="diagram">
   <img src="manual_images/diagram_12.png" width="480" height="260" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-7 溯源对照阅读器示意</div>
+  <div class="diagram-caption">图 5-6 溯源对照阅读器示意</div>
 </div>
 
 <p>阅读器功能特点：</p>
@@ -879,12 +869,12 @@
   <li><strong>关闭按钮</strong> — 点击右上角关闭按钮退出阅读器</li>
 </ul>
 
-<h2>5.8 Word 导出</h2>
+<h2>5.7 Word 导出</h2>
 <p>AI 分析结果可导出为 .docx 文件，方便在 Word 中进一步编辑和分享。</p>
 
 <div class="diagram">
   <img src="manual_images/diagram_13.png" width="480" height="80" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-8 Word 导出流程</div>
+  <div class="diagram-caption">图 5-7 Word 导出流程</div>
 </div>
 
 <p>Word 导出的格式处理：</p>
@@ -902,7 +892,7 @@
   Markdown 表格在导出时渲染为真正的 Word 表格，而非图片，可在 Word 中直接编辑单元格内容、调整列宽等。表头带有彩色背景，美观且易读。
 </div>
 
-<h2>5.9 设置</h2>
+<h2>5.8 设置</h2>
 <p>点击搜索栏右侧的齿轮图标，打开设置对话框，可配置 AI 模型相关参数。</p>
 
 <h3>AI 模型选择</h3>
@@ -942,7 +932,7 @@
   首次使用前，请务必完成 API Key 配置并通过测试连接验证。AI 分析功能依赖正确的 API 配置。
 </div>
 
-<h2>5.10 合并导出 PDF</h2>
+<h2>5.9 合并导出 PDF</h2>
 <p>合并导出 PDF 功能可将多份审查文档合并为一个 PDF 文件，方便整体查阅和归档。</p>
 
 <h3>封面页专利书目信息</h3>
@@ -969,7 +959,7 @@
 <h3>Q2：搜索专利时获取文档失败怎么办？</h3>
 <p>请检查以下几点：</p>
 <ul>
-  <li>专利号格式是否正确，与所选专利局是否匹配</li>
+  <li>专利号格式是否正确，系统是否正确识别了专利局</li>
   <li>网络连接是否正常</li>
   <li>该专利是否确实有审查历史文档（部分专利可能尚未公开审查历史）</li>
   <li>目标专利局服务器是否可正常访问</li>
@@ -1080,8 +1070,8 @@
 <table>
   <tr><th>字段</th><th>内容</th></tr>
   <tr><td>变更类型</td><td>功能增强</td></tr>
-  <tr><td>影响章节</td><td>3.7、4.4、5.5、5.10、6</td></tr>
-  <tr><td>变更说明</td><td>1. AI 分析标签页手动选择面板默认展开，支持搜索过滤和已选摘要；2. AI 分析选择状态自动记忆，切换标签页后保留；3. 合并导出 PDF 封面页增加专利书目信息；4. 品牌升级为 PatentLens，配色方案更新为绿色主题</td></tr>
+  <tr><td>影响章节</td><td>3.2、3.4、3.7、4.2、4.4、5.2、5.5、5.9、6</td></tr>
+  <tr><td>变更说明</td><td>1. AI 分析标签页手动选择面板默认展开，支持搜索过滤和已选摘要；2. AI 分析选择状态自动记忆，切换标签页后保留；3. 合并导出 PDF 封面页增加专利书目信息；4. 品牌升级为 PatentLens，配色方案更新为绿色主题；5. 搜索栏改为自动识别专利局，移除专利局下拉框；6. 时间线整合到概览标签页；7. 新增 DE 专利支持；8. 按钮名称更新</td></tr>
   <tr><td>图示更新</td><td>更新 AI 分析相关图示，新增合并导出 PDF 图示</td></tr>
 </table>
 
