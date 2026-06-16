@@ -31,14 +31,14 @@
   .tip-box .tip-title { font-weight: bold; margin-bottom: 4px; }
   .steps { counter-reset: step-counter; margin: 14px 0; padding-left: 0; }
   .step-item { display: flex; align-items: flex-start; margin-bottom: 10px; padding: 8px 12px; background: #fafafa; border-radius: 6px; border: 1px solid #eee; }
-  .step-item::before { counter-increment: step-counter; content: counter(step-counter); display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; border-radius: 50%; background: #4caf50; color: white; font-weight: bold; font-size: 12pt; margin-right: 12px; flex-shrink: 0; }
+  .step-item::before { counter-increment: step-counter; content: counter(step-counter); display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; border-radius: 50%; background: #e8f5e9; color: #1b5e20; font-weight: bold; font-size: 12pt; margin-right: 12px; flex-shrink: 0; border: 2px solid #4caf50; }
   .step-content { flex: 1; padding-top: 3px; }
   .step-content strong { color: #1b5e20; }
   .diagram { margin: 20px auto; text-align: center; }
   .diagram svg { max-width: 100%; }
   .diagram-caption { font-size: 9.5pt; color: #888; text-align: center; margin-top: 6px; }
   table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 10.5pt; }
-  th { background: #4caf50; color: white; padding: 8px 12px; text-align: left; font-weight: 600; }
+  th { background: #e8f5e9; color: #1b5e20; padding: 8px 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #4caf50; }
   td { padding: 8px 12px; border-bottom: 1px solid #e8e8e8; }
   tr:nth-child(even) td { background: #f8f9fa; }
   .shortcut-key { display: inline-block; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; padding: 1px 8px; font-family: "Consolas", "Courier New", monospace; font-size: 10pt; color: #333; box-shadow: 0 1px 0 #bbb; }
@@ -124,53 +124,7 @@
 <h2>1.2 核心功能一览</h2>
 
 <div class="diagram">
-  <svg width="680" height="400" viewBox="0 0 680 400">
-    <rect x="230" y="155" width="220" height="70" rx="14" fill="#4caf50" stroke="#1b5e20" stroke-width="2"/>
-    <text x="340" y="185" text-anchor="middle" fill="white" font-size="14" font-weight="bold">专利审查梳理工具</text>
-    <text x="340" y="208" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="9">PatentLens</text>
-    <rect x="20" y="15" width="130" height="45" rx="8" fill="#e8f5e9" stroke="#43a047" stroke-width="1.5"/>
-    <text x="85" y="43" text-anchor="middle" fill="#43a047" font-size="11" font-weight="bold">专利搜索</text>
-    <line x1="85" y1="60" x2="270" y2="155" stroke="#43a047" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
-    <rect x="530" y="15" width="130" height="45" rx="8" fill="#f6ffed" stroke="#52c41a" stroke-width="1.5"/>
-    <text x="595" y="43" text-anchor="middle" fill="#52c41a" font-size="11" font-weight="bold">审查看板</text>
-    <line x1="595" y1="60" x2="410" y2="155" stroke="#52c41a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
-    <rect x="10" y="280" width="130" height="45" rx="8" fill="#fff7e6" stroke="#fa8c16" stroke-width="1.5"/>
-    <text x="75" y="308" text-anchor="middle" fill="#fa8c16" font-size="11" font-weight="bold">AI 分析</text>
-    <line x1="270" y1="225" x2="75" y2="280" stroke="#fa8c16" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
-    <rect x="540" y="280" width="130" height="45" rx="8" fill="#f9f0ff" stroke="#722ed1" stroke-width="1.5"/>
-    <text x="605" y="308" text-anchor="middle" fill="#722ed1" font-size="11" font-weight="bold">导出与阅读</text>
-    <line x1="410" y1="225" x2="605" y2="280" stroke="#722ed1" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
-    <rect x="170" y="340" width="130" height="45" rx="8" fill="#e6f7ff" stroke="#13c2c2" stroke-width="1.5"/>
-    <text x="235" y="368" text-anchor="middle" fill="#13c2c2" font-size="11" font-weight="bold">OCR 文字提取</text>
-    <line x1="290" y1="225" x2="235" y2="340" stroke="#13c2c2" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
-    <rect x="320" y="340" width="120" height="45" rx="8" fill="#fff0f6" stroke="#eb2f96" stroke-width="1.5"/>
-    <text x="380" y="368" text-anchor="middle" fill="#eb2f96" font-size="11" font-weight="bold">全文翻译</text>
-    <line x1="370" y1="225" x2="380" y2="340" stroke="#eb2f96" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
-    <rect x="460" y="340" width="120" height="45" rx="8" fill="#fcffe6" stroke="#a0d911" stroke-width="1.5"/>
-    <text x="520" y="368" text-anchor="middle" fill="#a0d911" font-size="11" font-weight="bold">阅读模式</text>
-    <line x1="410" y1="225" x2="520" y2="340" stroke="#a0d911" stroke-width="1.5" marker-end="url(#arrow-lime)"/>
-    <rect x="530" y="340" width="130" height="45" rx="8" fill="#f0f5ff" stroke="#597ef7" stroke-width="1.5"/>
-    <text x="595" y="362" text-anchor="middle" fill="#597ef7" font-size="10" font-weight="bold">合并导出 PDF</text>
-    <text x="595" y="376" text-anchor="middle" fill="#597ef7" font-size="8">OCR 选区翻译</text>
-    <line x1="430" y1="225" x2="595" y2="340" stroke="#597ef7" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
-    <rect x="170" y="85" width="130" height="45" rx="8" fill="#fff1b8" stroke="#d4b106" stroke-width="1.5"/>
-    <text x="235" y="113" text-anchor="middle" fill="#d4b106" font-size="11" font-weight="bold">AI 文档对话</text>
-    <line x1="235" y1="130" x2="290" y2="155" stroke="#d4b106" stroke-width="1.5" marker-end="url(#arrow-gold)"/>
-    <rect x="380" y="85" width="120" height="45" rx="8" fill="#f0f5ff" stroke="#597ef7" stroke-width="1.5"/>
-    <text x="440" y="113" text-anchor="middle" fill="#597ef7" font-size="11" font-weight="bold">悬浮球</text>
-    <line x1="440" y1="130" x2="390" y2="155" stroke="#597ef7" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
-    <defs>
-      <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#43a047"/></marker>
-      <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#52c41a"/></marker>
-      <marker id="arrow-orange" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#fa8c16"/></marker>
-      <marker id="arrow-purple" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#722ed1"/></marker>
-      <marker id="arrow-cyan" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#13c2c2"/></marker>
-      <marker id="arrow-pink" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb2f96"/></marker>
-      <marker id="arrow-lime" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#a0d911"/></marker>
-      <marker id="arrow-gold" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#d4b106"/></marker>
-      <marker id="arrow-indigo" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#597ef7"/></marker>
-    </defs>
-  </svg>
+  <img src="manual_images/diagram_1.png" width="680" height="400" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 1-1 专利审查梳理工具核心功能架构</div>
 </div>
 
@@ -228,35 +182,7 @@
 <p>专利审查梳理工具采用顶部搜索栏 + 标签页内容区的布局结构，各区域功能明确、操作流畅：</p>
 
 <div class="diagram">
-  <svg width="520" height="380" viewBox="0 0 520 380">
-    <rect x="10" y="10" width="500" height="50" rx="4" fill="#1b5e20" stroke="#2e7d32" stroke-width="1"/>
-    <text x="260" y="32" text-anchor="middle" fill="white" font-size="11" font-weight="bold">搜索栏</text>
-    <text x="260" y="48" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="9">专利号输入 · 自动识别类型 · 搜索按钮 · 设置入口</text>
-    <rect x="10" y="65" width="500" height="30" rx="0" fill="#e0e0e0" stroke="#bbb" stroke-width="1"/>
-    <rect x="10" y="65" width="125" height="30" rx="0" fill="#fff" stroke="#4caf50" stroke-width="1.5" stroke-bottom="none"/>
-    <text x="72" y="85" text-anchor="middle" fill="#4caf50" font-size="10" font-weight="bold">概览</text>
-    <text x="197" y="85" text-anchor="middle" fill="#666" font-size="10">同族</text>
-    <text x="322" y="85" text-anchor="middle" fill="#666" font-size="10">审查看板</text>
-    <text x="447" y="85" text-anchor="middle" fill="#666" font-size="10">AI 分析</text>
-    <rect x="10" y="95" width="500" height="275" rx="0" fill="#fafafa" stroke="#ccc" stroke-width="1"/>
-    <text x="260" y="120" text-anchor="middle" fill="#999" font-size="11">标签页内容区域</text>
-    <rect x="25" y="135" width="220" height="30" rx="4" fill="#e8f5e9" stroke="#43a047" stroke-width="1"/>
-    <text x="135" y="155" text-anchor="middle" fill="#43a047" font-size="9">专利号 / 标题 / 申请人</text>
-    <rect x="25" y="170" width="220" height="30" rx="4" fill="#e8f5e9" stroke="#43a047" stroke-width="1"/>
-    <text x="135" y="190" text-anchor="middle" fill="#43a047" font-size="9">审查时间线（已合并至概览）</text>
-    <rect x="260" y="135" width="70" height="220" rx="4" fill="#fff" stroke="#eee" stroke-width="1"/>
-    <text x="295" y="152" text-anchor="middle" fill="#e74c3c" font-size="8" font-weight="bold">审查意见</text>
-    <rect x="268" y="160" width="54" height="28" rx="3" fill="#fde8e8" stroke="#e74c3c" stroke-width="0.5"/>
-    <text x="295" y="178" text-anchor="middle" fill="#e74c3c" font-size="7">CTFR</text>
-    <rect x="335" y="135" width="70" height="220" rx="4" fill="#fff" stroke="#eee" stroke-width="1"/>
-    <text x="370" y="152" text-anchor="middle" fill="#43a047" font-size="8" font-weight="bold">答复</text>
-    <rect x="343" y="160" width="54" height="28" rx="3" fill="#e8f5e9" stroke="#43a047" stroke-width="0.5"/>
-    <text x="370" y="178" text-anchor="middle" fill="#43a047" font-size="7">A</text>
-    <rect x="410" y="135" width="70" height="220" rx="4" fill="#fff" stroke="#eee" stroke-width="1"/>
-    <text x="445" y="152" text-anchor="middle" fill="#52c41a" font-size="8" font-weight="bold">授权</text>
-    <rect x="418" y="160" width="54" height="28" rx="3" fill="#f6ffed" stroke="#52c41a" stroke-width="0.5"/>
-    <text x="445" y="178" text-anchor="middle" fill="#52c41a" font-size="7">NOA</text>
-  </svg>
+  <img src="manual_images/diagram_2.png" width="520" height="380" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 3-1 专利审查梳理工具界面布局示意</div>
 </div>
 
@@ -274,16 +200,7 @@
 <p>标签页区域位于搜索栏下方，包含 4 个功能标签页：</p>
 
 <div class="diagram">
-  <svg width="460" height="50" viewBox="0 0 460 50">
-    <rect x="10" y="8" width="100" height="36" rx="6" fill="#4caf50"/>
-    <text x="60" y="31" text-anchor="middle" fill="white" font-size="10" font-weight="bold">概览</text>
-    <rect x="120" y="8" width="80" height="36" rx="6" fill="#43a047"/>
-    <text x="160" y="31" text-anchor="middle" fill="white" font-size="10" font-weight="bold">同族</text>
-    <rect x="210" y="8" width="100" height="36" rx="6" fill="#52c41a"/>
-    <text x="260" y="31" text-anchor="middle" fill="white" font-size="10" font-weight="bold">审查看板</text>
-    <rect x="320" y="8" width="100" height="36" rx="6" fill="#fa8c16"/>
-    <text x="370" y="31" text-anchor="middle" fill="white" font-size="10" font-weight="bold">AI 分析</text>
-  </svg>
+  <img src="manual_images/diagram_3.png" width="460" height="50" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 3-2 四个功能标签页</div>
 </div>
 
@@ -311,28 +228,7 @@
 <p>审查看板是核心功能区域，采用六列看板布局：</p>
 
 <div class="diagram">
-  <svg width="500" height="200" viewBox="0 0 500 200">
-    <rect x="10" y="5" width="480" height="28" rx="4" fill="#f0f0f0" stroke="#ddd" stroke-width="1"/>
-    <text x="30" y="24" fill="#666" font-size="9">&#x1F50D; 搜索关键词</text>
-    <rect x="140" y="9" width="45" height="20" rx="10" fill="#4caf50"/><text x="162" y="23" text-anchor="middle" fill="white" font-size="8">全部</text>
-    <rect x="190" y="9" width="60" height="20" rx="10" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/><text x="220" y="23" text-anchor="middle" fill="#e74c3c" font-size="8">审查意见</text>
-    <rect x="255" y="9" width="45" height="20" rx="10" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/><text x="277" y="23" text-anchor="middle" fill="#43a047" font-size="8">答复</text>
-    <rect x="305" y="9" width="45" height="20" rx="10" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/><text x="327" y="23" text-anchor="middle" fill="#fa8c16" font-size="8">请求</text>
-    <rect x="355" y="9" width="45" height="20" rx="10" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/><text x="377" y="23" text-anchor="middle" fill="#52c41a" font-size="8">授权</text>
-    <rect x="405" y="9" width="45" height="20" rx="10" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/><text x="427" y="23" text-anchor="middle" fill="#722ed1" font-size="8">通知</text>
-    <rect x="455" y="9" width="30" height="20" rx="10" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/><text x="470" y="23" text-anchor="middle" fill="#999" font-size="8">其他</text>
-    <rect x="10" y="40" width="75" height="150" rx="4" fill="#fde8e8" stroke="#e74c3c" stroke-width="1"/><text x="47" y="57" text-anchor="middle" fill="#e74c3c" font-size="9" font-weight="bold">审查意见</text>
-    <rect x="18" y="65" width="59" height="35" rx="3" fill="#fff" stroke="#e74c3c" stroke-width="0.5"/><text x="47" y="78" text-anchor="middle" fill="#e74c3c" font-size="7" font-weight="bold">CTFR</text><text x="47" y="92" text-anchor="middle" fill="#999" font-size="6">2024-03-15</text>
-    <rect x="92" y="40" width="75" height="150" rx="4" fill="#e8f5e9" stroke="#43a047" stroke-width="1"/><text x="129" y="57" text-anchor="middle" fill="#43a047" font-size="9" font-weight="bold">答复</text>
-    <rect x="100" y="65" width="59" height="35" rx="3" fill="#fff" stroke="#43a047" stroke-width="0.5"/><text x="129" y="78" text-anchor="middle" fill="#43a047" font-size="7" font-weight="bold">A</text><text x="129" y="92" text-anchor="middle" fill="#999" font-size="6">2024-05-20</text>
-    <rect x="174" y="40" width="75" height="150" rx="4" fill="#fff7e6" stroke="#fa8c16" stroke-width="1"/><text x="211" y="57" text-anchor="middle" fill="#fa8c16" font-size="9" font-weight="bold">请求</text>
-    <rect x="182" y="65" width="59" height="35" rx="3" fill="#fff" stroke="#fa8c16" stroke-width="0.5"/><text x="211" y="78" text-anchor="middle" fill="#fa8c16" font-size="7" font-weight="bold">R</text><text x="211" y="92" text-anchor="middle" fill="#999" font-size="6">2024-02-10</text>
-    <rect x="256" y="40" width="75" height="150" rx="4" fill="#f6ffed" stroke="#52c41a" stroke-width="1"/><text x="293" y="57" text-anchor="middle" fill="#52c41a" font-size="9" font-weight="bold">授权</text>
-    <rect x="264" y="65" width="59" height="35" rx="3" fill="#fff" stroke="#52c41a" stroke-width="0.5"/><text x="293" y="78" text-anchor="middle" fill="#52c41a" font-size="7" font-weight="bold">NOA</text><text x="293" y="92" text-anchor="middle" fill="#999" font-size="6">2024-08-01</text>
-    <rect x="338" y="40" width="75" height="150" rx="4" fill="#f9f0ff" stroke="#722ed1" stroke-width="1"/><text x="375" y="57" text-anchor="middle" fill="#722ed1" font-size="9" font-weight="bold">通知</text>
-    <rect x="346" y="65" width="59" height="35" rx="3" fill="#fff" stroke="#722ed1" stroke-width="0.5"/><text x="375" y="78" text-anchor="middle" fill="#722ed1" font-size="7" font-weight="bold">NORE</text><text x="375" y="92" text-anchor="middle" fill="#999" font-size="6">2024-01-05</text>
-    <rect x="420" y="40" width="70" height="150" rx="4" fill="#f5f5f5" stroke="#999" stroke-width="1"/><text x="455" y="57" text-anchor="middle" fill="#999" font-size="9" font-weight="bold">其他</text>
-  </svg>
+  <img src="manual_images/diagram_4.png" width="500" height="200" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 3-3 审查看板六列布局示意</div>
 </div>
 
@@ -358,25 +254,7 @@
 </ul>
 
 <div class="diagram">
-  <svg width="460" height="160" viewBox="0 0 460 160">
-    <rect x="10" y="10" width="320" height="140" rx="6" fill="#fafafa" stroke="#ddd" stroke-width="1"/>
-    <text x="170" y="30" text-anchor="middle" fill="#333" font-size="10" font-weight="bold">AI 分析结果</text>
-    <rect x="20" y="40" width="300" height="60" rx="4" fill="#fff" stroke="#eee" stroke-width="1"/>
-    <text x="30" y="60" fill="#888" font-size="8">审查意见要点：...</text>
-    <text x="30" y="76" fill="#888" font-size="8">1. 权利要求1缺乏新颖性</text>
-    <text x="30" y="92" fill="#888" font-size="8">2. 权利要求2-5缺乏创造性</text>
-    <circle cx="380" cy="120" r="22" fill="#722ed1" stroke="#531dab" stroke-width="2" opacity="0.9"/>
-    <text x="380" y="118" text-anchor="middle" fill="white" font-size="14">&#x1F4AC;</text>
-    <text x="380" y="132" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="6">AI</text>
-    <rect x="340" y="10" width="110" height="100" rx="6" fill="#fff" stroke="#722ed1" stroke-width="1.5"/>
-    <rect x="340" y="10" width="110" height="22" rx="6" fill="#722ed1"/><rect x="340" y="26" width="110" height="6" fill="#722ed1"/>
-    <text x="395" y="26" text-anchor="middle" fill="white" font-size="8" font-weight="bold">AI 对话</text>
-    <text x="350" y="48" fill="#722ed1" font-size="7">用户：请详细说明...</text>
-    <text x="350" y="64" fill="#333" font-size="7">AI：根据审查意见...</text>
-    <text x="350" y="80" fill="#333" font-size="7">该权利要求涉及...</text>
-    <rect x="345" y="88" width="50" height="14" rx="3" fill="#f9f0ff" stroke="#722ed1" stroke-width="0.5"/><text x="370" y="98" text-anchor="middle" fill="#722ed1" font-size="6">清空对话</text>
-    <rect x="400" y="88" width="45" height="14" rx="3" fill="#fde8e8" stroke="#e74c3c" stroke-width="0.5"/><text x="422" y="98" text-anchor="middle" fill="#e74c3c" font-size="6">中止</text>
-  </svg>
+  <img src="manual_images/diagram_5.png" width="460" height="160" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 3-4 AI 分析标签页与悬浮球对话示意</div>
 </div>
 
@@ -386,17 +264,7 @@
 <p class="section-intro">本章将以一个完整的操作流程，带您快速上手专利审查梳理工具的核心功能。</p>
 
 <div class="diagram">
-  <svg width="520" height="70" viewBox="0 0 520 70">
-    <rect x="5" y="15" width="90" height="36" rx="6" fill="#4caf50"/><text x="50" y="38" text-anchor="middle" fill="white" font-size="10" font-weight="bold">配置 AI</text>
-    <text x="108" y="38" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="120" y="15" width="90" height="36" rx="6" fill="#43a047"/><text x="165" y="38" text-anchor="middle" fill="white" font-size="10" font-weight="bold">搜索专利</text>
-    <text x="223" y="38" text-anchor="middle" fill="#43a047" font-size="16">&#x2192;</text>
-    <rect x="235" y="15" width="90" height="36" rx="6" fill="#52c41a"/><text x="280" y="38" text-anchor="middle" fill="white" font-size="10" font-weight="bold">浏览看板</text>
-    <text x="338" y="38" text-anchor="middle" fill="#52c41a" font-size="16">&#x2192;</text>
-    <rect x="350" y="15" width="80" height="36" rx="6" fill="#fa8c16"/><text x="390" y="38" text-anchor="middle" fill="white" font-size="10" font-weight="bold">AI 分析</text>
-    <text x="443" y="38" text-anchor="middle" fill="#fa8c16" font-size="16">&#x2192;</text>
-    <rect x="455" y="15" width="60" height="36" rx="6" fill="#722ed1"/><text x="485" y="38" text-anchor="middle" fill="white" font-size="10" font-weight="bold">导出</text>
-  </svg>
+  <img src="manual_images/diagram_6.png" width="520" height="70" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 4-1 快速入门操作流程</div>
 </div>
 
@@ -469,22 +337,7 @@
 
 <h3>搜索流程</h3>
 <div class="diagram">
-  <svg width="480" height="100" viewBox="0 0 480 100">
-    <rect x="5" y="25" width="110" height="44" rx="8" fill="#e8f5e9" stroke="#43a047" stroke-width="1.5"/>
-    <text x="60" y="52" text-anchor="middle" fill="#43a047" font-size="10" font-weight="bold">输入专利号</text>
-    <text x="130" y="52" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="145" y="20" width="120" height="54" rx="8" fill="#f6ffed" stroke="#52c41a" stroke-width="1.5"/>
-    <text x="205" y="44" text-anchor="middle" fill="#52c41a" font-size="10" font-weight="bold">自动识别类型</text>
-    <text x="205" y="60" text-anchor="middle" fill="#52c41a" font-size="8">US/EP/JP/DE/CN</text>
-    <text x="280" y="52" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="295" y="15" width="90" height="64" rx="8" fill="#fff7e6" stroke="#fa8c16" stroke-width="1.5"/>
-    <text x="340" y="38" text-anchor="middle" fill="#fa8c16" font-size="9" font-weight="bold">获取文档</text>
-    <text x="340" y="52" text-anchor="middle" fill="#fa8c16" font-size="8">自动分类</text>
-    <text x="340" y="66" text-anchor="middle" fill="#fa8c16" font-size="8">提取文本</text>
-    <text x="400" y="52" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="415" y="25" width="60" height="44" rx="8" fill="#f9f0ff" stroke="#722ed1" stroke-width="1.5"/>
-    <text x="445" y="52" text-anchor="middle" fill="#722ed1" font-size="10" font-weight="bold">完成</text>
-  </svg>
+  <img src="manual_images/diagram_7.png" width="480" height="100" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-1 专利搜索处理流程</div>
 </div>
 
@@ -499,23 +352,7 @@
 <p>概览标签页提供专利的摘要信息和审查时间线，让用户快速了解当前专利的基本情况和审查历程。</p>
 
 <div class="diagram">
-  <svg width="440" height="280" viewBox="0 0 440 280">
-    <rect x="10" y="10" width="420" height="260" rx="8" fill="#fafafa" stroke="#ddd" stroke-width="1"/>
-    <text x="30" y="35" fill="#333" font-size="11" font-weight="bold">专利概览</text>
-    <text x="30" y="60" fill="#888" font-size="9">专利号</text><text x="120" y="60" fill="#333" font-size="9" font-weight="bold">US12345678</text>
-    <text x="30" y="82" fill="#888" font-size="9">标题</text><text x="120" y="82" fill="#333" font-size="9">Method and Apparatus for...</text>
-    <text x="30" y="104" fill="#888" font-size="9">申请人</text><text x="120" y="104" fill="#333" font-size="9">ABC Corporation</text>
-    <text x="30" y="126" fill="#888" font-size="9">申请日</text><text x="120" y="126" fill="#333" font-size="9">2023-06-15</text>
-    <text x="30" y="148" fill="#888" font-size="9">当前状态</text>
-    <rect x="120" y="136" width="80" height="20" rx="10" fill="#f6ffed" stroke="#52c41a" stroke-width="1"/><text x="160" y="150" text-anchor="middle" fill="#52c41a" font-size="9" font-weight="bold">已授权</text>
-    <text x="30" y="170" fill="#888" font-size="9">文档数量</text><text x="120" y="170" fill="#333" font-size="9">12 份审查历史文档</text>
-    <line x1="30" y1="185" x2="410" y2="185" stroke="#ddd" stroke-width="1"/>
-    <text x="30" y="205" fill="#4caf50" font-size="10" font-weight="bold">审查时间线</text>
-    <line x1="50" y1="215" x2="50" y2="265" stroke="#4caf50" stroke-width="2"/>
-    <circle cx="50" cy="225" r="5" fill="#e74c3c" stroke="#fff" stroke-width="1.5"/><text x="65" y="228" fill="#888" font-size="7">2024-01-10</text><text x="130" y="228" fill="#333" font-size="8">第一次审查意见</text>
-    <circle cx="50" cy="245" r="5" fill="#43a047" stroke="#fff" stroke-width="1.5"/><text x="65" y="248" fill="#888" font-size="7">2024-03-15</text><text x="130" y="248" fill="#333" font-size="8">提交答复</text>
-    <circle cx="50" cy="265" r="5" fill="#52c41a" stroke="#fff" stroke-width="1.5"/><text x="65" y="268" fill="#888" font-size="7">2024-08-01</text><text x="130" y="268" fill="#333" font-size="8">授权通知</text>
-  </svg>
+  <img src="manual_images/diagram_8.png" width="440" height="280" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-2 概览标签页示意（含审查时间线）</div>
 </div>
 
@@ -553,17 +390,7 @@
 </ul>
 
 <div class="diagram">
-  <svg width="300" height="140" viewBox="0 0 300 140">
-    <rect x="10" y="10" width="280" height="120" rx="6" fill="#fff" stroke="#e74c3c" stroke-width="1.5" filter="url(#shadow)"/>
-    <rect x="10" y="10" width="60" height="22" rx="6" fill="#e74c3c"/><text x="40" y="25" text-anchor="middle" fill="white" font-size="9" font-weight="bold">CTFR</text>
-    <text x="80" y="25" fill="#333" font-size="9" font-weight="bold">Non-Final Rejection</text>
-    <text x="20" y="50" fill="#888" font-size="9">&#x1F4C5; 2024-03-15</text>
-    <rect x="20" y="60" width="50" height="18" rx="9" fill="#fde8e8" stroke="#e74c3c" stroke-width="0.5"/><text x="45" y="73" text-anchor="middle" fill="#e74c3c" font-size="8">审查意见</text>
-    <line x1="20" y1="85" x2="280" y2="85" stroke="#eee" stroke-width="1"/>
-    <rect x="20" y="92" width="80" height="24" rx="4" fill="#e8f5e9" stroke="#43a047" stroke-width="1"/><text x="60" y="108" text-anchor="middle" fill="#43a047" font-size="8">提取文本</text>
-    <rect x="110" y="92" width="80" height="24" rx="4" fill="#f6ffed" stroke="#52c41a" stroke-width="1"/><text x="150" y="108" text-anchor="middle" fill="#52c41a" font-size="8">下载 PDF</text>
-    <defs><filter id="shadow" x="-5%" y="-5%" width="110%" height="110%"><feDropShadow dx="1" dy="2" stdDeviation="3" flood-opacity="0.1"/></filter></defs>
-  </svg>
+  <img src="manual_images/diagram_9.png" width="300" height="140" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-3 文档卡片示意</div>
 </div>
 
@@ -590,15 +417,7 @@
 <p>AI 分析是专利审查梳理工具的核心功能，通过调用 AI 大语言模型，自动对审查文档进行深度分析。</p>
 
 <div class="diagram">
-  <svg width="480" height="100" viewBox="0 0 480 100">
-    <rect x="5" y="25" width="110" height="44" rx="8" fill="#e8f5e9" stroke="#43a047" stroke-width="1.5"/><text x="60" y="52" text-anchor="middle" fill="#43a047" font-size="10" font-weight="bold">审查文档</text>
-    <text x="130" y="52" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="145" y="20" width="100" height="54" rx="8" fill="#f6ffed" stroke="#52c41a" stroke-width="1.5"/><text x="195" y="44" text-anchor="middle" fill="#52c41a" font-size="10" font-weight="bold">AI 分析</text><text x="195" y="60" text-anchor="middle" fill="#52c41a" font-size="8">流式响应</text>
-    <text x="260" y="52" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="275" y="15" width="90" height="64" rx="8" fill="#fff7e6" stroke="#fa8c16" stroke-width="1.5"/><text x="320" y="38" text-anchor="middle" fill="#fa8c16" font-size="9" font-weight="bold">分析结果</text><text x="320" y="52" text-anchor="middle" fill="#fa8c16" font-size="8">Markdown 格式</text><text x="320" y="66" text-anchor="middle" fill="#fa8c16" font-size="8">审查意见梳理</text>
-    <text x="380" y="52" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="395" y="25" width="80" height="44" rx="8" fill="#f9f0ff" stroke="#722ed1" stroke-width="1.5"/><text x="435" y="52" text-anchor="middle" fill="#722ed1" font-size="10" font-weight="bold">导出/阅读</text>
-  </svg>
+  <img src="manual_images/diagram_10.png" width="480" height="100" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-4 AI 分析处理流程</div>
 </div>
 
@@ -606,23 +425,7 @@
 <p>AI 分析采用手动选择模式，文档加载完成后选择面板自动展开，用户可自由勾选需要分析的文档后启动 AI 梳理。</p>
 
 <div class="diagram">
-  <svg width="440" height="280" viewBox="0 0 440 280">
-    <rect x="10" y="10" width="420" height="260" rx="8" fill="#fafafa" stroke="#ddd" stroke-width="1"/>
-    <text x="30" y="35" fill="#333" font-size="11" font-weight="bold">选择分析文件范围</text>
-    <rect x="20" y="45" width="260" height="22" rx="4" fill="#fff" stroke="#ccc" stroke-width="1"/><text x="30" y="60" fill="#999" font-size="8">搜索文档名称、代码、日期...</text>
-    <rect x="290" y="45" width="40" height="22" rx="4" fill="#e8f5e9" stroke="#43a047" stroke-width="1"/><text x="310" y="60" text-anchor="middle" fill="#43a047" font-size="7">全选</text>
-    <rect x="335" y="45" width="50" height="22" rx="4" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/><text x="360" y="60" text-anchor="middle" fill="#666" font-size="7">全不选</text>
-    <rect x="390" y="45" width="30" height="22" rx="4" fill="#f6ffed" stroke="#52c41a" stroke-width="1"/><text x="405" y="60" text-anchor="middle" fill="#52c41a" font-size="7">默认</text>
-    <rect x="20" y="75" width="400" height="24" rx="3" fill="#fff" stroke="#eee" stroke-width="1"/><text x="35" y="91" fill="#52c41a" font-size="10">&#x2611;</text><text x="55" y="91" fill="#e74c3c" font-size="9" font-weight="bold">CTFR</text><text x="100" y="91" fill="#333" font-size="9">Non-Final Rejection</text><rect x="330" y="79" width="60" height="16" rx="8" fill="#fde8e8"/><text x="360" y="90" text-anchor="middle" fill="#e74c3c" font-size="7">审查意见</text>
-    <rect x="20" y="103" width="400" height="24" rx="3" fill="#f8f9fa" stroke="#eee" stroke-width="1"/><text x="35" y="119" fill="#52c41a" font-size="10">&#x2611;</text><text x="55" y="119" fill="#43a047" font-size="9" font-weight="bold">A</text><text x="100" y="119" fill="#333" font-size="9">Response to Office Action</text><rect x="330" y="107" width="60" height="16" rx="8" fill="#e8f5e9"/><text x="360" y="118" text-anchor="middle" fill="#43a047" font-size="7">答复</text>
-    <rect x="20" y="131" width="400" height="24" rx="3" fill="#fff" stroke="#eee" stroke-width="1"/><text x="35" y="147" fill="#ccc" font-size="10">&#x2610;</text><text x="55" y="147" fill="#999" font-size="9" font-weight="bold">SPEC</text><text x="100" y="147" fill="#999" font-size="9">Specification</text><rect x="330" y="135" width="60" height="16" rx="8" fill="#f5f5f5"/><text x="360" y="146" text-anchor="middle" fill="#999" font-size="7">说明书</text>
-    <rect x="20" y="159" width="400" height="24" rx="3" fill="#f8f9fa" stroke="#eee" stroke-width="1"/><text x="35" y="175" fill="#52c41a" font-size="10">&#x2611;</text><text x="55" y="175" fill="#e74c3c" font-size="9" font-weight="bold">CTNF</text><text x="100" y="175" fill="#333" font-size="9">Final Rejection</text><rect x="330" y="163" width="60" height="16" rx="8" fill="#fde8e8"/><text x="360" y="174" text-anchor="middle" fill="#e74c3c" font-size="7">审查意见</text>
-    <rect x="20" y="195" width="400" height="30" rx="4" fill="#f0f0f0" stroke="#eee" stroke-width="1"/>
-    <text x="30" y="214" fill="#4caf50" font-size="9" font-weight="bold">已选 3 份：</text><text x="95" y="214" fill="#666" font-size="8">CTFR - Non-Final Rejection、A - Response、CTNF - Final Rejection</text>
-    <rect x="20" y="235" width="100" height="26" rx="4" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/><text x="70" y="252" text-anchor="middle" fill="#666" font-size="9">取消</text>
-    <rect x="130" y="235" width="140" height="26" rx="4" fill="#e8f5e9" stroke="#43a047" stroke-width="1"/><text x="200" y="252" text-anchor="middle" fill="#43a047" font-size="9">合并导出选中文档</text>
-    <rect x="280" y="235" width="140" height="26" rx="4" fill="#4caf50"/><text x="350" y="252" text-anchor="middle" fill="white" font-size="9" font-weight="bold">确认并开始AI梳理</text>
-  </svg>
+  <img src="manual_images/diagram_11.png" width="440" height="280" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-5 手动选择文档面板示意（含搜索栏、已选汇总、合并导出）</div>
 </div>
 
@@ -660,14 +463,7 @@
 <p>审查时间线已合并至概览标签页中，以可视化方式展示专利审查历程中的关键事件。</p>
 
 <div class="diagram">
-  <svg width="440" height="280" viewBox="0 0 440 280">
-    <line x1="60" y1="20" x2="60" y2="270" stroke="#4caf50" stroke-width="2"/>
-    <circle cx="60" cy="40" r="8" fill="#43a047" stroke="#fff" stroke-width="2"/><text x="80" y="35" fill="#888" font-size="9">2023-06-15</text><text x="80" y="50" fill="#333" font-size="10" font-weight="bold">提交申请</text><rect x="75" y="55" width="60" height="16" rx="8" fill="#e8f5e9"/><text x="105" y="66" text-anchor="middle" fill="#43a047" font-size="7">请求</text>
-    <circle cx="60" cy="100" r="8" fill="#e74c3c" stroke="#fff" stroke-width="2"/><text x="80" y="95" fill="#888" font-size="9">2024-01-10</text><text x="80" y="110" fill="#333" font-size="10" font-weight="bold">第一次审查意见</text><rect x="75" y="115" width="60" height="16" rx="8" fill="#fde8e8"/><text x="105" y="126" text-anchor="middle" fill="#e74c3c" font-size="7">审查意见</text>
-    <circle cx="60" cy="160" r="8" fill="#43a047" stroke="#fff" stroke-width="2"/><text x="80" y="155" fill="#888" font-size="9">2024-03-15</text><text x="80" y="170" fill="#333" font-size="10" font-weight="bold">提交答复</text><rect x="75" y="175" width="60" height="16" rx="8" fill="#e8f5e9"/><text x="105" y="186" text-anchor="middle" fill="#43a047" font-size="7">答复</text>
-    <circle cx="60" cy="220" r="8" fill="#e74c3c" stroke="#fff" stroke-width="2"/><text x="80" y="215" fill="#888" font-size="9">2024-05-20</text><text x="80" y="230" fill="#333" font-size="10" font-weight="bold">最终审查意见</text><rect x="75" y="235" width="60" height="16" rx="8" fill="#fde8e8"/><text x="105" y="246" text-anchor="middle" fill="#e74c3c" font-size="7">审查意见</text>
-    <circle cx="60" cy="265" r="8" fill="#52c41a" stroke="#fff" stroke-width="2"/><text x="80" y="260" fill="#888" font-size="9">2024-08-01</text><text x="80" y="275" fill="#333" font-size="10" font-weight="bold">授权通知</text><rect x="75" y="265" width="60" height="16" rx="8" fill="#f6ffed"/><text x="105" y="276" text-anchor="middle" fill="#52c41a" font-size="7">授权</text>
-  </svg>
+  <img src="manual_images/diagram_12.png" width="440" height="280" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-6 时间线示意</div>
 </div>
 
@@ -682,39 +478,7 @@
 <p>溯源对照阅读器是一个全屏模态窗口，用于对照查看原始文档和 AI 分析结果，并集成了 OCR 提取、翻译、AI 对话等丰富功能。</p>
 
 <div class="diagram">
-  <svg width="520" height="320" viewBox="0 0 520 320">
-    <rect x="5" y="5" width="510" height="310" rx="8" fill="#1b5e20" stroke="#2e7d32" stroke-width="2"/>
-    <rect x="5" y="5" width="510" height="30" rx="8" fill="#1b5e20"/><rect x="5" y="25" width="510" height="10" fill="#1b5e20"/>
-    <text x="260" y="25" text-anchor="middle" fill="white" font-size="10" font-weight="bold">溯源对照阅读器</text>
-    <rect x="5" y="35" width="510" height="26" fill="#4caf50"/>
-    <rect x="15" y="39" width="60" height="18" rx="3" fill="rgba(255,255,255,0.2)"/><text x="45" y="52" text-anchor="middle" fill="white" font-size="8">PDF 视图</text>
-    <rect x="80" y="39" width="60" height="18" rx="3" fill="rgba(255,255,255,0.2)"/><text x="110" y="52" text-anchor="middle" fill="white" font-size="8">OCR 提取</text>
-    <rect x="145" y="39" width="50" height="18" rx="3" fill="rgba(255,255,255,0.2)"/><text x="170" y="52" text-anchor="middle" fill="white" font-size="8">翻译</text>
-    <rect x="200" y="39" width="60" height="18" rx="3" fill="rgba(255,255,255,0.2)"/><text x="230" y="52" text-anchor="middle" fill="white" font-size="8">AI 对话</text>
-    <rect x="265" y="39" width="40" height="18" rx="3" fill="rgba(255,255,255,0.2)"/><text x="285" y="52" text-anchor="middle" fill="white" font-size="8">半屏</text>
-    <rect x="310" y="39" width="40" height="18" rx="3" fill="rgba(255,255,255,0.2)"/><text x="330" y="52" text-anchor="middle" fill="white" font-size="8">悬浮</text>
-    <rect x="355" y="39" width="70" height="18" rx="3" fill="rgba(255,255,255,0.2)"/><text x="390" y="52" text-anchor="middle" fill="white" font-size="8">导出 Word</text>
-    <rect x="470" y="39" width="25" height="18" rx="3" fill="#e74c3c"/><text x="482" y="52" text-anchor="middle" fill="white" font-size="8">&#x2715;</text>
-    <rect x="15" y="66" width="100" height="240" rx="4" fill="#fff" stroke="#ddd" stroke-width="1"/>
-    <rect x="20" y="70" width="90" height="20" rx="3" fill="#f0f0f0" stroke="#ccc" stroke-width="0.5"/><text x="30" y="84" fill="#999" font-size="7">&#x1F50D; 搜索文档</text>
-    <rect x="20" y="95" width="90" height="22" rx="3" fill="#fde8e8" stroke="#e74c3c" stroke-width="0.5"/><text x="30" y="110" fill="#e74c3c" font-size="7" font-weight="bold">CTFR</text>
-    <rect x="20" y="120" width="90" height="22" rx="3" fill="#e8f5e9" stroke="#43a047" stroke-width="0.5"/><text x="30" y="135" fill="#43a047" font-size="7" font-weight="bold">A - Response</text>
-    <rect x="20" y="145" width="90" height="22" rx="3" fill="#f6ffed" stroke="#52c41a" stroke-width="0.5"/><text x="30" y="160" fill="#52c41a" font-size="7" font-weight="bold">NOA</text>
-    <rect x="20" y="170" width="90" height="22" rx="3" fill="#f5f5f5" stroke="#999" stroke-width="0.5"/><text x="30" y="185" fill="#999" font-size="7">SPEC</text>
-    <rect x="120" y="66" width="200" height="240" rx="4" fill="#fff" stroke="#ddd" stroke-width="1"/>
-    <text x="220" y="84" text-anchor="middle" fill="#43a047" font-size="9" font-weight="bold">PDF 阅读器</text>
-    <rect x="130" y="95" width="180" height="180" rx="2" fill="#f8f9fa" stroke="#eee" stroke-width="0.5"/>
-    <text x="220" y="150" text-anchor="middle" fill="#ccc" font-size="20">PDF</text>
-    <text x="220" y="170" text-anchor="middle" fill="#999" font-size="8">翻页 · 缩放 · 适应宽度</text>
-    <rect x="130" y="280" width="180" height="20" rx="2" fill="#f0f0f0"/><text x="155" y="294" text-anchor="middle" fill="#4caf50" font-size="9">&#x25C0;</text><text x="220" y="294" text-anchor="middle" fill="#333" font-size="8">1 / 5</text><text x="285" y="294" text-anchor="middle" fill="#4caf50" font-size="9">&#x25B6;</text>
-    <rect x="325" y="66" width="180" height="240" rx="4" fill="#fff" stroke="#ddd" stroke-width="1"/>
-    <rect x="325" y="66" width="90" height="22" rx="0" fill="#4caf50"/><text x="370" y="81" text-anchor="middle" fill="white" font-size="8" font-weight="bold">对照翻译</text>
-    <rect x="415" y="66" width="90" height="22" rx="0" fill="#f0f0f0" stroke="#ddd" stroke-width="0.5"/><text x="460" y="81" text-anchor="middle" fill="#666" font-size="8">AI 对话</text>
-    <rect x="490" y="68" width="14" height="18" rx="2" fill="#e74c3c"/><text x="497" y="81" text-anchor="middle" fill="white" font-size="7">&#x2715;</text>
-    <text x="335" y="100" fill="#333" font-size="7" font-weight="bold">原文：</text><text x="335" y="115" fill="#888" font-size="7">The invention relates to...</text>
-    <text x="335" y="135" fill="#333" font-size="7" font-weight="bold">译文：</text><text x="335" y="150" fill="#4caf50" font-size="7">本发明涉及一种...</text><text x="335" y="165" fill="#4caf50" font-size="7">用于处理数据的方法...</text>
-    <circle cx="490" cy="290" r="14" fill="#722ed1" stroke="#531dab" stroke-width="1.5" opacity="0.9"/><text x="490" y="294" text-anchor="middle" fill="white" font-size="10">&#x1F4AC;</text>
-  </svg>
+  <img src="manual_images/diagram_13.png" width="520" height="320" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-7 溯源对照阅读器示意</div>
 </div>
 
@@ -740,13 +504,7 @@
 <p>AI 分析结果可导出为 .docx 文件，方便在 Word 中进一步编辑和分享。</p>
 
 <div class="diagram">
-  <svg width="480" height="80" viewBox="0 0 480 80">
-    <rect x="10" y="18" width="100" height="40" rx="6" fill="#4caf50"/><text x="60" y="43" text-anchor="middle" fill="white" font-size="11" font-weight="bold">AI 分析</text>
-    <text x="128" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="145" y="18" width="120" height="40" rx="6" fill="#e8f5e9" stroke="#43a047" stroke-width="1.5"/><text x="205" y="43" text-anchor="middle" fill="#43a047" font-size="10" font-weight="bold">Markdown 解析</text>
-    <text x="283" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="300" y="18" width="170" height="40" rx="6" fill="#f6ffed" stroke="#52c41a" stroke-width="1.5"/><text x="385" y="43" text-anchor="middle" fill="#52c41a" font-size="10" font-weight="bold">导出 .docx 文件</text>
-  </svg>
+  <img src="manual_images/diagram_14.png" width="480" height="80" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-8 Word 导出流程</div>
 </div>
 
@@ -777,12 +535,7 @@
 <p>点击搜索栏右侧的齿轮图标，打开设置对话框。设置对话框包含 4 个 Tab 页，分别管理不同功能的配置。</p>
 
 <div class="diagram">
-  <svg width="460" height="50" viewBox="0 0 460 50">
-    <rect x="10" y="8" width="100" height="36" rx="6" fill="#4caf50"/><text x="60" y="31" text-anchor="middle" fill="white" font-size="10" font-weight="bold">AI 服务</text>
-    <rect x="120" y="8" width="80" height="36" rx="6" fill="#13c2c2"/><text x="160" y="31" text-anchor="middle" fill="white" font-size="10" font-weight="bold">OCR</text>
-    <rect x="210" y="8" width="80" height="36" rx="6" fill="#eb2f96"/><text x="250" y="31" text-anchor="middle" fill="white" font-size="10" font-weight="bold">翻译</text>
-    <rect x="300" y="8" width="80" height="36" rx="6" fill="#fa8c16"/><text x="340" y="31" text-anchor="middle" fill="white" font-size="10" font-weight="bold">提示词</text>
-  </svg>
+  <img src="manual_images/diagram_15.png" width="460" height="50" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-9 设置对话框四个 Tab 页</div>
 </div>
 
@@ -850,15 +603,7 @@
 
 <h3>OCR 提取流程</h3>
 <div class="diagram">
-  <svg width="480" height="80" viewBox="0 0 480 80">
-    <rect x="5" y="18" width="90" height="40" rx="6" fill="#13c2c2"/><text x="50" y="43" text-anchor="middle" fill="white" font-size="10" font-weight="bold">OCR 提取</text>
-    <text x="110" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="125" y="18" width="100" height="40" rx="6" fill="#e6f7ff" stroke="#13c2c2" stroke-width="1.5"/><text x="175" y="43" text-anchor="middle" fill="#13c2c2" font-size="10" font-weight="bold">调用 OCR 引擎</text>
-    <text x="240" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="255" y="18" width="100" height="40" rx="6" fill="#e6f7ff" stroke="#13c2c2" stroke-width="1.5"/><text x="305" y="43" text-anchor="middle" fill="#13c2c2" font-size="10" font-weight="bold">版面识别</text>
-    <text x="370" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="385" y="18" width="90" height="40" rx="6" fill="#f6ffed" stroke="#52c41a" stroke-width="1.5"/><text x="430" y="43" text-anchor="middle" fill="#52c41a" font-size="10" font-weight="bold">文字提取</text>
-  </svg>
+  <img src="manual_images/diagram_16.png" width="480" height="80" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-10 OCR 提取流程</div>
 </div>
 
@@ -892,17 +637,7 @@
 
 <h3>翻译流程</h3>
 <div class="diagram">
-  <svg width="520" height="80" viewBox="0 0 520 80">
-    <rect x="5" y="18" width="70" height="40" rx="6" fill="#eb2f96"/><text x="40" y="43" text-anchor="middle" fill="white" font-size="10" font-weight="bold">翻译</text>
-    <text x="88" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="100" y="13" width="100" height="50" rx="6" fill="#fff0f6" stroke="#eb2f96" stroke-width="1.5"/><text x="150" y="33" text-anchor="middle" fill="#eb2f96" font-size="9" font-weight="bold">检查 OCR</text><text x="150" y="48" text-anchor="middle" fill="#eb2f96" font-size="8">未 OCR 则自动先 OCR</text>
-    <text x="213" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="225" y="13" width="110" height="50" rx="6" fill="#fff0f6" stroke="#eb2f96" stroke-width="1.5"/><text x="280" y="33" text-anchor="middle" fill="#eb2f96" font-size="9" font-weight="bold">合并所有页内容</text><text x="280" y="48" text-anchor="middle" fill="#eb2f96" font-size="8">清理噪音符号</text>
-    <text x="348" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="360" y="13" width="80" height="50" rx="6" fill="#fff0f6" stroke="#eb2f96" stroke-width="1.5"/><text x="400" y="33" text-anchor="middle" fill="#eb2f96" font-size="9" font-weight="bold">流式翻译</text><text x="400" y="48" text-anchor="middle" fill="#eb2f96" font-size="8">实时显示</text>
-    <text x="453" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="465" y="18" width="50" height="40" rx="6" fill="#f6ffed" stroke="#52c41a" stroke-width="1.5"/><text x="490" y="43" text-anchor="middle" fill="#52c41a" font-size="10" font-weight="bold">完成</text>
-  </svg>
+  <img src="manual_images/diagram_17.png" width="520" height="80" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-11 全文翻译流程</div>
 </div>
 
@@ -926,18 +661,7 @@
 
 <h3>布局变化</h3>
 <div class="diagram">
-  <svg width="480" height="180" viewBox="0 0 480 180">
-    <text x="120" y="15" text-anchor="middle" fill="#888" font-size="9">普通模式</text>
-    <rect x="10" y="22" width="80" height="70" rx="4" fill="#e8f5e9" stroke="#43a047" stroke-width="1"/><text x="50" y="42" text-anchor="middle" fill="#43a047" font-size="8">文件列表</text>
-    <rect x="95" y="22" width="140" height="70" rx="4" fill="#f6ffed" stroke="#52c41a" stroke-width="1"/><text x="165" y="42" text-anchor="middle" fill="#52c41a" font-size="8">PDF 阅读器</text>
-    <text x="260" y="60" text-anchor="middle" fill="#4caf50" font-size="20">&#x2192;</text>
-    <text x="380" y="15" text-anchor="middle" fill="#4caf50" font-size="9" font-weight="bold">阅读模式</text>
-    <rect x="280" y="22" width="20" height="70" rx="4" fill="#e8f5e9" stroke="#43a047" stroke-width="1" opacity="0.4"/><text x="290" y="60" text-anchor="middle" fill="#43a047" font-size="6">收</text>
-    <rect x="305" y="22" width="100" height="70" rx="4" fill="#f6ffed" stroke="#52c41a" stroke-width="1"/><text x="355" y="42" text-anchor="middle" fill="#52c41a" font-size="8">PDF 阅读器</text><text x="355" y="60" text-anchor="middle" fill="#52c41a" font-size="7">（向左扩展）</text>
-    <rect x="410" y="22" width="60" height="70" rx="4" fill="#f9f0ff" stroke="#722ed1" stroke-width="1"/><text x="440" y="38" text-anchor="middle" fill="#722ed1" font-size="7">对照翻译</text><text x="440" y="52" text-anchor="middle" fill="#722ed1" font-size="7">AI 对话</text>
-    <text x="240" y="115" text-anchor="middle" fill="#666" font-size="9">布局变化：文件列表收起 &#x2192; PDF 向左扩展 &#x2192; 右侧 Tab 面板显示</text>
-    <rect x="140" y="130" width="200" height="30" rx="6" fill="#fafafa" stroke="#ddd" stroke-width="1"/><text x="240" y="150" text-anchor="middle" fill="#e74c3c" font-size="9">点击 Tab 栏右侧 &#x2715; 关闭按钮退出阅读模式</text>
-  </svg>
+  <img src="manual_images/diagram_18.png" width="480" height="180" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-12 阅读模式布局变化示意</div>
 </div>
 
@@ -955,15 +679,7 @@
 <p>合并导出功能可将审查看板中多个文档的 PDF 合并为一个文件，每个文档前自动插入封面页作为分隔，方便整体阅读和归档。</p>
 
 <div class="diagram">
-  <svg width="520" height="80" viewBox="0 0 520 80">
-    <rect x="5" y="18" width="100" height="40" rx="6" fill="#4caf50"/><text x="55" y="43" text-anchor="middle" fill="white" font-size="10" font-weight="bold">审查看板</text>
-    <text x="120" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="135" y="13" width="100" height="50" rx="6" fill="#e8f5e9" stroke="#43a047" stroke-width="1.5"/><text x="185" y="33" text-anchor="middle" fill="#43a047" font-size="9" font-weight="bold">勾选文档</text><text x="185" y="48" text-anchor="middle" fill="#43a047" font-size="8">搜索筛选</text>
-    <text x="250" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="265" y="13" width="100" height="50" rx="6" fill="#fff7e6" stroke="#fa8c16" stroke-width="1.5"/><text x="315" y="33" text-anchor="middle" fill="#fa8c16" font-size="9" font-weight="bold">合并导出</text><text x="315" y="48" text-anchor="middle" fill="#fa8c16" font-size="8">自动封面页</text>
-    <text x="380" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="395" y="18" width="120" height="40" rx="6" fill="#f6ffed" stroke="#52c41a" stroke-width="1.5"/><text x="455" y="43" text-anchor="middle" fill="#52c41a" font-size="10" font-weight="bold">下载合并 PDF</text>
-  </svg>
+  <img src="manual_images/diagram_19.png" width="520" height="80" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-13 合并导出 PDF 流程</div>
 </div>
 
@@ -991,24 +707,7 @@
 </table>
 
 <div class="diagram">
-  <svg width="300" height="420" viewBox="0 0 300 420">
-    <rect x="20" y="10" width="260" height="400" rx="4" fill="#fff" stroke="#ddd" stroke-width="1.5"/>
-    <rect x="20" y="10" width="260" height="60" rx="4" fill="#43a047"/>
-    <rect x="20" y="50" width="260" height="20" fill="#43a047"/>
-    <text x="40" y="38" fill="white" font-size="9" font-weight="bold">Patent: US12030161B2 (US)</text>
-    <text x="260" y="38" text-anchor="end" fill="rgba(255,255,255,0.7)" font-size="8" font-style="italic">by PatentLens</text>
-    <text x="40" y="58" fill="rgba(255,255,255,0.8)" font-size="7">Document 1 / 5</text>
-    <text x="150" y="95" text-anchor="middle" fill="#555" font-size="9">Method and Apparatus for...</text>
-    <text x="150" y="112" text-anchor="middle" fill="#888" font-size="7">Inventor: John Smith  |  Filed: 2023-06-15</text>
-    <line x1="60" y1="125" x2="240" y2="125" stroke="#ddd" stroke-width="1"/>
-    <text x="150" y="160" text-anchor="middle" fill="#1b5e20" font-size="14" font-weight="bold">Non-Final Rejection</text>
-    <text x="150" y="185" text-anchor="middle" fill="#4caf50" font-size="12">非最终驳回</text>
-    <rect x="100" y="200" width="100" height="24" rx="12" fill="#fde8e8" stroke="#e74c3c" stroke-width="1"/><text x="150" y="216" text-anchor="middle" fill="#e74c3c" font-size="10" font-weight="bold">CTNF</text>
-    <text x="150" y="255" text-anchor="middle" fill="#888" font-size="10">2025-01-14</text>
-    <line x1="80" y1="280" x2="220" y2="280" stroke="#e8e8e8" stroke-width="1"/>
-    <text x="150" y="320" text-anchor="middle" fill="#ccc" font-size="9">PatentLens 合并导出</text>
-    <text x="150" y="340" text-anchor="middle" fill="#ccc" font-size="8">自动生成封面页</text>
-  </svg>
+  <img src="manual_images/diagram_20.png" width="300" height="420" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-14 合并导出封面页示意（含专利著录信息）</div>
 </div>
 
@@ -1026,15 +725,7 @@
 <p>OCR 选区翻译功能允许用户在 PDF 视图中选择特定的 OCR 文本块，仅翻译选中部分，而非整篇文档。适用于只需翻译特定段落或图表说明的场景。</p>
 
 <div class="diagram">
-  <svg width="520" height="80" viewBox="0 0 520 80">
-    <rect x="5" y="18" width="90" height="40" rx="6" fill="#13c2c2"/><text x="50" y="43" text-anchor="middle" fill="white" font-size="10" font-weight="bold">OCR 提取</text>
-    <text x="110" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="125" y="13" width="100" height="50" rx="6" fill="#e6f7ff" stroke="#13c2c2" stroke-width="1.5"/><text x="175" y="33" text-anchor="middle" fill="#13c2c2" font-size="9" font-weight="bold">框选文本块</text><text x="175" y="48" text-anchor="middle" fill="#13c2c2" font-size="8">点击/拖选</text>
-    <text x="240" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="255" y="13" width="100" height="50" rx="6" fill="#fff0f6" stroke="#eb2f96" stroke-width="1.5"/><text x="305" y="33" text-anchor="middle" fill="#eb2f96" font-size="9" font-weight="bold">翻译选中块</text><text x="305" y="48" text-anchor="middle" fill="#eb2f96" font-size="8">右键/工具栏</text>
-    <text x="370" y="43" text-anchor="middle" fill="#4caf50" font-size="16">&#x2192;</text>
-    <rect x="385" y="18" width="130" height="40" rx="6" fill="#f6ffed" stroke="#52c41a" stroke-width="1.5"/><text x="450" y="43" text-anchor="middle" fill="#52c41a" font-size="10" font-weight="bold">对照翻译面板</text>
-  </svg>
+  <img src="manual_images/diagram_21.png" width="520" height="80" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-15 OCR 选区翻译流程</div>
 </div>
 
@@ -1154,28 +845,7 @@
 <h2>7.1 完整操作流程图</h2>
 
 <div class="diagram">
-  <svg width="480" height="560" viewBox="0 0 480 560">
-    <rect x="180" y="10" width="120" height="36" rx="18" fill="#4caf50"/><text x="240" y="33" text-anchor="middle" fill="white" font-size="11" font-weight="bold">启动软件</text>
-    <line x1="240" y1="46" x2="240" y2="66" stroke="#4caf50" stroke-width="1.5" marker-end="url(#arr)"/>
-    <rect x="145" y="66" width="190" height="36" rx="6" fill="#e8f5e9" stroke="#43a047" stroke-width="1.5"/><text x="240" y="89" text-anchor="middle" fill="#43a047" font-size="10" font-weight="bold">配置 AI / OCR / 翻译服务</text>
-    <line x1="240" y1="102" x2="240" y2="122" stroke="#4caf50" stroke-width="1.5" marker-end="url(#arr)"/>
-    <rect x="145" y="122" width="190" height="36" rx="6" fill="#e8f5e9" stroke="#43a047" stroke-width="1.5"/><text x="240" y="145" text-anchor="middle" fill="#43a047" font-size="10" font-weight="bold">输入专利号（自动识别类型）</text>
-    <line x1="240" y1="158" x2="240" y2="178" stroke="#4caf50" stroke-width="1.5" marker-end="url(#arr)"/>
-    <rect x="160" y="178" width="160" height="36" rx="6" fill="#f6ffed" stroke="#52c41a" stroke-width="1.5"/><text x="240" y="201" text-anchor="middle" fill="#52c41a" font-size="10" font-weight="bold">点击搜索</text>
-    <line x1="240" y1="214" x2="240" y2="234" stroke="#4caf50" stroke-width="1.5" marker-end="url(#arr)"/>
-    <rect x="130" y="234" width="220" height="36" rx="6" fill="#e8f5e9" stroke="#43a047" stroke-width="1.5"/><text x="240" y="257" text-anchor="middle" fill="#43a047" font-size="10" font-weight="bold">查看概览 / 同族 / 审查时间线</text>
-    <line x1="240" y1="270" x2="240" y2="290" stroke="#4caf50" stroke-width="1.5" marker-end="url(#arr)"/>
-    <rect x="145" y="290" width="190" height="36" rx="6" fill="#fff7e6" stroke="#fa8c16" stroke-width="1.5"/><text x="240" y="313" text-anchor="middle" fill="#fa8c16" font-size="10" font-weight="bold">浏览审查看板（筛选/展开）</text>
-    <line x1="240" y1="326" x2="240" y2="346" stroke="#4caf50" stroke-width="1.5" marker-end="url(#arr)"/>
-    <rect x="120" y="346" width="240" height="36" rx="6" fill="#f6ffed" stroke="#52c41a" stroke-width="1.5"/><text x="240" y="369" text-anchor="middle" fill="#52c41a" font-size="10" font-weight="bold">AI 分析（自动梳理 / 引用文献 / 手动选择）</text>
-    <line x1="240" y1="382" x2="240" y2="402" stroke="#4caf50" stroke-width="1.5" marker-end="url(#arr)"/>
-    <rect x="120" y="402" width="240" height="36" rx="6" fill="#f9f0ff" stroke="#722ed1" stroke-width="1.5"/><text x="240" y="425" text-anchor="middle" fill="#722ed1" font-size="10" font-weight="bold">阅读器（OCR / 翻译 / AI 对话）</text>
-    <line x1="240" y1="438" x2="240" y2="458" stroke="#4caf50" stroke-width="1.5" marker-end="url(#arr)"/>
-    <rect x="155" y="458" width="170" height="36" rx="6" fill="#f0f5ff" stroke="#597ef7" stroke-width="1.5"/><text x="240" y="481" text-anchor="middle" fill="#597ef7" font-size="10" font-weight="bold">悬浮球继续对话</text>
-    <line x1="240" y1="494" x2="240" y2="514" stroke="#4caf50" stroke-width="1.5" marker-end="url(#arr)"/>
-    <rect x="130" y="514" width="220" height="36" rx="6" fill="#f9f0ff" stroke="#722ed1" stroke-width="1.5"/><text x="240" y="537" text-anchor="middle" fill="#722ed1" font-size="10" font-weight="bold">导出 Word / 合并导出 PDF</text>
-    <defs><marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4caf50"/></marker></defs>
-  </svg>
+  <img src="manual_images/diagram_22.png" width="480" height="560" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 7-1 完整操作流程图</div>
 </div>
 
@@ -1203,31 +873,13 @@
 
 <h3>工作流一：标准审查意见梳理</h3>
 <div class="diagram">
-  <svg width="480" height="60" viewBox="0 0 480 60">
-    <rect x="5" y="12" width="80" height="32" rx="6" fill="#4caf50"/><text x="45" y="33" text-anchor="middle" fill="white" font-size="9" font-weight="bold">搜索专利</text>
-    <text x="98" y="33" text-anchor="middle" fill="#4caf50" font-size="14">&#x2192;</text>
-    <rect x="108" y="12" width="70" height="32" rx="6" fill="#43a047"/><text x="143" y="33" text-anchor="middle" fill="white" font-size="9" font-weight="bold">查看概览</text>
-    <text x="191" y="33" text-anchor="middle" fill="#43a047" font-size="14">&#x2192;</text>
-    <rect x="201" y="12" width="80" height="32" rx="6" fill="#52c41a"/><text x="241" y="33" text-anchor="middle" fill="white" font-size="9" font-weight="bold">浏览看板</text>
-    <text x="294" y="33" text-anchor="middle" fill="#52c41a" font-size="14">&#x2192;</text>
-    <rect x="304" y="12" width="80" height="32" rx="6" fill="#fa8c16"/><text x="344" y="33" text-anchor="middle" fill="white" font-size="9" font-weight="bold">AI 分析</text>
-    <text x="397" y="33" text-anchor="middle" fill="#fa8c16" font-size="14">&#x2192;</text>
-    <rect x="407" y="12" width="65" height="32" rx="6" fill="#722ed1"/><text x="439" y="33" text-anchor="middle" fill="white" font-size="9" font-weight="bold">导出</text>
-  </svg>
+  <img src="manual_images/diagram_23.png" width="480" height="60" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 7-2 标准审查意见梳理工作流</div>
 </div>
 
 <h3>工作流二：自定义文档分析</h3>
 <div class="diagram">
-  <svg width="480" height="60" viewBox="0 0 480 60">
-    <rect x="5" y="12" width="95" height="32" rx="6" fill="#4caf50"/><text x="52" y="33" text-anchor="middle" fill="white" font-size="9" font-weight="bold">手动选择文档</text>
-    <text x="113" y="33" text-anchor="middle" fill="#4caf50" font-size="14">&#x2192;</text>
-    <rect x="123" y="12" width="95" height="32" rx="6" fill="#43a047"/><text x="170" y="33" text-anchor="middle" fill="white" font-size="9" font-weight="bold">自定义 AI 分析</text>
-    <text x="231" y="33" text-anchor="middle" fill="#43a047" font-size="14">&#x2192;</text>
-    <rect x="241" y="12" width="95" height="32" rx="6" fill="#52c41a"/><text x="288" y="33" text-anchor="middle" fill="white" font-size="9" font-weight="bold">溯源对照阅读</text>
-    <text x="349" y="33" text-anchor="middle" fill="#52c41a" font-size="14">&#x2192;</text>
-    <rect x="359" y="12" width="110" height="32" rx="6" fill="#722ed1"/><text x="414" y="33" text-anchor="middle" fill="white" font-size="9" font-weight="bold">导出 Word 文件</text>
-  </svg>
+  <img src="manual_images/diagram_24.png" width="480" height="60" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 7-3 自定义文档分析工作流</div>
 </div>
 
