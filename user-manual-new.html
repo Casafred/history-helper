@@ -61,7 +61,7 @@
   <div class="subtitle">PatentLens · 用户使用说明书</div>
   <div class="divider-line"></div>
   <div class="version-info">
-    版本 V0.3.0<br/>
+    版本 V0.4.0<br/>
     2026 年 6 月
   </div>
 </div>
@@ -346,10 +346,10 @@
 <h2>3.7 AI 分析标签页</h2>
 <p>AI 分析标签页是 AI 智能分析的核心区域，包含以下功能区域：</p>
 <ul>
-  <li><strong>自动梳理审查意见</strong> — 一键启动 AI 分析所有审查文档</li>
-  <li><strong>引用文献梳理</strong> — AI 分析审查意见中引用的对比文献</li>
-  <li><strong>手动选择</strong> — 勾选需要分析的文档，自定义分析范围</li>
-  <li><strong>分析结果展示</strong> — 以 Markdown 格式展示 AI 分析结果</li>
+  <li><strong>手动选择文档面板</strong> — 页面加载后默认展开，预勾选审查意见和答复类型文档，支持搜索筛选和已选汇总</li>
+  <li><strong>梳理审查意见</strong> — 在手动选择文档后点击"确认并开始AI梳理"，AI 分析选中的审查文档</li>
+  <li><strong>引用文献梳理</strong> — AI 分析审查意见中引用的对比文献，同样支持手动选择和搜索筛选</li>
+  <li><strong>分析结果展示</strong> — 以 Markdown 格式展示 AI 分析结果，流式输出无闪动</li>
   <li><strong>阅读器按钮</strong> — 打开全屏溯源对照阅读器</li>
   <li><strong>导出 Word 按钮</strong> — 将分析结果导出为 .docx 文件</li>
   <li><strong>AI 继续对话悬浮球</strong> — 分析完成后，右下角出现紫色悬浮球，点击可继续与 AI 对话</li>
@@ -432,11 +432,12 @@
 
 <h2>4.4 AI 分析审查意见</h2>
 <div class="steps">
-  <div class="step-item"><div class="step-content">切换到 <strong>"AI 分析"</strong> 标签页</div></div>
-  <div class="step-item"><div class="step-content">点击 <strong>"自动梳理审查意见"</strong> 按钮，AI 开始分析所有审查文档</div></div>
+  <div class="step-item"><div class="step-content">切换到 <strong>"AI 分析"</strong> 标签页，手动选择文档面板已默认展开</div></div>
+  <div class="step-item"><div class="step-content">面板中已默认勾选审查意见和答复类型文档，可使用 <strong>搜索栏</strong> 快速定位文档，或手动调整勾选</div></div>
+  <div class="step-item"><div class="step-content">面板底部显示 <strong>已选文档汇总</strong>，确认选择范围后点击 <strong>"确认并开始AI梳理"</strong></div></div>
   <div class="step-item"><div class="step-content">分析过程中可随时点击红色的 <strong>"中止梳理"</strong> 按钮中断</div></div>
-  <div class="step-item"><div class="step-content">分析完成后，结果以 <strong>Markdown 格式</strong> 展示在页面中</div></div>
-  <div class="step-item"><div class="step-content">（可选）点击 <strong>"引用文献梳理"</strong> 分析审查意见中引用的对比文献</div></div>
+  <div class="step-item"><div class="step-content">分析完成后，结果以 <strong>Markdown 格式</strong> 流式展示在页面中</div></div>
+  <div class="step-item"><div class="step-content">（可选）点击 <strong>"梳理引用文献"</strong> 分析审查意见中引用的对比文献（同样支持手动选择和搜索筛选）</div></div>
   <div class="step-item"><div class="step-content">分析完成后，右下角出现 <strong>紫色悬浮球</strong>，点击可继续与 AI 对话</div></div>
 </div>
 
@@ -600,57 +601,51 @@
   <div class="diagram-caption">图 5-4 AI 分析处理流程</div>
 </div>
 
-<h3>自动梳理审查意见</h3>
-<p>点击"自动梳理审查意见"按钮，AI 将自动分析所有审查文档，生成综合分析报告。分析内容包括：</p>
-<ul>
-  <li>各次审查意见的核心要点</li>
-  <li>审查员引用的对比文献及其应用</li>
-  <li>申请人的答复策略及效果</li>
-  <li>审查过程中的关键转折点</li>
-</ul>
-<p>分析过程中：</p>
-<ul>
-  <li><strong>流式响应</strong> — AI 分析结果实时流式输出，无需等待全部完成</li>
-  <li><strong>中止梳理</strong> — 分析过程中显示红色"中止梳理"按钮，可随时中断</li>
-</ul>
+<h3>手动选择文档面板</h3>
+<p>AI 分析采用手动选择模式，文档加载完成后选择面板自动展开，用户可自由勾选需要分析的文档后启动 AI 梳理。</p>
 
-<div class="tip-box warning"><div class="tip-title">注意</div>SPEC（说明书）文档默认不纳入 AI 分析范围。如需包含，可在手动选择中勾选。</div>
-
-<h3>引用文献梳理</h3>
-<p>点击"引用文献梳理"按钮，AI 将专门分析审查意见中引用的对比文献：</p>
-<ul>
-  <li>引用文献的基本信息</li>
-  <li>审查员如何引用该文献进行对比</li>
-  <li>申请人对引用文献的答复策略</li>
-  <li>引用文献与权利要求的对比分析</li>
-</ul>
-<p>分析过程中同样支持流式响应和中止操作（红色"中止引用梳理"按钮）。</p>
-
-<h3>手动选择文档</h3>
 <div class="diagram">
-  <svg width="440" height="220" viewBox="0 0 440 220">
-    <rect x="10" y="10" width="420" height="200" rx="8" fill="#fafafa" stroke="#ddd" stroke-width="1"/>
-    <text x="30" y="35" fill="#333" font-size="11" font-weight="bold">手动选择文档</text>
-    <rect x="280" y="18" width="50" height="22" rx="4" fill="#e8f4fd" stroke="#1890FF" stroke-width="1"/><text x="305" y="33" text-anchor="middle" fill="#1890FF" font-size="8">全选</text>
-    <rect x="335" y="18" width="50" height="22" rx="4" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/><text x="360" y="33" text-anchor="middle" fill="#666" font-size="8">全不选</text>
-    <rect x="390" y="18" width="30" height="22" rx="4" fill="#f6ffed" stroke="#52c41a" stroke-width="1"/><text x="405" y="33" text-anchor="middle" fill="#52c41a" font-size="8">默认</text>
-    <rect x="20" y="50" width="400" height="24" rx="3" fill="#fff" stroke="#eee" stroke-width="1"/><text x="35" y="66" fill="#52c41a" font-size="10">&#x2611;</text><text x="55" y="66" fill="#e74c3c" font-size="9" font-weight="bold">CTFR</text><text x="100" y="66" fill="#333" font-size="9">Non-Final Rejection</text><rect x="330" y="54" width="60" height="16" rx="8" fill="#fde8e8"/><text x="360" y="65" text-anchor="middle" fill="#e74c3c" font-size="7">审查意见</text>
-    <rect x="20" y="78" width="400" height="24" rx="3" fill="#f8f9fa" stroke="#eee" stroke-width="1"/><text x="35" y="94" fill="#52c41a" font-size="10">&#x2611;</text><text x="55" y="94" fill="#1890FF" font-size="9" font-weight="bold">A</text><text x="100" y="94" fill="#333" font-size="9">Response to Office Action</text><rect x="330" y="82" width="60" height="16" rx="8" fill="#e8f4fd"/><text x="360" y="93" text-anchor="middle" fill="#1890FF" font-size="7">答复</text>
-    <rect x="20" y="106" width="400" height="24" rx="3" fill="#fff" stroke="#eee" stroke-width="1"/><text x="35" y="122" fill="#ccc" font-size="10">&#x2610;</text><text x="55" y="122" fill="#999" font-size="9" font-weight="bold">SPEC</text><text x="100" y="122" fill="#999" font-size="9">Specification</text><rect x="330" y="110" width="60" height="16" rx="8" fill="#f5f5f5"/><text x="360" y="121" text-anchor="middle" fill="#999" font-size="7">说明书</text>
-    <rect x="20" y="134" width="400" height="24" rx="3" fill="#f8f9fa" stroke="#eee" stroke-width="1"/><text x="35" y="150" fill="#52c41a" font-size="10">&#x2611;</text><text x="55" y="150" fill="#e74c3c" font-size="9" font-weight="bold">CTNF</text><text x="100" y="150" fill="#333" font-size="9">Final Rejection</text><rect x="330" y="138" width="60" height="16" rx="8" fill="#fde8e8"/><text x="360" y="149" text-anchor="middle" fill="#e74c3c" font-size="7">审查意见</text>
-    <text x="30" y="185" fill="#888" font-size="9">默认选择：审查意见 + 答复类型 | SPEC 文档默认排除</text>
+  <svg width="440" height="280" viewBox="0 0 440 280">
+    <rect x="10" y="10" width="420" height="260" rx="8" fill="#fafafa" stroke="#ddd" stroke-width="1"/>
+    <text x="30" y="35" fill="#333" font-size="11" font-weight="bold">选择分析文件范围</text>
+    <rect x="20" y="45" width="260" height="22" rx="4" fill="#fff" stroke="#ccc" stroke-width="1"/><text x="30" y="60" fill="#999" font-size="8">搜索文档名称、代码、日期...</text>
+    <rect x="290" y="45" width="40" height="22" rx="4" fill="#e8f4fd" stroke="#1890FF" stroke-width="1"/><text x="310" y="60" text-anchor="middle" fill="#1890FF" font-size="7">全选</text>
+    <rect x="335" y="45" width="50" height="22" rx="4" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/><text x="360" y="60" text-anchor="middle" fill="#666" font-size="7">全不选</text>
+    <rect x="390" y="45" width="30" height="22" rx="4" fill="#f6ffed" stroke="#52c41a" stroke-width="1"/><text x="405" y="60" text-anchor="middle" fill="#52c41a" font-size="7">默认</text>
+    <rect x="20" y="75" width="400" height="24" rx="3" fill="#fff" stroke="#eee" stroke-width="1"/><text x="35" y="91" fill="#52c41a" font-size="10">&#x2611;</text><text x="55" y="91" fill="#e74c3c" font-size="9" font-weight="bold">CTFR</text><text x="100" y="91" fill="#333" font-size="9">Non-Final Rejection</text><rect x="330" y="79" width="60" height="16" rx="8" fill="#fde8e8"/><text x="360" y="90" text-anchor="middle" fill="#e74c3c" font-size="7">审查意见</text>
+    <rect x="20" y="103" width="400" height="24" rx="3" fill="#f8f9fa" stroke="#eee" stroke-width="1"/><text x="35" y="119" fill="#52c41a" font-size="10">&#x2611;</text><text x="55" y="119" fill="#1890FF" font-size="9" font-weight="bold">A</text><text x="100" y="119" fill="#333" font-size="9">Response to Office Action</text><rect x="330" y="107" width="60" height="16" rx="8" fill="#e8f4fd"/><text x="360" y="118" text-anchor="middle" fill="#1890FF" font-size="7">答复</text>
+    <rect x="20" y="131" width="400" height="24" rx="3" fill="#fff" stroke="#eee" stroke-width="1"/><text x="35" y="147" fill="#ccc" font-size="10">&#x2610;</text><text x="55" y="147" fill="#999" font-size="9" font-weight="bold">SPEC</text><text x="100" y="147" fill="#999" font-size="9">Specification</text><rect x="330" y="135" width="60" height="16" rx="8" fill="#f5f5f5"/><text x="360" y="146" text-anchor="middle" fill="#999" font-size="7">说明书</text>
+    <rect x="20" y="159" width="400" height="24" rx="3" fill="#f8f9fa" stroke="#eee" stroke-width="1"/><text x="35" y="175" fill="#52c41a" font-size="10">&#x2611;</text><text x="55" y="175" fill="#e74c3c" font-size="9" font-weight="bold">CTNF</text><text x="100" y="175" fill="#333" font-size="9">Final Rejection</text><rect x="330" y="163" width="60" height="16" rx="8" fill="#fde8e8"/><text x="360" y="174" text-anchor="middle" fill="#e74c3c" font-size="7">审查意见</text>
+    <rect x="20" y="195" width="400" height="30" rx="4" fill="#f0f0f0" stroke="#eee" stroke-width="1"/>
+    <text x="30" y="214" fill="#2d6aa6" font-size="9" font-weight="bold">已选 3 份：</text><text x="95" y="214" fill="#666" font-size="8">CTFR - Non-Final Rejection、A - Response、CTNF - Final Rejection</text>
+    <rect x="20" y="235" width="100" height="26" rx="4" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/><text x="70" y="252" text-anchor="middle" fill="#666" font-size="9">取消</text>
+    <rect x="130" y="235" width="140" height="26" rx="4" fill="#e8f4fd" stroke="#1890FF" stroke-width="1"/><text x="200" y="252" text-anchor="middle" fill="#1890FF" font-size="9">合并导出选中文档</text>
+    <rect x="280" y="235" width="140" height="26" rx="4" fill="#2d6aa6"/><text x="350" y="252" text-anchor="middle" fill="white" font-size="9" font-weight="bold">确认并开始AI梳理</text>
   </svg>
-  <div class="diagram-caption">图 5-5 手动选择文档示意</div>
+  <div class="diagram-caption">图 5-5 手动选择文档面板示意（含搜索栏、已选汇总、合并导出）</div>
 </div>
 
 <ul>
+  <li><strong>搜索栏</strong> — 面板顶部搜索框，输入关键词实时过滤文档（支持文档名称、代码、日期等多字段匹配）</li>
   <li><strong>全选</strong> — 勾选所有文档</li>
   <li><strong>全不选</strong> — 取消所有勾选</li>
   <li><strong>默认选择</strong> — 恢复默认勾选状态（审查意见 + 答复类型，排除 SPEC）</li>
   <li><strong>单独勾选</strong> — 点击每个文档前的复选框进行单独选择</li>
+  <li><strong>已选汇总</strong> — 面板底部实时显示已勾选的文档数量和名称列表</li>
+  <li><strong>合并导出选中文档</strong> — 将勾选的文档直接合并导出为 PDF，无需切换到合并导出弹窗</li>
+  <li><strong>确认并开始AI梳理</strong> — 确认选择后启动 AI 分析</li>
 </ul>
 
-<div class="tip-box"><div class="tip-title">提示</div>默认选择包含 office_action（审查意见）和 response（答复）类型的文档，SPEC（说明书）文档默认排除。您可以根据需要手动调整选择范围。</div>
+<div class="tip-box"><div class="tip-title">提示</div>默认选择包含 office_action（审查意见）和 response（答复）类型的文档，SPEC（说明书）文档默认排除。您可以根据需要手动调整选择范围。勾选变更会实时保存，关闭面板后再次打开仍保留您的选择。</div>
+
+<h3>选择记忆</h3>
+<p>手动选择面板支持选择状态持久化：</p>
+<ul>
+  <li><strong>实时保存</strong> — 每次勾选或取消勾选时，选择状态自动保存到本地存储</li>
+  <li><strong>关闭保留</strong> — 点击"取消"关闭面板后，再次打开仍保留上次的选择状态</li>
+  <li><strong>跨会话保持</strong> — 同一专利号的选择状态在不同会话间保持一致</li>
+  <li><strong>默认选择恢复</strong> — 点击"默认选择"按钮可随时恢复到系统默认勾选状态</li>
+</ul>
 
 <h3>分析结果展示</h3>
 <p>AI 分析结果以 Markdown 格式展示，支持以下交互：</p>
@@ -984,27 +979,36 @@
 <p>合并后的 PDF 中，每个文档前会自动插入一页封面，包含以下信息：</p>
 <table>
   <tr><th>封面元素</th><th>说明</th></tr>
+  <tr><td>专利号</td><td>用户搜索时输入的专利号，显示在顶部蓝色条内（如 Patent: US12030161B2 (US)）</td></tr>
+  <tr><td>专利标题</td><td>专利发明名称，显示在蓝色条下方居中</td></tr>
+  <tr><td>发明人/申请人</td><td>发明人或申请人信息，与申请日一同显示</td></tr>
   <tr><td>文档标题</td><td>原文档的英文标题（如 Non-Final Rejection）</td></tr>
   <tr><td>中文标题</td><td>自动翻译的中文标题（如 非最终驳回）</td></tr>
   <tr><td>文档代码</td><td>文档类型代码（如 CTNF）</td></tr>
   <tr><td>日期</td><td>文档日期</td></tr>
-  <tr><td>页眉标记</td><td><em><strong>by PatentLens</strong></em> 斜体加粗艺术字，标识生成工具</td></tr>
+  <tr><td>页眉标记</td><td><em><strong>by PatentLens</strong></em> 标识生成工具</td></tr>
 </table>
 
 <div class="diagram">
-  <svg width="300" height="380" viewBox="0 0 300 380">
-    <rect x="20" y="10" width="260" height="360" rx="4" fill="#fff" stroke="#ddd" stroke-width="1.5"/>
-    <text x="260" y="35" text-anchor="end" fill="#4a90d9" font-size="10" font-style="italic" font-weight="bold">by PatentLens</text>
-    <line x1="40" y1="50" x2="260" y2="50" stroke="#e8e8e8" stroke-width="1"/>
-    <text x="150" y="100" text-anchor="middle" fill="#1a3a5c" font-size="14" font-weight="bold">Non-Final Rejection</text>
-    <text x="150" y="130" text-anchor="middle" fill="#2d6aa6" font-size="12">非最终驳回</text>
-    <rect x="100" y="155" width="100" height="24" rx="12" fill="#fde8e8" stroke="#e74c3c" stroke-width="1"/><text x="150" y="171" text-anchor="middle" fill="#e74c3c" font-size="10" font-weight="bold">CTNF</text>
-    <text x="150" y="210" text-anchor="middle" fill="#888" font-size="10">2025-01-14</text>
-    <line x1="80" y1="240" x2="220" y2="240" stroke="#e8e8e8" stroke-width="1"/>
-    <text x="150" y="280" text-anchor="middle" fill="#ccc" font-size="9">PatentLens 合并导出</text>
-    <text x="150" y="300" text-anchor="middle" fill="#ccc" font-size="8">自动生成封面页</text>
+  <svg width="300" height="420" viewBox="0 0 300 420">
+    <rect x="20" y="10" width="260" height="400" rx="4" fill="#fff" stroke="#ddd" stroke-width="1.5"/>
+    <rect x="20" y="10" width="260" height="60" rx="4" fill="#4a7ab5"/>
+    <rect x="20" y="50" width="260" height="20" fill="#4a7ab5"/>
+    <text x="40" y="38" fill="white" font-size="9" font-weight="bold">Patent: US12030161B2 (US)</text>
+    <text x="260" y="38" text-anchor="end" fill="rgba(255,255,255,0.7)" font-size="8" font-style="italic">by PatentLens</text>
+    <text x="40" y="58" fill="rgba(255,255,255,0.8)" font-size="7">Document 1 / 5</text>
+    <text x="150" y="95" text-anchor="middle" fill="#555" font-size="9">Method and Apparatus for...</text>
+    <text x="150" y="112" text-anchor="middle" fill="#888" font-size="7">Inventor: John Smith  |  Filed: 2023-06-15</text>
+    <line x1="60" y1="125" x2="240" y2="125" stroke="#ddd" stroke-width="1"/>
+    <text x="150" y="160" text-anchor="middle" fill="#1a3a5c" font-size="14" font-weight="bold">Non-Final Rejection</text>
+    <text x="150" y="185" text-anchor="middle" fill="#2d6aa6" font-size="12">非最终驳回</text>
+    <rect x="100" y="200" width="100" height="24" rx="12" fill="#fde8e8" stroke="#e74c3c" stroke-width="1"/><text x="150" y="216" text-anchor="middle" fill="#e74c3c" font-size="10" font-weight="bold">CTNF</text>
+    <text x="150" y="255" text-anchor="middle" fill="#888" font-size="10">2025-01-14</text>
+    <line x1="80" y1="280" x2="220" y2="280" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="150" y="320" text-anchor="middle" fill="#ccc" font-size="9">PatentLens 合并导出</text>
+    <text x="150" y="340" text-anchor="middle" fill="#ccc" font-size="8">自动生成封面页</text>
   </svg>
-  <div class="diagram-caption">图 5-14 合并导出封面页示意</div>
+  <div class="diagram-caption">图 5-14 合并导出封面页示意（含专利著录信息）</div>
 </div>
 
 <h3>搜索筛选</h3>
@@ -1091,27 +1095,30 @@
 <p>AI 分析过程中，界面上会显示红色的"中止梳理"或"中止引用梳理"按钮，点击即可中断当前分析。已生成的部分结果会保留显示。</p>
 
 <h3>Q6：为什么 SPEC 文档默认不纳入 AI 分析？</h3>
-<p>SPEC（说明书）通常篇幅很长，纳入分析会消耗大量 Token 且对审查意见梳理帮助有限。默认排除 SPEC 可以提高分析效率、降低 API 调用成本。如需包含，可在手动选择中勾选 SPEC 文档。</p>
+<p>SPEC（说明书）通常篇幅很长，纳入分析会消耗大量 Token 且对审查意见梳理帮助有限。默认排除 SPEC 可以提高分析效率、降低 API 调用成本。如需包含，可在手动选择面板中勾选 SPEC 文档。</p>
 
-<h3>Q7：导出的 Word 文件中表格可以编辑吗？</h3>
+<h3>Q7：手动选择面板关闭后，再次打开会保留之前的选择吗？</h3>
+<p>会。手动选择面板的勾选状态会实时保存到本地存储，关闭面板后再次打开仍保留您的选择。如需恢复默认状态，可点击面板中的"默认选择"按钮。</p>
+
+<h3>Q8：导出的 Word 文件中表格可以编辑吗？</h3>
 <p>可以。导出的 .docx 文件中，Markdown 表格已渲染为真正的 Word 表格，支持在 Word 中直接编辑单元格内容、调整列宽、修改样式等操作。表头带有彩色背景，可根据需要修改。</p>
 
-<h3>Q8：审查看板的筛选功能如何使用？</h3>
+<h3>Q9：审查看板的筛选功能如何使用？</h3>
 <p>审查看板顶部提供两种筛选方式：&#x2460;在搜索框中输入关键词，实时筛选包含该关键词的文档卡片；&#x2461;点击类型标签（全部/审查意见/答复/请求/授权/通知/其他），按文档类型筛选。两种方式可同时使用，实现精确过滤。</p>
 
-<h3>Q9：溯源对照阅读器中的引用链接如何使用？</h3>
+<h3>Q10：溯源对照阅读器中的引用链接如何使用？</h3>
 <p>在阅读器左侧原文中，被引用的部分会以高亮显示，并带有可点击的链接标记。点击链接后，右侧内容区会自动滚动到对应的分析段落，方便对照查看。</p>
 
-<h3>Q10：软件运行需要什么运行时环境？</h3>
+<h3>Q11：软件运行需要什么运行时环境？</h3>
 <p>需要 Microsoft Edge WebView2 运行时。Windows 10 2004+ 和 Windows 11 已内置，无需额外安装。较早版本的 Windows 10 可能需要手动安装 WebView2 运行时。</p>
 
-<h3>Q11：手动选择文档中的"默认选择"是什么？</h3>
+<h3>Q12：手动选择文档中的"默认选择"是什么？</h3>
 <p>默认选择包含 office_action（审查意见）和 response（答复）类型的文档，同时排除 SPEC（说明书）文档。点击"默认选择"按钮可恢复到此默认状态。</p>
 
-<h3>Q12：审查看板各列可以独立滚动吗？</h3>
+<h3>Q13：审查看板各列可以独立滚动吗？</h3>
 <p>可以。看板各列等高显示，当某列中文档较多时，该列可独立上下滚动浏览，不影响其他列的查看。</p>
 
-<h3>Q13：OCR 提取失败怎么办？</h3>
+<h3>Q14：OCR 提取失败怎么办？</h3>
 <p>请检查以下几点：</p>
 <ul>
   <li>如果使用 PaddleOCR-VL 引擎，确保网络连接正常（首次使用需下载模型）</li>
@@ -1120,7 +1127,7 @@
   <li>可在设置 &#x2192; OCR Tab 中切换引擎重试</li>
 </ul>
 
-<h3>Q14：翻译功能如何配置？</h3>
+<h3>Q15：翻译功能如何配置？</h3>
 <p>翻译功能使用独立的模型配置，步骤如下：</p>
 <ul>
   <li>打开设置对话框，切换到 <strong>"翻译" Tab</strong></li>
@@ -1130,10 +1137,10 @@
   <li>设置默认目标语言（中文/English/日本語/한국어）</li>
 </ul>
 
-<h3>Q15：阅读模式如何退出？</h3>
+<h3>Q16：阅读模式如何退出？</h3>
 <p>阅读模式下，点击右侧 Tab 面板顶部的 <strong>关闭按钮（&#x2715;）</strong> 即可退出阅读模式，恢复原始布局。左侧文件列表会自动展开恢复，PDF 阅读器回到原始宽度。</p>
 
-<h3>Q16：AI 对话功能如何使用？</h3>
+<h3>Q17：AI 对话功能如何使用？</h3>
 <p>AI 对话功能有两种使用方式：</p>
 <ul>
   <li><strong>阅读器内 AI 对话</strong> — 在溯源对照阅读器中点击工具栏"AI 对话"按钮，进入阅读模式，右侧 Tab 面板切换到"AI 对话"，可基于当前文档与 AI 实时对话</li>
@@ -1224,6 +1231,15 @@
 </div>
 
 <h2>7.5 版本更新清单</h2>
+
+<h3>V0.4.0 (2026-06)</h3>
+<table>
+  <tr><th>字段</th><th>内容</th></tr>
+  <tr><td>变更类型</td><td>功能更新 + 交互重构</td></tr>
+  <tr><td>影响章节</td><td>3.7、4.4、5.5、5.13、7.5</td></tr>
+  <tr><td>变更说明</td><td>AI 梳理交互重构：取消自动梳理按钮，改为手动选择+默认勾选模式，选择面板默认展开显示；选择面板新增搜索栏（支持文档名称/代码/日期多字段匹配）、已选文档汇总区域（实时显示勾选数量和名称列表）；勾选状态实时保存到本地存储，关闭面板后再次打开仍保留用户选择；合并导出 PDF 封面页新增专利著录信息（专利号、专利标题、发明人/申请人、申请日），每页封面均标注所属专利；AI 流式输出采用 RAF 节流机制，防止其他功能区域闪动；引用文献手动选择面板同步增加搜索栏、汇总区和实时保存功能；启动动画替换为 16:9 Lensgif.gif，白色背景容器；应用 LOGO 替换为透明背景大 LOGO；新增 GIF/JPG/WEBP 等 MIME 类型支持</td></tr>
+  <tr><td>图示更新</td><td>更新图 5-5（手动选择面板增加搜索栏、汇总区、合并导出按钮）、图 5-14（封面页增加专利著录信息）</td></tr>
+</table>
 
 <h3>V0.3.0 (2026-06)</h3>
 <table>
