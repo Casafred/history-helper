@@ -139,9 +139,9 @@ const readerDocList = document.getElementById("reader-doc-list");
 const readerContent = document.getElementById("reader-content");
 const readerExportBtn = document.getElementById("reader-export-btn");
 const exportWordBtn = document.getElementById("export-word-btn");
-const readerPdfToggle = document.getElementById("reader-pdf-toggle");
-const readerDockBtn = document.getElementById("reader-dock-btn");
-const readerFullscreenBtn = document.getElementById("reader-fullscreen-btn");
+const readerPdfToggle = null;
+const readerDockBtn = null;
+const readerFullscreenBtn = null;
 const readerPdfView = document.getElementById("reader-pdf-view");
 const readerPdfContainer = document.getElementById("reader-pdf-container");
 const pdfPageInfo = document.getElementById("pdf-page-info");
@@ -3108,7 +3108,7 @@ function parseDate(dateStr) {
   return new Date(dateStr).getTime();
 }
 
-function openReader(defaultToPdf = false, skipRender = false) {
+function openReader(defaultToPdf = true, skipRender = false) {
   if (!readerModal) return;
   const items = kanbanState.documents;
   if (!items || items.length === 0) {
@@ -3126,7 +3126,8 @@ function openReader(defaultToPdf = false, skipRender = false) {
     if (iconOpen) iconOpen.classList.add("hidden");
     if (iconBack) iconBack.classList.remove("hidden");
   }
-  if (defaultToPdf && !pdfViewState.active) {
+  // Always open in PDF view mode
+  if (!pdfViewState.active) {
     togglePdfView(skipRender);
   }
 
@@ -4218,6 +4219,8 @@ function enterReadingMode(activePanel) {
   const rightPanel = document.getElementById("reader-right-panel");
   if (readerBody) readerBody.classList.add("reading-mode");
   if (rightPanel) rightPanel.classList.remove("hidden");
+  // Tuck floating ball to the right when panel is open
+  if (readerFloatingBall) readerFloatingBall.classList.add("tucked");
   // Switch to the specified panel tab
   if (activePanel) {
     switchRightPanelTab(activePanel);
@@ -4233,6 +4236,8 @@ function exitReadingMode() {
   if (translatePanel) translatePanel.classList.add("hidden");
   if (chatPanel) chatPanel.classList.add("hidden");
   if (readerBody) readerBody.classList.remove("reading-mode");
+  // Restore floating ball position
+  if (readerFloatingBall) readerFloatingBall.classList.remove("tucked");
   if (rightPanel) rightPanel.classList.add("hidden");
   // Deactivate chat toggle button
   if (readerChatToggle) readerChatToggle.classList.remove("active");
@@ -5055,21 +5060,6 @@ document.addEventListener("DOMContentLoaded", () => {
     readerExportBtn.addEventListener("click", exportToWord);
   }
 
-  if (readerPdfToggle) {
-    readerPdfToggle.addEventListener("click", togglePdfView);
-  }
-
-  if (readerDockBtn) {
-    readerDockBtn.addEventListener("click", () => {
-      const content = document.querySelector(".reader-modal-content");
-      if (content) {
-        content.classList.add("docked");
-        readerDockBtn.classList.add("hidden");
-        readerFullscreenBtn.classList.remove("hidden");
-      }
-    });
-  }
-
   // Sidebar toggle
   const readerSidebarToggle = document.getElementById("reader-sidebar-toggle");
   const readerSidebar = document.getElementById("reader-sidebar");
@@ -5092,17 +5082,6 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         const expandBtn = document.getElementById("reader-sidebar-expand");
         if (expandBtn) expandBtn.remove();
-      }
-    });
-  }
-
-  if (readerFullscreenBtn) {
-    readerFullscreenBtn.addEventListener("click", () => {
-      const content = document.querySelector(".reader-modal-content");
-      if (content) {
-        content.classList.remove("docked");
-        readerFullscreenBtn.classList.add("hidden");
-        readerDockBtn.classList.remove("hidden");
       }
     });
   }

@@ -284,6 +284,8 @@ body {
   z-index: 100;
   background: var(--bg-primary);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  max-width: 900px;
+  width: 100%;
 }
 
 .tab-btn {
@@ -1566,6 +1568,18 @@ body {
 
 .reader-floating-ball.hidden {
   display: none;
+}
+
+/* When right panel is open, tuck the floating ball to the far right */
+.reader-floating-ball.tucked {
+  right: -48px;
+  opacity: 0.5;
+  transition: right 0.3s ease, opacity 0.3s ease, transform 0.2s, box-shadow 0.2s;
+}
+
+.reader-floating-ball.tucked:hover {
+  right: 10px;
+  opacity: 1;
 }
 
 .reader-floating-ball .reader-fb-icon-open.hidden,
