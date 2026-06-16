@@ -4990,6 +4990,8 @@ document.addEventListener("DOMContentLoaded", () => {
   if (readerModal) {
     readerModal.querySelector(".modal-overlay").addEventListener("click", () => {
       const content = document.querySelector(".reader-modal-content");
+      // Exit reading mode first (removes tucked, hides right panel)
+      exitReadingMode();
       if (content && content.classList.contains("docked")) {
         // In docked mode, minimize to floating ball instead of closing
         readerModal.classList.add("hidden");
@@ -5214,6 +5216,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         // Reader is visible → minimize to report view
         readerModal.classList.add("hidden");
+        exitReadingMode();
         updateFloatingBallState(false);
       }
     });
