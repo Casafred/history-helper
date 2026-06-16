@@ -41,6 +41,17 @@
       </section>
 
       <section id="result-section" class="result-section hidden">
+        <div class="result-layout">
+          <div id="history-sidebar" class="history-sidebar collapsed">
+            <div class="history-sidebar-toggle" title="历史记录">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="history-sidebar-content">
+              <div class="history-sidebar-title">历史记录</div>
+              <div id="history-list" class="history-list"></div>
+            </div>
+          </div>
+          <div class="result-main">
         <div class="tabs">
           <button class="tab-btn active" data-tab="overview">概览</button>
           <button class="tab-btn" data-tab="family">同族</button>
@@ -115,6 +126,8 @@
 
 
 
+          </div><!-- .result-main -->
+        </div><!-- .result-layout -->
       </section>
 
       <section id="convert-section" class="convert-section hidden">
@@ -237,6 +250,7 @@
             <button class="settings-tab-btn" data-settings-tab="ocr">OCR</button>
             <button class="settings-tab-btn" data-settings-tab="translate">翻译</button>
             <button class="settings-tab-btn" data-settings-tab="prompts">提示词</button>
+            <button class="settings-tab-btn" data-settings-tab="cache">缓存</button>
           </div>
           <div class="modal-body">
             <!-- AI Service Tab -->
@@ -368,6 +382,21 @@
                 <button id="prompts-save-btn" class="btn-primary">保存</button>
               </div>
             </div>
+
+            <!-- Cache Tab -->
+            <div id="settings-tab-cache" class="settings-tab-content">
+              <div class="form-group">
+                <label>缓存概览</label>
+                <div id="cache-overview" style="color:var(--text-secondary);font-size:13px;">加载中...</div>
+              </div>
+              <div class="form-group">
+                <label>已缓存专利</label>
+                <div id="cache-patent-list" style="max-height:240px;overflow-y:auto;"></div>
+              </div>
+              <div class="form-actions">
+                <button id="cache-clear-btn" class="btn-danger">清除全部缓存</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -401,6 +430,20 @@
         </div>
       </div>
     </main>
+
+    <!-- Cache Confirm Dialog -->
+    <div id="cache-confirm-dialog" class="cache-confirm-dialog hidden">
+      <div class="cache-confirm-overlay"></div>
+      <div class="cache-confirm-box">
+        <div class="cache-confirm-title">保存工作进度</div>
+        <div class="cache-confirm-message">当前专利的查询结果和梳理内容尚未保存，是否保存到历史记录？</div>
+        <div class="cache-confirm-actions">
+          <button id="cache-dialog-save-btn" class="btn-primary">保存</button>
+          <button id="cache-dialog-skip-btn" class="btn-secondary">不保存</button>
+          <button id="cache-dialog-cancel-btn" class="btn-secondary">取消</button>
+        </div>
+      </div>
+    </div>
 
     <footer class="app-footer">
       Developed by Alfred Shi

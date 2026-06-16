@@ -326,6 +326,20 @@ searchBtn.addEventListener("click", async () => {
   const input = patentInput.value.trim();
   if (!input) return;
 
+  // Check for unsaved work before starting a new search
+  if (kanbanState.hasUnsavedWork && currentData) {
+    const currentPatent = currentData.raw || (currentData.office + currentData.applicationNumber);
+    const newPn = parsePatentNumber(input);
+    const newPatent = newPn ? (newPn.raw || input) : input;
+    if (currentPatent !== newPatent) {
+      promptSaveCache(() => { doSearch(input); });
+      return;
+    }
+  }
+  doSearch(input);
+});
+
+async function doSearch(input) {
   // 退出首页居中模式，平滑过渡到紧凑布局
   const appEl = document.getElementById("app");
   if (appEl && appEl.classList.contains("home-mode")) {
@@ -345,7 +359,7 @@ searchBtn.addEventListener("click", async () => {
   const docNum = pn.applicationNumber;
   const selectedQueryType = queryTypeSelect ? queryTypeSelect.value : null;
   const queryType = selectedQueryType || pn.queryType || "application";
-  const result = { office, applicationNumber: docNum, queryType };
+  const result = { office, raw: pn.raw, applicationNumber: docNum, queryType };
   const warnings = [];
 
   try {
@@ -410,14 +424,415 @@ searchBtn.addEventListener("click", async () => {
   resultSection.classList.remove("hidden");
   searchBtn.disabled = false;
   loading.classList.add("hidden");
-});
+
+  // Refresh history list after new search
+  refreshHistoryList();
+}
 
 let kanbanState = {
   documents: [],
   extractions: {},
   analysis: "",
   traceIndex: {},
+  hasUnsavedWork: false,
 };
+
+// ── PatentCache - manages cached patent query states ──
+const PatentCache = {
+  STORAGE_KEY: "patentlens-cache",
+
+  getAll() {
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  },
+
+  get(patentNumber) {
+    const all = this.getAll();
+    return all[patentNumber] || null;
+  },
+
+  save(patentNumber, data) {
+    const all = this.getAll();
+    all[patentNumber] = data;
+    try {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+    } catch (e) {
+      // Quota exceeded - try removing oldest entries
+      if (e.name === "QuotaExceededError" || e.code === 22 || e.message.includes("quota")) {
+        const entries = Object.entries(all);
+        entries.sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
+        // Remove oldest entries until we can save
+        while (entries.length > 0) {
+          const oldest = entries.shift();
+          delete all[oldest[0]];
+          try {
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+            // Try saving again with the new entry
+            all[patentNumber] = data;
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+            return true;
+          } catch {
+            continue;
+          }
+        }
+      }
+      console.error("PatentCache save failed:", e);
+      return false;
+    }
+    return true;
+  },
+
+  remove(patentNumber) {
+    const all = this.getAll();
+    delete all[patentNumber];
+    try {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+    } catch {}
+  },
+
+  clearAll() {
+    try {
+      localStorage.removeItem(this.STORAGE_KEY);
+    } catch {}
+  },
+
+  getSize() {
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY);
+      return raw ? new Blob([raw]).size : 0;
+    } catch { return 0; }
+  },
+
+  formatSize(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  },
+
+  hasUnsavedWork() {
+    return kanbanState.hasUnsavedWork && currentData;
+  },
+
+  captureCurrentState() {
+    if (!currentData) return null;
+    const patentNumber = currentData.raw || (currentData.office + currentData.applicationNumber);
+    if (!patentNumber) return null;
+
+    // Deep-clone kanbanState but skip pageDimensions in traceIndex
+    const traceIndexClone = {};
+    for (const [key, val] of Object.entries(kanbanState.traceIndex)) {
+      const { pageDimensions, ...rest } = val;
+      traceIndexClone[key] = rest;
+    }
+
+    // Deep-clone extractions but skip pageDimensions
+    const extractionsClone = {};
+    for (const [idx, ext] of Object.entries(kanbanState.extractions)) {
+      const { pageDimensions, ...rest } = ext;
+      extractionsClone[idx] = rest;
+    }
+
+    const hasOCR = Object.keys(kanbanState.extractions).length > 0;
+    const hasAnalysis = !!(kanbanState.analysis);
+    const hasCitedRefs = !!(kanbanState.citedRefsAnalysis);
+
+    return {
+      patentNumber,
+      office: currentData.office || "",
+      timestamp: Date.now(),
+      currentData: JSON.parse(JSON.stringify(currentData)),
+      kanbanState: {
+        documents: JSON.parse(JSON.stringify(kanbanState.documents)),
+        extractions: extractionsClone,
+        analysis: kanbanState.analysis || "",
+        analysisSystemPrompt: kanbanState.analysisSystemPrompt || "",
+        analysisUserMessage: kanbanState.analysisUserMessage || "",
+        traceIndex: traceIndexClone,
+        citedRefsAnalysis: kanbanState.citedRefsAnalysis || "",
+      },
+      hasOCR,
+      hasAnalysis,
+      hasCitedRefs,
+    };
+  },
+
+  restoreState(cacheEntry) {
+    if (!cacheEntry) return false;
+    try {
+      currentData = cacheEntry.currentData;
+
+      // Re-render everything first (renderKanban will reset kanbanState)
+      try { renderOverview(currentData); } catch (e) { console.error("renderOverview:", e); }
+      try { renderFamily(currentData); } catch (e) { console.error("renderFamily:", e); }
+      try { renderKanban(currentData); } catch (e) { console.error("renderKanban:", e); }
+      try { renderTimeline(currentData); } catch (e) { console.error("renderTimeline:", e); }
+
+      // Now restore kanbanState AFTER renderKanban (which resets it)
+      kanbanState.documents = cacheEntry.kanbanState.documents || [];
+      kanbanState.analysis = cacheEntry.kanbanState.analysis || "";
+      kanbanState.analysisSystemPrompt = cacheEntry.kanbanState.analysisSystemPrompt || "";
+      kanbanState.analysisUserMessage = cacheEntry.kanbanState.analysisUserMessage || "";
+      kanbanState.citedRefsAnalysis = cacheEntry.kanbanState.citedRefsAnalysis || "";
+      kanbanState.hasUnsavedWork = false;
+
+      // Restore extractions - re-populate pageDimensions from blocks
+      kanbanState.extractions = {};
+      if (cacheEntry.kanbanState.extractions) {
+        for (const [idx, ext] of Object.entries(cacheEntry.kanbanState.extractions)) {
+          kanbanState.extractions[idx] = { ...ext, pageDimensions: {} };
+          // Re-populate pageDimensions from blocks if available
+          if (ext.blocks && Array.isArray(ext.blocks)) {
+            for (const b of ext.blocks) {
+              if (b.page != null && b.bbox) {
+                if (!kanbanState.extractions[idx].pageDimensions[b.page]) {
+                  // Estimate page dimensions from bbox if not available
+                  kanbanState.extractions[idx].pageDimensions[b.page] = null;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Restore traceIndex - re-populate pageDimensions from extractions
+      kanbanState.traceIndex = {};
+      if (cacheEntry.kanbanState.traceIndex) {
+        for (const [key, val] of Object.entries(cacheEntry.kanbanState.traceIndex)) {
+          const ext = kanbanState.extractions[val.docIdx];
+          const pd = ext && ext.pageDimensions ? (ext.pageDimensions[val.page] || null) : null;
+          kanbanState.traceIndex[key] = { ...val, pageDimensions: pd };
+        }
+      }
+
+      // Restore analysis content
+      const analysisContentEl = document.getElementById("kanban-analysis-content");
+      const analysisSection = document.getElementById("kanban-analysis");
+      if (kanbanState.analysis) {
+        if (analysisContentEl) analysisContentEl.innerHTML = renderMarkdownWithTrace(kanbanState.analysis);
+        if (analysisSection) analysisSection.classList.remove("hidden");
+      } else {
+        if (analysisContentEl) analysisContentEl.innerHTML = "";
+        if (analysisSection) analysisSection.classList.add("hidden");
+      }
+
+      // Restore extraction display in kanban cards
+      for (const [idx, ext] of Object.entries(kanbanState.extractions)) {
+        const container = document.getElementById("kanban-extracted-" + idx);
+        if (container && ext && (ext.text || ext.markdown)) {
+          const displayText = ext.markdown || ext.text;
+          const blocksInfo = ext.blocks && ext.blocks.length > 0 ? ` · ${ext.blocks.length} blocks` : "";
+          container.classList.remove("hidden");
+          container.innerHTML = `
+            <div class="extracted-header">
+              <span class="extracted-engine">引擎: ${escapeHtml(ext.engine || "")}</span>
+              <span class="extracted-chars">字符数: ${displayText.length}${blocksInfo}</span>
+            </div>
+            <pre class="extracted-text">${escapeHtml(displayText.length > 6000 ? displayText.substring(0, 6000) + "\n\n[...已截断...]" : displayText)}</pre>
+          `;
+        }
+      }
+
+      // Update input field
+      if (patentInput) patentInput.value = cacheEntry.patentNumber || "";
+
+      // Show result section
+      const appEl = document.getElementById("app");
+      if (appEl && appEl.classList.contains("home-mode")) {
+        appEl.classList.remove("home-mode");
+      }
+      resultSection.classList.remove("hidden");
+
+      // Show reader floating ball
+      if (readerFloatingBall && kanbanState.documents.length > 0) {
+        readerFloatingBall.classList.remove("hidden");
+      }
+
+      // Show analysis chat toggle if analysis exists
+      if (kanbanState.analysis) {
+        showAnalysisChatToggle();
+      }
+
+      return true;
+    } catch (e) {
+      console.error("PatentCache restoreState failed:", e);
+      return false;
+    }
+  },
+};
+
+// ── Time ago helper ──
+function timeAgo(timestamp) {
+  const now = Date.now();
+  const diff = now - timestamp;
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return "刚刚";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + "分钟前";
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + "小时前";
+  const days = Math.floor(hours / 24);
+  if (days < 30) return days + "天前";
+  const months = Math.floor(days / 30);
+  if (months < 12) return months + "个月前";
+  const years = Math.floor(months / 12);
+  return years + "年前";
+}
+
+// ── Cache confirm dialog ──
+function showCacheConfirmDialog(callback) {
+  const dialog = document.getElementById("cache-confirm-dialog");
+  if (!dialog) { callback(); return; }
+  dialog.classList.remove("hidden");
+
+  const saveBtn = document.getElementById("cache-dialog-save-btn");
+  const skipBtn = document.getElementById("cache-dialog-skip-btn");
+  const cancelBtn = document.getElementById("cache-dialog-cancel-btn");
+
+  function cleanup() {
+    dialog.classList.add("hidden");
+    saveBtn.removeEventListener("click", onSave);
+    skipBtn.removeEventListener("click", onSkip);
+    cancelBtn.removeEventListener("click", onCancel);
+  }
+
+  function onSave() {
+    cleanup();
+    // Save current state then continue
+    const entry = PatentCache.captureCurrentState();
+    if (entry) {
+      PatentCache.save(entry.patentNumber, entry);
+      kanbanState.hasUnsavedWork = false;
+      refreshHistoryList();
+    }
+    callback();
+  }
+
+  function onSkip() {
+    cleanup();
+    kanbanState.hasUnsavedWork = false;
+    callback();
+  }
+
+  function onCancel() {
+    cleanup();
+    // Abort the action - don't call callback
+  }
+
+  saveBtn.addEventListener("click", onSave);
+  skipBtn.addEventListener("click", onSkip);
+  cancelBtn.addEventListener("click", onCancel);
+}
+
+function promptSaveCache(callback) {
+  if (!kanbanState.hasUnsavedWork || !currentData) {
+    callback();
+    return;
+  }
+  showCacheConfirmDialog(callback);
+}
+
+// ── Refresh history sidebar & settings cache tab ──
+function refreshHistoryList() {
+  const all = PatentCache.getAll();
+  const entries = Object.values(all).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+  // Update history sidebar
+  const historyList = document.getElementById("history-list");
+  if (historyList) {
+    if (entries.length === 0) {
+      historyList.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px 4px;">暂无历史记录</div>';
+    } else {
+      historyList.innerHTML = entries.map(e => {
+        const currentPatent = currentData ? (currentData.raw || (currentData.office + currentData.applicationNumber)) : "";
+        const isActive = e.patentNumber === currentPatent;
+        let badges = "";
+        if (e.hasOCR) badges += '<span class="history-badge badge-ocr">OCR</span>';
+        if (e.hasAnalysis) badges += '<span class="history-badge badge-analysis">分析</span>';
+        if (e.hasCitedRefs) badges += '<span class="history-badge badge-cited">引用</span>';
+        return `<div class="history-item${isActive ? ' active' : ''}" data-patent="${escapeHtml(e.patentNumber)}">
+          <div class="history-item-patent">${escapeHtml(e.patentNumber)}</div>
+          <div class="history-item-time">${e.office ? '<span style="color:var(--accent);margin-right:4px;">' + escapeHtml(e.office) + '</span>' : ''}${timeAgo(e.timestamp)}</div>
+          ${badges ? '<div class="history-item-badges">' + badges + '</div>' : ''}
+        </div>`;
+      }).join("");
+
+      // Add click handlers
+      historyList.querySelectorAll(".history-item").forEach(item => {
+        item.addEventListener("click", () => {
+          const patentNumber = item.dataset.patent;
+          restoreFromCache(patentNumber);
+        });
+      });
+    }
+  }
+
+  // Update settings cache tab
+  const cacheOverview = document.getElementById("cache-overview");
+  const cachePatentList = document.getElementById("cache-patent-list");
+  if (cacheOverview) {
+    const size = PatentCache.getSize();
+    cacheOverview.textContent = `${entries.length} 条缓存，共 ${PatentCache.formatSize(size)}`;
+  }
+  if (cachePatentList) {
+    if (entries.length === 0) {
+      cachePatentList.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:12px;">暂无缓存</div>';
+    } else {
+      cachePatentList.innerHTML = entries.map(e => {
+        let badges = "";
+        if (e.hasOCR) badges += '<span class="history-badge badge-ocr">OCR</span>';
+        if (e.hasAnalysis) badges += '<span class="history-badge badge-analysis">分析</span>';
+        if (e.hasCitedRefs) badges += '<span class="history-badge badge-cited">引用</span>';
+        return `<div class="cache-patent-item" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${escapeHtml(e.patentNumber)}</div>
+            <div style="font-size:11px;color:var(--text-muted);">${e.office ? escapeHtml(e.office) + ' · ' : ''}${timeAgo(e.timestamp)}</div>
+            ${badges ? '<div class="history-item-badges" style="margin-top:2px;">' + badges + '</div>' : ''}
+          </div>
+          <button class="btn-small cache-delete-btn" data-patent="${escapeHtml(e.patentNumber)}" style="background:var(--bg-hover);color:var(--danger);border:1px solid var(--border);">删除</button>
+        </div>`;
+      }).join("");
+
+      cachePatentList.querySelectorAll(".cache-delete-btn").forEach(btn => {
+        btn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          const pn = btn.dataset.patent;
+          PatentCache.remove(pn);
+          refreshHistoryList();
+        });
+      });
+    }
+  }
+}
+
+function restoreFromCache(patentNumber) {
+  const entry = PatentCache.get(patentNumber);
+  if (!entry) { showError("缓存记录不存在"); return; }
+
+  // Check unsaved work first
+  if (kanbanState.hasUnsavedWork && currentData) {
+    const currentPatent = currentData.raw || (currentData.office + currentData.applicationNumber);
+    if (currentPatent !== patentNumber) {
+      promptSaveCache(() => {
+        doRestoreFromCache(patentNumber);
+      });
+      return;
+    }
+  }
+  doRestoreFromCache(patentNumber);
+}
+
+function doRestoreFromCache(patentNumber) {
+  const entry = PatentCache.get(patentNumber);
+  if (!entry) return;
+  const success = PatentCache.restoreState(entry);
+  if (success) {
+    refreshHistoryList();
+  } else {
+    showError("恢复缓存状态失败");
+  }
+}
 
 function renderKanban(data) {
   const board = document.getElementById("kanban-board");
@@ -462,6 +877,7 @@ function renderKanban(data) {
   kanbanState.analysisSystemPrompt = "";
   kanbanState.analysisUserMessage = "";
   kanbanState.traceIndex = {};
+  kanbanState.hasUnsavedWork = false;
 
   // Clear previous analysis content from DOM
   const analysisContentEl = document.getElementById("kanban-analysis-content");
@@ -1029,6 +1445,7 @@ async function extractDocumentText(url, idx, docType) {
     container._docType = docType;
 
     kanbanState.extractions[idx] = { text, markdown, engine: usedEngine, blocks, pageDimensions };
+    kanbanState.hasUnsavedWork = true;
     if (blocks.length > 0) {
       blocks.forEach(b => {
         kanbanState.traceIndex[b.block_id] = {
@@ -1337,6 +1754,10 @@ document.querySelectorAll(".settings-tab-btn").forEach(btn => {
     btn.classList.add("active");
     const tabContent = document.getElementById("settings-tab-" + tabId);
     if (tabContent) tabContent.classList.add("active");
+    // Refresh cache tab data when selected
+    if (tabId === "cache") {
+      refreshHistoryList();
+    }
   });
 });
 
@@ -1694,6 +2115,7 @@ async function runCitedRefsAnalysis(selectedIdxs) {
                   blocks: fbResult.blocks || [], pageDims: fbResult.page_dimensions || {},
                   engine: "glm_ocr",
                 };
+                kanbanState.hasUnsavedWork = true;
                 extracted = true;
                 break;
               }
@@ -1714,6 +2136,7 @@ async function runCitedRefsAnalysis(selectedIdxs) {
               blocks: result.blocks || [], pageDims: result.page_dimensions || {},
               engine: result.engine || primaryEngine,
             };
+            kanbanState.hasUnsavedWork = true;
             extracted = true;
           } else {
             // Empty result, retry
@@ -1801,6 +2224,7 @@ async function runCitedRefsAnalysis(selectedIdxs) {
     if (streamContainer) streamContainer.innerHTML = marked.parse(fullText);
 
     kanbanState.citedRefsAnalysis = fullText;
+    kanbanState.hasUnsavedWork = true;
   } catch (e) {
     const analysisContent = document.getElementById("kanban-analysis-content");
     if (analysisContent) analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + '</p>';
@@ -2216,6 +2640,7 @@ function buildReviewManualSelectPanel() {
         const blocks = result.blocks || [];
         const pageDimensions = result.page_dimensions || {};
         kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
+        kanbanState.hasUnsavedWork = true;
         if (blocks.length > 0) {
           blocks.forEach(b => {
             kanbanState.traceIndex[b.block_id] = {
@@ -2369,6 +2794,7 @@ function buildReviewManualSelectPanel() {
       // Final render to ensure all content is displayed
       if (streamContainer) streamContainer.innerHTML = renderMarkdownWithTrace(fullText);
       kanbanState.analysis = fullText;
+      kanbanState.hasUnsavedWork = true;
       // Save context for continued chat
       kanbanState.analysisSystemPrompt = systemPrompt;
       kanbanState.analysisUserMessage = userMessage;
@@ -3491,6 +3917,7 @@ async function ocrPdf() {
       const blocks = result.blocks || [];
       const pageDimensions = result.page_dimensions || {};
       kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
+      kanbanState.hasUnsavedWork = true;
       if (blocks.length > 0) {
         blocks.forEach(b => {
           kanbanState.traceIndex[b.block_id] = {
@@ -5201,6 +5628,7 @@ async function kanbanManualExtract(url, idx, docType) {
     const blocks = result.blocks || [];
     const pageDimensions = result.page_dimensions || {};
     kanbanState.extractions[idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
+    kanbanState.hasUnsavedWork = true;
     if (blocks.length > 0) {
       blocks.forEach(b => {
         kanbanState.traceIndex[b.block_id] = {
@@ -5529,3 +5957,30 @@ async function doMergeExport() {
 
   if (doBtn) { doBtn.disabled = false; doBtn.textContent = "合并导出 PDF"; }
 }
+
+// ── History sidebar toggle ──
+const historySidebar = document.getElementById("history-sidebar");
+const historySidebarToggle = document.querySelector(".history-sidebar-toggle");
+if (historySidebarToggle && historySidebar) {
+  historySidebarToggle.addEventListener("click", () => {
+    historySidebar.classList.toggle("collapsed");
+    // Refresh list when expanding
+    if (!historySidebar.classList.contains("collapsed")) {
+      refreshHistoryList();
+    }
+  });
+}
+
+// ── Cache clear button in settings ──
+const cacheClearBtn = document.getElementById("cache-clear-btn");
+if (cacheClearBtn) {
+  cacheClearBtn.addEventListener("click", () => {
+    if (confirm("确定要清除全部缓存吗？此操作不可撤销。")) {
+      PatentCache.clearAll();
+      refreshHistoryList();
+    }
+  });
+}
+
+// ── Initialize history list on page load ──
+refreshHistoryList();
