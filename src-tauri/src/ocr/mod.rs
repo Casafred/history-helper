@@ -2,9 +2,12 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-const PADDLE_OCR_VL_URL: &str =
-    "https://k2neb1qcy1u6g4k5.aistudio-app.com/layout-parsing";
-const PADDLE_OCR_VL_TOKEN: &str = "70b270c8275606a7a97f8c4e8617cdeb935ed74c";
+const PADDLE_OCR_V2_URL: &str =
+    "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs";
+const PADDLE_OCR_V2_TOKEN: &str = "70b270c8275606a7a97f8c4e8617cdeb935ed74c";
+const PADDLE_OCR_V2_MODEL: &str = "PaddleOCR-VL-1.6";
+const PADDLE_OCR_V2_POLL_INTERVAL_SECS: u64 = 5;
+const PADDLE_OCR_V2_POLL_TIMEOUT_SECS: u64 = 300;
 const GLM_OCR_URL: &str = "https://open.bigmodel.cn/api/paas/v4/layout_parsing";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -40,6 +43,18 @@ pub struct OcrClient {
     client: Client,
 }
 
+fn empty_ocr_result(error: Option<String>) -> OcrResult {
+    OcrResult {
+        text: String::new(),
+        markdown: String::new(),
+        engine: "none".to_string(),
+        char_count: 0,
+        blocks: vec![],
+        page_dimensions: std::collections::HashMap::new(),
+        error,
+    }
+}
+
 impl OcrClient {
     pub fn new() -> Self {
         let client = Client::builder()
@@ -50,174 +65,278 @@ impl OcrClient {
     }
 
     pub async fn extract_with_paddle_vl(&self, pdf_base64: &str) -> OcrResult {
-        let payload = serde_json::json!({
-            "file": pdf_base64,
-            "fileType": 2,
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+
+        // Step 1: Submit Job (multipart upload)
+        let pdf_bytes = match BASE64.decode(pdf_base64) {
+            Ok(b) => b,
+            Err(e) => {
+                log::error!("PaddleOCR-V2 base64 decode error: {}", e);
+                return empty_ocr_result(Some(format!("base64 decode error: {}", e)));
+            }
+        };
+
+        let optional_payload = serde_json::json!({
             "useDocOrientationClassify": true,
             "useDocUnwarping": false,
-            "useLayoutDetection": true,
             "useChartRecognition": false,
-            "layoutThreshold": 0.5,
-            "prettifyMarkdown": true,
-            "showFormulaNumber": false,
-            "visualize": false,
         });
 
-        let resp = match self
+        let form = reqwest::multipart::Form::new()
+            .text("model", PADDLE_OCR_V2_MODEL.to_string())
+            .text("optionalPayload", optional_payload.to_string())
+            .part(
+                "file",
+                reqwest::multipart::Part::bytes(pdf_bytes)
+                    .file_name("document.pdf")
+                    .mime_str("application/pdf")
+                    .unwrap_or_else(|_| reqwest::multipart::Part::bytes(vec![]).file_name("document.pdf")),
+            );
+
+        let submit_resp = match self
             .client
-            .post(PADDLE_OCR_VL_URL)
-            .header("Authorization", format!("token {}", PADDLE_OCR_VL_TOKEN))
-            .header("Content-Type", "application/json")
-            .json(&payload)
+            .post(PADDLE_OCR_V2_URL)
+            .header("Authorization", format!("bearer {}", PADDLE_OCR_V2_TOKEN))
+            .multipart(form)
+            .timeout(Duration::from_secs(30))
             .send()
             .await
         {
             Ok(r) => r,
             Err(e) => {
-                log::error!("PaddleOCR-VL request error: {}", e);
-                return OcrResult {
-                    text: String::new(),
-                    markdown: String::new(),
-                    engine: "none".to_string(),
-                    char_count: 0,
-                    blocks: vec![],
-                    page_dimensions: std::collections::HashMap::new(),
-                    error: Some(format!("PaddleOCR-VL request failed: {}", e)),
-                };
+                log::error!("PaddleOCR-V2 submit error: {}", e);
+                return empty_ocr_result(Some(format!("submit error: {}", e)));
             }
         };
 
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            log::error!("PaddleOCR-VL HTTP error {}: {}", status, &body[..body.len().min(300)]);
-            return OcrResult {
-                text: String::new(),
-                markdown: String::new(),
-                engine: "none".to_string(),
-                char_count: 0,
-                blocks: vec![],
-                page_dimensions: std::collections::HashMap::new(),
-                error: Some(format!("PaddleOCR-VL HTTP {}: {}", status, &body[..body.len().min(200)])),
-            };
+        let submit_status = submit_resp.status();
+        if !submit_status.is_success() {
+            let body = submit_resp.text().await.unwrap_or_default();
+            log::error!("PaddleOCR-V2 submit HTTP {}: {}", submit_status, &body[..body.len().min(300)]);
+            return empty_ocr_result(Some(format!("submit HTTP {}: {}", submit_status, &body[..body.len().min(200)])));
         }
 
-        let data: serde_json::Value = match resp.json().await {
+        let submit_data: serde_json::Value = match submit_resp.json().await {
             Ok(d) => d,
             Err(e) => {
-                log::error!("PaddleOCR-VL JSON parse error: {}", e);
-                return OcrResult {
-                    text: String::new(),
-                    markdown: String::new(),
-                    engine: "none".to_string(),
-                    char_count: 0,
-                    blocks: vec![],
-                    page_dimensions: std::collections::HashMap::new(),
-                    error: Some(format!("PaddleOCR-VL JSON parse error: {}", e)),
-                };
+                log::error!("PaddleOCR-V2 submit JSON parse error: {}", e);
+                return empty_ocr_result(Some(format!("submit JSON parse error: {}", e)));
             }
         };
 
-        let error_code = data.get("errorCode").and_then(|v| v.as_i64()).unwrap_or(-1);
-        if error_code != 0 {
-            let msg = data
-                .get("errorMsg")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown error");
-            log::error!("PaddleOCR-VL API error: {}", msg);
-            return OcrResult {
-                text: String::new(),
-                markdown: String::new(),
-                engine: "none".to_string(),
-                char_count: 0,
-                blocks: vec![],
-                page_dimensions: std::collections::HashMap::new(),
-                error: Some(format!("PaddleOCR-VL API error: {}", msg)),
-            };
+        let job_id = submit_data
+            .get("data")
+            .and_then(|d| d.get("jobId"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if job_id.is_empty() {
+            log::error!("PaddleOCR-V2 no jobId in response");
+            return empty_ocr_result(Some("no jobId in response".to_string()));
         }
 
-        let results = data
-            .get("result")
-            .and_then(|r| r.get("layoutParsingResults"))
-            .and_then(|v| v.as_array())
-            .cloned()
+        log::info!("PaddleOCR-V2 job submitted: {}", job_id);
+
+        // Step 2: Poll until done
+        let poll_client = Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
             .unwrap_or_default();
 
+        let start = std::time::Instant::now();
+        let mut jsonl_url = String::new();
+
+        loop {
+            if start.elapsed().as_secs() > PADDLE_OCR_V2_POLL_TIMEOUT_SECS {
+                log::error!("PaddleOCR-V2 poll timeout");
+                return empty_ocr_result(Some("poll timeout".to_string()));
+            }
+
+            let poll_resp = match poll_client
+                .get(format!("{}/{}", PADDLE_OCR_V2_URL, job_id))
+                .header("Authorization", format!("bearer {}", PADDLE_OCR_V2_TOKEN))
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    log::warn!("PaddleOCR-V2 poll request error: {}, retrying...", e);
+                    tokio::time::sleep(Duration::from_secs(PADDLE_OCR_V2_POLL_INTERVAL_SECS)).await;
+                    continue;
+                }
+            };
+
+            let poll_data: serde_json::Value = match poll_resp.json().await {
+                Ok(d) => d,
+                Err(e) => {
+                    log::warn!("PaddleOCR-V2 poll JSON parse error: {}, retrying...", e);
+                    tokio::time::sleep(Duration::from_secs(PADDLE_OCR_V2_POLL_INTERVAL_SECS)).await;
+                    continue;
+                }
+            };
+
+            let d = poll_data.get("data").cloned().unwrap_or_default();
+            let state = d.get("state").and_then(|v| v.as_str()).unwrap_or("");
+
+            match state {
+                "done" => {
+                    jsonl_url = d
+                        .get("resultUrl")
+                        .and_then(|r| r.get("jsonUrl"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if jsonl_url.is_empty() {
+                        log::error!("PaddleOCR-V2 done but no jsonUrl");
+                        return empty_ocr_result(Some("done but no jsonUrl".to_string()));
+                    }
+                    log::info!("PaddleOCR-V2 job done, fetching result");
+                    break;
+                }
+                "failed" => {
+                    let error_msg = d.get("errorMsg").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    log::error!("PaddleOCR-V2 job failed: {}", error_msg);
+                    return empty_ocr_result(Some(format!("job failed: {}", error_msg)));
+                }
+                "running" => {
+                    if let Some(prog) = d.get("extractProgress") {
+                        let extracted = prog.get("extractedPages").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let total = prog.get("totalPages").and_then(|v| v.as_u64()).unwrap_or(0);
+                        log::info!("PaddleOCR-V2 running: {}/{}", extracted, total);
+                    } else {
+                        log::info!("PaddleOCR-V2 running...");
+                    }
+                }
+                _ => {
+                    log::info!("PaddleOCR-V2 state={}", state);
+                }
+            }
+
+            tokio::time::sleep(Duration::from_secs(PADDLE_OCR_V2_POLL_INTERVAL_SECS)).await;
+        }
+
+        // Step 3: Fetch JSONL result
+        let jsonl_resp = match self
+            .client
+            .get(&jsonl_url)
+            .timeout(Duration::from_secs(60))
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                log::error!("PaddleOCR-V2 JSONL fetch error: {}", e);
+                return empty_ocr_result(Some(format!("JSONL fetch error: {}", e)));
+            }
+        };
+
+        let jsonl_text = match jsonl_resp.text().await {
+            Ok(t) => t,
+            Err(e) => {
+                log::error!("PaddleOCR-V2 JSONL read error: {}", e);
+                return empty_ocr_result(Some(format!("JSONL read error: {}", e)));
+            }
+        };
+
+        // Parse JSONL
         let mut all_markdown = Vec::new();
         let mut all_text = Vec::new();
         let mut all_blocks = Vec::new();
         let mut page_dimensions = std::collections::HashMap::new();
+        let mut page_num: u32 = 0;
 
-        for (page_idx, page_result) in results.iter().enumerate() {
-            let page_num = (page_idx + 1) as u32;
+        for line in jsonl_text.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
 
-            if let Some(md_text) = page_result
-                .get("markdown")
-                .and_then(|m| m.get("text"))
-                .and_then(|t| t.as_str())
-            {
-                if !md_text.is_empty() {
-                    all_markdown.push(md_text.to_string());
+            let parsed: serde_json::Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(e) => {
+                    log::warn!("PaddleOCR-V2 JSONL line parse error: {}", e);
+                    continue;
                 }
-            }
+            };
 
-            let pruned = page_result.get("prunedResult").cloned().unwrap_or_default();
-            let pw = pruned.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            let ph = pruned.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            if pw > 0 && ph > 0 {
-                page_dimensions.insert(page_num, PageDimension { width: pw, height: ph });
-            }
-
-            let parsing_list = pruned
-                .get("parsing_res_list")
+            let results = parsed
+                .get("result")
+                .and_then(|r| r.get("layoutParsingResults"))
                 .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default();
 
-            for block in &parsing_list {
-                let content = block
-                    .get("block_content")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let label = block
-                    .get("block_label")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let bbox = block
-                    .get("block_bbox")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<f64>>());
-                let block_order = block
-                    .get("block_order")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-                let group_id = block
-                    .get("group_id")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-                let block_id_num = block
-                    .get("block_id")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(all_blocks.len() as u64);
+            for page_result in &results {
+                page_num += 1;
 
-                let block_id = format!("B_p{}_{}", page_num, block_id_num);
-
-                let is_text_label = ["text", "title", "table", "formula"].contains(&label.as_str());
-                all_blocks.push(OcrBlock {
-                    block_id,
-                    page: page_num,
-                    label,
-                    content: content.clone(),
-                    bbox,
-                    order: block_order,
-                    group_id,
-                });
-
-                if !content.is_empty() && is_text_label
+                if let Some(md_text) = page_result
+                    .get("markdown")
+                    .and_then(|m| m.get("text"))
+                    .and_then(|t| t.as_str())
                 {
-                    all_text.push(content);
+                    if !md_text.is_empty() {
+                        all_markdown.push(md_text.to_string());
+                    }
+                }
+
+                let pruned = page_result.get("prunedResult").cloned().unwrap_or_default();
+                let pw = pruned.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let ph = pruned.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                if pw > 0 && ph > 0 {
+                    page_dimensions.insert(page_num, PageDimension { width: pw, height: ph });
+                }
+
+                let parsing_list = pruned
+                    .get("parsing_res_list")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+
+                for block in &parsing_list {
+                    let content = block
+                        .get("block_content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let label = block
+                        .get("block_label")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let bbox = block
+                        .get("block_bbox")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<f64>>());
+                    let block_order = block
+                        .get("block_order")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
+                    let group_id = block
+                        .get("group_id")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
+                    let block_id_num = block
+                        .get("block_id")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(all_blocks.len() as u64);
+
+                    let block_id = format!("B_p{}_{}", page_num, block_id_num);
+
+                    let is_text_label = ["text", "title", "table", "formula"].contains(&label.as_str());
+                    all_blocks.push(OcrBlock {
+                        block_id,
+                        page: page_num,
+                        label,
+                        content: content.clone(),
+                        bbox,
+                        order: block_order,
+                        group_id,
+                    });
+
+                    if !content.is_empty() && is_text_label {
+                        all_text.push(content);
+                    }
                 }
             }
         }
@@ -227,7 +346,7 @@ impl OcrClient {
         let char_count = text.len();
 
         log::info!(
-            "PaddleOCR-VL result: markdown={} chars, text={} chars, blocks={}",
+            "PaddleOCR-V2 result: markdown={} chars, text={} chars, blocks={}",
             markdown.len(),
             text.len(),
             all_blocks.len()

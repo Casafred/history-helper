@@ -4,8 +4,11 @@ import json
 import base64
 import os
 
-PADDLE_OCR_VL_URL = "https://k2neb1qcy1u6g4k5.aistudio-app.com/layout-parsing"
-PADDLE_OCR_VL_TOKEN = "70b270c8275606a7a97f8c4e8617cdeb935ed74c"
+PADDLE_OCR_V2_URL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
+PADDLE_OCR_V2_TOKEN = "70b270c8275606a7a97f8c4e8617cdeb935ed74c"
+PADDLE_OCR_V2_MODEL = "PaddleOCR-VL-1.6"
+PADDLE_OCR_V2_POLL_INTERVAL = 5
+PADDLE_OCR_V2_POLL_TIMEOUT = 300
 GLM_OCR_URL = "https://open.bigmodel.cn/api/paas/v4/layout_parsing"
 
 
@@ -15,24 +18,9 @@ def read_pdf_base64(pdf_path):
 
 
 def ocr_with_paddle_vl(pdf_base64):
+    """PaddleOCR V2 async Job API — submit → poll → fetch JSONL result."""
     import requests as req
-
-    headers = {
-        "Authorization": f"token {PADDLE_OCR_VL_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "file": pdf_base64,
-        "fileType": 2,
-        "useDocOrientationClassify": True,
-        "useDocUnwarping": False,
-        "useLayoutDetection": True,
-        "useChartRecognition": False,
-        "layoutThreshold": 0.5,
-        "prettifyMarkdown": True,
-        "showFormulaNumber": False,
-        "visualize": False,
-    }
+    import time
 
     all_markdown = []
     all_text = []
@@ -40,27 +28,99 @@ def ocr_with_paddle_vl(pdf_base64):
     page_dimensions = {}
 
     try:
-        print(f"[DEBUG] PaddleOCR-VL calling with fileType=2 (PDF), b64 len={len(pdf_base64)}", file=sys.stderr)
-        resp = req.post(PADDLE_OCR_VL_URL, json=payload, headers=headers, timeout=180)
-        print(f"[DEBUG] PaddleOCR-VL response status={resp.status_code}", file=sys.stderr)
+        # Step 1: Submit Job (multipart upload)
+        pdf_bytes = base64.b64decode(pdf_base64)
+        headers = {"Authorization": f"bearer {PADDLE_OCR_V2_TOKEN}"}
+        data = {
+            "model": PADDLE_OCR_V2_MODEL,
+            "optionalPayload": json.dumps({
+                "useDocOrientationClassify": True,
+                "useDocUnwarping": False,
+                "useChartRecognition": False,
+            }),
+        }
+        files = {"file": ("document.pdf", pdf_bytes, "application/pdf")}
+
+        print(f"[DEBUG] PaddleOCR-V2 submitting job, pdf bytes={len(pdf_bytes)}", file=sys.stderr)
+        resp = req.post(PADDLE_OCR_V2_URL, headers=headers, data=data, files=files, timeout=30)
+        print(f"[DEBUG] PaddleOCR-V2 submit status={resp.status_code}", file=sys.stderr)
+
         if resp.status_code != 200:
-            print(f"[DEBUG] PaddleOCR-VL error response: {resp.text[:300]}", file=sys.stderr)
+            print(f"[DEBUG] PaddleOCR-V2 submit error: {resp.text[:300]}", file=sys.stderr)
             return "", "", [], {}
-        data = resp.json()
-        print(f"[DEBUG] PaddleOCR-VL errorCode={data.get('errorCode')} errorMsg={data.get('errorMsg', 'N/A')}", file=sys.stderr)
-        if data.get("errorCode") == 0:
-            results = data.get("result", {}).get("layoutParsingResults", [])
-            print(f"[DEBUG] PaddleOCR-VL layoutParsingResults count={len(results)}", file=sys.stderr)
-            for page_idx, r in enumerate(results):
-                page_num = page_idx + 1
+
+        job_data = resp.json().get("data", {})
+        job_id = job_data.get("jobId")
+        if not job_id:
+            print(f"[DEBUG] PaddleOCR-V2 no jobId in response: {resp.text[:300]}", file=sys.stderr)
+            return "", "", [], {}
+
+        print(f"[DEBUG] PaddleOCR-V2 job submitted: {job_id}", file=sys.stderr)
+
+        # Step 2: Poll until done
+        start_time = time.time()
+        while True:
+            elapsed = time.time() - start_time
+            if elapsed > PADDLE_OCR_V2_POLL_TIMEOUT:
+                print(f"[DEBUG] PaddleOCR-V2 poll timeout ({PADDLE_OCR_V2_POLL_TIMEOUT}s)", file=sys.stderr)
+                return "", "", [], {}
+
+            poll_resp = req.get(f"{PADDLE_OCR_V2_URL}/{job_id}", headers=headers, timeout=10)
+            if poll_resp.status_code != 200:
+                print(f"[DEBUG] PaddleOCR-V2 poll error status={poll_resp.status_code}", file=sys.stderr)
+                return "", "", [], {}
+
+            poll_data = poll_resp.json().get("data", {})
+            state = poll_data.get("state", "")
+
+            if state == "done":
+                jsonl_url = (poll_data.get("resultUrl") or {}).get("jsonUrl", "")
+                if not jsonl_url:
+                    print(f"[DEBUG] PaddleOCR-V2 done but no jsonUrl", file=sys.stderr)
+                    return "", "", [], {}
+                print(f"[DEBUG] PaddleOCR-V2 job done, fetching result", file=sys.stderr)
+                break
+            elif state == "failed":
+                error_msg = poll_data.get("errorMsg", "unknown")
+                print(f"[DEBUG] PaddleOCR-V2 job failed: {error_msg}", file=sys.stderr)
+                return "", "", [], {}
+            elif state == "running":
+                try:
+                    prog = poll_data.get("extractProgress", {})
+                    print(f"[DEBUG] PaddleOCR-V2 running: {prog.get('extractedPages', '?')}/{prog.get('totalPages', '?')}", file=sys.stderr)
+                except Exception:
+                    print(f"[DEBUG] PaddleOCR-V2 running...", file=sys.stderr)
+            else:
+                print(f"[DEBUG] PaddleOCR-V2 state={state}", file=sys.stderr)
+
+            time.sleep(PADDLE_OCR_V2_POLL_INTERVAL)
+
+        # Step 3: Fetch JSONL result
+        jsonl_resp = req.get(jsonl_url, timeout=60)
+        jsonl_resp.raise_for_status()
+        lines = jsonl_resp.text.strip().split("\n")
+        print(f"[DEBUG] PaddleOCR-V2 JSONL lines={len(lines)}", file=sys.stderr)
+
+        page_num = 0
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            parsed = json.loads(line)
+            results = parsed.get("result", {}).get("layoutParsingResults", [])
+
+            for r in results:
+                page_num += 1
                 md = r.get("markdown", {}).get("text", "")
                 if md:
                     all_markdown.append(md)
+
                 pruned = r.get("prunedResult", {})
                 pw = pruned.get("width", 0)
                 ph = pruned.get("height", 0)
                 if pw and ph:
                     page_dimensions[page_num] = {"width": pw, "height": ph}
+
                 parsing_list = pruned.get("parsing_res_list", [])
                 for block in parsing_list:
                     content = block.get("block_content", "")
@@ -78,16 +138,15 @@ def ocr_with_paddle_vl(pdf_base64):
                     })
                     if content and label in ("text", "title", "table", "formula"):
                         all_text.append(content)
-        else:
-            print(f"[DEBUG] PaddleOCR-VL API error: {json.dumps(data, ensure_ascii=False)[:300]}", file=sys.stderr)
+
     except Exception as e:
-        print(f"PaddleOCR-VL error: {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"PaddleOCR-V2 error: {type(e).__name__}: {e}", file=sys.stderr)
         import traceback
         print(traceback.format_exc(), file=sys.stderr)
 
     markdown = "\n\n---\n\n".join(all_markdown)
     plain_text = "\n".join(all_text)
-    print(f"[DEBUG] PaddleOCR-VL result: markdown={len(markdown)} chars, text={len(plain_text)} chars, blocks={len(all_blocks)}", file=sys.stderr)
+    print(f"[DEBUG] PaddleOCR-V2 result: markdown={len(markdown)} chars, text={len(plain_text)} chars, blocks={len(all_blocks)}", file=sys.stderr)
     return markdown, plain_text, all_blocks, page_dimensions
 
 

@@ -8,9 +8,16 @@ const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
 const fontkit = require("@pdf-lib/fontkit");
 
 const GD_API_BASE = "https://d1kazzu6rbodne.cloudfront.net";
-const PADDLE_OCR_VL_URL = "https://k2neb1qcy1u6g4k5.aistudio-app.com/layout-parsing";
-const PADDLE_OCR_VL_TOKEN = "70b270c8275606a7a97f8c4e8617cdeb935ed74c";
+const PADDLE_OCR_V2_URL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs";
+const PADDLE_OCR_V2_TOKEN = "70b270c8275606a7a97f8c4e8617cdeb935ed74c";
+const PADDLE_OCR_V2_MODEL = "PaddleOCR-VL-1.6";
+const PADDLE_OCR_V2_POLL_INTERVAL = 5000;
+const PADDLE_OCR_V2_POLL_TIMEOUT = 300000;
 const GLM_OCR_URL = "https://open.bigmodel.cn/api/paas/v4/layout_parsing";
+
+// OCR result cache: key = sha256(pdfBase64), value = { result, timestamp }
+const ocrCache = new Map();
+const OCR_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 const GD_HEADERS = {
   "user-type": "external",
@@ -211,33 +218,31 @@ async function proxyGdApi(urlPath, res) {
   }
 }
 
-function ocrWithPaddleVl(pdfBase64) {
-  return new Promise((resolve) => {
-    const payload = JSON.stringify({
-      file: pdfBase64,
-      fileType: 2,
-      useDocOrientationClassify: true,
-      useDocUnwarping: false,
-      useLayoutDetection: true,
-      useChartRecognition: false,
-      layoutThreshold: 0.5,
-      prettifyMarkdown: true,
-      showFormulaNumber: false,
-      visualize: false,
-    });
+// ── PaddleOCR V2 (async Job API) ──
 
-    const urlObj = new URL(PADDLE_OCR_VL_URL);
+function _paddleV2SubmitJob(pdfBase64) {
+  return new Promise((resolve) => {
+    const fileBuffer = Buffer.from(pdfBase64, "base64");
+    const boundary = "----PaddleForm" + Date.now();
+    const parts = [];
+
+    parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${PADDLE_OCR_V2_MODEL}`);
+    parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="optionalPayload"\r\n\r\n${JSON.stringify({ useDocOrientationClassify: true, useDocUnwarping: false, useChartRecognition: false })}`);
+    parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="document.pdf"\r\nContent-Type: application/pdf\r\n\r\n`);
+
+    const headerBuf = Buffer.from(parts.join("\r\n"), "utf-8");
+    const footerBuf = Buffer.from(`\r\n--${boundary}--\r\n`, "utf-8");
+    const body = Buffer.concat([headerBuf, fileBuffer, footerBuf]);
+
+    const urlObj = new URL(PADDLE_OCR_V2_URL);
     const options = {
-      hostname: urlObj.hostname,
-      port: 443,
-      path: urlObj.pathname,
-      method: "POST",
+      hostname: urlObj.hostname, port: 443, path: urlObj.pathname, method: "POST",
       headers: {
-        "Authorization": `token ${PADDLE_OCR_VL_TOKEN}`,
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(payload),
+        "Authorization": `bearer ${PADDLE_OCR_V2_TOKEN}`,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Content-Length": body.length,
       },
-      timeout: 180000,
+      timeout: 30000,
     };
 
     const req = https.request(options, (resp) => {
@@ -245,23 +250,108 @@ function ocrWithPaddleVl(pdfBase64) {
       resp.on("data", (chunk) => chunks.push(chunk));
       resp.on("end", () => {
         try {
-          const data = Buffer.concat(chunks).toString("utf-8");
-          const parsed = JSON.parse(data);
+          const data = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+          resolve((data.data || {}).jobId || null);
+        } catch (e) {
+          console.error("[PaddleV2] submit parse error:", e.message);
+          resolve(null);
+        }
+      });
+    });
+    req.on("error", (e) => { console.error("[PaddleV2] submit error:", e.message); resolve(null); });
+    req.on("timeout", () => { req.destroy(); resolve(null); });
+    req.write(body);
+    req.end();
+  });
+}
+
+function _paddleV2PollJob(jobId) {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+
+    function poll() {
+      if (Date.now() - startTime > PADDLE_OCR_V2_POLL_TIMEOUT) {
+        console.error("[PaddleV2] poll timeout");
+        return resolve(null);
+      }
+
+      const urlObj = new URL(`${PADDLE_OCR_V2_URL}/${jobId}`);
+      const options = {
+        hostname: urlObj.hostname, port: 443, path: urlObj.pathname, method: "GET",
+        headers: { "Authorization": `bearer ${PADDLE_OCR_V2_TOKEN}` },
+        timeout: 10000,
+      };
+
+      const req = https.request(options, (resp) => {
+        const chunks = [];
+        resp.on("data", (chunk) => chunks.push(chunk));
+        resp.on("end", () => {
+          try {
+            const data = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+            const d = data.data || {};
+            const state = d.state;
+
+            if (state === "done") {
+              return resolve(d);
+            } else if (state === "failed") {
+              console.error("[PaddleV2] job failed:", d.errorMsg);
+              return resolve(null);
+            } else {
+              // pending or running — continue polling
+              setTimeout(poll, PADDLE_OCR_V2_POLL_INTERVAL);
+            }
+          } catch (e) {
+            console.error("[PaddleV2] poll parse error:", e.message);
+            resolve(null);
+          }
+        });
+      });
+      req.on("error", (e) => { console.error("[PaddleV2] poll error:", e.message); resolve(null); });
+      req.on("timeout", () => { req.destroy(); resolve(null); });
+      req.end();
+    }
+
+    poll();
+  });
+}
+
+function _paddleV2FetchJsonlResult(jsonlUrl) {
+  return new Promise((resolve) => {
+    const urlObj = new URL(jsonlUrl);
+    const options = {
+      hostname: urlObj.hostname, port: 443,
+      path: urlObj.pathname + urlObj.search, method: "GET",
+      timeout: 60000,
+    };
+
+    const req = https.request(options, (resp) => {
+      const chunks = [];
+      resp.on("data", (chunk) => chunks.push(chunk));
+      resp.on("end", () => {
+        try {
+          const text = Buffer.concat(chunks).toString("utf-8");
+          const lines = text.trim().split("\n").filter((l) => l.trim());
+
           const allMarkdown = [];
           const allText = [];
           const allBlocks = [];
           const pageDimensions = {};
+          let pageNum = 0;
 
-          if (parsed.errorCode === 0) {
+          for (const line of lines) {
+            const parsed = JSON.parse(line);
             const results = (parsed.result || {}).layoutParsingResults || [];
-            results.forEach((r, pageIdx) => {
-              const pageNum = pageIdx + 1;
+
+            for (const r of results) {
+              pageNum++;
               const md = (r.markdown || {}).text || "";
               if (md) allMarkdown.push(md);
+
               const pruned = r.prunedResult || {};
               const pw = pruned.width || 0;
               const ph = pruned.height || 0;
               if (pw && ph) pageDimensions[pageNum] = { width: pw, height: ph };
+
               const parsingList = pruned.parsing_res_list || [];
               parsingList.forEach((block) => {
                 const content = block.block_content || "";
@@ -277,7 +367,7 @@ function ocrWithPaddleVl(pdfBase64) {
                   allText.push(content);
                 }
               });
-            });
+            }
           }
 
           resolve({
@@ -287,15 +377,85 @@ function ocrWithPaddleVl(pdfBase64) {
             pageDimensions,
           });
         } catch (e) {
+          console.error("[PaddleV2] JSONL parse error:", e.message);
           resolve({ markdown: "", text: "", blocks: [], pageDimensions: {} });
         }
       });
     });
-
     req.on("error", () => resolve({ markdown: "", text: "", blocks: [], pageDimensions: {} }));
     req.on("timeout", () => { req.destroy(); resolve({ markdown: "", text: "", blocks: [], pageDimensions: {} }); });
-    req.write(payload);
     req.end();
+  });
+}
+
+function _ocrCacheKey(pdfBase64) {
+  const crypto = require("crypto");
+  return crypto.createHash("sha256").update(pdfBase64).digest("hex");
+}
+
+function _ocrCacheGet(key) {
+  const entry = ocrCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > OCR_CACHE_TTL) {
+    ocrCache.delete(key);
+    return null;
+  }
+  return entry.result;
+}
+
+function _ocrCacheSet(key, result) {
+  ocrCache.set(key, { result, timestamp: Date.now() });
+  // Prune expired entries periodically
+  if (ocrCache.size > 100) {
+    const now = Date.now();
+    for (const [k, v] of ocrCache) {
+      if (now - v.timestamp > OCR_CACHE_TTL) ocrCache.delete(k);
+    }
+  }
+}
+
+function ocrWithPaddleVl(pdfBase64) {
+  return new Promise(async (resolve) => {
+    // Check cache first
+    const cacheKey = _ocrCacheKey(pdfBase64);
+    const cached = _ocrCacheGet(cacheKey);
+    if (cached) {
+      console.log("[PaddleV2] cache hit");
+      return resolve(cached);
+    }
+
+    try {
+      // Step 1: Submit Job
+      const jobId = await _paddleV2SubmitJob(pdfBase64);
+      if (!jobId) {
+        console.error("[PaddleV2] failed to submit job");
+        return resolve({ markdown: "", text: "", blocks: [], pageDimensions: {} });
+      }
+      console.log("[PaddleV2] job submitted:", jobId);
+
+      // Step 2: Poll until done
+      const pollResult = await _paddleV2PollJob(jobId);
+      if (!pollResult) {
+        return resolve({ markdown: "", text: "", blocks: [], pageDimensions: {} });
+      }
+
+      // Step 3: Fetch JSONL result
+      const jsonlUrl = (pollResult.resultUrl || {}).jsonUrl || "";
+      if (!jsonlUrl) {
+        console.error("[PaddleV2] no jsonlUrl in result");
+        return resolve({ markdown: "", text: "", blocks: [], pageDimensions: {} });
+      }
+
+      const result = await _paddleV2FetchJsonlResult(jsonlUrl);
+      // Cache successful result
+      if (result.text || result.markdown) {
+        _ocrCacheSet(cacheKey, result);
+      }
+      resolve(result);
+    } catch (e) {
+      console.error("[PaddleV2] error:", e.message);
+      resolve({ markdown: "", text: "", blocks: [], pageDimensions: {} });
+    }
   });
 }
 
@@ -783,8 +943,27 @@ async function extractPdfText(req, res) {
     let blocks = [];
     let pageDimensions = {};
 
+    // OCR with retry on rate-limit (429) or transient errors
+    const MAX_OCR_RETRIES = 3;
+    const RETRY_BASE_DELAY = 10000; // 10s base, exponential backoff
+
+    async function ocrWithRetry(ocrFn, fnArg, engineName) {
+      for (let attempt = 0; attempt < MAX_OCR_RETRIES; attempt++) {
+        const r = await ocrFn(fnArg);
+        if (r.text && r.text.trim()) return r;
+        if (r.markdown && r.markdown.trim()) return r;
+        // Empty result — if not last attempt, wait and retry
+        if (attempt < MAX_OCR_RETRIES - 1) {
+          const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
+          console.log(`[OCR] ${engineName} returned empty, retry ${attempt + 1}/${MAX_OCR_RETRIES} in ${delay}ms`);
+          await new Promise(r => setTimeout(r, delay));
+        }
+      }
+      return { text: "", markdown: "", blocks: [], pageDimensions: {} };
+    }
+
     if (engine === "paddle_ocr_vl" || engine === "auto") {
-      const r = await ocrWithPaddleVl(pdfBase64);
+      const r = await ocrWithRetry(ocrWithPaddleVl, pdfBase64, "PaddleOCR");
       if (r.text.trim() || r.markdown.trim()) {
         text = r.text; markdown = r.markdown; blocks = r.blocks;
         pageDimensions = r.pageDimensions; usedEngine = "paddle_ocr_vl";
@@ -800,7 +979,7 @@ async function extractPdfText(req, res) {
     }
 
     if (!text && !markdown && engine !== "paddle_ocr_vl") {
-      const r = await ocrWithPaddleVl(pdfBase64);
+      const r = await ocrWithRetry(ocrWithPaddleVl, pdfBase64, "PaddleOCR-fallback");
       if (r.text.trim() || r.markdown.trim()) {
         text = r.text; markdown = r.markdown; blocks = r.blocks;
         pageDimensions = r.pageDimensions; usedEngine = "paddle_ocr_vl";

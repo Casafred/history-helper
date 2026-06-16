@@ -1630,74 +1630,84 @@ async function runCitedRefsAnalysis(selectedIdxs) {
     analysisSection.classList.remove("hidden");
     analysisContent.innerHTML = '<p class="extracting">正在提取引用文献内容并分析...</p>';
 
-    // 先提取引用文献文档内容（如果尚未提取）
+    // 先提取引用文献文档内容（如果尚未提取）— 断点续OCR
     const ocrConfig = window.AI.getOCRConfig(config);
     const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
     const glmApiKey = window.AI.getGlmOcrApiKey(config);
     const isUS = currentData.office === "US";
     const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
 
-    for (const doc of citedDocs) {
-      if (kanbanState.extractions[doc.idx] && kanbanState.extractions[doc.idx].text) continue;
+    const CITED_MAX_RETRIES = 5;
+    const CITED_RETRY_BASE_DELAY = 8000;
+    const citedMissing = citedDocs.filter(doc => !kanbanState.extractions[doc.idx] || (!kanbanState.extractions[doc.idx].text && !kanbanState.extractions[doc.idx].markdown));
 
-      // 需要先提取此文档
-      const extractUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${doc.docId}/${doc.numberOfPages}/${doc.docFormat}`;
-      try {
-        analysisContent.innerHTML = `<p class="extracting">正在提取 ${doc.docCode} - ${doc.name}...</p>`;
-        const resp = await fetch(extractUrl);
-        if (!resp.ok) {
-          kanbanState.extractions[doc.idx] = { text: "", error: `HTTP ${resp.status}` };
-          continue;
-        }
-        const arrayBuf = await resp.arrayBuffer();
-        const b64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
+    for (let i = 0; i < citedMissing.length; i++) {
+      const doc = citedMissing[i];
+      // Double-check: may have been filled
+      if (kanbanState.extractions[doc.idx] && (kanbanState.extractions[doc.idx].text || kanbanState.extractions[doc.idx].markdown)) continue;
+      if (citedRefsAbortController && citedRefsAbortController.signal.aborted) break;
 
-        const ocrResp = await fetch("/api/gd/extract-text/ocr", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pdf_base64: b64, engine: primaryEngine }),
-        });
-        if (!ocrResp.ok) {
-          kanbanState.extractions[doc.idx] = { text: "", error: `OCR HTTP ${ocrResp.status}` };
-          continue;
-        }
-        const ocrResult = await ocrResp.json();
-        if (ocrResult.error) {
-          // 降级尝试 GLM OCR
-          if (glmApiKey && primaryEngine !== "glm_ocr") {
-            try {
-              const glmResp = await fetch("/api/gd/extract-text/ocr", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ pdf_base64: b64, engine: "glm_ocr", glm_api_key: glmApiKey }),
-              });
-              const glmResult = await glmResp.json();
-              if (!glmResult.error && glmResult.text) {
+      analysisContent.innerHTML = `<p class="extracting">正在提取引用文献 (${i + 1}/${citedMissing.length}): ${doc.docCode} - ${doc.name}...</p>`;
+
+      // Retry loop with exponential backoff
+      let extracted = false;
+      for (let attempt = 0; attempt < CITED_MAX_RETRIES && !extracted; attempt++) {
+        try {
+          const useApiKey = primaryEngine === "glm_ocr" ? glmApiKey : "";
+          const result = await doExtractText(currentData.office, urlDocNum, doc.docId, doc.numberOfPages, doc.docFormat, primaryEngine, useApiKey);
+
+          if (result.error) {
+            const isRateLimit = result.error.includes("429") || result.error.includes("rate") || result.error.includes("limit");
+            // Try fallback engine
+            const fallbackEngine = primaryEngine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
+            if (glmApiKey && fallbackEngine === "glm_ocr") {
+              const fbResult = await doExtractText(currentData.office, urlDocNum, doc.docId, doc.numberOfPages, doc.docFormat, "glm_ocr", glmApiKey);
+              if (!fbResult.error && (fbResult.text || fbResult.markdown)) {
                 kanbanState.extractions[doc.idx] = {
-                  markdown: glmResult.markdown || "",
-                  text: glmResult.text || "",
-                  blocks: glmResult.blocks || [],
-                  pageDims: glmResult.pageDims || {},
+                  markdown: fbResult.markdown || "", text: fbResult.text || "",
+                  blocks: fbResult.blocks || [], pageDims: fbResult.page_dimensions || {},
                   engine: "glm_ocr",
                 };
-                continue;
+                extracted = true;
+                break;
               }
-            } catch {}
+            }
+            // Retry with delay
+            if (attempt < CITED_MAX_RETRIES - 1) {
+              const delay = isRateLimit
+                ? CITED_RETRY_BASE_DELAY * Math.pow(2, attempt) + Math.random() * 3000
+                : CITED_RETRY_BASE_DELAY * Math.pow(1.5, attempt);
+              analysisContent.innerHTML = `<p class="extracting" style="color:var(--warning)">${doc.name} ${isRateLimit ? '因限速等待重试' : '提取出错'} (${attempt + 1}/${CITED_MAX_RETRIES})，约${Math.round(delay/1000)}秒后重试...</p>`;
+              await new Promise(r => setTimeout(r, delay));
+              continue;
+            }
+            kanbanState.extractions[doc.idx] = { text: "", error: result.error };
+          } else if (result.text || result.markdown) {
+            kanbanState.extractions[doc.idx] = {
+              markdown: result.markdown || "", text: result.text || "",
+              blocks: result.blocks || [], pageDims: result.page_dimensions || {},
+              engine: result.engine || primaryEngine,
+            };
+            extracted = true;
+          } else {
+            // Empty result, retry
+            if (attempt < CITED_MAX_RETRIES - 1) {
+              const delay = CITED_RETRY_BASE_DELAY * Math.pow(1.5, attempt);
+              analysisContent.innerHTML = `<p class="extracting" style="color:var(--warning)">${doc.name} 提取结果为空，重试中 (${attempt + 1}/${CITED_MAX_RETRIES})...</p>`;
+              await new Promise(r => setTimeout(r, delay));
+              continue;
+            }
+            kanbanState.extractions[doc.idx] = { text: "", error: "提取结果为空" };
           }
-          kanbanState.extractions[doc.idx] = { text: "", error: ocrResult.error };
-          continue;
+        } catch (e) {
+          if (attempt < CITED_MAX_RETRIES - 1) {
+            const delay = CITED_RETRY_BASE_DELAY * Math.pow(1.5, attempt);
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+          }
+          kanbanState.extractions[doc.idx] = { text: "", error: e.message };
         }
-        kanbanState.extractions[doc.idx] = {
-          markdown: ocrResult.markdown || "",
-          text: ocrResult.text || "",
-          blocks: ocrResult.blocks || [],
-          pageDims: ocrResult.pageDims || {},
-          engine: ocrResult.engine || primaryEngine,
-        };
-      } catch (e) {
-        kanbanState.extractions[doc.idx] = { text: "", error: e.message };
       }
-      if (citedRefsAbortController && citedRefsAbortController.signal.aborted) break;
     }
 
     // 构建分析内容
@@ -2116,26 +2126,37 @@ function buildReviewManualSelectPanel() {
     const isUS = currentData.office === "US";
     const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
 
-    const MAX_RETRIES = 2;
-    const extractReport = { success: [], empty: [], failed: [] };
+    const MAX_RETRIES = 5;
+    const RETRY_BASE_DELAY = 8000; // 8s base, exponential backoff
+    const extractReport = { success: [], empty: [], failed: [], retrying: [] };
 
     async function extractWithRetry(it, engine, retriesLeft) {
       const container = document.getElementById("kanban-extracted-" + it.idx);
+      const attemptNum = MAX_RETRIES - retriesLeft + 1;
       if (container) {
         container.classList.remove("hidden");
-        const attemptNum = MAX_RETRIES - retriesLeft + 1;
         container.innerHTML = '<p class="extracting">正在提取（' + escapeHtml(engine) + '）' + (attemptNum > 1 ? '第' + attemptNum + '次尝试' : '') + '...</p>';
       }
       try {
         const useApiKey = engine === "glm_ocr" ? glmApiKey : "";
         const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, useApiKey);
         if (result.error) {
+          const isRateLimit = result.error.includes("429") || result.error.includes("rate") || result.error.includes("limit") || result.error.includes("Too Many");
           if (retriesLeft > 0) {
+            const delay = isRateLimit
+              ? RETRY_BASE_DELAY * Math.pow(2, attemptNum - 1) + Math.random() * 3000  // longer for rate-limit
+              : RETRY_BASE_DELAY * Math.pow(1.5, attemptNum - 1);
+            if (statusEl) statusEl.textContent = `${it.name} 遇到${isRateLimit ? '限速' : '提取错误'}，${Math.round(delay/1000)}秒后重试 (${attemptNum}/${MAX_RETRIES})...`;
+            if (container) container.innerHTML = `<p class="extracting" style="color:var(--warning)">${isRateLimit ? '因限速正在等待重试' : '提取出错，正在重试'} (${attemptNum}/${MAX_RETRIES})，约${Math.round(delay/1000)}秒后重试...</p>`;
+            extractReport.retrying.push({ name: it.name, docCode: it.docCode, attempt: attemptNum, reason: result.error });
+            await new Promise(r => setTimeout(r, delay));
+            // On rate-limit, try same engine first; on other errors, try fallback
+            if (isRateLimit) {
+              return await extractWithRetry(it, engine, retriesLeft - 1);
+            }
             const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
             if (fallbackEngine === "glm_ocr" && !glmApiKey) {
-              extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: result.error + "（无 GLM Key，无法降级）" });
-              if (container) container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>';
-              return false;
+              return await extractWithRetry(it, engine, retriesLeft - 1);
             }
             return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
           }
@@ -2147,11 +2168,12 @@ function buildReviewManualSelectPanel() {
         const markdown = result.markdown || "";
         if (!text && !markdown) {
           if (retriesLeft > 0) {
+            const delay = RETRY_BASE_DELAY * Math.pow(1.5, attemptNum - 1);
+            if (statusEl) statusEl.textContent = `${it.name} 提取结果为空，${Math.round(delay/1000)}秒后重试...`;
+            if (container) container.innerHTML = `<p class="extracting" style="color:var(--warning)">提取结果为空，正在重试 (${attemptNum}/${MAX_RETRIES})...</p>`;
             const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
             if (fallbackEngine === "glm_ocr" && !glmApiKey) {
-              extractReport.empty.push({ name: it.name, docCode: it.docCode });
-              if (container) container.innerHTML = '<p class="extract-empty">未能提取到文本（无 GLM Key，无法降级）</p>';
-              return false;
+              return await extractWithRetry(it, engine, retriesLeft - 1);
             }
             return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
           }
@@ -2185,26 +2207,40 @@ function buildReviewManualSelectPanel() {
         }
         return true;
       } catch (e) {
+        const isRateLimit = e.message && (e.message.includes("429") || e.message.includes("rate") || e.message.includes("limit"));
         if (retriesLeft > 0) {
-          await new Promise(r => setTimeout(r, 2000));
+          const delay = isRateLimit
+            ? RETRY_BASE_DELAY * Math.pow(2, attemptNum - 1) + Math.random() * 3000
+            : 2000 * attemptNum;
+          if (statusEl) statusEl.textContent = `${it.name} ${isRateLimit ? '限速等待重试' : '提取异常重试中'} (${attemptNum}/${MAX_RETRIES})...`;
+          if (container) container.innerHTML = `<p class="extracting" style="color:var(--warning)">${isRateLimit ? '因限速正在等待重试' : '提取异常，正在重试'} (${attemptNum}/${MAX_RETRIES})...</p>`;
+          await new Promise(r => setTimeout(r, delay));
           return await extractWithRetry(it, engine, retriesLeft - 1);
         }
         extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: e.message });
-        const container = document.getElementById("kanban-extracted-" + it.idx);
-        if (container) container.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
+        const container2 = document.getElementById("kanban-extracted-" + it.idx);
+        if (container2) container2.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
         return false;
       }
     }
 
-    const missing = oaItems.filter(it => !kanbanState.extractions[it.idx]);
-    for (let i = 0; i < missing.length; i++) {
-      const it = missing[i];
-      if (statusEl) statusEl.textContent = "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
-      await extractWithRetry(it, primaryEngine, MAX_RETRIES);
-      if (kanbanAutoAbortController && kanbanAutoAbortController.signal.aborted) break;
+    // 断点续OCR：已有缓存（kanbanState.extractions）的跳过，只提取缺失的
+    const missing = oaItems.filter(it => !kanbanState.extractions[it.idx] || (!kanbanState.extractions[it.idx].text && !kanbanState.extractions[it.idx].markdown));
+    if (missing.length > 0) {
+      for (let i = 0; i < missing.length; i++) {
+        const it = missing[i];
+        // Double-check: another parallel flow may have filled it
+        if (kanbanState.extractions[it.idx] && (kanbanState.extractions[it.idx].text || kanbanState.extractions[it.idx].markdown)) continue;
+        if (statusEl) statusEl.textContent = "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
+        await extractWithRetry(it, primaryEngine, MAX_RETRIES);
+        if (kanbanAutoAbortController && kanbanAutoAbortController.signal.aborted) break;
+      }
     }
 
+    // 务必等所有文档提取完毕再进入AI梳理
     const successCount = extractReport.success.length;
+    const failedCount = extractReport.failed.length + extractReport.empty.length;
+
     if (successCount === 0) {
       analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有文档提取均失败，无法进行 AI 分析。</p>';
       const manualSelectBtnEl2 = document.getElementById("kanban-manual-select-btn");
@@ -2213,7 +2249,13 @@ function buildReviewManualSelectPanel() {
       return;
     }
 
-    if (statusEl) statusEl.textContent = "正在用 AI 整理审查历史...";
+    // 如果有部分失败，提示用户但仍继续AI分析
+    if (failedCount > 0) {
+      const failedNames = [...extractReport.failed, ...extractReport.empty].map(f => f.docCode || f.name).join(", ");
+      if (statusEl) statusEl.textContent = `${successCount} 个文档提取成功，${failedCount} 个失败（${failedNames}），正在用 AI 整理...`;
+    } else {
+      if (statusEl) statusEl.textContent = "全部文档提取完成，正在用 AI 整理审查历史...";
+    }
     analysisContent.innerHTML = '<p class="extracting">AI 正在整理选中的文档...</p>';
 
     const hasBlocks = oaItems.some(it => {
