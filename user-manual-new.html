@@ -4,60 +4,330 @@
 <meta charset="UTF-8">
 <title>专利审查梳理工具 用户使用说明书</title>
 <style>
-  @page { size: A4; margin: 25mm 20mm 25mm 20mm; @bottom-center { content: "\2014 " counter(page) " \2014"; font-size: 9pt; color: #999; } }
-  @page :first { margin: 0; @bottom-center { content: none; } }
+  @page {
+    size: A4;
+    margin: 25mm 20mm 25mm 20mm;
+    @bottom-center {
+      content: "— " counter(page) " —";
+      font-size: 9pt;
+      color: #999;
+    }
+  }
+
+  @page :first {
+    margin: 0;
+    @bottom-center { content: none; }
+  }
+
   * { box-sizing: border-box; }
-  body { font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif; font-size: 11pt; line-height: 1.8; color: #333; margin: 0; padding: 0; }
-  .cover { page-break-after: always; width: 210mm; height: 297mm; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #ffffff; color: #2e7d32; text-align: center; position: relative; }
-  .cover-logo { width: 180px; height: 180px; border-radius: 24px; display: flex; align-items: center; justify-content: center; margin-bottom: 30px; }
-  .cover-logo img { width: 180px; height: auto; }
-  .cover h1 { font-size: 28pt; margin: 0 0 10px 0; letter-spacing: 4px; color: #1b5e20; }
-  .cover .subtitle { font-size: 14pt; color: #4caf50; margin-bottom: 50px; letter-spacing: 2px; }
-  .cover .version-info { font-size: 11pt; color: #666; margin-top: 20px; }
-  .cover .divider-line { width: 80px; height: 2px; background: #4caf50; margin: 30px auto; }
-  .toc-page { page-break-after: always; }
-  .toc-page h2 { text-align: center; font-size: 18pt; color: #1b5e20; border-bottom: 2px solid #4caf50; padding-bottom: 10px; margin-bottom: 30px; }
-  .toc-list { list-style: none; padding: 0; }
-  .toc-list li { padding: 6px 0; border-bottom: 1px dotted #ddd; display: flex; justify-content: space-between; }
-  .toc-list li.level1 { font-weight: bold; font-size: 12pt; color: #1b5e20; }
-  .toc-list li.level2 { padding-left: 24px; font-size: 11pt; color: #555; }
-  h1 { font-size: 20pt; color: #1b5e20; border-bottom: 3px solid #4caf50; padding-bottom: 8px; margin-top: 40px; page-break-after: avoid; }
-  h2 { font-size: 15pt; color: #2e7d32; border-left: 4px solid #4caf50; padding-left: 12px; margin-top: 30px; page-break-after: avoid; }
-  h3 { font-size: 12pt; color: #4a4a4a; margin-top: 20px; page-break-after: avoid; }
+
+  body {
+    font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+    font-size: 11pt;
+    line-height: 1.8;
+    color: #333;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* ===== 封面 ===== */
+  .cover {
+    page-break-after: always;
+    width: 210mm;
+    height: 297mm;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    color: #2e7d32;
+    text-align: center;
+    position: relative;
+  }
+
+  .cover-logo {
+    width: 180px;
+    height: auto;
+    margin-bottom: 30px;
+  }
+
+  .cover h1 {
+    font-size: 28pt;
+    margin: 0 0 10px 0;
+    letter-spacing: 4px;
+    color: #1b5e20;
+  }
+
+  .cover .subtitle {
+    font-size: 14pt;
+    color: #4caf50;
+    margin-bottom: 50px;
+    letter-spacing: 2px;
+  }
+
+  .cover .version-info {
+    font-size: 11pt;
+    color: #666;
+    margin-top: 20px;
+  }
+
+  .cover .divider-line {
+    width: 80px;
+    height: 2px;
+    background: #4caf50;
+    margin: 30px auto;
+  }
+
+  /* ===== 目录 ===== */
+  .toc-page {
+    page-break-after: always;
+  }
+
+  .toc-page h2 {
+    text-align: center;
+    font-size: 18pt;
+    color: #1b5e20;
+    border-bottom: 2px solid #4caf50;
+    padding-bottom: 10px;
+    margin-bottom: 30px;
+  }
+
+  .toc-list {
+    list-style: none;
+    padding: 0;
+  }
+
+  .toc-list li {
+    padding: 6px 0;
+    border-bottom: 1px dotted #ddd;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .toc-list li.level1 {
+    font-weight: bold;
+    font-size: 12pt;
+    color: #1b5e20;
+  }
+
+  .toc-list li.level2 {
+    padding-left: 24px;
+    font-size: 11pt;
+    color: #555;
+  }
+
+  /* ===== 正文 ===== */
+  h1 {
+    font-size: 20pt;
+    color: #1b5e20;
+    border-bottom: 3px solid #4caf50;
+    padding-bottom: 8px;
+    margin-top: 40px;
+    page-break-after: avoid;
+  }
+
+  h2 {
+    font-size: 15pt;
+    color: #2e7d32;
+    border-left: 4px solid #4caf50;
+    padding-left: 12px;
+    margin-top: 30px;
+    page-break-after: avoid;
+  }
+
+  h3 {
+    font-size: 12pt;
+    color: #4a4a4a;
+    margin-top: 20px;
+    page-break-after: avoid;
+  }
+
   p { margin: 8px 0; text-align: justify; }
-  .tip-box { background: #e8f5e9; border-left: 4px solid #4caf50; padding: 12px 16px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 10.5pt; }
-  .tip-box.warning { background: #fff8e6; border-left-color: #fa8c16; }
-  .tip-box.success { background: #f0fff0; border-left-color: #52c41a; }
-  .tip-box .tip-title { font-weight: bold; margin-bottom: 4px; }
-  .steps { counter-reset: step-counter; margin: 14px 0; padding-left: 0; }
-  .step-item { display: flex; align-items: flex-start; margin-bottom: 10px; padding: 8px 12px; background: #fafafa; border-radius: 6px; border: 1px solid #eee; }
-  .step-item::before { counter-increment: step-counter; content: counter(step-counter); display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; border-radius: 50%; background: #e8f5e9; color: #1b5e20; font-weight: bold; font-size: 12pt; margin-right: 12px; flex-shrink: 0; border: 2px solid #4caf50; }
-  .step-content { flex: 1; padding-top: 3px; }
-  .step-content strong { color: #1b5e20; }
-  .diagram { margin: 20px auto; text-align: center; }
-  .diagram svg { max-width: 100%; }
-  .diagram-caption { font-size: 9.5pt; color: #888; text-align: center; margin-top: 6px; }
-  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 10.5pt; }
-  th { background: #e8f5e9; color: #1b5e20; padding: 8px 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #4caf50; }
-  td { padding: 8px 12px; border-bottom: 1px solid #e8e8e8; }
-  tr:nth-child(even) td { background: #f8f9fa; }
-  .shortcut-key { display: inline-block; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; padding: 1px 8px; font-family: "Consolas", "Courier New", monospace; font-size: 10pt; color: #333; box-shadow: 0 1px 0 #bbb; }
-  .feature-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; margin: 12px 0; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
-  .feature-card .card-title { font-size: 12pt; font-weight: bold; color: #2e7d32; margin-bottom: 6px; }
-  .feature-card .card-desc { font-size: 10.5pt; color: #666; }
-  .flow-box { display: inline-block; padding: 8px 20px; border-radius: 6px; font-size: 10pt; font-weight: 600; text-align: center; }
-  .flow-arrow { font-size: 14pt; color: #4caf50; margin: 0 4px; }
-  ul, ol { padding-left: 24px; }
+
+  /* 提示框 */
+  .tip-box {
+    background: #e8f5e9;
+    border-left: 4px solid #4caf50;
+    padding: 12px 16px;
+    margin: 14px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 10.5pt;
+  }
+
+  .tip-box.warning {
+    background: #fff8e6;
+    border-left-color: #fa8c16;
+  }
+
+  .tip-box.success {
+    background: #f0fff0;
+    border-left-color: #52c41a;
+  }
+
+  .tip-box .tip-title {
+    font-weight: bold;
+    margin-bottom: 4px;
+  }
+
+  /* 步骤 */
+  .steps {
+    counter-reset: step-counter;
+    margin: 14px 0;
+    padding-left: 0;
+  }
+
+  .step-item {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    background: #fafafa;
+    border-radius: 6px;
+    border: 1px solid #eee;
+  }
+
+  .step-item::before {
+    counter-increment: step-counter;
+    content: counter(step-counter);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #e8f5e9;
+    color: #1b5e20;
+    border: 2px solid #4caf50;
+    font-weight: bold;
+    font-size: 12pt;
+    margin-right: 12px;
+    flex-shrink: 0;
+  }
+
+  .step-content {
+    flex: 1;
+    padding-top: 3px;
+  }
+
+  .step-content strong {
+    color: #1b5e20;
+  }
+
+  /* 示意框图 */
+  .diagram {
+    margin: 20px auto;
+    text-align: center;
+  }
+
+  .diagram svg {
+    max-width: 100%;
+  }
+
+  .diagram-caption {
+    font-size: 9.5pt;
+    color: #888;
+    text-align: center;
+    margin-top: 6px;
+  }
+
+  /* 表格 */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 10.5pt;
+  }
+
+  th {
+    background: #e8f5e9;
+    color: #1b5e20;
+    border-bottom: 2px solid #4caf50;
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+  }
+
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #e8e8e8;
+  }
+
+  tr:nth-child(even) td {
+    background: #f8f9fa;
+  }
+
+  /* 快捷键表格 */
+  .shortcut-key {
+    display: inline-block;
+    background: #f0f0f0;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 1px 8px;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 10pt;
+    color: #333;
+    box-shadow: 0 1px 0 #bbb;
+  }
+
+  /* 功能卡片 */
+  .feature-card {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 12px 0;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }
+
+  .feature-card .card-title {
+    font-size: 12pt;
+    font-weight: bold;
+    color: #4caf50;
+    margin-bottom: 6px;
+  }
+
+  .feature-card .card-desc {
+    font-size: 10.5pt;
+    color: #666;
+  }
+
+  /* 流程框图通用样式 */
+  .flow-box {
+    display: inline-block;
+    padding: 8px 20px;
+    border-radius: 6px;
+    font-size: 10pt;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .flow-arrow {
+    font-size: 14pt;
+    color: #4caf50;
+    margin: 0 4px;
+  }
+
+  ul, ol {
+    padding-left: 24px;
+  }
+
   li { margin-bottom: 4px; }
+
   .page-break { page-break-before: always; }
-  .section-intro { font-size: 10.5pt; color: #666; font-style: italic; margin-bottom: 16px; }
+
+  .section-intro {
+    font-size: 10.5pt;
+    color: #666;
+    font-style: italic;
+    margin-bottom: 16px;
+  }
 </style>
 </head>
 <body>
 
 <!-- ==================== 封面 ==================== -->
 <div class="cover">
-  <div class="cover-logo"><img src="src/PatentLens_transparent.png" alt="PatentLens"></div>
+  <div class="cover-logo"><img src="src/PatentLens_transparent.png" style="width:180px; height:auto;"></div>
   <h1>专利审查梳理工具</h1>
   <div class="subtitle">PatentLens · 用户使用说明书</div>
   <div class="divider-line"></div>
@@ -87,6 +357,7 @@
     <li class="level2"><span>3.5 同族标签页</span></li>
     <li class="level2"><span>3.6 审查看板标签页</span></li>
     <li class="level2"><span>3.7 AI 分析标签页</span></li>
+    <li class="level2"><span>3.8 时间线标签页</span></li>
     <li class="level1"><span>4 快速入门</span></li>
     <li class="level2"><span>4.1 配置 AI 服务</span></li>
     <li class="level2"><span>4.2 搜索专利</span></li>
@@ -103,11 +374,7 @@
     <li class="level2"><span>5.7 溯源对照阅读器</span></li>
     <li class="level2"><span>5.8 Word 导出</span></li>
     <li class="level2"><span>5.9 设置</span></li>
-    <li class="level2"><span>5.10 OCR 文字提取</span></li>
-    <li class="level2"><span>5.11 全文翻译</span></li>
-    <li class="level2"><span>5.12 阅读模式</span></li>
-    <li class="level2"><span>5.13 合并导出 PDF</span></li>
-    <li class="level2"><span>5.14 OCR 选区翻译</span></li>
+    <li class="level2"><span>5.10 合并导出 PDF</span></li>
     <li class="level1"><span>6 常见问题</span></li>
     <li class="level1"><span>7 附录</span></li>
   </ul>
@@ -118,27 +385,40 @@
 
 <h2>1.1 产品简介</h2>
 <p>
-  专利审查梳理工具（PatentLens）是一款面向专利从业人员的专业工具软件，能够自动获取专利审查历史文档，并通过看板式管理和 AI 智能分析，帮助用户高效梳理审查意见、答复策略及引用文献。用户只需输入专利号，软件即可从 USPTO/EPO/JPO/CNIPA 等专利局获取审查历史文档，自动分类归档，并结合 AI 大模型对审查意见和引用文献进行深度分析，大幅提升专利审查应对的效率与质量。
+  专利审查梳理工具（History Helper，简称 H2H）是一款面向专利从业人员的专业工具软件，能够自动获取专利审查历史文档，并通过看板式管理和 AI 智能分析，帮助用户高效梳理审查意见、答复策略及引用文献。用户只需输入专利号，软件即可从 USPTO/EPO/JPO/CNIPA 等专利局获取审查历史文档，自动分类归档，并结合 AI 大模型对审查意见和引用文献进行深度分析，大幅提升专利审查应对的效率与质量。
 </p>
 
 <h2>1.2 核心功能一览</h2>
 
 <div class="diagram">
-  <img src="manual_images/diagram_1.png" width="680" height="400" alt="示意图" style="max-width:100%; height:auto;">
+  <img src="manual_images/diagram_1.png" width="580" height="320" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 1-1 专利审查梳理工具核心功能架构</div>
 </div>
 
-<div class="feature-card"><div class="card-title">专利搜索</div><div class="card-desc">支持 US/EP/JP/CN 多种专利号格式，自动识别专利号类型，从 USPTO/EPO/JPO/CNIPA 获取审查历史文档，实时显示加载进度。</div></div>
-<div class="feature-card"><div class="card-title">审查看板</div><div class="card-desc">六列看板式文档管理，将审查历史文档自动分类为审查意见、答复、请求、授权、通知和其他，支持关键词与类型筛选。</div></div>
-<div class="feature-card"><div class="card-title">AI 分析</div><div class="card-desc">集成 DeepSeek、OpenAI 兼容接口、智谱 GLM 等 AI 服务，自动梳理审查意见和引用文献，支持手动选择文档和流式响应。</div></div>
-<div class="feature-card"><div class="card-title">溯源对照阅读</div><div class="card-desc">全屏对照阅读器，左侧原文高亮引用，右侧 AI 分析内容，点击引用链接自动跳转对应段落。</div></div>
-<div class="feature-card"><div class="card-title">Word 导出</div><div class="card-desc">将 AI 分析结果导出为 .docx 文件，Markdown 表格渲染为可编辑的 Word 表格，标题、粗体、列表格式完整保留，自动填充概览信息表格。</div></div>
-<div class="feature-card"><div class="card-title">时间线</div><div class="card-desc">按时间顺序展示审查过程中的关键事件，配有彩色标记和可视化时间轴，一目了然掌握审查进度。</div></div>
-<div class="feature-card"><div class="card-title">OCR 文字提取</div><div class="card-desc">支持 PaddleOCR-VL（免费）和 GLM OCR 两种引擎，对 PDF 文档进行版面识别和文字提取，自动清理噪音符号。</div></div>
-<div class="feature-card"><div class="card-title">全文翻译</div><div class="card-desc">独立翻译模型配置，支持智谱/DeepSeek/OpenAI，全文合并翻译，流式实时显示，自动清理 OCR 噪音符号。</div></div>
-<div class="feature-card"><div class="card-title">阅读模式</div><div class="card-desc">统一的沉浸式阅读体验，左侧文件列表自动收起，右侧Tab面板显示翻译对照和AI对话，不遮挡PDF阅读器。</div></div>
-<div class="feature-card"><div class="card-title">AI 文档对话</div><div class="card-desc">基于当前文档内容与 AI 实时对话，支持流式响应，深入探讨审查细节。</div></div>
-<div class="feature-card"><div class="card-title">悬浮球</div><div class="card-desc">阅读器可最小化为悬浮球，AI分析报告支持悬浮球继续对话，随时呼出不影响其他操作。</div></div>
+<div class="feature-card">
+  <div class="card-title">专利搜索</div>
+  <div class="card-desc">支持 US/EP/JP/CN 多种专利号格式，自动从 USPTO/EPO/JPO/CNIPA 获取审查历史文档，实时显示加载进度。</div>
+</div>
+<div class="feature-card">
+  <div class="card-title">审查看板</div>
+  <div class="card-desc">六列看板式文档管理，将审查历史文档自动分类为审查意见、答复、请求、授权、通知和其他，支持关键词与类型筛选。</div>
+</div>
+<div class="feature-card">
+  <div class="card-title">AI 分析</div>
+  <div class="card-desc">集成 DeepSeek、OpenAI 兼容接口、智谱 GLM 等 AI 服务，自动梳理审查意见和引用文献，支持手动选择文档和流式响应。</div>
+</div>
+<div class="feature-card">
+  <div class="card-title">溯源对照阅读</div>
+  <div class="card-desc">全屏对照阅读器，左侧原文高亮引用，右侧 AI 分析内容，点击引用链接自动跳转对应段落。</div>
+</div>
+<div class="feature-card">
+  <div class="card-title">Word 导出</div>
+  <div class="card-desc">将 AI 分析结果导出为 .docx 文件，Markdown 表格渲染为可编辑的 Word 表格，标题、粗体、列表格式完整保留。</div>
+</div>
+<div class="feature-card">
+  <div class="card-title">时间线</div>
+  <div class="card-desc">按时间顺序展示审查过程中的关键事件，配有彩色标记和可视化时间轴，一目了然掌握审查进度。</div>
+</div>
 
 <h2>1.3 系统要求</h2>
 <table>
@@ -154,25 +434,44 @@
 
 <h2>2.1 安装版安装</h2>
 <div class="steps">
-  <div class="step-item"><div class="step-content"><strong>下载安装程序</strong> — 获取 <code>PatentLens_x.x.x_x64-setup.exe</code> 文件</div></div>
-  <div class="step-item"><div class="step-content"><strong>运行安装程序</strong> — 双击 .exe 文件，按照安装向导提示完成安装</div></div>
-  <div class="step-item"><div class="step-content"><strong>启动软件</strong> — 从桌面快捷方式或开始菜单启动专利审查梳理工具</div></div>
+  <div class="step-item">
+    <div class="step-content"><strong>下载安装程序</strong> — 获取 <code>H2H_x.x.x_x64-setup.exe</code> 文件</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content"><strong>运行安装程序</strong> — 双击 .exe 文件，按照安装向导提示完成安装</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content"><strong>启动软件</strong> — 从桌面快捷方式或开始菜单启动专利审查梳理工具</div>
+  </div>
 </div>
 
 <h2>2.2 便携版使用</h2>
 <div class="steps">
-  <div class="step-item"><div class="step-content"><strong>解压文件</strong> — 将压缩包解压到任意目录（如桌面、D 盘等）</div></div>
-  <div class="step-item"><div class="step-content"><strong>运行程序</strong> — 双击 <code>PatentLens.exe</code> 即可运行，无需安装</div></div>
-  <div class="step-item"><div class="step-content"><strong>卸载</strong> — 直接删除整个文件夹即可完成卸载</div></div>
+  <div class="step-item">
+    <div class="step-content"><strong>解压文件</strong> — 将压缩包解压到任意目录（如桌面、D 盘等）</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content"><strong>运行程序</strong> — 双击 <code>H2H.exe</code> 即可运行，无需安装</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content"><strong>卸载</strong> — 直接删除整个文件夹即可完成卸载</div>
+  </div>
 </div>
 
-<div class="tip-box warning"><div class="tip-title">注意</div>便携版中 <code>PatentLens.exe</code> 与相关动态库必须位于同一目录下，请勿分开存放。</div>
+<div class="tip-box warning">
+  <div class="tip-title">注意</div>
+  便携版中 <code>H2H.exe</code> 与相关动态库必须位于同一目录下，请勿分开存放。
+</div>
 
 <h2>2.3 首次运行注意事项</h2>
 <p>首次运行时，Windows 可能弹出"Windows 已保护你的电脑"安全提示，请按以下步骤操作：</p>
 <div class="steps">
-  <div class="step-item"><div class="step-content">点击弹窗中的 <strong>"更多信息"</strong></div></div>
-  <div class="step-item"><div class="step-content">点击 <strong>"仍要运行"</strong> 按钮即可正常启动</div></div>
+  <div class="step-item">
+    <div class="step-content">点击弹窗中的 <strong>"更多信息"</strong></div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">点击 <strong>"仍要运行"</strong> 按钮即可正常启动</div>
+  </div>
 </div>
 
 <!-- ==================== 第3章 界面布局 ==================== -->
@@ -189,32 +488,28 @@
 <h2>3.2 搜索栏</h2>
 <p>搜索栏位于窗口最顶部，是整个应用的入口，包含以下元素：</p>
 <ul>
-  <li><strong>专利号输入框</strong> — 输入专利号，系统自动识别专利号类型（US/EP/JP/CN），placeholder 提示"输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型"</li>
+  <li><strong>专利号输入框</strong> — 输入专利号或申请号，支持 US、EP、JP、CN 格式</li>
+  <li><strong>专利局选择</strong> — 下拉选择目标专利局（USPTO/EPO/JPO/CNIPA）</li>
   <li><strong>搜索按钮</strong> — 点击后开始获取审查历史文档，搜索过程中显示加载进度</li>
-  <li><strong>设置按钮</strong> — 齿轮图标，点击打开设置对话框（AI 模型配置、OCR 配置、翻译配置、提示词配置等）</li>
+  <li><strong>设置按钮</strong> — 齿轮图标，点击打开设置对话框（AI 模型配置、API Key 等）</li>
 </ul>
 
-<div class="tip-box"><div class="tip-title">提示</div>支持 US / EP / JP / DE / CN 专利审查信息查询，US / EP / JP 支持文档原文下载与 AI 梳理（DE 需手动查阅）。系统会根据输入的专利号自动识别专利局类型，无需手动选择。</div>
-
 <h2>3.3 标签页区域</h2>
-<p>标签页区域位于搜索栏下方，包含 4 个功能标签页：</p>
+<p>标签页区域位于搜索栏下方，包含 5 个功能标签页：</p>
 
 <div class="diagram">
   <img src="manual_images/diagram_3.png" width="460" height="50" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 3-2 四个功能标签页</div>
+  <div class="diagram-caption">图 3-2 五个功能标签页</div>
 </div>
 
-<p>其中"概览"标签页已合并了原"时间线"标签页的内容，审查时间线直接展示在概览页面中。</p>
-
 <h2>3.4 概览标签页</h2>
-<p>概览标签页显示专利的基本信息和审查时间线，包括：</p>
+<p>概览标签页显示专利的基本信息，包括：</p>
 <ul>
   <li><strong>专利号</strong> — 当前查看的专利号</li>
   <li><strong>标题</strong> — 专利标题</li>
   <li><strong>申请人</strong> — 专利申请人/专利权人</li>
   <li><strong>申请日</strong> — 专利申请日期</li>
   <li><strong>当前审查状态</strong> — 专利的当前审查进度状态</li>
-  <li><strong>审查时间线</strong> — 以可视化时间轴展示审查历程中的关键事件，不同类型事件使用不同颜色标记</li>
 </ul>
 
 <h2>3.5 同族标签页</h2>
@@ -243,20 +538,23 @@
 <h2>3.7 AI 分析标签页</h2>
 <p>AI 分析标签页是 AI 智能分析的核心区域，包含以下功能区域：</p>
 <ul>
-  <li><strong>手动选择文档面板</strong> — 页面加载后默认展开，预勾选审查意见和答复类型文档，支持搜索筛选和已选汇总</li>
-  <li><strong>梳理审查意见</strong> — 在手动选择文档后点击"确认并开始AI梳理"，AI 分析选中的审查文档</li>
-  <li><strong>引用文献梳理</strong> — AI 分析审查意见中引用的对比文献，同样支持手动选择和搜索筛选</li>
-  <li><strong>分析结果展示</strong> — 以 Markdown 格式展示 AI 分析结果，流式输出无闪动</li>
+  <li><strong>手动选择面板（默认展开）</strong> — 进入标签页时自动展开，可勾选需要分析的文档，支持搜索过滤快速定位</li>
+  <li><strong>搜索过滤</strong> — 在手动选择面板中输入关键词，实时筛选匹配的文档，方便快速定位目标文档</li>
+  <li><strong>已选摘要</strong> — 面板底部显示当前已选文档数量和类型汇总，一目了然掌握选择范围</li>
+  <li><strong>自动梳理审查意见</strong> — 一键启动 AI 分析所有审查文档</li>
+  <li><strong>引用文献梳理</strong> — AI 分析审查意见中引用的对比文献</li>
+  <li><strong>分析结果展示</strong> — 以 Markdown 格式展示 AI 分析结果</li>
   <li><strong>阅读器按钮</strong> — 打开全屏溯源对照阅读器</li>
   <li><strong>导出 Word 按钮</strong> — 将分析结果导出为 .docx 文件</li>
-  <li><strong>AI 继续对话悬浮球</strong> — 分析完成后，右下角出现紫色悬浮球，点击可继续与 AI 对话</li>
-  <li><strong>悬浮球对话面板</strong> — 固定定位的对话面板，支持流式响应、清空对话、中止</li>
 </ul>
 
-<div class="diagram">
-  <img src="manual_images/diagram_5.png" width="460" height="160" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 3-4 AI 分析标签页与悬浮球对话示意</div>
-</div>
+<h2>3.8 时间线标签页</h2>
+<p>时间线标签页以可视化方式展示审查历程：</p>
+<ul>
+  <li><strong>时间轴</strong> — 按时间顺序排列的关键事件</li>
+  <li><strong>事件卡片</strong> — 每个事件显示日期、类型和描述</li>
+  <li><strong>彩色标记</strong> — 不同类型事件使用不同颜色标记</li>
+</ul>
 
 <!-- ==================== 第4章 快速入门 ==================== -->
 <h1 class="page-break">4 快速入门</h1>
@@ -264,80 +562,133 @@
 <p class="section-intro">本章将以一个完整的操作流程，带您快速上手专利审查梳理工具的核心功能。</p>
 
 <div class="diagram">
-  <img src="manual_images/diagram_6.png" width="520" height="70" alt="示意图" style="max-width:100%; height:auto;">
+  <img src="manual_images/diagram_5.png" width="520" height="70" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 4-1 快速入门操作流程</div>
 </div>
 
 <h2>4.1 配置 AI 服务</h2>
 <p>使用 AI 分析功能前，需先配置 AI 服务的 API Key：</p>
 <div class="steps">
-  <div class="step-item"><div class="step-content">点击搜索栏右侧的 <strong>齿轮图标</strong>，打开"设置"对话框</div></div>
-  <div class="step-item"><div class="step-content">在 <strong>"AI 服务" Tab</strong> 中选择 AI 服务商（DeepSeek / OpenAI 兼容 / 智谱 GLM）</div></div>
-  <div class="step-item"><div class="step-content">输入对应服务商的 <strong>API Key</strong></div></div>
-  <div class="step-item"><div class="step-content">（可选）修改 <strong>API 端点</strong> 地址，以适配代理或私有部署</div></div>
-  <div class="step-item"><div class="step-content">选择或输入要使用的 <strong>模型</strong></div></div>
-  <div class="step-item"><div class="step-content">点击 <strong>"测试连接"</strong> 验证配置是否正确，确认成功后关闭对话框</div></div>
+  <div class="step-item">
+    <div class="step-content">点击搜索栏右侧的 <strong>齿轮图标</strong>，打开"设置"对话框</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">选择 <strong>AI 服务商</strong>（DeepSeek / OpenAI 兼容 / 智谱 GLM）</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">输入对应服务商的 <strong>API Key</strong></div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">（可选）修改 <strong>API 端点</strong> 地址，以适配代理或私有部署</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">选择或输入要使用的 <strong>模型</strong></div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">点击 <strong>"测试连接"</strong> 验证配置是否正确，确认成功后关闭对话框</div>
+  </div>
 </div>
 
-<div class="tip-box"><div class="tip-title">提示</div>API 端点地址默认已填充各服务商的标准地址，一般情况下无需修改。如使用代理或私有部署，可自定义修改。OCR 和翻译功能可在各自 Tab 中独立配置。</div>
+<div class="tip-box">
+  <div class="tip-title">提示</div>
+  API 端点地址默认已填充各服务商的标准地址，一般情况下无需修改。如使用代理或私有部署，可自定义修改。
+</div>
 
 <h2>4.2 搜索专利</h2>
 <div class="steps">
-  <div class="step-item"><div class="step-content">在搜索栏的 <strong>专利号输入框</strong> 中输入专利号（如 US12030161B2, EP4252965A3）</div></div>
-  <div class="step-item"><div class="step-content">系统 <strong>自动识别专利号类型</strong>，无需手动选择专利局</div></div>
-  <div class="step-item"><div class="step-content">点击 <strong>搜索按钮</strong>，软件开始获取审查历史文档</div></div>
-  <div class="step-item"><div class="step-content">等待 <strong>加载进度</strong> 完成，各标签页数据自动填充</div></div>
+  <div class="step-item">
+    <div class="step-content">在搜索栏的 <strong>专利号输入框</strong> 中输入专利号或申请号</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">在 <strong>专利局下拉框</strong> 中选择目标专利局（USPTO/EPO/JPO/CNIPA）</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">点击 <strong>搜索按钮</strong>，软件开始获取审查历史文档</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">等待 <strong>加载进度</strong> 完成，各标签页数据自动填充</div>
+  </div>
 </div>
 
-<div class="tip-box warning"><div class="tip-title">注意</div>请确保输入的专利号格式正确。系统会自动识别 US、EP、JP、CN 等专利号类型。DE 专利仅支持审查信息查询，需手动查阅。</div>
+<div class="tip-box warning">
+  <div class="tip-title">注意</div>
+  请确保输入的专利号格式与所选专利局匹配。US 专利号如 US12345678，EP 如 EP12345678，JP 如 JP12345678，CN 如 CN12345678。
+</div>
 
 <h2>4.3 浏览审查看板</h2>
 <div class="steps">
-  <div class="step-item"><div class="step-content">点击 <strong>"审查看板"</strong> 标签页，查看自动分类的审查历史文档</div></div>
-  <div class="step-item"><div class="step-content">文档自动归入六列看板：<strong>审查意见、答复、请求、授权、通知、其他</strong></div></div>
-  <div class="step-item"><div class="step-content">使用顶部 <strong>筛选栏</strong> 按关键词或类型筛选文档</div></div>
-  <div class="step-item"><div class="step-content">点击文档卡片可 <strong>展开查看</strong> 提取的文本内容</div></div>
+  <div class="step-item">
+    <div class="step-content">点击 <strong>"审查看板"</strong> 标签页，查看自动分类的审查历史文档</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">文档自动归入六列看板：<strong>审查意见、答复、请求、授权、通知、其他</strong></div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">使用顶部 <strong>筛选栏</strong> 按关键词或类型筛选文档</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">点击文档卡片可 <strong>展开查看</strong> 提取的文本内容</div>
+  </div>
 </div>
 
 <h2>4.4 AI 分析审查意见</h2>
 <div class="steps">
-  <div class="step-item"><div class="step-content">切换到 <strong>"AI 分析"</strong> 标签页，手动选择文档面板已默认展开</div></div>
-  <div class="step-item"><div class="step-content">面板中已默认勾选审查意见和答复类型文档，可使用 <strong>搜索栏</strong> 快速定位文档，或手动调整勾选</div></div>
-  <div class="step-item"><div class="step-content">面板底部显示 <strong>已选文档汇总</strong>，确认选择范围后点击 <strong>"确认并开始AI梳理"</strong></div></div>
-  <div class="step-item"><div class="step-content">分析过程中可随时点击红色的 <strong>"中止梳理"</strong> 按钮中断</div></div>
-  <div class="step-item"><div class="step-content">分析完成后，结果以 <strong>Markdown 格式</strong> 流式展示在页面中</div></div>
-  <div class="step-item"><div class="step-content">（可选）点击 <strong>"梳理引用文献"</strong> 分析审查意见中引用的对比文献（同样支持手动选择和搜索筛选）</div></div>
-  <div class="step-item"><div class="step-content">分析完成后，右下角出现 <strong>紫色悬浮球</strong>，点击可继续与 AI 对话</div></div>
+  <div class="step-item">
+    <div class="step-content">切换到 <strong>"AI 分析"</strong> 标签页，手动选择面板默认展开</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">在手动选择面板中，使用 <strong>搜索框</strong> 过滤文档，或直接勾选/取消勾选需要分析的文档</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">查看面板底部的 <strong>已选摘要</strong>，确认当前选择的文档范围</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">点击 <strong>"自动梳理审查意见"</strong> 按钮，AI 开始分析选中的审查文档</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">分析过程中可随时点击红色的 <strong>"中止梳理"</strong> 按钮中断</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">分析完成后，结果以 <strong>Markdown 格式</strong> 展示在页面中</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">（可选）点击 <strong>"引用文献梳理"</strong> 分析审查意见中引用的对比文献</div>
+  </div>
 </div>
 
 <h2>4.5 导出与阅读</h2>
 <div class="steps">
-  <div class="step-item"><div class="step-content">点击 <strong>阅读器按钮</strong>，打开全屏溯源对照阅读器，对照查看原文与 AI 分析</div></div>
-  <div class="step-item"><div class="step-content">在阅读器中可使用 <strong>OCR 提取</strong>、<strong>翻译</strong>、<strong>AI 对话</strong> 等功能</div></div>
-  <div class="step-item"><div class="step-content">点击 <strong>"导出 Word"</strong> 按钮，将分析结果导出为 .docx 文件（自动填充概览信息）</div></div>
+  <div class="step-item">
+    <div class="step-content">点击 <strong>阅读器按钮</strong>，打开全屏溯源对照阅读器，对照查看原文与 AI 分析</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">点击 <strong>"导出 Word"</strong> 按钮，将分析结果导出为 .docx 文件</div>
+  </div>
 </div>
 
-<div class="tip-box success"><div class="tip-title">完成</div>至此，您已完成专利审查梳理工具的核心操作流程。更多高级功能请参阅第 5 章功能详解。</div>
+<div class="tip-box success">
+  <div class="tip-title">完成</div>
+  至此，您已完成专利审查梳理工具的核心操作流程。更多高级功能请参阅第 5 章功能详解。
+</div>
 
 <!-- ==================== 第5章 功能详解 ==================== -->
 <h1 class="page-break">5 功能详解</h1>
 
 <h2>5.1 专利搜索</h2>
-<p>专利搜索是整个工具的入口，通过输入专利号获取审查历史文档。系统会自动识别专利号类型，无需手动选择专利局。</p>
+<p>专利搜索是整个工具的入口，通过输入专利号获取审查历史文档。</p>
 
 <h3>支持的专利号格式</h3>
 <table>
   <tr><th>专利局</th><th>代码</th><th>专利号示例</th><th>说明</th></tr>
-  <tr><td>美国专利商标局</td><td>USPTO</td><td>US12030161B2</td><td>美国专利/申请号</td></tr>
-  <tr><td>欧洲专利局</td><td>EPO</td><td>EP4252965A3</td><td>欧洲专利/申请号</td></tr>
+  <tr><td>美国专利商标局</td><td>USPTO</td><td>US12345678</td><td>美国专利/申请号</td></tr>
+  <tr><td>欧洲专利局</td><td>EPO</td><td>EP12345678</td><td>欧洲专利/申请号</td></tr>
   <tr><td>日本特许厅</td><td>JPO</td><td>JP12345678</td><td>日本专利/申请号</td></tr>
-  <tr><td>德国专利商标局</td><td>DPMA</td><td>DE12345678</td><td>德国专利（仅审查信息查询，需手动查阅）</td></tr>
   <tr><td>中国国家知识产权局</td><td>CNIPA</td><td>CN12345678</td><td>中国专利/申请号</td></tr>
 </table>
 
 <h3>搜索流程</h3>
 <div class="diagram">
-  <img src="manual_images/diagram_7.png" width="480" height="100" alt="示意图" style="max-width:100%; height:auto;">
+  <img src="manual_images/diagram_6.png" width="480" height="100" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-1 专利搜索处理流程</div>
 </div>
 
@@ -349,15 +700,16 @@
 </ul>
 
 <h2>5.2 概览</h2>
-<p>概览标签页提供专利的摘要信息和审查时间线，让用户快速了解当前专利的基本情况和审查历程。</p>
+<p>概览标签页提供专利的摘要信息，让用户快速了解当前专利的基本情况。</p>
 
 <div class="diagram">
-  <img src="manual_images/diagram_8.png" width="440" height="280" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-2 概览标签页示意（含审查时间线）</div>
+  <img src="manual_images/diagram_7.png" width="440" height="200" alt="示意图" style="max-width:100%; height:auto;">
+  <div class="diagram-caption">图 5-2 概览标签页示意</div>
 </div>
 
 <h2>5.3 同族</h2>
 <p>同族标签页展示该专利在不同国家/地区的申请情况，帮助用户了解专利的全球布局。</p>
+
 <table>
   <tr><th>字段</th><th>说明</th></tr>
   <tr><td>同族成员</td><td>同一专利族在不同专利局的申请</td></tr>
@@ -390,19 +742,17 @@
 </ul>
 
 <div class="diagram">
-  <img src="manual_images/diagram_9.png" width="300" height="140" alt="示意图" style="max-width:100%; height:auto;">
+  <img src="manual_images/diagram_8.png" width="300" height="140" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-3 文档卡片示意</div>
 </div>
 
 <h3>筛选功能</h3>
+<p>审查看板顶部集成了筛选栏，支持以下筛选方式：</p>
 <ul>
   <li><strong>关键词搜索</strong> — 在搜索输入框中输入关键词，实时筛选包含该关键词的文档卡片</li>
   <li><strong>类型筛选</strong> — 点击类型标签（全部/审查意见/答复/请求/授权/通知/其他），按文档类型筛选</li>
   <li><strong>组合筛选</strong> — 关键词和类型筛选可同时使用，实现精确过滤</li>
 </ul>
-
-<h3>合并导出</h3>
-<p>审查看板标题栏右侧提供"合并导出"按钮，可将多个审查文档 PDF 合并为一个文件，详见 5.13 节。</p>
 
 <h3>卡片操作</h3>
 <ul>
@@ -411,92 +761,121 @@
   <li><strong>下载 PDF</strong> — 点击"下载 PDF"按钮，下载原始 PDF 文件</li>
 </ul>
 
-<div class="tip-box"><div class="tip-title">提示</div>看板各列等高显示，当文档较多时，列内可独立滚动浏览，不影响其他列的查看。</div>
+<div class="tip-box">
+  <div class="tip-title">提示</div>
+  看板各列等高显示，当文档较多时，列内可独立滚动浏览，不影响其他列的查看。
+</div>
 
 <h2>5.5 AI 分析</h2>
 <p>AI 分析是专利审查梳理工具的核心功能，通过调用 AI 大语言模型，自动对审查文档进行深度分析。</p>
 
 <div class="diagram">
-  <img src="manual_images/diagram_10.png" width="480" height="100" alt="示意图" style="max-width:100%; height:auto;">
+  <img src="manual_images/diagram_9.png" width="480" height="100" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-4 AI 分析处理流程</div>
 </div>
 
-<h3>手动选择文档面板</h3>
-<p>AI 分析采用手动选择模式，文档加载完成后选择面板自动展开，用户可自由勾选需要分析的文档后启动 AI 梳理。</p>
+<h3>手动选择面板</h3>
+<p>进入 AI 分析标签页时，手动选择面板默认展开，用户可直接勾选需要分析的文档。面板提供以下功能：</p>
+<ul>
+  <li><strong>搜索栏</strong> — 面板顶部提供搜索输入框，输入关键词可实时过滤文档列表，快速定位目标文档</li>
+  <li><strong>文档列表</strong> — 显示所有可用文档，每项包含文档代码、名称、日期和类型标签，点击复选框进行选择</li>
+  <li><strong>已选摘要</strong> — 面板底部实时显示当前已选文档数量及类型汇总（如"已选 5 篇：审查意见 3 · 答复 2"），一目了然掌握选择范围</li>
+  <li><strong>快捷操作</strong> — 提供全选、全不选、默认选择按钮，快速调整选择范围</li>
+  <li><strong>选择记忆</strong> — 用户的手动选择状态会自动保留，切换标签页或重新进入时恢复上次的选择，无需重复操作</li>
+</ul>
 
 <div class="diagram">
-  <img src="manual_images/diagram_11.png" width="440" height="280" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-5 手动选择文档面板示意（含搜索栏、已选汇总、合并导出）</div>
+  <img src="manual_images/diagram_10.png" width="440" height="220" alt="示意图" style="max-width:100%; height:auto;">
+  <div class="diagram-caption">图 5-5 手动选择面板示意</div>
 </div>
 
+<div class="tip-box">
+  <div class="tip-title">提示</div>
+  手动选择面板默认展开，方便用户在启动分析前确认和调整文档范围。选择状态会自动记忆，下次进入时无需重新选择。
+</div>
+
+<h3>自动梳理审查意见</h3>
+<p>点击"自动梳理审查意见"按钮，AI 将自动分析所有选中的审查文档，生成综合分析报告。分析内容包括：</p>
 <ul>
-  <li><strong>搜索栏</strong> — 面板顶部搜索框，输入关键词实时过滤文档（支持文档名称、代码、日期等多字段匹配）</li>
+  <li>各次审查意见的核心要点</li>
+  <li>审查员引用的对比文献及其应用</li>
+  <li>申请人的答复策略及效果</li>
+  <li>审查过程中的关键转折点</li>
+</ul>
+
+<p>分析过程中：</p>
+<ul>
+  <li><strong>流式响应</strong> — AI 分析结果实时流式输出，无需等待全部完成</li>
+  <li><strong>中止梳理</strong> — 分析过程中显示红色"中止梳理"按钮，可随时中断</li>
+</ul>
+
+<div class="tip-box warning">
+  <div class="tip-title">注意</div>
+  SPEC（说明书）文档默认不纳入 AI 分析范围。如需包含，可在手动选择面板中勾选。
+</div>
+
+<h3>引用文献梳理</h3>
+<p>点击"引用文献梳理"按钮，AI 将专门分析审查意见中引用的对比文献：</p>
+<ul>
+  <li>引用文献的基本信息</li>
+  <li>审查员如何引用该文献进行对比</li>
+  <li>申请人对引用文献的答复策略</li>
+  <li>引用文献与权利要求的对比分析</li>
+</ul>
+
+<p>分析过程中同样支持流式响应和中止操作（红色"中止引用梳理"按钮）。</p>
+
+<h3>手动选择文档</h3>
+<p>用户可以手动选择需要纳入 AI 分析的文档，实现更精细的控制：</p>
+<ul>
   <li><strong>全选</strong> — 勾选所有文档</li>
   <li><strong>全不选</strong> — 取消所有勾选</li>
   <li><strong>默认选择</strong> — 恢复默认勾选状态（审查意见 + 答复类型，排除 SPEC）</li>
   <li><strong>单独勾选</strong> — 点击每个文档前的复选框进行单独选择</li>
-  <li><strong>已选汇总</strong> — 面板底部实时显示已勾选的文档数量和名称列表</li>
-  <li><strong>合并导出选中文档</strong> — 将勾选的文档直接合并导出为 PDF，无需切换到合并导出弹窗</li>
-  <li><strong>确认并开始AI梳理</strong> — 确认选择后启动 AI 分析</li>
+  <li><strong>搜索过滤</strong> — 在搜索栏输入关键词，快速筛选目标文档</li>
 </ul>
 
-<div class="tip-box"><div class="tip-title">提示</div>默认选择包含 office_action（审查意见）和 response（答复）类型的文档，SPEC（说明书）文档默认排除。您可以根据需要手动调整选择范围。勾选变更会实时保存，关闭面板后再次打开仍保留您的选择。</div>
-
-<h3>选择记忆</h3>
-<p>手动选择面板支持选择状态持久化：</p>
-<ul>
-  <li><strong>实时保存</strong> — 每次勾选或取消勾选时，选择状态自动保存到本地存储</li>
-  <li><strong>关闭保留</strong> — 点击"取消"关闭面板后，再次打开仍保留上次的选择状态</li>
-  <li><strong>跨会话保持</strong> — 同一专利号的选择状态在不同会话间保持一致</li>
-  <li><strong>默认选择恢复</strong> — 点击"默认选择"按钮可随时恢复到系统默认勾选状态</li>
-</ul>
+<div class="tip-box">
+  <div class="tip-title">提示</div>
+  默认选择包含 office_action（审查意见）和 response（答复）类型的文档，SPEC（说明书）文档默认排除。您可以根据需要手动调整选择范围，选择状态会自动记忆。
+</div>
 
 <h3>分析结果展示</h3>
 <p>AI 分析结果以 Markdown 格式展示，支持以下交互：</p>
 <ul>
   <li><strong>阅读器按钮</strong> — 打开全屏溯源对照阅读器，详见 5.7 节</li>
   <li><strong>导出 Word 按钮</strong> — 将分析结果导出为 .docx 文件，详见 5.8 节</li>
-  <li><strong>AI 继续对话悬浮球</strong> — 分析完成后，右下角出现紫色悬浮球，点击可继续与 AI 对话</li>
 </ul>
 
 <h2>5.6 时间线</h2>
-<p>审查时间线已合并至概览标签页中，以可视化方式展示专利审查历程中的关键事件。</p>
+<p>时间线标签页以可视化方式展示专利审查历程中的关键事件。</p>
 
 <div class="diagram">
-  <img src="manual_images/diagram_12.png" width="440" height="280" alt="示意图" style="max-width:100%; height:auto;">
+  <img src="manual_images/diagram_11.png" width="440" height="280" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-6 时间线示意</div>
 </div>
 
+<p>时间线功能特点：</p>
 <ul>
   <li><strong>按时间排序</strong> — 所有事件按时间先后顺序排列</li>
   <li><strong>彩色标记</strong> — 不同类型事件使用不同颜色标记（审查意见-红色、答复-蓝色、请求-橙色、授权-绿色、通知-紫色）</li>
   <li><strong>事件详情</strong> — 每个事件显示日期、类型和描述</li>
-  <li><strong>合并至概览</strong> — 时间线已整合到概览标签页中，无需切换标签即可查看</li>
 </ul>
 
 <h2>5.7 溯源对照阅读器</h2>
-<p>溯源对照阅读器是一个全屏模态窗口，用于对照查看原始文档和 AI 分析结果，并集成了 OCR 提取、翻译、AI 对话等丰富功能。</p>
+<p>溯源对照阅读器是一个全屏模态窗口，用于对照查看原始文档和 AI 分析结果。</p>
 
 <div class="diagram">
-  <img src="manual_images/diagram_13.png" width="520" height="320" alt="示意图" style="max-width:100%; height:auto;">
+  <img src="manual_images/diagram_12.png" width="480" height="260" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-7 溯源对照阅读器示意</div>
 </div>
 
 <p>阅读器功能特点：</p>
 <ul>
-  <li><strong>左侧文件列表</strong> — 带固定搜索框，支持关键词筛选文档，快速定位目标文件</li>
-  <li><strong>PDF 视图</strong> — 点击"PDF 视图"切换到 PDF 渲染模式，支持翻页、缩放、适应宽度</li>
-  <li><strong>OCR 提取</strong> — 工具栏"OCR 提取"按钮，对当前 PDF 文档进行版面识别和文字提取（详见 5.10 节）</li>
-  <li><strong>翻译</strong> — 工具栏"翻译"按钮，全文合并翻译，自动先 OCR 再翻译（详见 5.11 节）</li>
-  <li><strong>OCR 选区翻译</strong> — 在 PDF 视图中框选 OCR 文本块后，可翻译选中区域（详见 5.14 节）</li>
-  <li><strong>AI 对话</strong> — 工具栏"AI 对话"按钮，基于当前文档与 AI 实时对话</li>
-  <li><strong>阅读模式</strong> — 点击翻译或 AI 对话时自动进入，左侧文件列表收起，右侧 Tab 面板显示翻译/AI 对话（详见 5.12 节）</li>
-  <li><strong>半屏模式</strong> — 点击"半屏"按钮，阅读器下拉固定为半屏对照模式</li>
-  <li><strong>悬浮球</strong> — 点击"悬浮"按钮，阅读器最小化为右下角悬浮球，点击悬浮球可恢复</li>
-  <li><strong>导出 Word</strong> — 阅读器内也可导出 Word 文件</li>
-  <li><strong>左右对照</strong> — 左侧显示原始文档文本，右侧显示 AI 分析或翻译内容</li>
+  <li><strong>左右对照</strong> — 左侧显示原始文档文本，右侧显示 AI 分析或引用文献内容</li>
   <li><strong>高亮引用</strong> — 原文中被引用的部分以高亮显示</li>
   <li><strong>可点击链接</strong> — 点击原文中的引用链接，右侧自动滚动到对应的分析段落</li>
+  <li><strong>全屏显示</strong> — 阅读器占满整个屏幕，提供更好的阅读体验</li>
   <li><strong>关闭按钮</strong> — 点击右上角关闭按钮退出阅读器</li>
 </ul>
 
@@ -504,7 +883,7 @@
 <p>AI 分析结果可导出为 .docx 文件，方便在 Word 中进一步编辑和分享。</p>
 
 <div class="diagram">
-  <img src="manual_images/diagram_14.png" width="480" height="80" alt="示意图" style="max-width:100%; height:auto;">
+  <img src="manual_images/diagram_13.png" width="480" height="80" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 5-8 Word 导出流程</div>
 </div>
 
@@ -518,248 +897,79 @@
   <tr><td>普通段落</td><td>Word 正文段落</td></tr>
 </table>
 
-<h3>概览信息自动填充</h3>
-<p>导出的 Word 文件会自动在文档开头填充概览信息表格，包含：</p>
-<table>
-  <tr><th>字段</th><th>说明</th></tr>
-  <tr><td>专利号</td><td>当前专利号</td></tr>
-  <tr><td>标题</td><td>专利标题</td></tr>
-  <tr><td>申请人/发明人</td><td>专利申请人或发明人信息</td></tr>
-  <tr><td>申请日</td><td>专利申请日期</td></tr>
-  <tr><td>当前状态</td><td>专利的当前审查状态</td></tr>
-</table>
-
-<div class="tip-box success"><div class="tip-title">优势</div>Markdown 表格在导出时渲染为真正的 Word 表格，而非图片，可在 Word 中直接编辑单元格内容、调整列宽等。表头带有彩色背景，美观且易读。概览信息表格自动填充，无需手动复制。</div>
+<div class="tip-box success">
+  <div class="tip-title">优势</div>
+  Markdown 表格在导出时渲染为真正的 Word 表格，而非图片，可在 Word 中直接编辑单元格内容、调整列宽等。表头带有彩色背景，美观且易读。
+</div>
 
 <h2>5.9 设置</h2>
-<p>点击搜索栏右侧的齿轮图标，打开设置对话框。设置对话框包含 4 个 Tab 页，分别管理不同功能的配置。</p>
+<p>点击搜索栏右侧的齿轮图标，打开设置对话框，可配置 AI 模型相关参数。</p>
 
-<div class="diagram">
-  <img src="manual_images/diagram_15.png" width="460" height="50" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-9 设置对话框四个 Tab 页</div>
+<h3>AI 模型选择</h3>
+<p>支持以下三种 AI 服务商：</p>
+<table>
+  <tr><th>服务商</th><th>推荐模型</th><th>说明</th></tr>
+  <tr><td>DeepSeek</td><td>deepseek-chat、deepseek-reasoner</td><td>国产 AI 服务，性价比高</td></tr>
+  <tr><td>OpenAI 兼容</td><td>gpt-4o、gpt-4o-mini、gpt-4-turbo</td><td>兼容 OpenAI API 格式的各类服务</td></tr>
+  <tr><td>智谱 GLM</td><td>glm-4-plus、glm-4-flash、glm-4-air</td><td>智谱 AI 大语言模型</td></tr>
+</table>
+
+<h3>API Key 配置</h3>
+<p>选择服务商后，需要输入对应的 API Key：</p>
+<div class="steps">
+  <div class="step-item">
+    <div class="step-content">在设置对话框中选择 <strong>AI 服务商</strong></div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">在 API Key 输入框中粘贴 <strong>API Key</strong></div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">（可选）修改 <strong>API 端点</strong> 地址</div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">选择要使用的 <strong>模型</strong></div>
+  </div>
+  <div class="step-item">
+    <div class="step-content">点击 <strong>"测试连接"</strong> 验证配置</div>
+  </div>
 </div>
 
-<h3>AI 服务 Tab</h3>
-<p>配置 AI 分析功能使用的模型和服务商：</p>
-<table>
-  <tr><th>配置项</th><th>说明</th></tr>
-  <tr><td>服务商选择</td><td>DeepSeek / OpenAI 兼容 / 智谱 GLM</td></tr>
-  <tr><td>API Key</td><td>对应服务商的 API 密钥</td></tr>
-  <tr><td>Base URL</td><td>API 端点地址，默认已填充标准地址</td></tr>
-  <tr><td>模型选择</td><td>选择或输入要使用的模型名称</td></tr>
-  <tr><td>测试连接</td><td>验证 API Key 和端点配置是否正确</td></tr>
-</table>
+<h3>模型测试</h3>
+<p>设置对话框提供"测试连接"功能，点击后系统将向 AI 服务发送一条测试消息，验证 API Key 和端点配置是否正确。测试成功后显示绿色提示，失败则显示错误信息。</p>
 
-<h3>OCR Tab</h3>
-<p>配置 OCR 文字提取功能：</p>
-<table>
-  <tr><th>配置项</th><th>说明</th></tr>
-  <tr><td>OCR 引擎选择</td><td>PaddleOCR-VL（免费，无需 API Key）/ GLM OCR（需要智谱 API Key）</td></tr>
-  <tr><td>GLM OCR API Key</td><td>选择 GLM OCR 引擎时需要填写智谱 API Key</td></tr>
-</table>
-
-<div class="tip-box"><div class="tip-title">提示</div>PaddleOCR-VL 为免费引擎，无需配置 API Key 即可使用。GLM OCR 需要智谱 API Key，识别精度更高。</div>
-
-<h3>翻译 Tab</h3>
-<p>配置全文翻译功能，翻译模型可独立于 AI 分析使用不同服务商/模型：</p>
-<table>
-  <tr><th>配置项</th><th>说明</th></tr>
-  <tr><td>翻译模型服务商</td><td>智谱 / DeepSeek / OpenAI（可独立于 AI 服务）</td></tr>
-  <tr><td>翻译 API Key</td><td>翻译服务专用的 API Key</td></tr>
-  <tr><td>翻译模型选择</td><td>选择翻译使用的模型</td></tr>
-  <tr><td>默认目标语言</td><td>中文 / English / 日本語 / 한국어</td></tr>
-</table>
-
-<p>各服务商的翻译默认模型：</p>
-<table>
-  <tr><th>服务商</th><th>翻译默认模型</th></tr>
-  <tr><td>智谱 AI (GLM)</td><td>glm-4-flash</td></tr>
-  <tr><td>DeepSeek</td><td>deepseek-v4-flash</td></tr>
-  <tr><td>OpenAI 兼容</td><td>gpt-4o-mini</td></tr>
-</table>
-
-<h3>提示词 Tab</h3>
-<p>配置各类 AI 分析使用的提示词模板，每个提示词均可自定义编辑并恢复默认：</p>
-<table>
-  <tr><th>提示词</th><th>说明</th></tr>
-  <tr><td>审查意见梳理提示词（含溯源版）</td><td>带溯源引用的审查意见梳理分析</td></tr>
-  <tr><td>审查意见梳理提示词（简化版）</td><td>简化版审查意见梳理，不含溯源引用</td></tr>
-  <tr><td>单文档分析提示词</td><td>对单个文档进行 AI 分析</td></tr>
-  <tr><td>审查历史梳理提示词</td><td>梳理完整审查历史</td></tr>
-  <tr><td>引用文献梳理提示词</td><td>分析审查意见中引用的对比文献</td></tr>
-</table>
-
-<div class="tip-box"><div class="tip-title">提示</div>每个提示词旁均有"恢复默认"按钮，修改后可一键恢复为系统预设的默认提示词。建议在默认提示词基础上微调，以获得最佳分析效果。</div>
-
-<h2>5.10 OCR 文字提取</h2>
-<p>OCR 文字提取功能可对 PDF 文档进行版面识别和文字提取，为翻译和 AI 对话提供文本基础。</p>
-
-<h3>OCR 引擎</h3>
-<table>
-  <tr><th>引擎</th><th>说明</th><th>是否需要 API Key</th></tr>
-  <tr><td>PaddleOCR-VL</td><td>免费开源引擎，版面识别能力优秀</td><td>否（免费使用）</td></tr>
-  <tr><td>GLM OCR</td><td>智谱 AI 提供的 OCR 服务，识别精度更高</td><td>是（需要智谱 API Key）</td></tr>
-</table>
-
-<h3>OCR 提取流程</h3>
-<div class="diagram">
-  <img src="manual_images/diagram_16.png" width="480" height="80" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-10 OCR 提取流程</div>
+<div class="tip-box">
+  <div class="tip-title">提示</div>
+  首次使用前，请务必完成 API Key 配置并通过测试连接验证。AI 分析功能依赖正确的 API 配置。
 </div>
 
-<h3>提取结果</h3>
-<p>OCR 提取结果包含以下信息：</p>
+<h2>5.10 合并导出 PDF</h2>
+<p>合并导出 PDF 功能可将多份审查文档合并为一个 PDF 文件，方便整体查阅和归档。</p>
+
+<h3>封面页专利书目信息</h3>
+<p>合并导出的 PDF 文件会自动生成封面页，封面页包含以下专利书目信息：</p>
 <ul>
-  <li><strong>block 类型标记</strong> — text（正文）、title（标题）、table（表格）、formula（公式）、figure（图片）、header（页眉）、caption（图注）</li>
-  <li><strong>内容文本</strong> — 识别出的文字内容</li>
-  <li><strong>页码</strong> — 内容所在的 PDF 页码</li>
+  <li><strong>专利号</strong> — 当前专利的公开/授权编号</li>
+  <li><strong>标题</strong> — 专利的完整标题</li>
+  <li><strong>申请人</strong> — 专利申请人/专利权人名称</li>
+  <li><strong>申请日</strong> — 专利申请的提交日期</li>
+  <li><strong>发明人</strong> — 专利的发明人信息</li>
 </ul>
 
-<h3>自动清理噪音符号</h3>
-<table>
-  <tr><th>OCR 原始符号</th><th>清理后</th><th>说明</th></tr>
-  <tr><td>$ \Box $</td><td>&#x2610;</td><td>复选框（未勾选）</td></tr>
-  <tr><td>$ \surd $</td><td>&#x2611;</td><td>复选框（已勾选）</td></tr>
-  <tr><td>$ \S $</td><td>&#x00A7;</td><td>章节符号</td></tr>
-</table>
-
-<div class="tip-box"><div class="tip-title">提示</div>OCR 提取完成后，PDF 阅读器会自动启用搜索功能，可在 PDF 中搜索关键词定位内容。</div>
-
-<h2>5.11 全文翻译</h2>
-<p>全文翻译功能可将 PDF 文档全文翻译为目标语言，采用全文合并翻译策略，翻译质量更高。</p>
-
-<h3>翻译模型配置</h3>
-<p>翻译功能使用独立的模型配置，可与 AI 分析使用不同服务商/模型：</p>
-<ul>
-  <li>默认模型：GLM &#x2192; glm-4-flash，DeepSeek &#x2192; deepseek-v4-flash，OpenAI &#x2192; gpt-4o-mini</li>
-  <li>支持目标语言选择：中文、English、日本語、한국어</li>
-</ul>
-
-<h3>翻译流程</h3>
-<div class="diagram">
-  <img src="manual_images/diagram_17.png" width="520" height="80" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-11 全文翻译流程</div>
+<div class="tip-box">
+  <div class="tip-title">提示</div>
+  封面页的专利书目信息自动从概览标签页获取，无需手动输入。如信息不完整，请先在概览标签页确认数据是否加载成功。
 </div>
-
-<h3>全文合并翻译</h3>
-<ul>
-  <li><strong>不分页不分块</strong> — 将所有页 OCR 内容拼接后一次性翻译，保证上下文连贯</li>
-  <li><strong>自动清理噪音</strong> — 翻译前自动清理 OCR 噪音符号，确保翻译源文本质量</li>
-  <li><strong>流式实时显示</strong> — 翻译结果流式输出，无需等待全部完成</li>
-</ul>
-
-<div class="tip-box"><div class="tip-title">提示</div>点击"翻译"按钮时，如果文档尚未进行 OCR 提取，系统会自动先执行 OCR 提取，然后再进行翻译，无需手动操作。</div>
-
-<h2>5.12 阅读模式</h2>
-<p>阅读模式提供统一的沉浸式阅读体验，在查看翻译或与 AI 对话时自动进入。</p>
-
-<h3>触发方式</h3>
-<ul>
-  <li><strong>翻译按钮</strong> — 进入阅读模式，右侧 Tab 面板显示"对照翻译"</li>
-  <li><strong>AI 对话按钮</strong> — 进入阅读模式，右侧 Tab 面板显示"AI 对话"</li>
-</ul>
-
-<h3>布局变化</h3>
-<div class="diagram">
-  <img src="manual_images/diagram_18.png" width="480" height="180" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-12 阅读模式布局变化示意</div>
-</div>
-
-<h3>右侧 Tab 面板</h3>
-<ul>
-  <li><strong>顶部 Tab 切换栏</strong> — "对照翻译" / "AI 对话" 两个 Tab，可自由切换</li>
-  <li><strong>对照翻译 Tab</strong> — 显示原文与翻译的对照内容</li>
-  <li><strong>AI 对话 Tab</strong> — 基于当前文档与 AI 实时对话，支持流式响应</li>
-  <li><strong>关闭按钮</strong> — Tab 栏右侧的关闭按钮，退出阅读模式恢复原布局</li>
-</ul>
-
-<div class="tip-box"><div class="tip-title">提示</div>阅读模式下，PDF 阅读器与右侧面板采用 flex 布局，完全分离不遮挡，确保阅读体验流畅。左侧文件列表收起时带有过渡动画，退出阅读模式后自动恢复。</div>
-
-<h2>5.13 合并导出 PDF</h2>
-<p>合并导出功能可将审查看板中多个文档的 PDF 合并为一个文件，每个文档前自动插入封面页作为分隔，方便整体阅读和归档。</p>
-
-<div class="diagram">
-  <img src="manual_images/diagram_19.png" width="520" height="80" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-13 合并导出 PDF 流程</div>
-</div>
-
-<h3>操作步骤</h3>
-<ol class="steps">
-  <li class="step-item"><div class="step-content">在审查看板标题栏点击<strong>"合并导出"</strong>按钮，打开文档选择弹窗</div></li>
-  <li class="step-item"><div class="step-content">弹窗中列出所有可下载文档，按日期<strong>倒序排列</strong>（最新在前）</div></li>
-  <li class="step-item"><div class="step-content">使用<strong>搜索框</strong>输入关键词快速筛选文档（支持文档名称、代码、日期等多字段匹配）</div></li>
-  <li class="step-item"><div class="step-content">勾选需要导出的文档，支持<strong>全选/取消全选</strong>快捷操作</div></li>
-  <li class="step-item"><div class="step-content">点击<strong>"合并导出 PDF"</strong>按钮，系统自动下载并合并所选文档</div></li>
-</ol>
-
-<h3>封面页</h3>
-<p>合并后的 PDF 中，每个文档前会自动插入一页封面，包含以下信息：</p>
-<table>
-  <tr><th>封面元素</th><th>说明</th></tr>
-  <tr><td>专利号</td><td>用户搜索时输入的专利号，显示在顶部蓝色条内（如 Patent: US12030161B2 (US)）</td></tr>
-  <tr><td>专利标题</td><td>专利发明名称，显示在蓝色条下方居中</td></tr>
-  <tr><td>发明人/申请人</td><td>发明人或申请人信息，与申请日一同显示</td></tr>
-  <tr><td>文档标题</td><td>原文档的英文标题（如 Non-Final Rejection）</td></tr>
-  <tr><td>中文标题</td><td>自动翻译的中文标题（如 非最终驳回）</td></tr>
-  <tr><td>文档代码</td><td>文档类型代码（如 CTNF）</td></tr>
-  <tr><td>日期</td><td>文档日期</td></tr>
-  <tr><td>页眉标记</td><td><em><strong>by PatentLens</strong></em> 标识生成工具</td></tr>
-</table>
-
-<div class="diagram">
-  <img src="manual_images/diagram_20.png" width="300" height="420" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-14 合并导出封面页示意（含专利著录信息）</div>
-</div>
-
-<h3>搜索筛选</h3>
-<p>文档选择弹窗顶部提供搜索输入框，支持以下筛选方式：</p>
-<ul>
-  <li><strong>关键词搜索</strong> — 输入关键词实时过滤，匹配文档名称、代码、描述、日期等字段</li>
-  <li><strong>多次搜索</strong> — 可反复修改搜索词，分别勾选不同搜索结果中的文档</li>
-  <li><strong>清空搜索</strong> — 清空搜索框恢复显示全部文档，已勾选状态保持不变</li>
-</ul>
-
-<div class="tip-box"><div class="tip-title">提示</div>合并导出功能不支持 DE（德国）专利局的文档，因为该专利局不提供 PDF 下载接口。DE 专利的"合并导出"按钮会自动隐藏。</div>
-
-<h2>5.14 OCR 选区翻译</h2>
-<p>OCR 选区翻译功能允许用户在 PDF 视图中选择特定的 OCR 文本块，仅翻译选中部分，而非整篇文档。适用于只需翻译特定段落或图表说明的场景。</p>
-
-<div class="diagram">
-  <img src="manual_images/diagram_21.png" width="520" height="80" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-15 OCR 选区翻译流程</div>
-</div>
-
-<h3>操作方式</h3>
-<ol class="steps">
-  <li class="step-item"><div class="step-content">在溯源对照阅读器中，先对文档执行<strong>OCR 提取</strong>（PDF 视图会显示 OCR 识别的文本块色块）</div></li>
-  <li class="step-item"><div class="step-content"><strong>单击</strong>某个文本块色块选中它，或<strong>拖拽框选</strong>多个文本块</div></li>
-  <li class="step-item"><div class="step-content">选中后，底部出现操作栏，显示"已选 N 块"，提供<strong>"翻译"</strong>和<strong>"清除"</strong>按钮</div></li>
-  <li class="step-item"><div class="step-content">也可<strong>右键点击</strong>文本块，在上下文菜单中选择"翻译此文本块"或"翻译已选 N 块"</div></li>
-  <li class="step-item"><div class="step-content">翻译结果自动显示在右侧<strong>对照翻译面板</strong>中，进入阅读模式</div></li>
-</ol>
-
-<h3>选区操作</h3>
-<table>
-  <tr><th>操作</th><th>方式</th><th>说明</th></tr>
-  <tr><td>选中单个块</td><td>单击 OCR 色块</td><td>再次单击取消选中</td></tr>
-  <tr><td>框选多个块</td><td>在 PDF 页面上拖拽矩形</td><td>矩形范围内的文本块被选中</td></tr>
-  <tr><td>追加选择</td><td>按住 Ctrl/Cmd 键单击</td><td>在已有选区基础上追加文本块</td></tr>
-  <tr><td>清除选区</td><td>点击"清除"按钮</td><td>清除所有已选文本块</td></tr>
-  <tr><td>翻译选区</td><td>点击"翻译"按钮或右键菜单</td><td>翻译所有选中的文本块内容</td></tr>
-</table>
-
-<div class="tip-box"><div class="tip-title">提示</div>OCR 选区翻译使用与全文翻译相同的翻译模型配置，翻译结果会缓存，重复翻译相同选区时直接使用缓存，无需重复调用 API。选区翻译会自动进入阅读模式，左侧文件列表收起，右侧显示对照翻译面板。</div>
 
 <!-- ==================== 第6章 常见问题 ==================== -->
 <h1 class="page-break">6 常见问题</h1>
 
 <h3>Q1：首次运行时 Windows 提示"已保护你的电脑"怎么办？</h3>
-<p>这是 Windows SmartScreen 的正常安全提示。点击"更多信息" &#x2192; "仍要运行"即可。专利审查梳理工具是安全的本地应用，不会收集或上传任何用户数据。</p>
+<p>这是 Windows SmartScreen 的正常安全提示。点击"更多信息" → "仍要运行"即可。专利审查梳理工具是安全的本地应用，不会收集或上传任何用户数据。</p>
 
 <h3>Q2：搜索专利时获取文档失败怎么办？</h3>
 <p>请检查以下几点：</p>
 <ul>
-  <li>专利号格式是否正确，系统能否自动识别类型</li>
+  <li>专利号格式是否正确，与所选专利局是否匹配</li>
   <li>网络连接是否正常</li>
   <li>该专利是否确实有审查历史文档（部分专利可能尚未公开审查历史）</li>
   <li>目标专利局服务器是否可正常访问</li>
@@ -776,11 +986,12 @@
 </ul>
 
 <h3>Q4：支持哪些 AI 服务商和模型？</h3>
+<p>目前支持以下三种服务商：</p>
 <table>
   <tr><th>服务商</th><th>推荐模型</th></tr>
-  <tr><td>DeepSeek</td><td>deepseek-chat、deepseek-reasoner、deepseek-v4-flash（翻译默认）</td></tr>
-  <tr><td>OpenAI 兼容</td><td>gpt-4o、gpt-4o-mini（翻译默认）、gpt-4-turbo</td></tr>
-  <tr><td>智谱 AI (GLM)</td><td>glm-4-plus、glm-4-flash（翻译默认）、glm-4-air</td></tr>
+  <tr><td>DeepSeek</td><td>deepseek-chat、deepseek-reasoner</td></tr>
+  <tr><td>OpenAI 兼容</td><td>gpt-4o、gpt-4o-mini、gpt-4-turbo、gpt-3.5-turbo</td></tr>
+  <tr><td>智谱 AI (GLM)</td><td>glm-4-plus、glm-4-flash、glm-4-air、glm-4</td></tr>
 </table>
 
 <h3>Q5：如何中止正在进行的 AI 分析？</h3>
@@ -789,14 +1000,14 @@
 <h3>Q6：为什么 SPEC 文档默认不纳入 AI 分析？</h3>
 <p>SPEC（说明书）通常篇幅很长，纳入分析会消耗大量 Token 且对审查意见梳理帮助有限。默认排除 SPEC 可以提高分析效率、降低 API 调用成本。如需包含，可在手动选择面板中勾选 SPEC 文档。</p>
 
-<h3>Q7：手动选择面板关闭后，再次打开会保留之前的选择吗？</h3>
-<p>会。手动选择面板的勾选状态会实时保存到本地存储，关闭面板后再次打开仍保留您的选择。如需恢复默认状态，可点击面板中的"默认选择"按钮。</p>
+<h3>Q7：手动选择的文档会保留吗？</h3>
+<p>会。AI 分析标签页中的手动选择状态会自动记忆，切换标签页或重新进入时恢复上次的选择，无需重复操作。如需重置，可点击"默认选择"按钮恢复默认勾选状态。</p>
 
 <h3>Q8：导出的 Word 文件中表格可以编辑吗？</h3>
 <p>可以。导出的 .docx 文件中，Markdown 表格已渲染为真正的 Word 表格，支持在 Word 中直接编辑单元格内容、调整列宽、修改样式等操作。表头带有彩色背景，可根据需要修改。</p>
 
 <h3>Q9：审查看板的筛选功能如何使用？</h3>
-<p>审查看板顶部提供两种筛选方式：&#x2460;在搜索框中输入关键词，实时筛选包含该关键词的文档卡片；&#x2461;点击类型标签（全部/审查意见/答复/请求/授权/通知/其他），按文档类型筛选。两种方式可同时使用，实现精确过滤。</p>
+<p>审查看板顶部提供两种筛选方式：①在搜索框中输入关键词，实时筛选包含该关键词的文档卡片；②点击类型标签（全部/审查意见/答复/请求/授权/通知/其他），按文档类型筛选。两种方式可同时使用，实现精确过滤。</p>
 
 <h3>Q10：溯源对照阅读器中的引用链接如何使用？</h3>
 <p>在阅读器左侧原文中，被引用的部分会以高亮显示，并带有可点击的链接标记。点击链接后，右侧内容区会自动滚动到对应的分析段落，方便对照查看。</p>
@@ -810,42 +1021,13 @@
 <h3>Q13：审查看板各列可以独立滚动吗？</h3>
 <p>可以。看板各列等高显示，当某列中文档较多时，该列可独立上下滚动浏览，不影响其他列的查看。</p>
 
-<h3>Q14：OCR 提取失败怎么办？</h3>
-<p>请检查以下几点：</p>
-<ul>
-  <li>如果使用 PaddleOCR-VL 引擎，确保网络连接正常（首次使用需下载模型）</li>
-  <li>如果使用 GLM OCR 引擎，确保智谱 API Key 已正确配置</li>
-  <li>PDF 文件是否损坏或为扫描图片（扫描件识别效果取决于图片质量）</li>
-  <li>可在设置 &#x2192; OCR Tab 中切换引擎重试</li>
-</ul>
-
-<h3>Q15：翻译功能如何配置？</h3>
-<p>翻译功能使用独立的模型配置，步骤如下：</p>
-<ul>
-  <li>打开设置对话框，切换到 <strong>"翻译" Tab</strong></li>
-  <li>选择翻译模型服务商（智谱/DeepSeek/OpenAI，可与 AI 分析使用不同服务商）</li>
-  <li>填写翻译专用的 API Key</li>
-  <li>选择翻译模型（默认已推荐最优模型）</li>
-  <li>设置默认目标语言（中文/English/日本語/한국어）</li>
-</ul>
-
-<h3>Q16：阅读模式如何退出？</h3>
-<p>阅读模式下，点击右侧 Tab 面板顶部的 <strong>关闭按钮（&#x2715;）</strong> 即可退出阅读模式，恢复原始布局。左侧文件列表会自动展开恢复，PDF 阅读器回到原始宽度。</p>
-
-<h3>Q17：AI 对话功能如何使用？</h3>
-<p>AI 对话功能有两种使用方式：</p>
-<ul>
-  <li><strong>阅读器内 AI 对话</strong> — 在溯源对照阅读器中点击工具栏"AI 对话"按钮，进入阅读模式，右侧 Tab 面板切换到"AI 对话"，可基于当前文档与 AI 实时对话</li>
-  <li><strong>悬浮球对话</strong> — AI 分析完成后，右下角出现紫色悬浮球，点击可打开对话面板继续与 AI 对话，支持流式响应、清空对话和中止操作</li>
-</ul>
-
 <!-- ==================== 第7章 附录 ==================== -->
 <h1 class="page-break">7 附录</h1>
 
 <h2>7.1 完整操作流程图</h2>
 
 <div class="diagram">
-  <img src="manual_images/diagram_22.png" width="480" height="560" alt="示意图" style="max-width:100%; height:auto;">
+  <img src="manual_images/diagram_14.png" width="480" height="520" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 7-1 完整操作流程图</div>
 </div>
 
@@ -863,54 +1045,27 @@
 
 <h2>7.3 AI 服务配置参考</h2>
 <table>
-  <tr><th>服务商</th><th>默认端点</th><th>推荐模型</th><th>翻译默认模型</th><th>获取 API Key</th></tr>
-  <tr><td>DeepSeek</td><td>https://api.deepseek.com</td><td>deepseek-chat、deepseek-reasoner</td><td>deepseek-v4-flash</td><td>platform.deepseek.com 注册</td></tr>
-  <tr><td>OpenAI 兼容</td><td>https://api.openai.com</td><td>gpt-4o、gpt-4-turbo</td><td>gpt-4o-mini</td><td>对应平台注册</td></tr>
-  <tr><td>智谱 AI (GLM)</td><td>https://open.bigmodel.cn/api/paas</td><td>glm-4-plus、glm-4-air</td><td>glm-4-flash</td><td>open.bigmodel.cn 注册</td></tr>
+  <tr><th>服务商</th><th>默认端点</th><th>推荐模型</th><th>获取 API Key</th></tr>
+  <tr><td>DeepSeek</td><td>https://api.deepseek.com</td><td>deepseek-chat、deepseek-reasoner</td><td>platform.deepseek.com 注册</td></tr>
+  <tr><td>OpenAI 兼容</td><td>https://api.openai.com</td><td>gpt-4o、gpt-4o-mini</td><td>对应平台注册</td></tr>
+  <tr><td>智谱 AI (GLM)</td><td>https://open.bigmodel.cn/api/paas</td><td>glm-4-plus、glm-4-flash</td><td>open.bigmodel.cn 注册</td></tr>
 </table>
 
 <h2>7.4 关键工作流</h2>
 
 <h3>工作流一：标准审查意见梳理</h3>
 <div class="diagram">
-  <img src="manual_images/diagram_23.png" width="480" height="60" alt="示意图" style="max-width:100%; height:auto;">
+  <img src="manual_images/diagram_15.png" width="480" height="60" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 7-2 标准审查意见梳理工作流</div>
 </div>
 
 <h3>工作流二：自定义文档分析</h3>
 <div class="diagram">
-  <img src="manual_images/diagram_24.png" width="480" height="60" alt="示意图" style="max-width:100%; height:auto;">
+  <img src="manual_images/diagram_16.png" width="480" height="60" alt="示意图" style="max-width:100%; height:auto;">
   <div class="diagram-caption">图 7-3 自定义文档分析工作流</div>
 </div>
 
 <h2>7.5 版本更新清单</h2>
-
-<h3>V0.4.0 (2026-06)</h3>
-<table>
-  <tr><th>字段</th><th>内容</th></tr>
-  <tr><td>变更类型</td><td>功能更新 + 交互重构</td></tr>
-  <tr><td>影响章节</td><td>3.7、4.4、5.5、5.13、7.5</td></tr>
-  <tr><td>变更说明</td><td>AI 梳理交互重构：取消自动梳理按钮，改为手动选择+默认勾选模式，选择面板默认展开显示；选择面板新增搜索栏（支持文档名称/代码/日期多字段匹配）、已选文档汇总区域（实时显示勾选数量和名称列表）；勾选状态实时保存到本地存储，关闭面板后再次打开仍保留用户选择；合并导出 PDF 封面页新增专利著录信息（专利号、专利标题、发明人/申请人、申请日），每页封面均标注所属专利；AI 流式输出采用 RAF 节流机制，防止其他功能区域闪动；引用文献手动选择面板同步增加搜索栏、汇总区和实时保存功能；启动动画替换为 16:9 Lensgif.gif，白色背景容器；应用 LOGO 替换为透明背景大 LOGO；新增 GIF/JPG/WEBP 等 MIME 类型支持</td></tr>
-  <tr><td>图示更新</td><td>更新图 5-5（手动选择面板增加搜索栏、汇总区、合并导出按钮）、图 5-14（封面页增加专利著录信息）</td></tr>
-</table>
-
-<h3>V0.3.0 (2026-06)</h3>
-<table>
-  <tr><th>字段</th><th>内容</th></tr>
-  <tr><td>变更类型</td><td>功能更新</td></tr>
-  <tr><td>影响章节</td><td>1.2、5.4、5.7、5.13（新增）、5.14（新增）、7.1、7.5</td></tr>
-  <tr><td>变更说明</td><td>新增合并导出 PDF 功能（支持搜索筛选、封面页含中英文标题和 by PatentLens 页眉、日期倒序排列）；新增 OCR 选区翻译功能（支持单击/框选/右键翻译特定文本块）；补充 US 文档中文翻译映射（Preliminary Amendment、Welcome Letter 等 12 项）；修复 AI 溯源链接跳转 PDF 阅读器时页面崩坏和缩放后 OCR 块消失的竞态条件问题</td></tr>
-  <tr><td>图示更新</td><td>新增图 5-13、5-14、5-15</td></tr>
-</table>
-
-<h3>V0.2.0 (2026-06)</h3>
-<table>
-  <tr><th>字段</th><th>内容</th></tr>
-  <tr><td>变更类型</td><td>功能更新</td></tr>
-  <tr><td>影响章节</td><td>1.2、3.2、3.3、3.4、3.7、5.1、5.2、5.6、5.7、5.8、5.9、6、7.1、7.3、7.5</td></tr>
-  <tr><td>变更说明</td><td>新增 OCR 文字提取、全文翻译、阅读模式、AI 文档对话、悬浮球、设置分 Tab、阅读器搜索框、Word 导出概览信息等功能；搜索栏移除专利局选择改为自动识别；标签页从5个调整为4个（时间线合并至概览）；AI 分析新增悬浮球继续对话；设置从单一页面改为4个 Tab；更新 AI 服务配置参考模型列表</td></tr>
-  <tr><td>图示更新</td><td>新增图 3-4、5-9、5-10、5-11、5-12；更新图 1-1、3-1、3-2、5-1、5-2、5-7、7-1</td></tr>
-</table>
 
 <h3>V0.1.0 (2026-06)</h3>
 <table>
@@ -919,6 +1074,15 @@
   <tr><td>影响章节</td><td>全部</td></tr>
   <tr><td>变更说明</td><td>初始版本，建立说明书框架，覆盖核心功能说明：专利搜索、概览、同族、审查看板、AI 分析、时间线、溯源对照阅读器、Word 导出、设置</td></tr>
   <tr><td>图示更新</td><td>全部图示首次绘制</td></tr>
+</table>
+
+<h3>V0.4.0 (2026-06)</h3>
+<table>
+  <tr><th>字段</th><th>内容</th></tr>
+  <tr><td>变更类型</td><td>功能增强</td></tr>
+  <tr><td>影响章节</td><td>3.7、4.4、5.5、5.10、6</td></tr>
+  <tr><td>变更说明</td><td>1. AI 分析标签页手动选择面板默认展开，支持搜索过滤和已选摘要；2. AI 分析选择状态自动记忆，切换标签页后保留；3. 合并导出 PDF 封面页增加专利书目信息；4. 品牌升级为 PatentLens，配色方案更新为绿色主题</td></tr>
+  <tr><td>图示更新</td><td>更新 AI 分析相关图示，新增合并导出 PDF 图示</td></tr>
 </table>
 
 </body>
