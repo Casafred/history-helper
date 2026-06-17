@@ -152,6 +152,7 @@ async fn fetch_patent(
 #[tauri::command]
 async fn fetch_family(
     input: String,
+    query_type: Option<String>,
 ) -> Result<CommandResult, String> {
     let pn = match parse_patent_number(&input) {
         Ok(pn) => pn,
@@ -160,9 +161,10 @@ async fn fetch_family(
 
     let office = pn.office.to_string();
     let doc_num = pn.application_number.unwrap_or_else(|| input.clone());
+    let qtype = query_type.unwrap_or_else(|| "application".to_string());
 
     let client = GlobalDossierClient::new();
-    match client.get_family("application", &office, &doc_num).await {
+    match client.get_family(&qtype, &office, &doc_num).await {
         Ok(data) => Ok(CommandResult::ok(data)),
         Err(e) => Ok(CommandResult::err(e.to_string())),
     }

@@ -250,6 +250,12 @@ function parsePatentNumber(input) {
       break;
     case "EP":
       appNum = stripped.replace(/^EP/i, "").replace(/[\s.]/g, "");
+      // EP patents: Global Dossier "patent" query type often returns null corrAppNum,
+      // causing wrong application number to be selected from family list.
+      // Always use "publication" which reliably returns corrAppNum.
+      if (kindCode) {
+        queryType = "publication";
+      }
       break;
     case "JP":
       appNum = stripped.replace(/^JP/i, "").replace(/[\s-]/g, "");
@@ -282,7 +288,8 @@ async function gdFetch(urlPath) {
 
     if (familyMatch) {
       const result = await tauriInvoke("fetch_family", {
-        input: familyMatch[2].startsWith("US") ? familyMatch[3] : familyMatch[3],
+        input: familyMatch[3],
+        queryType: familyMatch[1],
       });
       if (result && result.success && result.data) return result.data;
       throw new Error(result?.error || "Tauri family fetch failed");
