@@ -66,16 +66,34 @@ body {
 #app.wide-layout {
   max-width: 100%;
   padding: 24px 32px;
-  align-items: stretch;
+}
+
+/* In wide-layout, only result-main expands; header/search/tabs stay constrained */
+#app.wide-layout .app-header,
+#app.wide-layout .search-section {
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+#app.wide-layout .tabs-wrapper {
+  max-width: 960px;
 }
 
 /* Non-home-mode: left-aligned, full-width sections */
 #app:not(.home-mode) .app-header,
-#app:not(.home-mode) .search-section,
 #app:not(.home-mode) .result-section,
 #app:not(.home-mode) .convert-section,
 #app:not(.home-mode) #loading {
   width: 100%;
+}
+
+/* Search section: always constrained width, centered */
+#app:not(.home-mode) .search-section {
+  width: 100%;
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .app-header {
@@ -289,6 +307,7 @@ body {
   padding: 0;
   margin: 0 auto 16px auto;
   max-width: 960px;
+  width: 100%;
 }
 
 .result-section .tabs {
@@ -3182,20 +3201,20 @@ body {
   margin-top: 4px;
 }
 
-/* ── History Sidebar ── */
-.result-layout {
-  display: flex;
-  gap: 0;
-  position: relative;
-}
+/* ── History Sidebar (fixed, always accessible) ── */
 .history-sidebar {
-  flex-shrink: 0;
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 500;
   width: 44px;
   transition: width 0.3s ease;
   overflow: hidden;
   border-right: 1px solid var(--border);
+  border-radius: 0 var(--radius) var(--radius) 0;
   background: var(--bg-secondary);
-  border-radius: var(--radius) 0 0 var(--radius);
+  box-shadow: 2px 0 8px rgba(0,0,0,0.15);
 }
 .history-sidebar:not(.collapsed) {
   width: 220px;

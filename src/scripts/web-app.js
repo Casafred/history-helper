@@ -937,11 +937,8 @@ function doRestoreFromHistory(patentNumber) {
   const historyAll = PatentCache.getHistoryAll();
   const h = historyAll[patentNumber];
   const office = h ? h.office : "";
-  const searchInput = document.getElementById("search-input");
-  const officeSelect = document.getElementById("office-select");
-  if (searchInput) searchInput.value = patentNumber;
-  if (officeSelect && office) officeSelect.value = office;
-  doSearch();
+  if (patentInput) patentInput.value = patentNumber;
+  doSearch(patentNumber);
 }
 
 function doRestoreFromCache(patentNumber) {
