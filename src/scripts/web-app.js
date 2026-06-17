@@ -3399,13 +3399,34 @@ function togglePdfView(skipRender) {
   }
 }
 
-function showOcrProgressOverlay() {
-  // Remove existing overlay if any
-  hideOcrProgressOverlay();
+function showOcrProgressOverlay(statusText, progress) {
+  const existing = document.getElementById("ocr-progress-overlay");
+  if (existing) {
+    // Update existing overlay
+    const textEl = existing.querySelector(".ocr-progress-label");
+    const fillEl = existing.querySelector(".ocr-progress-fill");
+    const pctEl = existing.querySelector(".ocr-progress-pct");
+    if (textEl && statusText) textEl.textContent = statusText;
+    if (fillEl && typeof progress === "number") {
+      fillEl.style.width = progress + "%";
+      fillEl.classList.remove("ocr-progress-indeterminate");
+    }
+    if (pctEl && typeof progress === "number") pctEl.textContent = Math.round(progress) + "%";
+    return;
+  }
   const overlay = document.createElement("div");
   overlay.id = "ocr-progress-overlay";
-  overlay.style.cssText = "position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;padding:8px 16px;background:var(--accent-dim);border-bottom:2px solid var(--accent);font-size:13px;color:var(--accent);";
-  overlay.innerHTML = '<div class="ocr-progress-spinner" style="width:16px;height:16px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></div><span>正在 OCR 识别中，PDF 已可浏览...</span>';
+  overlay.style.cssText = "position:sticky;top:0;z-index:50;padding:10px 16px 12px;background:var(--accent-dim);border-bottom:2px solid var(--accent);font-size:13px;color:var(--accent);";
+  const isIndeterminate = typeof progress !== "number";
+  overlay.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+      <div class="ocr-progress-spinner" style="width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></div>
+      <span class="ocr-progress-label" style="flex:1;">${statusText || "正在 OCR 识别中..."}</span>
+      <span class="ocr-progress-pct" style="font-size:12px;font-weight:600;min-width:36px;text-align:right;">${typeof progress === "number" ? Math.round(progress) + "%" : ""}</span>
+    </div>
+    <div class="ocr-progress-bar" style="width:100%;height:4px;background:rgba(79,143,247,0.15);border-radius:2px;overflow:hidden;">
+      <div class="ocr-progress-fill ${isIndeterminate ? "ocr-progress-indeterminate" : ""}" style="height:100%;background:var(--accent);border-radius:2px;transition:width 0.3s ease;${typeof progress === "number" ? "width:" + progress + "%;" : ""}"></div>
+    </div>`;
   readerPdfContainer.prepend(overlay);
 }
 
@@ -3517,7 +3538,7 @@ async function renderPdfView(idx) {
       const ocrConfig = window.AI.getOCRConfig(config);
       if (ocrConfig.autoOcr !== false) {
         // Show OCR progress overlay on top of the already-rendered PDF
-        showOcrProgressOverlay();
+        showOcrProgressOverlay("正在自动 OCR 识别中，PDF 已可浏览...");
         ocrPdf(); // fire-and-forget, will re-render on completion
       }
     }
@@ -4020,13 +4041,49 @@ async function ocrPdf() {
   const isUS = currentData.office === "US";
   const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
 
+  const totalPages = it.numberOfPages ? parseInt(it.numberOfPages) : 0;
+
+  // Show progress overlay with phase indicators
+  showOcrProgressOverlay("正在下载 PDF 文档...", 5);
+
+  // Simulate download phase progress
+  let downloadTimer = null;
+  let downloadProgress = 5;
+  if (totalPages > 0) {
+    downloadTimer = setInterval(() => {
+      if (downloadProgress < 30) {
+        downloadProgress += 3;
+        showOcrProgressOverlay("正在下载 PDF 文档...", downloadProgress);
+      }
+    }, 500);
+  }
+
   const MAX_RETRIES = 2;
   let success = false;
 
   async function tryExtract(engine, retriesLeft) {
     try {
+      // Update progress to OCR phase
+      if (downloadTimer) clearInterval(downloadTimer);
+      showOcrProgressOverlay("正在 OCR 识别 (" + (engine === "paddle_ocr_vl" ? "PaddleOCR" : "GLM OCR") + ")...", 35);
+
+      // Simulate OCR phase progress
+      let ocrTimer = null;
+      let ocrProgress = 35;
+      if (totalPages > 0) {
+        ocrTimer = setInterval(() => {
+          if (ocrProgress < 85) {
+            ocrProgress += Math.max(1, Math.floor((85 - ocrProgress) * 0.08));
+            showOcrProgressOverlay("正在 OCR 识别 (" + (engine === "paddle_ocr_vl" ? "PaddleOCR" : "GLM OCR") + ")... " + Math.round(ocrProgress * totalPages / 85) + "/" + totalPages + " 页", ocrProgress);
+          }
+        }, 800);
+      }
+
       const useApiKey = engine === "glm_ocr" ? glmApiKey : "";
       const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, useApiKey);
+
+      if (ocrTimer) clearInterval(ocrTimer);
+
       if (result.error) {
         if (retriesLeft > 0) {
           const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
@@ -4047,6 +4104,7 @@ async function ocrPdf() {
         showError("OCR 提取内容为空");
         return false;
       }
+      showOcrProgressOverlay("正在解析 OCR 结果...", 90);
       const blocks = result.blocks || [];
       const pageDimensions = result.page_dimensions || {};
       kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
@@ -4060,6 +4118,7 @@ async function ocrPdf() {
           };
         });
       }
+      showOcrProgressOverlay("OCR 完成", 100);
       return true;
     } catch (e) {
       if (retriesLeft > 0) {
@@ -5247,7 +5306,6 @@ document.addEventListener("DOMContentLoaded", () => {
       if (pdfOcrBtn.disabled) return;
       pdfOcrBtn.disabled = true;
       pdfOcrBtn.textContent = "OCR中...";
-      showOcrProgressOverlay();
       await ocrPdf();
       pdfOcrBtn.disabled = false;
       pdfOcrBtn.textContent = "OCR 提取";

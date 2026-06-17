@@ -68,16 +68,19 @@ body {
   padding: 24px 32px;
 }
 
-/* In wide-layout, only result-main expands; header/search/tabs stay constrained */
+/* In wide-layout, only result-section expands; header/search/tabs stay constrained */
 #app.wide-layout .app-header,
 #app.wide-layout .search-section {
   max-width: 960px;
+  width: 100%;
   margin-left: auto;
   margin-right: auto;
 }
 
-#app.wide-layout .tabs-wrapper {
+#app.wide-layout .result-section .tabs-wrapper {
   max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* Non-home-mode: left-aligned, full-width sections */
@@ -715,6 +718,16 @@ body {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* OCR indeterminate progress bar animation */
+@keyframes ocr-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.ocr-progress-indeterminate {
+  width: 25% !important;
+  animation: ocr-progress-slide 1.5s ease-in-out infinite;
 }
 
 .toast {
