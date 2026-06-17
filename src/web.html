@@ -8,6 +8,17 @@
 </head>
 <body>
   <div id="app">
+    <!-- 历史栏：固定定位，始终可见 -->
+    <div id="history-sidebar" class="history-sidebar collapsed">
+      <div class="history-sidebar-toggle" title="历史记录">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </div>
+      <div class="history-sidebar-content">
+        <div class="history-sidebar-title">历史记录</div>
+        <div id="history-list" class="history-list"></div>
+      </div>
+    </div>
+
     <header class="app-header">
       <h1>PatentLens</h1>
       <p class="subtitle">专利审查文档获取与梳理</p>

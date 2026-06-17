@@ -305,6 +305,18 @@ searchBtn.addEventListener("click", async () => {
 
   currentData = result;
 
+  // 记录到历史
+  const patentKey = result.raw || (result.office + result.applicationNumber);
+  PatentCache.addHistory(patentKey, result.office);
+  PatentCache.save(patentKey, {
+    office: result.office,
+    applicationNumber: result.applicationNumber,
+    docNumber: result.docNumber,
+    applicantName: result.applicantName,
+    timestamp: Date.now(),
+  });
+  refreshHistoryList();
+
   try { renderOverview(result); } catch (e) { console.error("renderOverview:", e); }
   try { renderFamily(result); } catch (e) { console.error("renderFamily:", e); }
   try { renderKanban(result); } catch (e) { console.error("renderKanban:", e); }
