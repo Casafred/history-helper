@@ -3299,7 +3299,10 @@ function selectReaderDoc(idx) {
 
   document.querySelectorAll(".reader-doc-item").forEach(el => el.classList.remove("active"));
   const activeEl = document.querySelector(`.reader-doc-item[data-idx="${idx}"]`);
-  if (activeEl) activeEl.classList.add("active");
+  if (activeEl) {
+    activeEl.classList.add("active");
+    activeEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
 
   // Track the currently selected document for PDF view
   pdfViewState.currentDocIdx = idx;
