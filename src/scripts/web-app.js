@@ -403,9 +403,9 @@ async function doSearch(input) {
 
   currentData = result;
 
+  try { renderKanban(result); } catch (e) { console.error("renderKanban:", e); }
   try { renderOverview(result); } catch (e) { console.error("renderOverview:", e); }
   try { renderFamily(result); } catch (e) { console.error("renderFamily:", e); }
-  try { renderKanban(result); } catch (e) { console.error("renderKanban:", e); }
   try { renderTimeline(result); } catch (e) { console.error("renderTimeline:", e); }
 
   if (warnings.length > 0) {
@@ -425,6 +425,8 @@ async function doSearch(input) {
   searchBtn.disabled = false;
   loading.classList.add("hidden");
 
+  // Auto-record lightweight history entry (even without OCR/AI)
+  PatentCache.addHistory(result.raw || (result.office + result.applicationNumber), result.office);
   // Refresh history list after new search
   refreshHistoryList();
 }
@@ -440,6 +442,7 @@ let kanbanState = {
 // ── PatentCache - manages cached patent query states ──
 const PatentCache = {
   STORAGE_KEY: "patentlens-cache",
+  HISTORY_KEY: "patentlens-history",  // Lightweight history entries (no cache data)
 
   getAll() {
     try {
@@ -495,6 +498,40 @@ const PatentCache = {
   clearAll() {
     try {
       localStorage.removeItem(this.STORAGE_KEY);
+    } catch {}
+  },
+
+  // ── Lightweight history (always recorded, no cache data) ──
+  getHistoryAll() {
+    try {
+      const raw = localStorage.getItem(this.HISTORY_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  },
+
+  addHistory(patentNumber, office) {
+    const all = this.getHistoryAll();
+    all[patentNumber] = {
+      patentNumber,
+      office: office || "",
+      timestamp: Date.now(),
+    };
+    try {
+      localStorage.setItem(this.HISTORY_KEY, JSON.stringify(all));
+    } catch {}
+  },
+
+  removeHistory(patentNumber) {
+    const all = this.getHistoryAll();
+    delete all[patentNumber];
+    try {
+      localStorage.setItem(this.HISTORY_KEY, JSON.stringify(all));
+    } catch {}
+  },
+
+  clearAllHistory() {
+    try {
+      localStorage.removeItem(this.HISTORY_KEY);
     } catch {}
   },
 
@@ -564,9 +601,9 @@ const PatentCache = {
       currentData = cacheEntry.currentData;
 
       // Re-render everything first (renderKanban will reset kanbanState)
+      try { renderKanban(currentData); } catch (e) { console.error("renderKanban:", e); }
       try { renderOverview(currentData); } catch (e) { console.error("renderOverview:", e); }
       try { renderFamily(currentData); } catch (e) { console.error("renderFamily:", e); }
-      try { renderKanban(currentData); } catch (e) { console.error("renderKanban:", e); }
       try { renderTimeline(currentData); } catch (e) { console.error("renderTimeline:", e); }
 
       // Now restore kanbanState AFTER renderKanban (which resets it)
@@ -735,8 +772,49 @@ function promptSaveCache(callback) {
 
 // ── Refresh history sidebar & settings cache tab ──
 function refreshHistoryList() {
-  const all = PatentCache.getAll();
-  const entries = Object.values(all).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  const cachedAll = PatentCache.getAll();
+  const historyAll = PatentCache.getHistoryAll();
+
+  // Merge: cached entries + lightweight-only entries
+  const mergedMap = {};
+  // Lightweight history entries first
+  Object.entries(historyAll).forEach(([pn, h]) => {
+    mergedMap[pn] = {
+      patentNumber: pn,
+      office: h.office || "",
+      timestamp: h.timestamp || 0,
+      isCached: !!cachedAll[pn],
+      hasOCR: false,
+      hasAnalysis: false,
+      hasCitedRefs: false,
+    };
+  });
+  // Overlay cached entries (they have richer data)
+  Object.entries(cachedAll).forEach(([pn, c]) => {
+    if (mergedMap[pn]) {
+      mergedMap[pn].isCached = true;
+      mergedMap[pn].hasOCR = !!c.hasOCR;
+      mergedMap[pn].hasAnalysis = !!c.hasAnalysis;
+      mergedMap[pn].hasCitedRefs = !!c.hasCitedRefs;
+      // Use the more recent timestamp
+      if ((c.timestamp || 0) > mergedMap[pn].timestamp) {
+        mergedMap[pn].timestamp = c.timestamp;
+        mergedMap[pn].office = c.office || mergedMap[pn].office;
+      }
+    } else {
+      mergedMap[pn] = {
+        patentNumber: pn,
+        office: c.office || "",
+        timestamp: c.timestamp || 0,
+        isCached: true,
+        hasOCR: !!c.hasOCR,
+        hasAnalysis: !!c.hasAnalysis,
+        hasCitedRefs: !!c.hasCitedRefs,
+      };
+    }
+  });
+
+  const entries = Object.values(mergedMap).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
   // Update history sidebar
   const historyList = document.getElementById("history-list");
@@ -748,10 +826,11 @@ function refreshHistoryList() {
         const currentPatent = currentData ? (currentData.raw || (currentData.office + currentData.applicationNumber)) : "";
         const isActive = e.patentNumber === currentPatent;
         let badges = "";
+        if (!e.isCached) badges += '<span class="history-badge" style="background:var(--bg-hover);color:var(--text-muted);">仅记录</span>';
         if (e.hasOCR) badges += '<span class="history-badge badge-ocr">OCR</span>';
         if (e.hasAnalysis) badges += '<span class="history-badge badge-analysis">分析</span>';
         if (e.hasCitedRefs) badges += '<span class="history-badge badge-cited">引用</span>';
-        return `<div class="history-item${isActive ? ' active' : ''}" data-patent="${escapeHtml(e.patentNumber)}">
+        return `<div class="history-item${isActive ? ' active' : ''}" data-patent="${escapeHtml(e.patentNumber)}" data-cached="${e.isCached ? '1' : '0'}">
           <div class="history-item-patent">${escapeHtml(e.patentNumber)}</div>
           <div class="history-item-time">${e.office ? '<span style="color:var(--accent);margin-right:4px;">' + escapeHtml(e.office) + '</span>' : ''}${timeAgo(e.timestamp)}</div>
           ${badges ? '<div class="history-item-badges">' + badges + '</div>' : ''}
@@ -762,24 +841,30 @@ function refreshHistoryList() {
       historyList.querySelectorAll(".history-item").forEach(item => {
         item.addEventListener("click", () => {
           const patentNumber = item.dataset.patent;
-          restoreFromCache(patentNumber);
+          const isCached = item.dataset.cached === "1";
+          if (isCached) {
+            restoreFromCache(patentNumber);
+          } else {
+            restoreFromHistory(patentNumber);
+          }
         });
       });
     }
   }
 
-  // Update settings cache tab
+  // Update settings cache tab (only show cached entries)
+  const cachedEntries = Object.values(cachedAll).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
   const cacheOverview = document.getElementById("cache-overview");
   const cachePatentList = document.getElementById("cache-patent-list");
   if (cacheOverview) {
     const size = PatentCache.getSize();
-    cacheOverview.textContent = `${entries.length} 条缓存，共 ${PatentCache.formatSize(size)}`;
+    cacheOverview.textContent = `${cachedEntries.length} 条缓存，共 ${PatentCache.formatSize(size)}`;
   }
   if (cachePatentList) {
-    if (entries.length === 0) {
+    if (cachedEntries.length === 0) {
       cachePatentList.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:12px;">暂无缓存</div>';
     } else {
-      cachePatentList.innerHTML = entries.map(e => {
+      cachePatentList.innerHTML = cachedEntries.map(e => {
         let badges = "";
         if (e.hasOCR) badges += '<span class="history-badge badge-ocr">OCR</span>';
         if (e.hasAnalysis) badges += '<span class="history-badge badge-analysis">分析</span>';
@@ -799,6 +884,7 @@ function refreshHistoryList() {
           ev.stopPropagation();
           const pn = btn.dataset.patent;
           PatentCache.remove(pn);
+          PatentCache.removeHistory(pn);
           refreshHistoryList();
         });
       });
@@ -810,17 +896,45 @@ function restoreFromCache(patentNumber) {
   const entry = PatentCache.get(patentNumber);
   if (!entry) { showError("缓存记录不存在"); return; }
 
-  // Check unsaved work first
-  if (kanbanState.hasUnsavedWork && currentData) {
+  // Confirm if switching away from current query
+  if (currentData) {
     const currentPatent = currentData.raw || (currentData.office + currentData.applicationNumber);
     if (currentPatent !== patentNumber) {
-      promptSaveCache(() => {
-        doRestoreFromCache(patentNumber);
-      });
-      return;
+      if (kanbanState.hasUnsavedWork) {
+        promptSaveCache(() => doRestoreFromCache(patentNumber));
+        return;
+      }
+      if (!confirm("当前查询结果尚未保存，确认切换到其他专利？")) return;
     }
   }
   doRestoreFromCache(patentNumber);
+}
+
+function restoreFromHistory(patentNumber) {
+  // Lightweight history entry: confirm and re-trigger search
+  if (currentData) {
+    const currentPatent = currentData.raw || (currentData.office + currentData.applicationNumber);
+    if (currentPatent !== patentNumber) {
+      if (kanbanState.hasUnsavedWork) {
+        promptSaveCache(() => doRestoreFromHistory(patentNumber));
+        return;
+      }
+      if (!confirm("当前查询结果尚未保存，确认切换到其他专利？")) return;
+    }
+  }
+  doRestoreFromHistory(patentNumber);
+}
+
+function doRestoreFromHistory(patentNumber) {
+  // Re-trigger search for this patent
+  const historyAll = PatentCache.getHistoryAll();
+  const h = historyAll[patentNumber];
+  const office = h ? h.office : "";
+  const searchInput = document.getElementById("search-input");
+  const officeSelect = document.getElementById("office-select");
+  if (searchInput) searchInput.value = patentNumber;
+  if (officeSelect && office) officeSelect.value = office;
+  doSearch();
 }
 
 function doRestoreFromCache(patentNumber) {
@@ -1139,10 +1253,14 @@ function renderOverview(data) {
   const family = data.family;
   const items = kanbanState.documents;
   const famCount = family ? countFamilyMembers(family) : 0;
-  const docCount = family ? countDocuments(data.documents) : 0;
-  const oaCount = items.filter(it => it.type === "office_action").length;
-  const respCount = items.filter(it => it.type === "response").length;
-  const allowCount = items.filter(it => it.type === "allowance").length;
+  // Only count substantive documents (exclude misc like descriptions, drawings, receipts)
+  const substantiveItems = items.filter(it => it.type !== "misc");
+  const docCount = substantiveItems.length;
+  const oaCount = substantiveItems.filter(it => it.type === "office_action").length;
+  const respCount = substantiveItems.filter(it => it.type === "response").length;
+  const allowCount = substantiveItems.filter(it => it.type === "allowance").length;
+  const notifCount = substantiveItems.filter(it => it.type === "notification").length;
+  const reqCount = substantiveItems.filter(it => it.type === "request").length;
 
   let statusHtml = '';
   if (legalStatus) {
@@ -1159,6 +1277,12 @@ function renderOverview(data) {
     statusHtml += '<div class="info-row"><span class="info-label">申请人答复</span><span class="info-value">' + respCount + ' 份</span></div>';
     if (allowCount > 0) {
       statusHtml += '<div class="info-row"><span class="info-label">授权通知</span><span class="info-value">' + allowCount + ' 份</span></div>';
+    }
+    if (notifCount > 0) {
+      statusHtml += '<div class="info-row"><span class="info-label">通知文件</span><span class="info-value">' + notifCount + ' 份</span></div>';
+    }
+    if (reqCount > 0) {
+      statusHtml += '<div class="info-row"><span class="info-label">请求文件</span><span class="info-value">' + reqCount + ' 份</span></div>';
     }
   }
   if (!statusHtml) {
@@ -5965,8 +6089,9 @@ if (historySidebarToggle && historySidebar) {
 const cacheClearBtn = document.getElementById("cache-clear-btn");
 if (cacheClearBtn) {
   cacheClearBtn.addEventListener("click", () => {
-    if (confirm("确定要清除全部缓存吗？此操作不可撤销。")) {
+    if (confirm("确定要清除全部缓存和历史记录吗？此操作不可撤销。")) {
       PatentCache.clearAll();
+      PatentCache.clearAllHistory();
       refreshHistoryList();
     }
   });
