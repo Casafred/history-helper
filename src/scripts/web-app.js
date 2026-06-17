@@ -3253,14 +3253,18 @@ function togglePdfView(skipRender) {
     pdfViewState.active = false;
     readerPdfView.classList.add("hidden");
     readerContent.classList.remove("hidden");
-    readerPdfToggle.classList.remove("active");
-    readerPdfToggle.textContent = "PDF 视图";
+    if (readerPdfToggle) {
+      readerPdfToggle.classList.remove("active");
+      readerPdfToggle.textContent = "PDF 视图";
+    }
   } else {
     pdfViewState.active = true;
     readerPdfView.classList.remove("hidden");
     readerContent.classList.add("hidden");
-    readerPdfToggle.classList.add("active");
-    readerPdfToggle.textContent = "文本视图";
+    if (readerPdfToggle) {
+      readerPdfToggle.classList.add("active");
+      readerPdfToggle.textContent = "文本视图";
+    }
     if (!skipRender && pdfViewState.currentDocIdx !== null) {
       renderPdfView(pdfViewState.currentDocIdx);
     }
@@ -4962,8 +4966,10 @@ document.addEventListener("DOMContentLoaded", () => {
         pdfViewState.active = false;
         readerPdfView.classList.add("hidden");
         readerContent.classList.remove("hidden");
-        readerPdfToggle.classList.remove("active");
-        readerPdfToggle.textContent = "PDF 视图";
+        if (readerPdfToggle) {
+          readerPdfToggle.classList.remove("active");
+          readerPdfToggle.textContent = "PDF 视图";
+        }
       }
       pdfViewState.pdfDoc = null;
       pdfViewState.renderedPages = {};
@@ -5020,8 +5026,10 @@ document.addEventListener("DOMContentLoaded", () => {
           pdfViewState.active = false;
           readerPdfView.classList.add("hidden");
           readerContent.classList.remove("hidden");
-          readerPdfToggle.classList.remove("active");
-          readerPdfToggle.textContent = "PDF 视图";
+          if (readerPdfToggle) {
+            readerPdfToggle.classList.remove("active");
+            readerPdfToggle.textContent = "PDF 视图";
+          }
         }
         pdfViewState.pdfDoc = null;
         pdfViewState.renderedPages = {};
