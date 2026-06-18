@@ -809,6 +809,32 @@ function promptSaveCache(callback) {
   showCacheConfirmDialog(callback);
 }
 
+// Auto-save cache silently after OCR/AI operations complete.
+// This ensures work is preserved even if the user closes the app without
+// explicitly saving or switching to another patent.
+function autoSaveCache() {
+  if (!kanbanState.hasUnsavedWork || !currentData) return;
+  const entry = PatentCache.captureCurrentState();
+  if (entry) {
+    PatentCache.save(entry.patentNumber, entry);
+    kanbanState.hasUnsavedWork = false;
+    refreshHistoryList();
+  }
+}
+
+// Auto-save on page hide/close to prevent data loss
+window.addEventListener("beforeunload", () => {
+  if (kanbanState.hasUnsavedWork && currentData) {
+    autoSaveCache();
+  }
+});
+// Also handle visibilitychange for mobile/Electron scenarios
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden" && kanbanState.hasUnsavedWork && currentData) {
+    autoSaveCache();
+  }
+});
+
 // ── Refresh history sidebar & settings cache tab ──
 function refreshHistoryList() {
   const cachedAll = PatentCache.getAll();
@@ -1620,6 +1646,7 @@ async function extractDocumentText(url, idx, docType) {
         };
       });
     }
+    autoSaveCache();
   } catch (e) {
     container.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(e.message) + '</p>';
   }
@@ -2337,6 +2364,7 @@ async function runCitedRefsAnalysis(selectedIdxs) {
         }
       }
     }
+    autoSaveCache();
 
     // 构建分析内容
     const lines = [];
@@ -2404,6 +2432,7 @@ async function runCitedRefsAnalysis(selectedIdxs) {
 
     kanbanState.citedRefsAnalysis = fullText;
     kanbanState.hasUnsavedWork = true;
+    autoSaveCache();
   } catch (e) {
     const analysisContent = document.getElementById("kanban-analysis-content");
     if (analysisContent) analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + '</p>';
@@ -2873,6 +2902,7 @@ function buildReviewManualSelectPanel() {
         if (kanbanAutoAbortController && kanbanAutoAbortController.signal.aborted) break;
       }
     }
+    autoSaveCache();
 
     // 务必等所有文档提取完毕再进入AI梳理
     const successCount = extractReport.success.length;
@@ -2987,6 +3017,7 @@ function buildReviewManualSelectPanel() {
       kanbanState.analysisUserMessage = userMessage;
       analysisChatHistory = [];
       showAnalysisChatToggle();
+      autoSaveCache();
       if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份文档" + (hasBlocks ? "（含溯源标记）" : "");
 
       let reportHtml = "";
@@ -4191,6 +4222,7 @@ async function ocrPdf() {
         });
       }
       showOcrProgressOverlay("OCR 完成", 100);
+      autoSaveCache();
       return true;
     } catch (e) {
       if (retriesLeft > 0) {
@@ -5900,6 +5932,7 @@ async function kanbanManualExtract(url, idx, docType) {
       </div>
       <pre class="extracted-text">${escapeHtml(displayText.length > 8000 ? displayText.substring(0, 8000) + "\n\n[...已截断...]" : displayText)}</pre>
     `;
+    autoSaveCache();
   } catch (e) {
     container.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
   }
