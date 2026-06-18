@@ -2737,6 +2737,14 @@ body {
   line-height: 1.5;
 }
 
+.prompts-version {
+  margin: 6px 0 0 0;
+  font-size: 11px;
+  color: var(--accent);
+  line-height: 1.5;
+  font-weight: 500;
+}
+
 .prompt-group {
   margin-bottom: 14px;
   border: 1px solid var(--border);

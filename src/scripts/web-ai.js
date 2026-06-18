@@ -68,21 +68,37 @@ var AI = (function () {
     return null;
   }
 
+  // Prompts version - increment this when DEFAULT_PROMPTS is updated
+  // to automatically invalidate user's cached custom prompts
+  var PROMPTS_VERSION = 2;
+
   function loadAIConfig() {
+    var config;
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return JSON.parse(raw);
+      if (raw) config = JSON.parse(raw);
     } catch (e) { /* ignore */ }
-    return {
-      openai: createDefaultConfig("openai"),
-      zhipu: createDefaultConfig("zhipu"),
-      deepseek: createDefaultConfig("deepseek"),
-      ocr: { engine: "paddle_ocr_vl" },
-    };
+    if (!config) {
+      config = {
+        openai: createDefaultConfig("openai"),
+        zhipu: createDefaultConfig("zhipu"),
+        deepseek: createDefaultConfig("deepseek"),
+        ocr: { engine: "paddle_ocr_vl" },
+      };
+    }
+    // Invalidate cached custom prompts if prompts version is outdated
+    if (config.prompts && config.promptsVersion !== PROMPTS_VERSION) {
+      delete config.prompts;
+      config.promptsVersion = PROMPTS_VERSION;
+      // Persist the cleaned config immediately
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(config)); } catch (e) { /* ignore */ }
+    }
+    return config;
   }
 
   function saveAIConfig(config) {
     if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl" };
+    config.promptsVersion = PROMPTS_VERSION;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
   }
 
