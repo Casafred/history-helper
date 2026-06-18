@@ -2715,6 +2715,105 @@ body {
   text-align: right;
 }
 
+.prompts-header {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  border-left: 3px solid var(--accent);
+}
+
+.prompts-intro {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.prompts-tip {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.prompt-group {
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-card);
+}
+
+.prompt-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  cursor: pointer;
+}
+
+.prompt-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.prompt-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.prompt-badge-auto {
+  background: rgba(74, 144, 217, 0.15);
+  color: var(--accent);
+}
+
+.prompt-badge-manual {
+  background: rgba(102, 187, 106, 0.15);
+  color: #66bb6a;
+}
+
+.prompt-toggle-btn {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.prompt-toggle-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.prompt-group-desc {
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  border-bottom: 1px solid var(--border);
+}
+
+.prompt-group-body {
+  padding: 12px 14px;
+}
+
+.prompt-group-body.collapsed {
+  display: none;
+}
+
 .overview-timeline-section {
   margin-top: 24px;
   background: var(--bg-card);

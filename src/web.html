@@ -343,41 +343,79 @@
 
             <!-- Prompts Tab -->
             <div id="settings-tab-prompts" class="settings-tab-content">
-              <div class="form-group">
-                <label>审查意见梳理提示词（含溯源版）</label>
-                <textarea id="prompt-kanban-analysis" class="prompt-textarea" rows="6" placeholder="审查意见梳理提示词（含 OCR 溯源信息时使用）"></textarea>
-                <div class="prompt-actions">
-                  <button id="reset-prompt-kanban-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+              <div class="prompts-header">
+                <p class="prompts-intro">以下是各功能使用的 AI 提示词。修改后点击"保存"即可生效，下次分析将使用新提示词。可随时点击"恢复默认"还原。</p>
+                <p class="prompts-tip">提示：溯源标记格式为 【来源: D{文档序号}_B_p{页码}_{块序号}】（如 D0_B_p1_0），修改时请保留此格式以确保溯源功能正常。</p>
+              </div>
+
+              <div class="prompt-group">
+                <div class="prompt-group-header">
+                  <div class="prompt-group-title">
+                    <span class="prompt-badge prompt-badge-auto">自动触发</span>
+                    审查历史梳理（含溯源版）
+                  </div>
+                  <button class="prompt-toggle-btn" type="button">展开/收起</button>
+                </div>
+                <div class="prompt-group-desc">当文档已 OCR 提取到文本块（含溯源信息）时，看板"AI 整理"功能使用此提示词。这是最常用的提示词，生成含溯源标记的结构化审查历史报告。</div>
+                <div class="prompt-group-body collapsed">
+                  <textarea id="prompt-kanban-analysis" class="prompt-textarea" rows="12" placeholder="审查意见梳理提示词（含 OCR 溯源信息时使用）"></textarea>
+                  <div class="prompt-actions">
+                    <button id="reset-prompt-kanban-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+                  </div>
                 </div>
               </div>
-              <div class="form-group">
-                <label>审查意见梳理提示词（简化版）</label>
-                <textarea id="prompt-kanban-simple" class="prompt-textarea" rows="4" placeholder="审查意见梳理提示词（无溯源信息时使用）"></textarea>
-                <div class="prompt-actions">
-                  <button id="reset-prompt-kanban-simple" class="btn-secondary btn-small" type="button">恢复默认</button>
+
+              <div class="prompt-group">
+                <div class="prompt-group-header">
+                  <div class="prompt-group-title">
+                    <span class="prompt-badge prompt-badge-auto">自动触发</span>
+                    审查历史梳理（简化版）
+                  </div>
+                  <button class="prompt-toggle-btn" type="button">展开/收起</button>
+                </div>
+                <div class="prompt-group-desc">当文档未能提取到文本块（无溯源信息）时，看板"AI 整理"功能自动降级使用此提示词。生成简明的审查历史报告，不含溯源标记。</div>
+                <div class="prompt-group-body collapsed">
+                  <textarea id="prompt-kanban-simple" class="prompt-textarea" rows="10" placeholder="审查意见梳理提示词（无溯源信息时使用）"></textarea>
+                  <div class="prompt-actions">
+                    <button id="reset-prompt-kanban-simple" class="btn-secondary btn-small" type="button">恢复默认</button>
+                  </div>
                 </div>
               </div>
-              <div class="form-group">
-                <label>单文档分析提示词</label>
-                <textarea id="prompt-doc-analysis" class="prompt-textarea" rows="3" placeholder="单篇文档 AI 分析提示词"></textarea>
-                <div class="prompt-actions">
-                  <button id="reset-prompt-doc-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+
+              <div class="prompt-group">
+                <div class="prompt-group-header">
+                  <div class="prompt-group-title">
+                    <span class="prompt-badge prompt-badge-manual">手动触发</span>
+                    单文档 AI 分析
+                  </div>
+                  <button class="prompt-toggle-btn" type="button">展开/收起</button>
+                </div>
+                <div class="prompt-group-desc">在看板中点击某文档的"AI 分析"按钮时使用，针对单篇文档进行详细分析（如单篇审查意见或答复的深度解读）。</div>
+                <div class="prompt-group-body collapsed">
+                  <textarea id="prompt-doc-analysis" class="prompt-textarea" rows="10" placeholder="单篇文档 AI 分析提示词"></textarea>
+                  <div class="prompt-actions">
+                    <button id="reset-prompt-doc-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+                  </div>
                 </div>
               </div>
-              <div class="form-group">
-                <label>审查历史梳理提示词</label>
-                <textarea id="prompt-history-summary" class="prompt-textarea" rows="3" placeholder="审查历史整体梳理提示词"></textarea>
-                <div class="prompt-actions">
-                  <button id="reset-prompt-history-summary" class="btn-secondary btn-small" type="button">恢复默认</button>
+
+              <div class="prompt-group">
+                <div class="prompt-group-header">
+                  <div class="prompt-group-title">
+                    <span class="prompt-badge prompt-badge-manual">手动触发</span>
+                    引用文献梳理
+                  </div>
+                  <button class="prompt-toggle-btn" type="button">展开/收起</button>
+                </div>
+                <div class="prompt-group-desc">点击"引用文献分析"按钮时使用，对审查员和申请人引用的对比文献进行系统梳理。</div>
+                <div class="prompt-group-body collapsed">
+                  <textarea id="prompt-cited-refs-analysis" class="prompt-textarea" rows="8" placeholder="引用文献梳理分析要求提示词"></textarea>
+                  <div class="prompt-actions">
+                    <button id="reset-prompt-cited-refs-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+                  </div>
                 </div>
               </div>
-              <div class="form-group">
-                <label>引用文献梳理提示词</label>
-                <textarea id="prompt-cited-refs-analysis" class="prompt-textarea" rows="4" placeholder="引用文献梳理分析要求提示词"></textarea>
-                <div class="prompt-actions">
-                  <button id="reset-prompt-cited-refs-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
-                </div>
-              </div>
+
               <div class="form-actions">
                 <button id="prompts-save-btn" class="btn-primary">保存</button>
               </div>

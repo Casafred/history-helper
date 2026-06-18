@@ -1887,7 +1887,6 @@ if (promptsSaveBtn) {
       { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
       { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
       { id: "prompt-doc-analysis", key: "docAnalysis" },
-      { id: "prompt-history-summary", key: "historySummary" },
       { id: "prompt-cited-refs-analysis", key: "citedRefsAnalysis" },
     ];
     promptKeys.forEach(p => {
@@ -1906,6 +1905,26 @@ if (promptsSaveBtn) {
     aiSettingsModal.classList.add("hidden");
   });
 }
+
+// Prompt group expand/collapse
+document.querySelectorAll(".prompt-toggle-btn").forEach(btn => {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const group = btn.closest(".prompt-group");
+    if (!group) return;
+    const body = group.querySelector(".prompt-group-body");
+    if (body) body.classList.toggle("collapsed");
+  });
+});
+// Also allow clicking the header to toggle
+document.querySelectorAll(".prompt-group-header").forEach(header => {
+  header.addEventListener("click", () => {
+    const group = header.closest(".prompt-group");
+    if (!group) return;
+    const body = group.querySelector(".prompt-group-body");
+    if (body) body.classList.toggle("collapsed");
+  });
+});
 
 // Settings tab switching
 document.querySelectorAll(".settings-tab-btn").forEach(btn => {
@@ -2004,7 +2023,6 @@ function loadAISettingsToForm() {
     { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
     { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
     { id: "prompt-doc-analysis", key: "docAnalysis" },
-    { id: "prompt-history-summary", key: "historySummary" },
     { id: "prompt-cited-refs-analysis", key: "citedRefsAnalysis" },
   ];
   promptKeys.forEach(p => {
@@ -2026,7 +2044,6 @@ document.querySelectorAll("[id^='reset-prompt-']").forEach(btn => {
       "kanban-analysis": "kanbanAnalysis",
       "kanban-simple": "kanbanAnalysisSimple",
       "doc-analysis": "docAnalysis",
-      "history-summary": "historySummary",
       "cited-refs-analysis": "citedRefsAnalysis",
     };
     const key = keyMap[promptId];
