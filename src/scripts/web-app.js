@@ -641,13 +641,45 @@ const PatentCache = {
       }
 
       // Restore traceIndex - re-populate pageDimensions from extractions
+      // Also migrate old format keys (B_p1_0) to new format (D0_B_p1_0)
       kanbanState.traceIndex = {};
       if (cacheEntry.kanbanState.traceIndex) {
         for (const [key, val] of Object.entries(cacheEntry.kanbanState.traceIndex)) {
           const ext = kanbanState.extractions[val.docIdx];
           const pd = ext && ext.pageDimensions ? (ext.pageDimensions[val.page] || null) : null;
-          kanbanState.traceIndex[key] = { ...val, pageDimensions: pd };
+          // Migrate old format key: if key doesn't start with D, prefix with D{docIdx}_
+          const newKey = /^D\d+_B_/.test(key) ? key : ("D" + val.docIdx + "_" + key);
+          // Ensure originalBlockId exists
+          const entryVal = { ...val, pageDimensions: pd };
+          if (!entryVal.originalBlockId) {
+            // Extract original block_id from old format key or from the key itself
+            const blockMatch = key.match(/B_p\d+_\d+/);
+            entryVal.originalBlockId = blockMatch ? blockMatch[0] : key;
+          }
+          kanbanState.traceIndex[newKey] = entryVal;
         }
+      }
+
+      // Migrate old format references in analysis text (【来源: B_p1_0】 → 【来源: D0_B_p1_0】)
+      if (kanbanState.analysis && /【来源:\s*B_p/.test(kanbanState.analysis)) {
+        kanbanState.analysis = kanbanState.analysis.replace(
+          /【来源:\s*([^\】]+)】/g,
+          (match, refsStr) => {
+            const newRefs = refsStr.split(",").map(r => {
+              r = r.trim();
+              if (/^B_p/.test(r) && !/^D\d+_B_/.test(r)) {
+                // Find which docIdx this old-format block_id belongs to
+                for (const [key, val] of Object.entries(kanbanState.traceIndex)) {
+                  if (val.originalBlockId === r) {
+                    return key; // Return the new format key
+                  }
+                }
+              }
+              return r;
+            });
+            return "【来源: " + newRefs.join(", ") + "】";
+          }
+        );
       }
 
       // Restore analysis content
@@ -1576,12 +1608,14 @@ async function extractDocumentText(url, idx, docType) {
     kanbanState.hasUnsavedWork = true;
     if (blocks.length > 0) {
       blocks.forEach(b => {
-        kanbanState.traceIndex[b.block_id] = {
+        const traceKey = "D" + idx + "_" + b.block_id;
+        kanbanState.traceIndex[traceKey] = {
           docIdx: idx,
           page: b.page,
           bbox: b.bbox,
           content: b.content,
           label: b.label,
+          originalBlockId: b.block_id,
           pageDimensions: pageDimensions[b.page] || null,
         };
       });
@@ -2771,9 +2805,10 @@ function buildReviewManualSelectPanel() {
         kanbanState.hasUnsavedWork = true;
         if (blocks.length > 0) {
           blocks.forEach(b => {
-            kanbanState.traceIndex[b.block_id] = {
+            const traceKey = "D" + it.idx + "_" + b.block_id;
+            kanbanState.traceIndex[traceKey] = {
               docIdx: it.idx, page: b.page, bbox: b.bbox,
-              content: b.content, label: b.label,
+              content: b.content, label: b.label, originalBlockId: b.block_id,
               pageDimensions: pageDimensions[b.page] || null,
             };
           });
@@ -2851,24 +2886,31 @@ function buildReviewManualSelectPanel() {
     const annotatedLines = [];
     const timelineSummary = buildTimelineSummary(currentData.office, kanbanState.documents);
 
-    oaItems.forEach((it, idx) => {
+    // Sort oaItems by date for consistent timeline in AI context
+    const sortedOaItems = [...oaItems].sort((a, b) => {
+      const da = parseDate(a.date);
+      const db = parseDate(b.date);
+      return da - db;
+    });
+
+    sortedOaItems.forEach((it) => {
       const ext = kanbanState.extractions[it.idx];
       if (!ext) {
         const isClaimsDoc = CLAIMS_CODES_MANUAL.includes(it.docCode);
         const missingHeader = isClaimsDoc
-          ? `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）[权利要求参考]`
-          : `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）`;
+          ? `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）[权利要求参考]`
+          : `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）`;
         annotatedLines.push(missingHeader + "\n[未能提取内容]");
         return;
       }
       const isClaimsDoc = CLAIMS_CODES_MANUAL.includes(it.docCode);
       const header = isClaimsDoc
-        ? `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）[权利要求参考]`
-        : `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）`;
+        ? `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）[权利要求参考]`
+        : `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）`;
       if (hasBlocks && ext.blocks && ext.blocks.length > 0) {
         const blockParts = ext.blocks
           .filter(b => b.content && b.content.trim())
-          .map(b => `[ref:${b.block_id}]${b.content}[/ref:${b.block_id}]`)
+          .map(b => `[ref:D${it.idx}_${b.block_id}]${b.content}[/ref:D${it.idx}_${b.block_id}]`)
           .join("\n\n");
         annotatedLines.push(header + "\n" + blockParts);
       } else {
@@ -2977,7 +3019,7 @@ function renderMarkdown(text) {
 function renderMarkdownWithTrace(text) {
   if (!text) return "";
   const processed = text.replace(/【来源:\s*([^\】]+)】/g, (match, refsStr) => {
-    const refs = refsStr.split(",").map(r => r.trim()).filter(r => r.startsWith("B_"));
+    const refs = refsStr.split(",").map(r => r.trim()).filter(r => /^D\d+_B_/.test(r));
     if (refs.length === 0) return "";
     const validRefs = refs.filter(r => kanbanState.traceIndex[r]);
     if (validRefs.length === 0) {
@@ -2993,10 +3035,10 @@ function renderMarkdownWithTrace(text) {
       const docLabel = doc ? `${doc.name} (${doc.docCode})` : `文档${info.docIdx}`;
       const key = `${info.docIdx}|${info.page}|${docLabel}`;
       if (!grouped[key]) grouped[key] = [];
-      // Extract block index from block_id like "B_p2_5" -> 5
-      const blockMatch = ref.match(/B_p(\d+)_(\d+)/);
+      // Extract docIdx, page, blockIdx from traceIndex key like "D0_B_p2_5" -> docIdx=0, page=2, blockIdx=5
+      const blockMatch = ref.match(/^D(\d+)_B_p(\d+)_(\d+)$/);
       if (blockMatch) {
-        grouped[key].push({ ref, blockIdx: parseInt(blockMatch[2]), page: parseInt(blockMatch[1]) });
+        grouped[key].push({ ref, blockIdx: parseInt(blockMatch[3]), page: parseInt(blockMatch[2]) });
       } else {
         grouped[key].push({ ref, blockIdx: -1, page: info.page });
       }
@@ -3005,6 +3047,7 @@ function renderMarkdownWithTrace(text) {
     Object.keys(grouped).forEach(key => {
       const [docIdxStr, pageStr, docLabel] = key.split("|");
       const page = parseInt(pageStr);
+      const docIdx = parseInt(docIdxStr);
       const entries = grouped[key].sort((a, b) => a.blockIdx - b.blockIdx);
 
       // Merge consecutive block indices into ranges
@@ -3025,7 +3068,7 @@ function renderMarkdownWithTrace(text) {
       ranges.forEach(range => {
         const allRefs = [];
         for (let bi = range.start.blockIdx; bi <= range.end.blockIdx; bi++) {
-          const refId = `B_p${page}_${bi}`;
+          const refId = `D${docIdx}_B_p${page}_${bi}`;
           if (kanbanState.traceIndex[refId]) allRefs.push(refId);
         }
         const dataBlockIds = allRefs.map(r => escapeHtml(r)).join(",");
@@ -3065,9 +3108,17 @@ function onTraceClick(blockIdStr) {
     return;
   }
 
-  // Set pending highlight before any view switching
-  pdfViewState.pendingHighlight = primaryBlockId;
-  pdfViewState.pendingHighlightRange = blockIds;
+  // Use originalBlockId for PDF overlay and text view block queries,
+  // since overlay data-block-id uses the original format (e.g., "B_p1_0")
+  const originalId = info.originalBlockId || primaryBlockId;
+  const rangeOriginalIds = blockIds.map(id => {
+    const entry = kanbanState.traceIndex[id];
+    return entry ? (entry.originalBlockId || id) : id;
+  });
+
+  // Set pending highlight using originalBlockId for overlay matching
+  pdfViewState.pendingHighlight = originalId;
+  pdfViewState.pendingHighlightRange = rangeOriginalIds;
   pdfViewState.traceJumpPending = true;
 
   // Set the correct doc index BEFORE toggling PDF view,
@@ -3091,13 +3142,13 @@ function onTraceClick(blockIdStr) {
       // pendingHighlight was already consumed by renderPdfView, highlight is done
       return;
     }
-    // If pendingHighlight is still set, try direct highlight
+    // If pendingHighlight is still set, try direct highlight using originalBlockId
     if (pdfViewState.active) {
-      const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${primaryBlockId}"]`);
+      const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${originalId}"]`);
       if (overlay) {
-        highlightPdfBlock(primaryBlockId);
-        blockIds.forEach(id => {
-          if (id !== primaryBlockId) {
+        highlightPdfBlock(originalId);
+        rangeOriginalIds.forEach(id => {
+          if (id !== originalId) {
             const el = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
             if (el) el.classList.add("highlight-range");
           }
@@ -3108,15 +3159,15 @@ function onTraceClick(blockIdStr) {
       }
     }
 
-    // Text view fallback
+    // Text view fallback — use originalBlockId for data-block-id matching
     if (!pdfViewState.active) {
       const md = kanbanState.extractions[info.docIdx];
       if (!md) return;
       const content = md.markdown || md.text || "";
       const blocks = md.blocks || [];
-      const targetBlock = blocks.find(b => b.block_id === primaryBlockId);
+      const targetBlock = blocks.find(b => b.block_id === originalId);
       if (targetBlock && targetBlock.content) {
-        const el = readerContent.querySelector(`[data-block-id="${primaryBlockId}"]`);
+        const el = readerContent.querySelector(`[data-block-id="${originalId}"]`);
         if (el) {
           el.scrollIntoView({ behavior: "smooth", block: "center" });
           el.classList.add("trace-highlight");
@@ -3128,7 +3179,7 @@ function onTraceClick(blockIdStr) {
       traceEl.className = "trace-locator";
       traceEl.innerHTML = `
         <div class="trace-locator-header">
-          <span class="trace-locator-id">${escapeHtml(primaryBlockId)}</span>
+          <span class="trace-locator-id">${escapeHtml(originalId)}</span>
           <span class="trace-locator-page">第 ${info.page} 页</span>
           <button class="trace-locator-close" onclick="this.parentElement.parentElement.remove()">×</button>
         </div>
@@ -4114,9 +4165,10 @@ async function ocrPdf() {
       kanbanState.hasUnsavedWork = true;
       if (blocks.length > 0) {
         blocks.forEach(b => {
-          kanbanState.traceIndex[b.block_id] = {
+          const traceKey = "D" + it.idx + "_" + b.block_id;
+          kanbanState.traceIndex[traceKey] = {
             docIdx: it.idx, page: b.page, bbox: b.bbox,
-            content: b.content, label: b.label,
+            content: b.content, label: b.label, originalBlockId: b.block_id,
             pageDimensions: pageDimensions[b.page] || null,
           };
         });
@@ -5810,12 +5862,14 @@ async function kanbanManualExtract(url, idx, docType) {
     kanbanState.hasUnsavedWork = true;
     if (blocks.length > 0) {
       blocks.forEach(b => {
-        kanbanState.traceIndex[b.block_id] = {
+        const traceKey = "D" + idx + "_" + b.block_id;
+        kanbanState.traceIndex[traceKey] = {
           docIdx: idx,
           page: b.page,
           bbox: b.bbox,
           content: b.content,
           label: b.label,
+          originalBlockId: b.block_id,
           pageDimensions: pageDimensions[b.page] || null,
         };
       });
