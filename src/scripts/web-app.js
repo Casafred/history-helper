@@ -365,6 +365,8 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
     if (searchMode === "patent") {
       patentInput.placeholder = "输入专利号查询原文信息（如 US12030161B2, EP4252965A3）";
       resultSection.classList.add("hidden");
+      // Restore patent detail if previously loaded
+      if (window._currentPatentData) patentDetailSection.classList.remove("hidden");
     } else {
       patentInput.placeholder = "输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型";
       patentDetailSection.classList.add("hidden");
@@ -376,6 +378,9 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
 
 // ── 专利原文查询（Google Patents） ──
 async function searchPatentDetail(input) {
+  // Clear prefetch cache when starting a new search
+  clearPrefetchCache();
+
   const appEl = document.getElementById("app");
   if (appEl && appEl.classList.contains("home-mode")) appEl.classList.remove("home-mode");
 
@@ -408,6 +413,10 @@ async function searchPatentDetail(input) {
     // Record to history
     const country = raw.match(/^[A-Z]{2}/)?.[0] || "";
     PatentCache.addHistory(raw, country, {
+      applicantName: (json.data.assignees || []).join(", "),
+      title: json.data.title || "",
+    });
+    PatentCache.addPatentHistory(raw, {
       applicantName: (json.data.assignees || []).join(", "),
       title: json.data.title || "",
     });
@@ -784,18 +793,76 @@ function openPatentImageViewer(images, startIndex) {
 
 // ── 在文本中识别专利号并转为可跳转链接 ──
 function linkifyPatentNumbers(text) {
-  // Match patent numbers like US12345678B2, EP4252965A3, CN119052083A, WO2024123456A1, JP2023512345A
+  // Match patent numbers in two formats:
+  // 1. Compact: US12345678B2, EP4252965A3, CN119052083A, WO2024123456A1
+  // 2. Spaced: US 2019/0009398, US 2019/0308309, EP 4252965 A3
   // Only replace in text nodes, not inside HTML tags
-  const patentRegex = /\b([A-Z]{2}\d{5,}[A-Z]?\d?)\b/g;
-  // Split by HTML tags, only process text segments (odd indices are tags)
   const parts = text.split(/(<[^>]+>)/);
   return parts.map((part, i) => {
     if (i % 2 === 1) return part; // HTML tag, skip
-    return part.replace(patentRegex, (match, pn) => {
+    // First handle spaced format: "US 2019/0009398" → "US20190009398"
+    let result = part.replace(/\b([A-Z]{2})\s+(\d{4})\s*\/\s*(\d{4,7})\s*([A-Z]\d?)?\b/g, (match, country, year, num, kind) => {
+      const pn = country + year + num + (kind || '');
+      return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + match + '</a>';
+    });
+    // Then handle spaced format without slash: "US 20190308309" or "EP 4252965 A3"
+    result = result.replace(/\b([A-Z]{2})\s+(\d{5,})\s*([A-Z]\d?)?\b/g, (match, country, num, kind) => {
+      // Skip if already wrapped in a link
       if (match.length < 7) return match;
+      const pn = country + num + (kind || '');
+      return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + match + '</a>';
+    });
+    // Finally handle compact format: US12345678B2
+    // Track positions already inside links to avoid double-wrapping
+    const linkRanges = [];
+    const linkRegex = /<a[^>]*class="pd-patent-link-inline"[^>]*>/g;
+    let lr;
+    while ((lr = linkRegex.exec(result)) !== null) {
+      const linkStart = lr.index;
+      const linkEnd = result.indexOf('</a>', linkStart);
+      if (linkEnd !== -1) linkRanges.push([linkStart, linkEnd + 4]);
+    }
+    result = result.replace(/\b([A-Z]{2}\d{5,}[A-Z]?\d?)\b/g, (match, pn, offset) => {
+      if (match.length < 7) return match;
+      // Skip if this position is already inside a link
+      for (const [s, e] of linkRanges) {
+        if (offset >= s && offset < e) return match;
+      }
       return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + pn + '</a>';
     });
+    return result;
   }).join("");
+}
+
+// Auto-prefetch patent data for inline links after AI analysis
+let _prefetchCache = {}; // short-lived cache, cleared when leaving analysis
+
+function prefetchPatentLinks() {
+  const links = document.querySelectorAll("#analysis-content .pd-patent-link-inline, .kanban-analysis-content .pd-patent-link-inline");
+  if (links.length === 0) return;
+
+  let fetched = 0;
+  const MAX_PREFETCH = 10; // limit to avoid overwhelming the server
+
+  links.forEach(link => {
+    if (fetched >= MAX_PREFETCH) return;
+    const pn = link.dataset.patent;
+    if (!pn || _prefetchCache[pn]) return;
+
+    fetched++;
+    fetch("/api/gp/" + encodeURIComponent(pn))
+      .then(r => r.json())
+      .then(json => {
+        if (json.success) {
+          _prefetchCache[pn] = json.data;
+        }
+      })
+      .catch(() => {}); // silently fail
+  });
+}
+
+function clearPrefetchCache() {
+  _prefetchCache = {};
 }
 
 // Global handler for inline patent links (delegated)
@@ -818,6 +885,140 @@ document.addEventListener("click", (e) => {
 
 // ── Patent Popup Viewer ──
 let _patentPopupData = null; // cached patent data for the popup
+
+function renderPatentPopupContent(data) {
+  let html = "";
+
+  // Abstract
+  if (data.abstract) {
+    html += '<div class="pd-section"><div class="pd-section-title">摘要</div><div class="pd-abstract">' + escapeHtml(data.abstract) + '</div></div>';
+  }
+
+  // Basic info grid
+  html += '<div class="pd-section"><div class="pd-section-title">基本信息</div><div class="pd-info-grid">';
+  if (data.inventors && data.inventors.length > 0) {
+    html += '<div class="pd-info-item"><span class="pd-info-label">发明人</span><span class="pd-info-value">' + escapeHtml(data.inventors.join("; ")) + '</span></div>';
+  }
+  if (data.assignees && data.assignees.length > 0) {
+    html += '<div class="pd-info-item"><span class="pd-info-label">申请人</span><span class="pd-info-value">' + escapeHtml(data.assignees.join("; ")) + '</span></div>';
+  }
+  if (data.application_date) {
+    html += '<div class="pd-info-item"><span class="pd-info-label">申请日期</span><span class="pd-info-value">' + escapeHtml(data.application_date) + '</span></div>';
+  }
+  if (data.publication_date) {
+    html += '<div class="pd-info-item"><span class="pd-info-label">公开日期</span><span class="pd-info-value">' + escapeHtml(data.publication_date) + '</span></div>';
+  }
+  html += '</div></div>';
+
+  // CPC Classifications
+  if (data.classifications && data.classifications.length > 0) {
+    html += '<div class="pd-section"><div class="pd-section-title">CPC 分类</div><div class="pd-classifications">';
+    data.classifications.forEach(c => {
+      html += '<div class="pd-class-item"><span class="pd-class-code">' + escapeHtml(c.code) + '</span>';
+      if (c.description) html += '<span class="pd-class-desc">' + escapeHtml(c.description) + '</span>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  // Claims (collapsible)
+  if (data.claims && data.claims.length > 0) {
+    html += '<div class="pd-collapsible collapsed" id="ppv-claims-section" data-section-type="claims">';
+    html += '<div class="pd-collapsible-header" onclick="togglePatentSection(\'ppv-claims-section\')">';
+    html += '<span class="pd-collapsible-arrow">▼</span>';
+    html += '<span class="pd-collapsible-title">权利要求</span>';
+    html += '<span class="pd-collapsible-badge">' + data.claims.length + '</span>';
+    html += '<div class="pd-collapsible-actions">';
+    html += '<button class="pd-translate-btn" onclick="event.stopPropagation(); translatePatentSection(\'claims\')">翻译</button>';
+    html += '<button class="pd-copy-btn" onclick="event.stopPropagation(); copyPatentSectionText(\'claims\')">复制</button>';
+    html += '</div></div>';
+    html += '<div class="pd-collapsible-content"><div class="pd-claims-list">';
+    data.claims.forEach(c => {
+      const typeClass = c.type === "independent" ? "claim-independent" : "claim-dependent";
+      const typeLabel = c.type === "independent" ? "独立" : "从属";
+      const typeBadge = c.type === "independent" ? "independent" : "dependent";
+      html += '<div class="pd-claim-item ' + typeClass + '">';
+      html += '<span class="pd-claim-num">' + (c.num || "") + '.</span>';
+      html += '<span class="pd-claim-type ' + typeBadge + '">' + typeLabel + '</span>';
+      html += '<div class="pd-claim-text">' + escapeHtml(c.text) + '</div>';
+      html += '</div>';
+    });
+    html += '</div></div></div>';
+  }
+
+  // Description (collapsible)
+  if (data.description) {
+    html += '<div class="pd-collapsible collapsed" id="ppv-description-section" data-section-type="description">';
+    html += '<div class="pd-collapsible-header" onclick="togglePatentSection(\'ppv-description-section\')">';
+    html += '<span class="pd-collapsible-arrow">▼</span>';
+    html += '<span class="pd-collapsible-title">说明书</span>';
+    html += '<div class="pd-collapsible-actions">';
+    html += '<button class="pd-translate-btn" onclick="event.stopPropagation(); translatePatentSection(\'description\')">翻译</button>';
+    html += '<button class="pd-copy-btn" onclick="event.stopPropagation(); copyPatentSectionText(\'description\')">复制</button>';
+    html += '</div></div>';
+    html += '<div class="pd-collapsible-content"><div class="pd-description-text">' + escapeHtml(data.description) + '</div></div>';
+    html += '</div>';
+  }
+
+  // Drawings
+  if (data.drawings && data.drawings.length > 0) {
+    html += '<div class="pd-section"><div class="pd-section-title">附图</div><div class="pd-drawings-grid">';
+    const maxShow = 6;
+    data.drawings.slice(0, maxShow).forEach((url, i) => {
+      html += '<div class="pd-drawing-item" data-index="' + i + '">';
+      html += '<img src="' + escapeHtml(url) + '" alt="Figure ' + (i + 1) + '" loading="lazy">';
+      html += '</div>';
+    });
+    if (data.drawings.length > maxShow) {
+      html += '<div class="pd-drawing-more" onclick="openPatentImageViewer(window._patentPopupData.drawings, ' + maxShow + ')">+' + (data.drawings.length - maxShow) + '</div>';
+    }
+    html += '</div></div>';
+  }
+
+  // Events timeline (collapsible)
+  if (data.events_timeline && data.events_timeline.length > 0) {
+    html += '<div class="pd-collapsible collapsed" id="ppv-events-section" data-section-type="events">';
+    html += '<div class="pd-collapsible-header" onclick="togglePatentSection(\'ppv-events-section\')">';
+    html += '<span class="pd-collapsible-arrow">▼</span>';
+    html += '<span class="pd-collapsible-title">事件时间轴</span>';
+    html += '<span class="pd-collapsible-badge">' + data.events_timeline.length + '</span>';
+    html += '</div>';
+    html += '<div class="pd-collapsible-content"><div class="pd-timeline">';
+    [...data.events_timeline].reverse().forEach(ev => {
+      html += '<div class="pd-timeline-item"><div class="pd-timeline-date">' + escapeHtml(ev.date) + '</div><div class="pd-timeline-title">' + escapeHtml(ev.title) + '</div></div>';
+    });
+    html += '</div></div></div>';
+  }
+
+  // Legal events (collapsible)
+  if (data.legal_events && data.legal_events.length > 0) {
+    html += '<div class="pd-collapsible collapsed" id="ppv-legal-section" data-section-type="legal">';
+    html += '<div class="pd-collapsible-header" onclick="togglePatentSection(\'ppv-legal-section\')">';
+    html += '<span class="pd-collapsible-arrow">▼</span>';
+    html += '<span class="pd-collapsible-title">法律事件</span>';
+    html += '<span class="pd-collapsible-badge">' + data.legal_events.length + '</span>';
+    html += '</div>';
+    html += '<div class="pd-collapsible-content"><table class="pd-legal-table"><thead><tr><th>日期</th><th>代码</th><th>描述</th></tr></thead><tbody>';
+    [...data.legal_events].reverse().forEach(ev => {
+      html += '<tr><td>' + escapeHtml(ev.date) + '</td><td>' + escapeHtml(ev.code || "-") + '</td><td>' + escapeHtml(ev.description || ev.title || "-") + '</td></tr>';
+    });
+    html += '</tbody></table></div></div>';
+  }
+
+  // Patent citations
+  if (data.patent_citations && data.patent_citations.length > 0) {
+    html += '<div class="pd-section"><div class="pd-section-title">引用专利 (' + data.patent_citations.length + ')</div><div class="pd-citations">';
+    data.patent_citations.forEach(c => {
+      html += '<div class="pd-citation-item">';
+      html += '<a class="pd-patent-link-inline" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
+      if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  return html;
+}
 
 async function openPatentPopup(patentNumber) {
   const viewer = document.getElementById("patent-popup-viewer");
@@ -843,6 +1044,27 @@ async function openPatentPopup(patentNumber) {
 
   const raw = patentNumber.trim().toUpperCase().replace(/[\s\/]/g, "");
 
+  // Check prefetch cache first
+  if (_prefetchCache[raw]) {
+    const data = _prefetchCache[raw];
+    _patentPopupData = data;
+    loading.classList.add("hidden");
+    titleEl.textContent = data.title || "无标题";
+    if (data.pdf_link) {
+      pdfLink.href = data.pdf_link;
+      pdfLink.classList.remove("hidden");
+    }
+    content.innerHTML = renderPatentPopupContent(data);
+    // Bind drawing clicks
+    content.querySelectorAll(".pd-drawing-item").forEach(item => {
+      item.addEventListener("click", () => {
+        const idx = parseInt(item.dataset.index);
+        openPatentImageViewer(data.drawings, idx);
+      });
+    });
+    return;
+  }
+
   try {
     const resp = await fetch("/api/gp/" + encodeURIComponent(raw));
     const json = await resp.json();
@@ -865,138 +1087,7 @@ async function openPatentPopup(patentNumber) {
       pdfLink.classList.remove("hidden");
     }
 
-    // Render detail content (reuse the same renderPatentDetail logic but into ppv-content)
-    let html = "";
-
-    // Abstract
-    if (data.abstract) {
-      html += '<div class="pd-section"><div class="pd-section-title">摘要</div><div class="pd-abstract">' + escapeHtml(data.abstract) + '</div></div>';
-    }
-
-    // Basic info grid
-    html += '<div class="pd-section"><div class="pd-section-title">基本信息</div><div class="pd-info-grid">';
-    if (data.inventors && data.inventors.length > 0) {
-      html += '<div class="pd-info-item"><span class="pd-info-label">发明人</span><span class="pd-info-value">' + escapeHtml(data.inventors.join("; ")) + '</span></div>';
-    }
-    if (data.assignees && data.assignees.length > 0) {
-      html += '<div class="pd-info-item"><span class="pd-info-label">申请人</span><span class="pd-info-value">' + escapeHtml(data.assignees.join("; ")) + '</span></div>';
-    }
-    if (data.application_date) {
-      html += '<div class="pd-info-item"><span class="pd-info-label">申请日期</span><span class="pd-info-value">' + escapeHtml(data.application_date) + '</span></div>';
-    }
-    if (data.publication_date) {
-      html += '<div class="pd-info-item"><span class="pd-info-label">公开日期</span><span class="pd-info-value">' + escapeHtml(data.publication_date) + '</span></div>';
-    }
-    html += '</div></div>';
-
-    // CPC Classifications
-    if (data.classifications && data.classifications.length > 0) {
-      html += '<div class="pd-section"><div class="pd-section-title">CPC 分类</div><div class="pd-classifications">';
-      data.classifications.forEach(c => {
-        html += '<div class="pd-class-item"><span class="pd-class-code">' + escapeHtml(c.code) + '</span>';
-        if (c.description) html += '<span class="pd-class-desc">' + escapeHtml(c.description) + '</span>';
-        html += '</div>';
-      });
-      html += '</div></div>';
-    }
-
-    // Claims (collapsible)
-    if (data.claims && data.claims.length > 0) {
-      html += '<div class="pd-collapsible collapsed" id="ppv-claims-section" data-section-type="claims">';
-      html += '<div class="pd-collapsible-header" onclick="togglePatentSection(\'ppv-claims-section\')">';
-      html += '<span class="pd-collapsible-arrow">▼</span>';
-      html += '<span class="pd-collapsible-title">权利要求</span>';
-      html += '<span class="pd-collapsible-badge">' + data.claims.length + '</span>';
-      html += '<div class="pd-collapsible-actions">';
-      html += '<button class="pd-translate-btn" onclick="event.stopPropagation(); translatePatentSection(\'claims\')">翻译</button>';
-      html += '<button class="pd-copy-btn" onclick="event.stopPropagation(); copyPatentSectionText(\'claims\')">复制</button>';
-      html += '</div></div>';
-      html += '<div class="pd-collapsible-content"><div class="pd-claims-list">';
-      data.claims.forEach(c => {
-        const typeClass = c.type === "independent" ? "claim-independent" : "claim-dependent";
-        const typeLabel = c.type === "independent" ? "独立" : "从属";
-        const typeBadge = c.type === "independent" ? "independent" : "dependent";
-        html += '<div class="pd-claim-item ' + typeClass + '">';
-        html += '<span class="pd-claim-num">' + (c.num || "") + '.</span>';
-        html += '<span class="pd-claim-type ' + typeBadge + '">' + typeLabel + '</span>';
-        html += '<div class="pd-claim-text">' + escapeHtml(c.text) + '</div>';
-        html += '</div>';
-      });
-      html += '</div></div></div>';
-    }
-
-    // Description (collapsible)
-    if (data.description) {
-      html += '<div class="pd-collapsible collapsed" id="ppv-description-section" data-section-type="description">';
-      html += '<div class="pd-collapsible-header" onclick="togglePatentSection(\'ppv-description-section\')">';
-      html += '<span class="pd-collapsible-arrow">▼</span>';
-      html += '<span class="pd-collapsible-title">说明书</span>';
-      html += '<div class="pd-collapsible-actions">';
-      html += '<button class="pd-translate-btn" onclick="event.stopPropagation(); translatePatentSection(\'description\')">翻译</button>';
-      html += '<button class="pd-copy-btn" onclick="event.stopPropagation(); copyPatentSectionText(\'description\')">复制</button>';
-      html += '</div></div>';
-      html += '<div class="pd-collapsible-content"><div class="pd-description-text">' + escapeHtml(data.description) + '</div></div>';
-      html += '</div>';
-    }
-
-    // Drawings
-    if (data.drawings && data.drawings.length > 0) {
-      html += '<div class="pd-section"><div class="pd-section-title">附图</div><div class="pd-drawings-grid">';
-      const maxShow = 6;
-      data.drawings.slice(0, maxShow).forEach((url, i) => {
-        html += '<div class="pd-drawing-item" data-index="' + i + '">';
-        html += '<img src="' + escapeHtml(url) + '" alt="Figure ' + (i + 1) + '" loading="lazy">';
-        html += '</div>';
-      });
-      if (data.drawings.length > maxShow) {
-        html += '<div class="pd-drawing-more" onclick="openPatentImageViewer(window._patentPopupData.drawings, ' + maxShow + ')">+' + (data.drawings.length - maxShow) + '</div>';
-      }
-      html += '</div></div>';
-    }
-
-    // Events timeline (collapsible)
-    if (data.events_timeline && data.events_timeline.length > 0) {
-      html += '<div class="pd-collapsible collapsed" id="ppv-events-section" data-section-type="events">';
-      html += '<div class="pd-collapsible-header" onclick="togglePatentSection(\'ppv-events-section\')">';
-      html += '<span class="pd-collapsible-arrow">▼</span>';
-      html += '<span class="pd-collapsible-title">事件时间轴</span>';
-      html += '<span class="pd-collapsible-badge">' + data.events_timeline.length + '</span>';
-      html += '</div>';
-      html += '<div class="pd-collapsible-content"><div class="pd-timeline">';
-      [...data.events_timeline].reverse().forEach(ev => {
-        html += '<div class="pd-timeline-item"><div class="pd-timeline-date">' + escapeHtml(ev.date) + '</div><div class="pd-timeline-title">' + escapeHtml(ev.title) + '</div></div>';
-      });
-      html += '</div></div></div>';
-    }
-
-    // Legal events (collapsible)
-    if (data.legal_events && data.legal_events.length > 0) {
-      html += '<div class="pd-collapsible collapsed" id="ppv-legal-section" data-section-type="legal">';
-      html += '<div class="pd-collapsible-header" onclick="togglePatentSection(\'ppv-legal-section\')">';
-      html += '<span class="pd-collapsible-arrow">▼</span>';
-      html += '<span class="pd-collapsible-title">法律事件</span>';
-      html += '<span class="pd-collapsible-badge">' + data.legal_events.length + '</span>';
-      html += '</div>';
-      html += '<div class="pd-collapsible-content"><table class="pd-legal-table"><thead><tr><th>日期</th><th>代码</th><th>描述</th></tr></thead><tbody>';
-      [...data.legal_events].reverse().forEach(ev => {
-        html += '<tr><td>' + escapeHtml(ev.date) + '</td><td>' + escapeHtml(ev.code || "-") + '</td><td>' + escapeHtml(ev.description || ev.title || "-") + '</td></tr>';
-      });
-      html += '</tbody></table></div></div>';
-    }
-
-    // Patent citations
-    if (data.patent_citations && data.patent_citations.length > 0) {
-      html += '<div class="pd-section"><div class="pd-section-title">引用专利 (' + data.patent_citations.length + ')</div><div class="pd-citations">';
-      data.patent_citations.forEach(c => {
-        html += '<div class="pd-citation-item">';
-        html += '<a class="pd-patent-link-inline" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-        if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
-        html += '</div>';
-      });
-      html += '</div></div>';
-    }
-
-    content.innerHTML = html;
+    content.innerHTML = renderPatentPopupContent(data);
 
     // Bind drawing clicks
     content.querySelectorAll(".pd-drawing-item").forEach(item => {
@@ -1028,6 +1119,9 @@ function showPatentPopup() {
 }
 
 async function doSearch(input) {
+  // Clear prefetch cache when starting a new search
+  clearPrefetchCache();
+
   // 退出首页居中模式，平滑过渡到紧凑布局
   const appEl = document.getElementById("app");
   if (appEl && appEl.classList.contains("home-mode")) {
@@ -1140,6 +1234,7 @@ let kanbanState = {
 const PatentCache = {
   STORAGE_KEY: "patentlens-cache",
   HISTORY_KEY: "patentlens-history",  // Lightweight history entries (no cache data)
+  PATENT_HISTORY_KEY: "patentlens_patent_history",
 
   getAll() {
     try {
@@ -1220,6 +1315,35 @@ const PatentCache = {
     } catch {}
   },
 
+  addPatentHistory(patentNumber, extra) {
+    const all = this.getPatentHistoryAll();
+    all[patentNumber] = {
+      patentNumber,
+      type: "patent",
+      timestamp: Date.now(),
+      applicantName: (extra && extra.applicantName) || "",
+      title: (extra && extra.title) || "",
+    };
+    try {
+      localStorage.setItem(this.PATENT_HISTORY_KEY, JSON.stringify(all));
+    } catch {}
+  },
+
+  getPatentHistoryAll() {
+    try {
+      const raw = localStorage.getItem(this.PATENT_HISTORY_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  },
+
+  removePatentHistory(patentNumber) {
+    const all = this.getPatentHistoryAll();
+    delete all[patentNumber];
+    try {
+      localStorage.setItem(this.PATENT_HISTORY_KEY, JSON.stringify(all));
+    } catch {}
+  },
+
   removeHistory(patentNumber) {
     const all = this.getHistoryAll();
     delete all[patentNumber];
@@ -1231,6 +1355,7 @@ const PatentCache = {
   clearAllHistory() {
     try {
       localStorage.removeItem(this.HISTORY_KEY);
+      localStorage.removeItem(this.PATENT_HISTORY_KEY);
     } catch {}
   },
 
@@ -1420,6 +1545,7 @@ const PatentCache = {
       // Show analysis chat toggle if analysis exists
       if (kanbanState.analysis) {
         showAnalysisChatToggle();
+        prefetchPatentLinks();
       }
 
       return true;
@@ -1593,7 +1719,7 @@ function refreshHistoryList() {
   // Update history sidebar
   const historyList = document.getElementById("history-list");
   if (historyList) {
-    if (entries.length === 0) {
+    if (entries.length === 0 && Object.keys(PatentCache.getPatentHistoryAll()).length === 0) {
       historyList.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px 4px;">暂无历史记录</div>';
     } else {
       historyList.innerHTML = entries.map(e => {
@@ -1606,7 +1732,7 @@ function refreshHistoryList() {
         if (e.hasCitedRefs) badges += '<span class="history-badge badge-cited">引用</span>';
         const titleHtml = e.title ? '<div class="history-item-title">' + escapeHtml(e.title.length > 30 ? e.title.substring(0, 30) + '...' : e.title) + '</div>' : '';
         const applicantHtml = e.applicantName ? '<div class="history-item-applicant">申请人: ' + escapeHtml(e.applicantName.length > 20 ? e.applicantName.substring(0, 20) + '...' : e.applicantName) + '</div>' : '';
-        return `<div class="history-item${isActive ? ' active' : ''}" data-patent="${escapeHtml(e.patentNumber)}" data-cached="${e.isCached ? '1' : '0'}">
+        return `<div class="history-item${isActive ? ' active' : ''}" data-patent="${escapeHtml(e.patentNumber)}" data-cached="${e.isCached ? '1' : '0'}" data-timestamp="${e.timestamp || 0}">
           <div class="history-item-patent">${escapeHtml(e.patentNumber)}</div>
           ${titleHtml}
           ${applicantHtml}
@@ -1615,8 +1741,40 @@ function refreshHistoryList() {
         </div>`;
       }).join("");
 
-      // Add click handlers
-      historyList.querySelectorAll(".history-item").forEach(item => {
+      // Also show patent original text history
+      const patentHistory = PatentCache.getPatentHistoryAll();
+      for (const [key, item] of Object.entries(patentHistory)) {
+        if (item.timestamp) {
+          const ts = new Date(item.timestamp);
+          const timeStr = ts.toLocaleDateString() + " " + ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          const li = document.createElement("div");
+          li.className = "history-item patent-history-item";
+          li.dataset.patentNumber = item.patentNumber;
+          li.dataset.type = "patent";
+          li.dataset.timestamp = item.timestamp;
+          li.innerHTML = `
+            <div class="history-item-patent"><span class="history-office-badge gp-badge" style="background:var(--accent);color:#fff;font-size:10px;padding:1px 4px;border-radius:3px;margin-right:4px;">GP</span>${escapeHtml(item.patentNumber)}</div>
+            ${item.title ? `<div class="history-item-title">${escapeHtml(item.title.length > 30 ? item.title.substring(0, 30) + '...' : item.title)}</div>` : ""}
+            ${item.applicantName ? `<div class="history-item-applicant">申请人: ${escapeHtml(item.applicantName.length > 20 ? item.applicantName.substring(0, 20) + '...' : item.applicantName)}</div>` : ""}
+            <div class="history-item-time">${timeStr}</div>
+          `;
+          // Insert at the right position by timestamp
+          const existingItems = historyList.querySelectorAll(".history-item");
+          let inserted = false;
+          for (const existing of existingItems) {
+            const existingTs = parseInt(existing.dataset.timestamp || "0");
+            if (item.timestamp > existingTs) {
+              historyList.insertBefore(li, existing);
+              inserted = true;
+              break;
+            }
+          }
+          if (!inserted) historyList.appendChild(li);
+        }
+      }
+
+      // Add click handlers for dossier history items
+      historyList.querySelectorAll(".history-item:not(.patent-history-item)").forEach(item => {
         item.addEventListener("click", () => {
           const patentNumber = item.dataset.patent;
           const isCached = item.dataset.cached === "1";
@@ -1625,6 +1783,19 @@ function refreshHistoryList() {
           } else {
             restoreFromHistory(patentNumber);
           }
+        });
+      });
+
+      // Add click handlers for patent history items
+      historyList.querySelectorAll(".patent-history-item").forEach(item => {
+        item.addEventListener("click", () => {
+          const patentNumber = item.dataset.patentNumber;
+          // Switch to patent mode and search
+          searchMode = "patent";
+          document.querySelectorAll(".search-mode-btn").forEach(b => {
+            b.classList.toggle("active", b.dataset.mode === "patent");
+          });
+          searchPatentDetail(patentNumber);
         });
       });
     }
@@ -1663,6 +1834,7 @@ function refreshHistoryList() {
           const pn = btn.dataset.patent;
           PatentCache.remove(pn);
           PatentCache.removeHistory(pn);
+          PatentCache.removePatentHistory(pn);
           refreshHistoryList();
         });
       });
@@ -3146,6 +3318,7 @@ async function runCitedRefsAnalysis(selectedIdxs) {
     kanbanState.citedRefsAnalysis = fullText;
     kanbanState.hasUnsavedWork = true;
     autoSaveCache();
+    prefetchPatentLinks();
   } catch (e) {
     const analysisContent = document.getElementById("kanban-analysis-content");
     if (analysisContent) analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + '</p>';
@@ -3731,6 +3904,7 @@ function buildReviewManualSelectPanel() {
       analysisChatHistory = [];
       showAnalysisChatToggle();
       autoSaveCache();
+      prefetchPatentLinks();
       if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份文档" + (hasBlocks ? "（含溯源标记）" : "");
 
       let reportHtml = "";

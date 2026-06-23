@@ -417,32 +417,128 @@ function extractPatentFromHtml(html, patentId) {
     || html.match(/<div[^>]*class="claims"[^>]*>([\s\S]*?)<\/div>/i);
   if (claimsSection) {
     const claimsHtml = claimsSection[1];
-    // Extract claim items from <li class="claim"> or <li class="claim-dependent">
-    const claimMatches = claimsHtml.matchAll(/<li[^>]*class="claim(?:-dependent)?[^"]*"[^>]*>([\s\S]*?)<\/li>/gi);
-    for (const cm of claimMatches) {
-      const claimBody = cm[1];
-      const isDependent = cm[0].includes('claim-dependent');
-      // Extract claim text, remove HTML tags
-      let claimText = claimBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      // Try to extract claim number from num attribute
-      const numMatch = cm[0].match(/<div[^>]*num="(\d+)"[^>]*class="claim"/);
-      const claimNum = numMatch ? numMatch[1] : "";
-      if (claimText && claimText.length > 10) {
-        htmlResult.claims.push({
-          num: claimNum,
-          text: claimText,
-          type: isDependent ? "dependent" : "independent"
-        });
+
+    // Strategy 1: Extract from <div class="claim" num="N"> elements (Google Patents format)
+    // Use a function to properly handle nested divs by tracking depth
+    function extractDivClaims(html) {
+      const claims = [];
+      const claimStartRegex = /<div[^>]*class="claim[^"]*"[^>]*num="(\d+)"[^>]*>/gi;
+      let match;
+      while ((match = claimStartRegex.exec(html)) !== null) {
+        const claimNum = match[1];
+        const startIndex = match.index + match[0].length;
+        // Find matching closing tag by tracking div depth
+        let depth = 1;
+        let pos = startIndex;
+        const divOpen = /<div[\s>]/gi;
+        const divClose = /<\/div>/gi;
+        divOpen.lastIndex = startIndex;
+        divClose.lastIndex = startIndex;
+        while (depth > 0 && pos < html.length) {
+          const nextOpen = divOpen.exec(html);
+          const nextClose = divClose.exec(html);
+          if (!nextClose) break;
+          if (nextOpen && nextOpen.index < nextClose.index) {
+            depth++;
+            pos = nextOpen.index + 1;
+          } else {
+            depth--;
+            if (depth === 0) {
+              const claimBody = html.substring(startIndex, nextClose.index);
+              let claimText = claimBody.replace(/<br\s*\/?>/gi, " ").replace(/<\/div>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+              const isDependent = /claim-dependent/.test(match[0]) || /claim\s*\d+/i.test(claimText.substring(0, 100)) || claimText.includes('根据权利要求');
+              if (claimText && claimText.length > 5) {
+                claims.push({ num: claimNum, text: claimText, type: isDependent ? "dependent" : "independent" });
+              }
+              break;
+            }
+            pos = nextClose.index + 1;
+          }
+        }
       }
+      return claims;
     }
-    // Fallback: extract from div[num] elements
+
+    // Also try <div num="N" class="claim"> (attribute order may vary)
+    function extractDivClaimsAlt(html) {
+      const claims = [];
+      const claimStartRegex = /<div[^>]*num="(\d+)"[^>]*class="claim[^"]*"[^>]*>/gi;
+      let match;
+      while ((match = claimStartRegex.exec(html)) !== null) {
+        const claimNum = match[1];
+        const startIndex = match.index + match[0].length;
+        let depth = 1;
+        let pos = startIndex;
+        const divOpen = /<div[\s>]/gi;
+        const divClose = /<\/div>/gi;
+        divOpen.lastIndex = startIndex;
+        divClose.lastIndex = startIndex;
+        while (depth > 0 && pos < html.length) {
+          const nextOpen = divOpen.exec(html);
+          const nextClose = divClose.exec(html);
+          if (!nextClose) break;
+          if (nextOpen && nextOpen.index < nextClose.index) {
+            depth++;
+            pos = nextOpen.index + 1;
+          } else {
+            depth--;
+            if (depth === 0) {
+              const claimBody = html.substring(startIndex, nextClose.index);
+              let claimText = claimBody.replace(/<br\s*\/?>/gi, " ").replace(/<\/div>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+              const isDependent = /claim-dependent/.test(match[0]) || /claim\s*\d+/i.test(claimText.substring(0, 100)) || claimText.includes('根据权利要求');
+              if (claimText && claimText.length > 5) {
+                claims.push({ num: claimNum, text: claimText, type: isDependent ? "dependent" : "independent" });
+              }
+              break;
+            }
+            pos = nextClose.index + 1;
+          }
+        }
+      }
+      return claims;
+    }
+
+    // Also try <li class="claim"> format
+    function extractLiClaims(html) {
+      const claims = [];
+      const claimMatches = html.matchAll(/<li[^>]*class="claim(?:-dependent)?[^"]*"[^>]*>([\s\S]*?)<\/li>/gi);
+      for (const cm of claimMatches) {
+        const claimBody = cm[1];
+        const isDependent = cm[0].includes('claim-dependent');
+        let claimText = claimBody.replace(/<br\s*\/?>/gi, " ").replace(/<\/div>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        const numMatch = cm[0].match(/num="(\d+)"/);
+        const claimNum = numMatch ? numMatch[1] : "";
+        if (claimText && claimText.length > 5) {
+          claims.push({ num: claimNum, text: claimText, type: isDependent ? "dependent" : "independent" });
+        }
+      }
+      return claims;
+    }
+
+    // Try all strategies, pick the one with most claims
+    const divClaims = extractDivClaims(claimsHtml);
+    const divClaimsAlt = extractDivClaimsAlt(claimsHtml);
+    const liClaims = extractLiClaims(claimsHtml);
+
+    if (divClaims.length >= divClaimsAlt.length && divClaims.length >= liClaims.length && divClaims.length > 0) {
+      htmlResult.claims = divClaims;
+    } else if (divClaimsAlt.length >= liClaims.length && divClaimsAlt.length > 0) {
+      htmlResult.claims = divClaimsAlt;
+    } else if (liClaims.length > 0) {
+      htmlResult.claims = liClaims;
+    }
+
+    // Last resort: extract claims by number pattern in text
     if (htmlResult.claims.length === 0) {
-      const divClaimMatches = claimsHtml.matchAll(/<div[^>]*num="(\d+)"[^>]*class="claim"[^>]*>([\s\S]*?)<\/div>/gi);
-      for (const dm of divClaimMatches) {
-        let text = dm[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-        if (text && text.length > 10) {
-          const isDep = /claim\s*\d+/i.test(text) || text.includes('根据权利要求');
-          htmlResult.claims.push({ num: dm[1], text, type: isDep ? "dependent" : "independent" });
+      const textContent = claimsHtml.replace(/<br\s*\/?>/gi, " ").replace(/<\/div>/gi, " ").replace(/<[^>]+>/g, " ");
+      const claimNumRegex = /(?:^|\s)(\d+)\.\s*((?:(?!^\d+\.\s)[\s\S])+)/gm;
+      let cm;
+      while ((cm = claimNumRegex.exec(textContent)) !== null) {
+        const claimNum = cm[1];
+        let claimText = cm[2].replace(/\s+/g, " ").trim();
+        if (claimText && claimText.length > 5) {
+          const isDep = /claim\s*\d+/i.test(claimText.substring(0, 100)) || claimText.includes('根据权利要求');
+          htmlResult.claims.push({ num: claimNum, text: claimText, type: isDep ? "dependent" : "independent" });
         }
       }
     }
