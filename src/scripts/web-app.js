@@ -15,6 +15,110 @@ let currentData = null;
 let kanbanAutoAbortController = null;
 let citedRefsAbortController = null;
 
+// ===== PatentCache: 历史记录缓存管理 =====
+var PatentCache = {
+  STORAGE_KEY: "patentlens-cache",
+  HISTORY_KEY: "patentlens-history",
+
+  _getCache: function () {
+    try {
+      var raw = localStorage.getItem(this.STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  },
+  _saveCache: function (cache) {
+    try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(cache)); } catch (e) {}
+  },
+  _getHistory: function () {
+    try {
+      var raw = localStorage.getItem(this.HISTORY_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) { return []; }
+  },
+  _saveHistory: function (list) {
+    try { localStorage.setItem(this.HISTORY_KEY, JSON.stringify(list)); } catch (e) {}
+  },
+
+  save: function (key, data) {
+    var cache = this._getCache();
+    cache[key] = data;
+    this._saveCache(cache);
+  },
+  get: function (key) {
+    var cache = this._getCache();
+    return cache[key] || null;
+  },
+  remove: function (key) {
+    var cache = this._getCache();
+    delete cache[key];
+    this._saveCache(cache);
+  },
+  addHistory: function (key, office) {
+    var list = this._getHistory();
+    list = list.filter(function (item) { return item.key !== key; });
+    list.unshift({ key: key, office: office, timestamp: Date.now() });
+    if (list.length > 50) list = list.slice(0, 50);
+    this._saveHistory(list);
+  },
+  list: function () {
+    return this._getHistory();
+  },
+  clear: function () {
+    try {
+      localStorage.removeItem(this.STORAGE_KEY);
+      localStorage.removeItem(this.HISTORY_KEY);
+    } catch (e) {}
+  },
+};
+
+function refreshHistoryList() {
+  var container = document.getElementById("history-list");
+  if (!container) return;
+  var list = PatentCache.list();
+  if (list.length === 0) {
+    container.innerHTML = '<p class="placeholder" style="font-size:12px;color:var(--text-muted)">暂无历史记录</p>';
+    return;
+  }
+  var html = "";
+  list.forEach(function (item) {
+    var data = PatentCache.get(item.key);
+    var officeName = OFFICE_NAMES[item.office] || item.office || "";
+    var patentLabel = item.key;
+    var applicantName = "";
+    var title = "";
+    if (data) {
+      if (data.applicantName) applicantName = data.applicantName;
+      if (data.title) title = data.title;
+      if (data.docNumber) patentLabel = data.docNumber;
+      else if (data.applicationNumber) patentLabel = data.applicationNumber;
+    }
+    var timeStr = "";
+    if (item.timestamp) {
+      var d = new Date(item.timestamp);
+      timeStr = d.toLocaleDateString("zh-CN") + " " + d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    }
+    var isActive = currentData && (currentData.raw === item.key || (currentData.office + currentData.applicationNumber) === item.key);
+    html += '<div class="history-item' + (isActive ? ' active' : '') + '" data-key="' + escapeHtml(item.key) + '">';
+    html += '<div class="history-item-patent">' + escapeHtml(patentLabel) + '</div>';
+    if (title) html += '<div class="history-item-title">' + escapeHtml(title.length > 30 ? title.substring(0, 30) + '...' : title) + '</div>';
+    if (applicantName) html += '<div class="history-item-applicant">申请人: ' + escapeHtml(applicantName.length > 20 ? applicantName.substring(0, 20) + '...' : applicantName) + '</div>';
+    html += '<div class="history-item-time">' + escapeHtml(officeName) + (timeStr ? ' · ' + timeStr : '') + '</div>';
+    html += '</div>';
+  });
+  container.innerHTML = html;
+
+  // Bind click events
+  container.querySelectorAll(".history-item").forEach(function (el) {
+    el.addEventListener("click", function () {
+      var key = el.dataset.key;
+      if (key) {
+        patentInput.value = key;
+        searchBtn.click();
+      }
+    });
+  });
+}
+
 // Map JP document codes to JPO API doc type endpoints
 function mapJpDocType(docCode, type) {
   if (!docCode) return null;
@@ -307,12 +411,19 @@ searchBtn.addEventListener("click", async () => {
 
   // 记录到历史
   const patentKey = result.raw || (result.office + result.applicationNumber);
+  let patentTitle = "";
+  if (result.documents && result.documents.title) {
+    patentTitle = result.documents.title;
+  } else if (result.family && result.family.list && result.family.list.length > 0) {
+    patentTitle = result.family.list[0].title || "";
+  }
   PatentCache.addHistory(patentKey, result.office);
   PatentCache.save(patentKey, {
     office: result.office,
     applicationNumber: result.applicationNumber,
     docNumber: result.docNumber,
     applicantName: result.applicantName,
+    title: patentTitle,
     timestamp: Date.now(),
   });
   refreshHistoryList();
@@ -3012,6 +3123,16 @@ async function exportToWord() {
 
 document.addEventListener("DOMContentLoaded", () => {
   loadAISettingsToForm();
+  refreshHistoryList();
+
+  // ── 历史侧边栏展开/收起 ──
+  const historySidebar = document.getElementById("history-sidebar");
+  const historyToggle = historySidebar ? historySidebar.querySelector(".history-sidebar-toggle") : null;
+  if (historyToggle && historySidebar) {
+    historyToggle.addEventListener("click", () => {
+      historySidebar.classList.toggle("collapsed");
+    });
+  }
 
   // ── 监听浏览器插件发送的数据（通过 Electron 主进程注入） ──
   window.addEventListener("message", (event) => {

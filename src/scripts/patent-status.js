@@ -183,6 +183,71 @@ var PATENT_STATUS = {
     abstract: "德国专利审查",
     aiAnalysisTypes: ["office_action", "response", "allowance"],
   },
+  EP: {
+    codeMap: {},
+    descMap: {
+      "letter relating to the revocation of the automatic debiting procedure": "关于撤销自动扣款程序的信函",
+      "communication concerning the withdrawal of the automatic debiting procedure": "关于撤销自动扣款程序的通知",
+      "communication from the examining division": "审查部门通知",
+      "communication pursuant to article 94(4) epc": "依据EPC第94(4)条的通知",
+      "communication pursuant to rule 71(3) epc": "依据EPC细则71(3)条的通知（授权意向）",
+      "intention to grant": "授权意向通知",
+      "decision to grant a european patent": "欧洲专利授权决定",
+      "invitation to pay the grant and publishing fee": "缴纳授权及公告费通知",
+      "search report": "检索报告",
+      "extended european search report": "扩展欧洲检索报告",
+      "written opinion": "书面意见",
+      "response to a communication from the examining division": "对审查部门通知的答复",
+      "response to the extended european search report": "对扩展欧洲检索报告的答复",
+      "request for examination": "实质审查请求",
+      "request for further processing": "进一步处理请求",
+      "request for re-establishment of rights": "权利恢复请求",
+      "notice of loss of rights": "权利丧失通知",
+      "communication concerning the correction of errors": "错误更正通知",
+      "communication under rule 164(1) epc": "依据EPC细则164(1)条的通知",
+      "communication under rule 164(2) epc": "依据EPC细则164(2)条的通知",
+      "communication under rule 70(2) epc": "依据EPC细则70(2)条的通知",
+      "communication under rule 71(1) epc": "依据EPC细则71(1)条的通知",
+      "communication under rule 71(2) epc": "依据EPC细则71(2)条的通知",
+      "communication under rule 139 epc": "依据EPC细则139条的通知（错误更正）",
+      "communication under rule 112(1) epc": "依据EPC细则112(1)条的通知",
+      "decision of the examining division": "审查部门决定",
+      "decision to refuse the application": "驳回决定",
+      "notice of appeal": "申诉通知",
+      "statement of grounds of appeal": "申诉理由陈述",
+      "statement setting out the grounds of appeal": "申诉理由陈述",
+      "reply to the statement of grounds of appeal": "对申诉理由陈述的答复",
+      "summons to oral proceedings": "口头审理传唤通知",
+      "minutes of oral proceedings": "口头审理纪要",
+      "decision of the board of appeal": "申诉委员会决定",
+      "communication from the opposition division": "异议部门通知",
+      "notice of opposition": "异议通知",
+      "decision of the opposition division": "异议部门决定",
+      "communication under rule 100(1) epc": "依据EPC细则100(1)条的通知",
+      "information that the european patent application has been withdrawn": "欧洲专利申请撤回通知",
+      "information that the european patent application is deemed to be withdrawn": "欧洲专利申请视为撤回通知",
+      "communication concerning the entry in the register of european patents": "欧洲专利登记簿记录通知",
+      "communication concerning the filing of a divisional application": "分案申请提交通知",
+      "communication concerning the payment of renewal fees": "年费缴纳通知",
+      "reminder concerning the payment of renewal fees": "年费缴纳提醒",
+      "communication concerning the recording of a transfer": "权利转让记录通知",
+      "communication concerning the recording of a licence": "许可记录通知",
+      "bibliographic data": "书目数据",
+      "description": "说明书",
+      "claims": "权利要求书",
+      "abstract": "摘要",
+      "drawings": "附图",
+    },
+    typeNames: {
+      "office_action": "审查意见", "response": "答复", "request": "请求",
+      "allowance": "授权", "notification": "通知", "misc": "其他"
+    },
+    stageNames: {
+      "申请": "申请", "审查中": "审查中", "授权": "授权", "复审": "复审", "异议": "异议", "未知": "未知"
+    },
+    abstract: "欧洲专利审查",
+    aiAnalysisTypes: ["office_action", "response", "allowance"],
+  },
   JP: {
     codeMap: {
       "A131": { name: "驳回理由通知书", type: "office_action", stage: "审查中" },
@@ -277,6 +342,44 @@ function classifyDocCode(code, desc) {
   if (/patentschrift/.test(descLower)) return "misc";
   if (/teilung/.test(descLower)) return "misc";
   if (/schutzbereich/.test(descLower)) return "misc";
+
+  // === EP specific patterns (desc is in English from EPO/GD API) ===
+  if (/communication.*from.*examining division/.test(descLower)) return "office_action";
+  if (/communication.*pursuant to article 94/.test(descLower)) return "office_action";
+  if (/decision.*to refuse/.test(descLower)) return "office_action";
+  if (/decision of the examining division/.test(descLower)) return "office_action";
+  if (/response.*to.*communication.*examining/.test(descLower)) return "response";
+  if (/response.*to.*extended european search report/.test(descLower)) return "response";
+  if (/response.*to.*written opinion/.test(descLower)) return "response";
+  if (/observations.*pursuant to article/.test(descLower)) return "response";
+  if (/communication.*pursuant to rule 71\(3\)/.test(descLower)) return "allowance";
+  if (/intention to grant/.test(descLower)) return "allowance";
+  if (/decision to grant a european patent/.test(descLower)) return "allowance";
+  if (/invitation to pay.*grant.*publishing fee/.test(descLower)) return "allowance";
+  if (/request for examination/.test(descLower)) return "request";
+  if (/request for further processing/.test(descLower)) return "request";
+  if (/request for re.?establishment/.test(descLower)) return "request";
+  if (/notice of appeal/.test(descLower)) return "request";
+  if (/statement.*grounds of appeal/.test(descLower)) return "request";
+  if (/notice of opposition/.test(descLower)) return "request";
+  if (/letter relating to.*revocation.*automatic debiting/.test(descLower)) return "notification";
+  if (/communication.*concerning.*withdrawal.*automatic debiting/.test(descLower)) return "notification";
+  if (/notice of loss of rights/.test(descLower)) return "notification";
+  if (/communication.*concerning.*correction/.test(descLower)) return "notification";
+  if (/communication under rule/.test(descLower)) return "notification";
+  if (/information.*application.*withdrawn/.test(descLower)) return "notification";
+  if (/communication.*concerning.*entry.*register/.test(descLower)) return "notification";
+  if (/communication.*concerning.*payment.*renewal/.test(descLower)) return "notification";
+  if (/reminder.*renewal/.test(descLower)) return "notification";
+  if (/communication.*concerning.*recording.*transfer/.test(descLower)) return "notification";
+  if (/communication.*concerning.*recording.*licence/.test(descLower)) return "notification";
+  if (/communication.*concerning.*filing.*divisional/.test(descLower)) return "notification";
+  if (/summons to oral proceedings/.test(descLower)) return "notification";
+  if (/minutes of oral proceedings/.test(descLower)) return "notification";
+  if (/extended european search report/.test(descLower)) return "misc";
+  if (/search report/.test(descLower)) return "misc";
+  if (/written opinion/.test(descLower)) return "misc";
+  if (/bibliographic data/.test(descLower)) return "misc";
 
   // === US / General patterns ===
   if (/notice of allowance|allowed|allowance/.test(text)) return "allowance";
