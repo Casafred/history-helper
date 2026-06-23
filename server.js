@@ -656,7 +656,7 @@ function scrapeGooglePatent(patentNumber, res) {
     for (const tryNumber of allToTry) {
       const url = `${GOOGLE_PATENTS_BASE}/patent/${encodeURIComponent(tryNumber)}`;
       const args = [
-        "-s", "-w", "\n__HTTP_CODE__%{http_code}",
+        "-s", "-k", "-w", "\n__HTTP_CODE__%{http_code}",
         "--max-time", "30",
         "-L",
         "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -665,9 +665,15 @@ function scrapeGooglePatent(patentNumber, res) {
         url,
       ];
 
+      console.log(`[GP] 尝试抓取: ${url}`);
+
       const result = await new Promise((resolve) => {
         execFile("curl", args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
-          if (err) { resolve(null); return; }
+          if (err) {
+            console.log(`[GP] curl 错误: ${err.message}`);
+            resolve(null);
+            return;
+          }
           const marker = "\n__HTTP_CODE__";
           const idx = stdout.lastIndexOf(marker);
           let httpCode = 200;
@@ -676,6 +682,7 @@ function scrapeGooglePatent(patentNumber, res) {
             httpCode = parseInt(stdout.substring(idx + marker.length), 10);
             body = stdout.substring(0, idx);
           }
+          console.log(`[GP] HTTP ${httpCode}, body长度: ${body.length}`);
           resolve({ httpCode, body });
         });
       });

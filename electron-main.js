@@ -536,7 +536,8 @@ async function scrapeGooglePatent(patentNumber, res) {
   for (const tryNumber of allToTry) {
     const url = `${GOOGLE_PATENTS_BASE}/patent/${encodeURIComponent(tryNumber)}`;
     const curlArgs = [
-      "-s", "-L",
+      "-s", "-k", "-L",
+      "-w", "\n__HTTP_CODE__%{http_code}",
       "--max-time", "30",
       "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "-H", "Accept-Language: en-US,en;q=0.9",
@@ -545,14 +546,24 @@ async function scrapeGooglePatent(patentNumber, res) {
     ];
 
     try {
-      const html = await new Promise((resolve, reject) => {
+      const rawOutput = await new Promise((resolve, reject) => {
         execFile("curl", curlArgs, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
           if (err) { reject(err); return; }
           resolve(stdout);
         });
       });
 
-      if (html && html.length > 1000) {
+      const marker = "\n__HTTP_CODE__";
+      const idx = rawOutput.lastIndexOf(marker);
+      let httpCode = 200;
+      let html = rawOutput;
+      if (idx !== -1) {
+        httpCode = parseInt(rawOutput.substring(idx + marker.length), 10);
+        html = rawOutput.substring(0, idx);
+      }
+      console.log(`[GP] ${tryNumber} → HTTP ${httpCode}, body长度: ${html.length}`);
+
+      if (httpCode === 200 && html && html.length > 1000) {
         const data = extractPatentFromHtml(html, tryNumber);
         if (data.title || data.abstract) {
           res.writeHead(200, corsHeaders);
@@ -561,7 +572,7 @@ async function scrapeGooglePatent(patentNumber, res) {
         }
       }
     } catch (e) {
-      // network error, try next variant
+      console.log(`[GP] curl 错误: ${e.message}`);
       continue;
     }
   }
