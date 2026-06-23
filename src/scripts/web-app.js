@@ -2126,10 +2126,10 @@ aiSettingsBtn.addEventListener("click", () => {
   aiSettingsModal.classList.remove("hidden");
 });
 
-modalCloseBtn.addEventListener("click", () => { aiSettingsModal.classList.add("hidden"); });
-modalOverlay.addEventListener("click", () => { aiSettingsModal.classList.add("hidden"); });
+if (modalCloseBtn) modalCloseBtn.addEventListener("click", () => { if (aiSettingsModal) aiSettingsModal.classList.add("hidden"); });
+if (modalOverlay) modalOverlay.addEventListener("click", () => { if (aiSettingsModal) aiSettingsModal.classList.add("hidden"); });
 
-aiProviderSelect.addEventListener("change", () => {
+if (aiProviderSelect) aiProviderSelect.addEventListener("change", () => {
   const type = aiProviderSelect.value;
   aiBaseUrlInput.value = window.AI.getDefaultBaseUrl(type);
   updateModelOptions(type);
@@ -2139,7 +2139,7 @@ if (ocrEngineSelect) {
   ocrEngineSelect.addEventListener("change", toggleOcrGlmKeyVisibility);
 }
 
-aiTestBtn.addEventListener("click", async () => {
+if (aiTestBtn) aiTestBtn.addEventListener("click", async () => {
   const type = aiProviderSelect.value;
   const apiKey = aiApiKeyInput.value.trim();
   const baseUrl = aiBaseUrlInput.value.trim();
@@ -2156,7 +2156,7 @@ aiTestBtn.addEventListener("click", async () => {
   }
 });
 
-aiSaveBtn.addEventListener("click", () => {
+if (aiSaveBtn) aiSaveBtn.addEventListener("click", () => {
   const type = aiProviderSelect.value;
   const config = window.AI.loadAIConfig();
   if (config[type]) {
@@ -6627,3 +6627,9 @@ if (cacheClearBtn) {
 
 // ── Initialize history list on page load ──
 refreshHistoryList();
+
+// ── Fallback splash-screen removal (in case DOMContentLoaded handler fails) ──
+setTimeout(() => {
+  const splash = document.getElementById("splash-screen");
+  if (splash) { splash.style.opacity = "0"; setTimeout(() => splash.remove(), 500); }
+}, 8000);
