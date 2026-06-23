@@ -343,6 +343,8 @@ var PATENT_STATUS = {
       "modified abstract": "修改摘要",
       "examination started": "审查开始",
       "search started": "检索开始",
+      "letter relating to the revocation of the automatic debiting procedure": "关于撤销自动扣款程序的信函",
+      "communication concerning the withdrawal of the automatic debiting procedure": "关于撤销自动扣款程序的通知",
     },
     typeNames: {
       "office_action": "审查意见", "response": "申请人答复", "request": "申请人请求",
@@ -477,6 +479,8 @@ function classifyDocCode(code, desc) {
   if (/grant of extension of time limit/.test(descLower)) return "notification";
   if (/refund of fees/.test(descLower)) return "notification";
   if (/brief communication to applicant/.test(descLower)) return "notification";
+  if (/letter relating to.*revocation.*automatic debiting/.test(descLower)) return "notification";
+  if (/communication concerning.*withdrawal.*automatic debiting/.test(descLower)) return "notification";
   if (/european search report/.test(descLower)) return "misc";
   if (/supplementary european search report/.test(descLower)) return "misc";
   if (/letter accompanying subsequently filed items/.test(descLower)) return "misc";

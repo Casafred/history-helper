@@ -33,6 +33,10 @@
 
     <section class="search-section">
       <div class="search-box">
+        <div class="search-mode-switch">
+          <button class="search-mode-btn active" data-mode="dossier" title="查询审查历史、文档下载与AI梳理">审查文档</button>
+          <button class="search-mode-btn" data-mode="patent" title="查询专利原文信息（Google Patents）">专利原文</button>
+        </div>
         <input type="text" id="patent-input" placeholder="输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型" autocomplete="off">
         <button id="search-btn" class="btn-primary">查询</button>
         <button id="theme-toggle-btn" class="btn-icon" title="切换亮色/暗色模式">
@@ -50,6 +54,13 @@
     </section>
 
     <main class="app-main">
+
+      <!-- 专利原文详情视图（Google Patents） -->
+      <section id="patent-detail-section" class="patent-detail-section hidden">
+        <div id="patent-detail-content" class="patent-detail-content">
+          <p class="placeholder">请输入专利号查询</p>
+        </div>
+      </section>
 
       <section id="result-section" class="result-section hidden">
         <div class="tabs-wrapper">
