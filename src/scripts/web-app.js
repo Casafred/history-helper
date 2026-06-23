@@ -15,108 +15,62 @@ let currentData = null;
 let kanbanAutoAbortController = null;
 let citedRefsAbortController = null;
 
-// ===== PatentCache: 历史记录缓存管理 =====
-var PatentCache = {
-  STORAGE_KEY: "patentlens-cache",
-  HISTORY_KEY: "patentlens-history",
-
-  _getCache: function () {
-    try {
-      var raw = localStorage.getItem(this.STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch (e) { return {}; }
-  },
-  _saveCache: function (cache) {
-    try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(cache)); } catch (e) {}
-  },
-  _getHistory: function () {
-    try {
-      var raw = localStorage.getItem(this.HISTORY_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch (e) { return []; }
-  },
-  _saveHistory: function (list) {
-    try { localStorage.setItem(this.HISTORY_KEY, JSON.stringify(list)); } catch (e) {}
-  },
-
-  save: function (key, data) {
-    var cache = this._getCache();
-    cache[key] = data;
-    this._saveCache(cache);
-  },
-  get: function (key) {
-    var cache = this._getCache();
-    return cache[key] || null;
-  },
-  remove: function (key) {
-    var cache = this._getCache();
-    delete cache[key];
-    this._saveCache(cache);
-  },
-  addHistory: function (key, office) {
-    var list = this._getHistory();
-    list = list.filter(function (item) { return item.key !== key; });
-    list.unshift({ key: key, office: office, timestamp: Date.now() });
-    if (list.length > 50) list = list.slice(0, 50);
-    this._saveHistory(list);
-  },
-  list: function () {
-    return this._getHistory();
-  },
-  clear: function () {
-    try {
-      localStorage.removeItem(this.STORAGE_KEY);
-      localStorage.removeItem(this.HISTORY_KEY);
-    } catch (e) {}
-  },
-};
-
-function refreshHistoryList() {
-  var container = document.getElementById("history-list");
-  if (!container) return;
-  var list = PatentCache.list();
-  if (list.length === 0) {
-    container.innerHTML = '<p class="placeholder" style="font-size:12px;color:var(--text-muted)">暂无历史记录</p>';
-    return;
+// Process management: allows new process to interrupt existing one
+let activeAnalysisProcess = null; // "review" | "citedRefs" | null
+function abortActiveProcess() {
+  if (kanbanAutoAbortController) {
+    kanbanAutoAbortController.abort();
+    kanbanAutoAbortController = null;
   }
-  var html = "";
-  list.forEach(function (item) {
-    var data = PatentCache.get(item.key);
-    var officeName = OFFICE_NAMES[item.office] || item.office || "";
-    var patentLabel = item.key;
-    var applicantName = "";
-    var title = "";
-    if (data) {
-      if (data.applicantName) applicantName = data.applicantName;
-      if (data.title) title = data.title;
-      if (data.docNumber) patentLabel = data.docNumber;
-      else if (data.applicationNumber) patentLabel = data.applicationNumber;
-    }
-    var timeStr = "";
-    if (item.timestamp) {
-      var d = new Date(item.timestamp);
-      timeStr = d.toLocaleDateString("zh-CN") + " " + d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-    }
-    var isActive = currentData && (currentData.raw === item.key || (currentData.office + currentData.applicationNumber) === item.key);
-    html += '<div class="history-item' + (isActive ? ' active' : '') + '" data-key="' + escapeHtml(item.key) + '">';
-    html += '<div class="history-item-patent">' + escapeHtml(patentLabel) + '</div>';
-    if (title) html += '<div class="history-item-title">' + escapeHtml(title.length > 30 ? title.substring(0, 30) + '...' : title) + '</div>';
-    if (applicantName) html += '<div class="history-item-applicant">申请人: ' + escapeHtml(applicantName.length > 20 ? applicantName.substring(0, 20) + '...' : applicantName) + '</div>';
-    html += '<div class="history-item-time">' + escapeHtml(officeName) + (timeStr ? ' · ' + timeStr : '') + '</div>';
-    html += '</div>';
+  if (citedRefsAbortController) {
+    citedRefsAbortController.abort();
+    citedRefsAbortController = null;
+  }
+  const btns = ["kanban-manual-select-btn", "cited-refs-manual-btn"];
+  btns.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.disabled = false; el.classList.remove("hidden"); }
   });
-  container.innerHTML = html;
+  const abortBtns = ["cited-refs-abort-btn"];
+  abortBtns.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hidden");
+  });
+  activeAnalysisProcess = null;
+}
 
-  // Bind click events
-  container.querySelectorAll(".history-item").forEach(function (el) {
-    el.addEventListener("click", function () {
-      var key = el.dataset.key;
-      if (key) {
-        patentInput.value = key;
-        searchBtn.click();
-      }
-    });
+// Save/load manual selection state
+function getManualSelectKey(prefix) {
+  if (!currentData) return null;
+  const office = currentData.office || "";
+  const appNum = currentData.applicationNumber || currentData.docNumber || "";
+  return `patentlens_${prefix}_${office}_${appNum}`;
+}
+
+function saveManualSelection(prefix, items, checkboxSelector, panelEl) {
+  const key = getManualSelectKey(prefix);
+  if (!key) return;
+  const checkedIdxs = [];
+  panelEl.querySelectorAll(checkboxSelector + ":checked").forEach(cb => {
+    checkedIdxs.push(parseInt(cb.dataset.idx));
   });
+  try { localStorage.setItem(key, JSON.stringify(checkedIdxs)); } catch {}
+}
+
+function loadManualSelection(prefix, items, checkboxSelector, panelEl, defaultCheckFn) {
+  const key = getManualSelectKey(prefix);
+  if (!key) return false;
+  try {
+    const saved = localStorage.getItem(key);
+    if (!saved) return false;
+    const checkedIdxs = JSON.parse(saved);
+    if (!Array.isArray(checkedIdxs)) return false;
+    panelEl.querySelectorAll(checkboxSelector).forEach(cb => {
+      const idx = parseInt(cb.dataset.idx);
+      cb.checked = checkedIdxs.includes(idx);
+    });
+    return true;
+  } catch { return false; }
 }
 
 // Map JP document codes to JPO API doc type endpoints
@@ -176,19 +130,18 @@ const aiTestResult = document.getElementById("ai-test-result");
 const aiSummarizeBtn = null;
 const aiStatus = null;
 const aiSummaryResult = null;
-const kanbanAutoBtn = document.getElementById("kanban-auto-btn");
 const readerBtn = document.getElementById("reader-btn");
 const readerModal = document.getElementById("reader-modal");
 const readerCloseBtn = document.getElementById("reader-close-btn");
-const readerMinimizeBtn = document.getElementById("reader-minimize-btn");
+const readerMinimizeBtn = null;
 const readerFloatingBall = document.getElementById("reader-floating-ball");
 const readerDocList = document.getElementById("reader-doc-list");
 const readerContent = document.getElementById("reader-content");
 const readerExportBtn = document.getElementById("reader-export-btn");
 const exportWordBtn = document.getElementById("export-word-btn");
-const readerPdfToggle = document.getElementById("reader-pdf-toggle");
-const readerDockBtn = document.getElementById("reader-dock-btn");
-const readerFullscreenBtn = document.getElementById("reader-fullscreen-btn");
+const readerPdfToggle = null;
+const readerDockBtn = null;
+const readerFullscreenBtn = null;
 const readerPdfView = document.getElementById("reader-pdf-view");
 const readerPdfContainer = document.getElementById("reader-pdf-container");
 const pdfPageInfo = document.getElementById("pdf-page-info");
@@ -198,13 +151,15 @@ const pdfNextPage = document.getElementById("pdf-next-page");
 const pdfZoomIn = document.getElementById("pdf-zoom-in");
 const pdfZoomOut = document.getElementById("pdf-zoom-out");
 const pdfZoomFit = document.getElementById("pdf-zoom-fit");
-const pdfOcrBtn = document.getElementById("pdf-ocr-btn");
+const pdfTranslateBtn = document.getElementById("pdf-translate-btn");
+const pdfTranslatePanel = document.getElementById("pdf-translate-panel");
+const pdfTranslateLang = document.getElementById("pdf-translate-lang");
+const pdfTranslateContent = document.getElementById("pdf-translate-content");
 
 const readerChatPanel = document.getElementById("reader-chat-panel");
 const chatMessages = document.getElementById("chat-messages");
 const chatInput = document.getElementById("chat-input");
 const chatSendBtn = document.getElementById("chat-send-btn");
-const chatCloseBtn = document.getElementById("chat-close-btn");
 const readerChatToggle = document.getElementById("reader-chat-toggle");
 
 let pdfViewState = {
@@ -218,12 +173,22 @@ let pdfViewState = {
   renderedPages: {},
   pendingHighlight: null,
   pendingHighlightRange: null,
+  searchMatches: [],
+  searchCurrentIdx: -1,
+  selectedBlockIds: [],
+  selecting: false,
+  selectStart: null,
+  selectEnd: null,
+  traceJumpPending: false,
+  renderVersion: 0,
 };
 
 let chatHistory = [];
 let chatAbortController = null;
 let analysisChatHistory = [];
 let analysisChatAbortController = null;
+let translateAbortController = null;
+let translatePageCache = {};
 
 function showError(msg) {
   errorToast.textContent = msg;
@@ -285,6 +250,12 @@ function parsePatentNumber(input) {
       break;
     case "EP":
       appNum = stripped.replace(/^EP/i, "").replace(/[\s.]/g, "");
+      // EP patents: Global Dossier "patent" query type often returns null corrAppNum,
+      // causing wrong application number to be selected from family list.
+      // Always use "publication" which reliably returns corrAppNum.
+      if (kindCode) {
+        queryType = "publication";
+      }
       break;
     case "JP":
       appNum = stripped.replace(/^JP/i, "").replace(/[\s-]/g, "");
@@ -317,7 +288,8 @@ async function gdFetch(urlPath) {
 
     if (familyMatch) {
       const result = await tauriInvoke("fetch_family", {
-        input: familyMatch[2].startsWith("US") ? familyMatch[3] : familyMatch[3],
+        input: familyMatch[3],
+        queryType: familyMatch[1],
       });
       if (result && result.success && result.data) return result.data;
       throw new Error(result?.error || "Tauri family fetch failed");
@@ -361,6 +333,26 @@ searchBtn.addEventListener("click", async () => {
   const input = patentInput.value.trim();
   if (!input) return;
 
+  // Check for unsaved work before starting a new search
+  if (kanbanState.hasUnsavedWork && currentData) {
+    const currentPatent = currentData.raw || (currentData.office + currentData.applicationNumber);
+    const newPn = parsePatentNumber(input);
+    const newPatent = newPn ? (newPn.raw || input) : input;
+    if (currentPatent !== newPatent) {
+      promptSaveCache(() => { doSearch(input); });
+      return;
+    }
+  }
+  doSearch(input);
+});
+
+async function doSearch(input) {
+  // 退出首页居中模式，平滑过渡到紧凑布局
+  const appEl = document.getElementById("app");
+  if (appEl && appEl.classList.contains("home-mode")) {
+    appEl.classList.remove("home-mode");
+  }
+
   const pn = parsePatentNumber(input);
   if (!pn) { showError("无法识别专利号格式: " + input); return; }
 
@@ -374,7 +366,7 @@ searchBtn.addEventListener("click", async () => {
   const docNum = pn.applicationNumber;
   const selectedQueryType = queryTypeSelect ? queryTypeSelect.value : null;
   const queryType = selectedQueryType || pn.queryType || "application";
-  const result = { office, applicationNumber: docNum, queryType };
+  const result = { office, raw: pn.raw, applicationNumber: docNum, queryType };
   const warnings = [];
 
   try {
@@ -384,6 +376,15 @@ searchBtn.addEventListener("click", async () => {
     // 后续的文档列表查询必须使用申请号
     if (familyData && familyData.corrAppNum) {
       result.applicationNumber = familyData.corrAppNum;
+    } else if (familyData && familyData.list && Array.isArray(familyData.list)) {
+      // corrAppNum 为 null 时，从 family.list 中查找当前局的申请号
+      // EP 专利通过公开号/专利号查询时，corrAppNum 经常为 null
+      const ownEntry = familyData.list.find(item => item.countryCode === office);
+      if (ownEntry && ownEntry.appNum) {
+        result.applicationNumber = ownEntry.appNum;
+      } else if (ownEntry && ownEntry.docNum && ownEntry.docNum.docNumber) {
+        result.applicationNumber = ownEntry.docNum.docNumber;
+      }
     }
   } catch (e) {
     warnings.push("同族查询失败: " + e.message);
@@ -409,28 +410,9 @@ searchBtn.addEventListener("click", async () => {
 
   currentData = result;
 
-  // 记录到历史
-  const patentKey = result.raw || (result.office + result.applicationNumber);
-  let patentTitle = "";
-  if (result.documents && result.documents.title) {
-    patentTitle = result.documents.title;
-  } else if (result.family && result.family.list && result.family.list.length > 0) {
-    patentTitle = result.family.list[0].title || "";
-  }
-  PatentCache.addHistory(patentKey, result.office);
-  PatentCache.save(patentKey, {
-    office: result.office,
-    applicationNumber: result.applicationNumber,
-    docNumber: result.docNumber,
-    applicantName: result.applicantName,
-    title: patentTitle,
-    timestamp: Date.now(),
-  });
-  refreshHistoryList();
-
+  try { renderKanban(result); } catch (e) { console.error("renderKanban:", e); }
   try { renderOverview(result); } catch (e) { console.error("renderOverview:", e); }
   try { renderFamily(result); } catch (e) { console.error("renderFamily:", e); }
-  try { renderKanban(result); } catch (e) { console.error("renderKanban:", e); }
   try { renderTimeline(result); } catch (e) { console.error("renderTimeline:", e); }
 
   if (warnings.length > 0) {
@@ -438,22 +420,627 @@ searchBtn.addEventListener("click", async () => {
   }
 
   if (aiSummarizeBtn) aiSummarizeBtn.disabled = false;
-  kanbanAutoBtn.disabled = false;
-  const citedRefsBtn = document.getElementById("cited-refs-btn");
-  if (citedRefsBtn) citedRefsBtn.disabled = false;
+  const citedRefsManualBtn = document.getElementById("cited-refs-manual-btn");
+  if (citedRefsManualBtn) citedRefsManualBtn.disabled = false;
   const manualSelectBtn = document.getElementById("kanban-manual-select-btn");
   if (manualSelectBtn) manualSelectBtn.disabled = false;
+  // Auto-expand review manual selection panel when documents are loaded
+  if (typeof buildReviewManualSelectPanel === "function") {
+    try { buildReviewManualSelectPanel(); } catch (e) { console.error("auto-expand review panel:", e); }
+  }
   resultSection.classList.remove("hidden");
   searchBtn.disabled = false;
   loading.classList.add("hidden");
-});
+
+  // Auto-record lightweight history entry (even without OCR/AI)
+  let patentTitle = "";
+  if (result.documents && result.documents.title) {
+    patentTitle = result.documents.title;
+  } else if (result.family && result.family.list && result.family.list.length > 0) {
+    patentTitle = result.family.list[0].title || "";
+  }
+  PatentCache.addHistory(result.raw || (result.office + result.applicationNumber), result.office, {
+    applicantName: result.applicantName || "",
+    title: patentTitle,
+  });
+  // Refresh history list after new search
+  refreshHistoryList();
+}
 
 let kanbanState = {
   documents: [],
   extractions: {},
   analysis: "",
   traceIndex: {},
+  hasUnsavedWork: false,
 };
+
+// ── PatentCache - manages cached patent query states ──
+const PatentCache = {
+  STORAGE_KEY: "patentlens-cache",
+  HISTORY_KEY: "patentlens-history",  // Lightweight history entries (no cache data)
+
+  getAll() {
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  },
+
+  get(patentNumber) {
+    const all = this.getAll();
+    return all[patentNumber] || null;
+  },
+
+  save(patentNumber, data) {
+    const all = this.getAll();
+    all[patentNumber] = data;
+    try {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+    } catch (e) {
+      // Quota exceeded - try removing oldest entries
+      if (e.name === "QuotaExceededError" || e.code === 22 || e.message.includes("quota")) {
+        const entries = Object.entries(all);
+        entries.sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
+        // Remove oldest entries until we can save
+        while (entries.length > 0) {
+          const oldest = entries.shift();
+          delete all[oldest[0]];
+          try {
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+            // Try saving again with the new entry
+            all[patentNumber] = data;
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+            return true;
+          } catch {
+            continue;
+          }
+        }
+      }
+      console.error("PatentCache save failed:", e);
+      return false;
+    }
+    return true;
+  },
+
+  remove(patentNumber) {
+    const all = this.getAll();
+    delete all[patentNumber];
+    try {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+    } catch {}
+  },
+
+  clearAll() {
+    try {
+      localStorage.removeItem(this.STORAGE_KEY);
+    } catch {}
+  },
+
+  // ── Lightweight history (always recorded, no cache data) ──
+  getHistoryAll() {
+    try {
+      const raw = localStorage.getItem(this.HISTORY_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  },
+
+  addHistory(patentNumber, office, extra) {
+    const all = this.getHistoryAll();
+    all[patentNumber] = {
+      patentNumber,
+      office: office || "",
+      timestamp: Date.now(),
+      applicantName: (extra && extra.applicantName) || "",
+      title: (extra && extra.title) || "",
+    };
+    try {
+      localStorage.setItem(this.HISTORY_KEY, JSON.stringify(all));
+    } catch {}
+  },
+
+  removeHistory(patentNumber) {
+    const all = this.getHistoryAll();
+    delete all[patentNumber];
+    try {
+      localStorage.setItem(this.HISTORY_KEY, JSON.stringify(all));
+    } catch {}
+  },
+
+  clearAllHistory() {
+    try {
+      localStorage.removeItem(this.HISTORY_KEY);
+    } catch {}
+  },
+
+  getSize() {
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY);
+      return raw ? new Blob([raw]).size : 0;
+    } catch { return 0; }
+  },
+
+  formatSize(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  },
+
+  hasUnsavedWork() {
+    return kanbanState.hasUnsavedWork && currentData;
+  },
+
+  captureCurrentState() {
+    if (!currentData) return null;
+    const patentNumber = currentData.raw || (currentData.office + currentData.applicationNumber);
+    if (!patentNumber) return null;
+
+    // Deep-clone kanbanState but skip pageDimensions in traceIndex
+    const traceIndexClone = {};
+    for (const [key, val] of Object.entries(kanbanState.traceIndex)) {
+      const { pageDimensions, ...rest } = val;
+      traceIndexClone[key] = rest;
+    }
+
+    // Deep-clone extractions but skip pageDimensions
+    const extractionsClone = {};
+    for (const [idx, ext] of Object.entries(kanbanState.extractions)) {
+      const { pageDimensions, ...rest } = ext;
+      extractionsClone[idx] = rest;
+    }
+
+    const hasOCR = Object.keys(kanbanState.extractions).length > 0;
+    const hasAnalysis = !!(kanbanState.analysis);
+    const hasCitedRefs = !!(kanbanState.citedRefsAnalysis);
+
+    return {
+      patentNumber,
+      office: currentData.office || "",
+      timestamp: Date.now(),
+      currentData: JSON.parse(JSON.stringify(currentData)),
+      kanbanState: {
+        documents: JSON.parse(JSON.stringify(kanbanState.documents)),
+        extractions: extractionsClone,
+        analysis: kanbanState.analysis || "",
+        analysisSystemPrompt: kanbanState.analysisSystemPrompt || "",
+        analysisUserMessage: kanbanState.analysisUserMessage || "",
+        traceIndex: traceIndexClone,
+        citedRefsAnalysis: kanbanState.citedRefsAnalysis || "",
+      },
+      hasOCR,
+      hasAnalysis,
+      hasCitedRefs,
+    };
+  },
+
+  restoreState(cacheEntry) {
+    if (!cacheEntry) return false;
+    try {
+      currentData = cacheEntry.currentData;
+
+      // Re-render everything first (renderKanban will reset kanbanState)
+      try { renderKanban(currentData); } catch (e) { console.error("renderKanban:", e); }
+      try { renderOverview(currentData); } catch (e) { console.error("renderOverview:", e); }
+      try { renderFamily(currentData); } catch (e) { console.error("renderFamily:", e); }
+      try { renderTimeline(currentData); } catch (e) { console.error("renderTimeline:", e); }
+
+      // Now restore kanbanState AFTER renderKanban (which resets it)
+      kanbanState.documents = cacheEntry.kanbanState.documents || [];
+      kanbanState.analysis = cacheEntry.kanbanState.analysis || "";
+      kanbanState.analysisSystemPrompt = cacheEntry.kanbanState.analysisSystemPrompt || "";
+      kanbanState.analysisUserMessage = cacheEntry.kanbanState.analysisUserMessage || "";
+      kanbanState.citedRefsAnalysis = cacheEntry.kanbanState.citedRefsAnalysis || "";
+      kanbanState.hasUnsavedWork = false;
+
+      // Restore extractions - re-populate pageDimensions from blocks
+      kanbanState.extractions = {};
+      if (cacheEntry.kanbanState.extractions) {
+        for (const [idx, ext] of Object.entries(cacheEntry.kanbanState.extractions)) {
+          kanbanState.extractions[idx] = { ...ext, pageDimensions: {} };
+          // Re-populate pageDimensions from blocks if available
+          if (ext.blocks && Array.isArray(ext.blocks)) {
+            for (const b of ext.blocks) {
+              if (b.page != null && b.bbox) {
+                if (!kanbanState.extractions[idx].pageDimensions[b.page]) {
+                  // Estimate page dimensions from bbox if not available
+                  kanbanState.extractions[idx].pageDimensions[b.page] = null;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Restore traceIndex - re-populate pageDimensions from extractions
+      // Also migrate old format keys (B_p1_0) to new format (D0_B_p1_0)
+      kanbanState.traceIndex = {};
+      if (cacheEntry.kanbanState.traceIndex) {
+        for (const [key, val] of Object.entries(cacheEntry.kanbanState.traceIndex)) {
+          const ext = kanbanState.extractions[val.docIdx];
+          const pd = ext && ext.pageDimensions ? (ext.pageDimensions[val.page] || null) : null;
+          // Migrate old format key: if key doesn't start with D, prefix with D{docIdx}_
+          const newKey = /^D\d+_B_/.test(key) ? key : ("D" + val.docIdx + "_" + key);
+          // Ensure originalBlockId exists
+          const entryVal = { ...val, pageDimensions: pd };
+          if (!entryVal.originalBlockId) {
+            // Extract original block_id from old format key or from the key itself
+            const blockMatch = key.match(/B_p\d+_\d+/);
+            entryVal.originalBlockId = blockMatch ? blockMatch[0] : key;
+          }
+          kanbanState.traceIndex[newKey] = entryVal;
+        }
+      }
+
+      // Migrate old format references in analysis text (【来源: B_p1_0】 → 【来源: D0_B_p1_0】)
+      if (kanbanState.analysis && /【来源:\s*B_p/.test(kanbanState.analysis)) {
+        kanbanState.analysis = kanbanState.analysis.replace(
+          /【来源:\s*([^\】]+)】/g,
+          (match, refsStr) => {
+            const newRefs = refsStr.split(",").map(r => {
+              r = r.trim();
+              if (/^B_p/.test(r) && !/^D\d+_B_/.test(r)) {
+                // Find which docIdx this old-format block_id belongs to
+                for (const [key, val] of Object.entries(kanbanState.traceIndex)) {
+                  if (val.originalBlockId === r) {
+                    return key; // Return the new format key
+                  }
+                }
+              }
+              return r;
+            });
+            return "【来源: " + newRefs.join(", ") + "】";
+          }
+        );
+      }
+
+      // Restore analysis content
+      const analysisContentEl = document.getElementById("kanban-analysis-content");
+      const analysisSection = document.getElementById("kanban-analysis");
+      if (kanbanState.analysis) {
+        if (analysisContentEl) analysisContentEl.innerHTML = renderMarkdownWithTrace(kanbanState.analysis);
+        if (analysisSection) analysisSection.classList.remove("hidden");
+      } else {
+        if (analysisContentEl) analysisContentEl.innerHTML = "";
+        if (analysisSection) analysisSection.classList.add("hidden");
+      }
+
+      // Restore extraction display in kanban cards
+      for (const [idx, ext] of Object.entries(kanbanState.extractions)) {
+        const container = document.getElementById("kanban-extracted-" + idx);
+        if (container && ext && (ext.text || ext.markdown)) {
+          const displayText = ext.markdown || ext.text;
+          const blocksInfo = ext.blocks && ext.blocks.length > 0 ? ` · ${ext.blocks.length} blocks` : "";
+          container.classList.remove("hidden");
+          container.innerHTML = `
+            <div class="extracted-header">
+              <span class="extracted-engine">引擎: ${escapeHtml(ext.engine || "")}</span>
+              <span class="extracted-chars">字符数: ${displayText.length}${blocksInfo}</span>
+            </div>
+            <pre class="extracted-text">${escapeHtml(displayText.length > 6000 ? displayText.substring(0, 6000) + "\n\n[...已截断...]" : displayText)}</pre>
+          `;
+        }
+      }
+
+      // Update input field
+      if (patentInput) patentInput.value = cacheEntry.patentNumber || "";
+
+      // Show result section
+      const appEl = document.getElementById("app");
+      if (appEl && appEl.classList.contains("home-mode")) {
+        appEl.classList.remove("home-mode");
+      }
+      resultSection.classList.remove("hidden");
+
+      // Show reader floating ball
+      if (readerFloatingBall && kanbanState.documents.length > 0) {
+        readerFloatingBall.classList.remove("hidden");
+      }
+
+      // Show analysis chat toggle if analysis exists
+      if (kanbanState.analysis) {
+        showAnalysisChatToggle();
+      }
+
+      return true;
+    } catch (e) {
+      console.error("PatentCache restoreState failed:", e);
+      return false;
+    }
+  },
+};
+
+// ── Time ago helper ──
+function timeAgo(timestamp) {
+  const now = Date.now();
+  const diff = now - timestamp;
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return "刚刚";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + "分钟前";
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + "小时前";
+  const days = Math.floor(hours / 24);
+  if (days < 30) return days + "天前";
+  const months = Math.floor(days / 30);
+  if (months < 12) return months + "个月前";
+  const years = Math.floor(months / 12);
+  return years + "年前";
+}
+
+// ── Cache confirm dialog ──
+function showCacheConfirmDialog(callback) {
+  const dialog = document.getElementById("cache-confirm-dialog");
+  if (!dialog) { callback(); return; }
+  dialog.classList.remove("hidden");
+
+  const saveBtn = document.getElementById("cache-dialog-save-btn");
+  const skipBtn = document.getElementById("cache-dialog-skip-btn");
+  const cancelBtn = document.getElementById("cache-dialog-cancel-btn");
+
+  function cleanup() {
+    dialog.classList.add("hidden");
+    saveBtn.removeEventListener("click", onSave);
+    skipBtn.removeEventListener("click", onSkip);
+    cancelBtn.removeEventListener("click", onCancel);
+  }
+
+  function onSave() {
+    cleanup();
+    // Save current state then continue
+    const entry = PatentCache.captureCurrentState();
+    if (entry) {
+      PatentCache.save(entry.patentNumber, entry);
+      kanbanState.hasUnsavedWork = false;
+      refreshHistoryList();
+    }
+    callback();
+  }
+
+  function onSkip() {
+    cleanup();
+    kanbanState.hasUnsavedWork = false;
+    callback();
+  }
+
+  function onCancel() {
+    cleanup();
+    // Abort the action - don't call callback
+  }
+
+  saveBtn.addEventListener("click", onSave);
+  skipBtn.addEventListener("click", onSkip);
+  cancelBtn.addEventListener("click", onCancel);
+}
+
+function promptSaveCache(callback) {
+  if (!kanbanState.hasUnsavedWork || !currentData) {
+    callback();
+    return;
+  }
+  showCacheConfirmDialog(callback);
+}
+
+// Auto-save cache silently after OCR/AI operations complete.
+// This ensures work is preserved even if the user closes the app without
+// explicitly saving or switching to another patent.
+function autoSaveCache() {
+  if (!kanbanState.hasUnsavedWork || !currentData) return;
+  const entry = PatentCache.captureCurrentState();
+  if (entry) {
+    PatentCache.save(entry.patentNumber, entry);
+    kanbanState.hasUnsavedWork = false;
+    refreshHistoryList();
+  }
+}
+
+// Auto-save on page hide/close to prevent data loss
+window.addEventListener("beforeunload", () => {
+  if (kanbanState.hasUnsavedWork && currentData) {
+    autoSaveCache();
+  }
+});
+// Also handle visibilitychange for mobile/Electron scenarios
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden" && kanbanState.hasUnsavedWork && currentData) {
+    autoSaveCache();
+  }
+});
+
+// ── Refresh history sidebar & settings cache tab ──
+function refreshHistoryList() {
+  const cachedAll = PatentCache.getAll();
+  const historyAll = PatentCache.getHistoryAll();
+
+  // Merge: cached entries + lightweight-only entries
+  const mergedMap = {};
+  // Lightweight history entries first
+  Object.entries(historyAll).forEach(([pn, h]) => {
+    mergedMap[pn] = {
+      patentNumber: pn,
+      office: h.office || "",
+      timestamp: h.timestamp || 0,
+      isCached: !!cachedAll[pn],
+      hasOCR: false,
+      hasAnalysis: false,
+      hasCitedRefs: false,
+      applicantName: h.applicantName || "",
+      title: h.title || "",
+    };
+  });
+  // Overlay cached entries (they have richer data)
+  Object.entries(cachedAll).forEach(([pn, c]) => {
+    if (mergedMap[pn]) {
+      mergedMap[pn].isCached = true;
+      mergedMap[pn].hasOCR = !!c.hasOCR;
+      mergedMap[pn].hasAnalysis = !!c.hasAnalysis;
+      mergedMap[pn].hasCitedRefs = !!c.hasCitedRefs;
+      // Use the more recent timestamp
+      if ((c.timestamp || 0) > mergedMap[pn].timestamp) {
+        mergedMap[pn].timestamp = c.timestamp;
+        mergedMap[pn].office = c.office || mergedMap[pn].office;
+      }
+      // Also get applicantName/title from cached currentData if available
+      if (c.currentData) {
+        if (!mergedMap[pn].applicantName && c.currentData.applicantName) {
+          mergedMap[pn].applicantName = c.currentData.applicantName;
+        }
+        if (!mergedMap[pn].title) {
+          if (c.currentData.documents && c.currentData.documents.title) {
+            mergedMap[pn].title = c.currentData.documents.title;
+          } else if (c.currentData.family && c.currentData.family.list && c.currentData.family.list.length > 0) {
+            mergedMap[pn].title = c.currentData.family.list[0].title || "";
+          }
+        }
+      }
+    } else {
+      mergedMap[pn] = {
+        patentNumber: pn,
+        office: c.office || "",
+        timestamp: c.timestamp || 0,
+        isCached: true,
+        hasOCR: !!c.hasOCR,
+        hasAnalysis: !!c.hasAnalysis,
+        hasCitedRefs: !!c.hasCitedRefs,
+        applicantName: (c.currentData && c.currentData.applicantName) || "",
+        title: (c.currentData && c.currentData.documents && c.currentData.documents.title) || (c.currentData && c.currentData.family && c.currentData.family.list && c.currentData.family.list[0] && c.currentData.family.list[0].title) || "",
+      };
+    }
+  });
+
+  const entries = Object.values(mergedMap).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+  // Update history sidebar
+  const historyList = document.getElementById("history-list");
+  if (historyList) {
+    if (entries.length === 0) {
+      historyList.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px 4px;">暂无历史记录</div>';
+    } else {
+      historyList.innerHTML = entries.map(e => {
+        const currentPatent = currentData ? (currentData.raw || (currentData.office + currentData.applicationNumber)) : "";
+        const isActive = e.patentNumber === currentPatent;
+        let badges = "";
+        if (!e.isCached) badges += '<span class="history-badge" style="background:var(--bg-hover);color:var(--text-muted);">仅记录</span>';
+        if (e.hasOCR) badges += '<span class="history-badge badge-ocr">OCR</span>';
+        if (e.hasAnalysis) badges += '<span class="history-badge badge-analysis">分析</span>';
+        if (e.hasCitedRefs) badges += '<span class="history-badge badge-cited">引用</span>';
+        const titleHtml = e.title ? '<div class="history-item-title">' + escapeHtml(e.title.length > 30 ? e.title.substring(0, 30) + '...' : e.title) + '</div>' : '';
+        const applicantHtml = e.applicantName ? '<div class="history-item-applicant">申请人: ' + escapeHtml(e.applicantName.length > 20 ? e.applicantName.substring(0, 20) + '...' : e.applicantName) + '</div>' : '';
+        return `<div class="history-item${isActive ? ' active' : ''}" data-patent="${escapeHtml(e.patentNumber)}" data-cached="${e.isCached ? '1' : '0'}">
+          <div class="history-item-patent">${escapeHtml(e.patentNumber)}</div>
+          ${titleHtml}
+          ${applicantHtml}
+          <div class="history-item-time">${e.office ? '<span style="color:var(--accent);margin-right:4px;">' + escapeHtml(e.office) + '</span>' : ''}${timeAgo(e.timestamp)}</div>
+          ${badges ? '<div class="history-item-badges">' + badges + '</div>' : ''}
+        </div>`;
+      }).join("");
+
+      // Add click handlers
+      historyList.querySelectorAll(".history-item").forEach(item => {
+        item.addEventListener("click", () => {
+          const patentNumber = item.dataset.patent;
+          const isCached = item.dataset.cached === "1";
+          if (isCached) {
+            restoreFromCache(patentNumber);
+          } else {
+            restoreFromHistory(patentNumber);
+          }
+        });
+      });
+    }
+  }
+
+  // Update settings cache tab (only show cached entries)
+  const cachedEntries = Object.values(cachedAll).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  const cacheOverview = document.getElementById("cache-overview");
+  const cachePatentList = document.getElementById("cache-patent-list");
+  if (cacheOverview) {
+    const size = PatentCache.getSize();
+    cacheOverview.textContent = `${cachedEntries.length} 条缓存，共 ${PatentCache.formatSize(size)}`;
+  }
+  if (cachePatentList) {
+    if (cachedEntries.length === 0) {
+      cachePatentList.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:12px;">暂无缓存</div>';
+    } else {
+      cachePatentList.innerHTML = cachedEntries.map(e => {
+        let badges = "";
+        if (e.hasOCR) badges += '<span class="history-badge badge-ocr">OCR</span>';
+        if (e.hasAnalysis) badges += '<span class="history-badge badge-analysis">分析</span>';
+        if (e.hasCitedRefs) badges += '<span class="history-badge badge-cited">引用</span>';
+        return `<div class="cache-patent-item" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${escapeHtml(e.patentNumber)}</div>
+            <div style="font-size:11px;color:var(--text-muted);">${e.office ? escapeHtml(e.office) + ' · ' : ''}${timeAgo(e.timestamp)}</div>
+            ${badges ? '<div class="history-item-badges" style="margin-top:2px;">' + badges + '</div>' : ''}
+          </div>
+          <button class="btn-small cache-delete-btn" data-patent="${escapeHtml(e.patentNumber)}" style="background:var(--bg-hover);color:var(--danger);border:1px solid var(--border);">删除</button>
+        </div>`;
+      }).join("");
+
+      cachePatentList.querySelectorAll(".cache-delete-btn").forEach(btn => {
+        btn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          const pn = btn.dataset.patent;
+          PatentCache.remove(pn);
+          PatentCache.removeHistory(pn);
+          refreshHistoryList();
+        });
+      });
+    }
+  }
+}
+
+function restoreFromCache(patentNumber) {
+  const entry = PatentCache.get(patentNumber);
+  if (!entry) { showError("缓存记录不存在"); return; }
+
+  // Confirm if switching away from current query
+  if (currentData) {
+    const currentPatent = currentData.raw || (currentData.office + currentData.applicationNumber);
+    if (currentPatent !== patentNumber) {
+      if (kanbanState.hasUnsavedWork) {
+        promptSaveCache(() => doRestoreFromCache(patentNumber));
+        return;
+      }
+      if (!confirm("当前查询结果尚未保存，确认切换到其他专利？")) return;
+    }
+  }
+  doRestoreFromCache(patentNumber);
+}
+
+function restoreFromHistory(patentNumber) {
+  // Lightweight history entry: confirm and re-trigger search
+  if (currentData) {
+    const currentPatent = currentData.raw || (currentData.office + currentData.applicationNumber);
+    if (currentPatent !== patentNumber) {
+      if (kanbanState.hasUnsavedWork) {
+        promptSaveCache(() => doRestoreFromHistory(patentNumber));
+        return;
+      }
+      if (!confirm("当前查询结果尚未保存，确认切换到其他专利？")) return;
+    }
+  }
+  doRestoreFromHistory(patentNumber);
+}
+
+function doRestoreFromHistory(patentNumber) {
+  // Re-trigger search for this patent
+  const historyAll = PatentCache.getHistoryAll();
+  const h = historyAll[patentNumber];
+  const office = h ? h.office : "";
+  if (patentInput) patentInput.value = patentNumber;
+  doSearch(patentNumber);
+}
+
+function doRestoreFromCache(patentNumber) {
+  const entry = PatentCache.get(patentNumber);
+  if (!entry) return;
+  const success = PatentCache.restoreState(entry);
+  if (success) {
+    refreshHistoryList();
+  } else {
+    showError("恢复缓存状态失败");
+  }
+}
 
 function renderKanban(data) {
   const board = document.getElementById("kanban-board");
@@ -498,11 +1085,33 @@ function renderKanban(data) {
   kanbanState.analysisSystemPrompt = "";
   kanbanState.analysisUserMessage = "";
   kanbanState.traceIndex = {};
+  kanbanState.hasUnsavedWork = false;
+
+  // Clear previous analysis content from DOM
+  const analysisContentEl = document.getElementById("kanban-analysis-content");
+  if (analysisContentEl) analysisContentEl.innerHTML = "";
+
+  // Show merge export button if there are documents with download URLs
+  const mergeExportBtn = document.getElementById("merge-export-btn");
+  if (mergeExportBtn) {
+    const hasDownloadable = items.some(it => it.docId && data.office !== "DE");
+    mergeExportBtn.style.display = hasDownloadable ? "" : "none";
+  }
   analysisChatHistory = [];
-  const analysisChatToggleBtn = document.getElementById("analysis-chat-toggle-btn");
-  if (analysisChatToggleBtn) analysisChatToggleBtn.classList.add("hidden");
+  const analysisChatFloatBall = document.getElementById("analysis-chat-float-ball");
+  if (analysisChatFloatBall) analysisChatFloatBall.classList.add("hidden");
   const analysisChatPanel = document.getElementById("analysis-chat-panel");
   if (analysisChatPanel) analysisChatPanel.classList.add("hidden");
+
+  // Show reader floating ball when documents are loaded
+  if (readerFloatingBall && items.length > 0) {
+    readerFloatingBall.classList.remove("hidden");
+    const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
+    const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
+    readerFloatingBall.title = "点击打开阅读器";
+    if (iconOpen) iconOpen.classList.remove("hidden");
+    if (iconBack) iconBack.classList.add("hidden");
+  }
 
   // Build filter bar
   const filterBar = document.getElementById("kanban-filter-bar");
@@ -618,6 +1227,7 @@ function renderKanban(data) {
             <div class="kanban-card-actions">
               ${extractUrl ? '<button class="btn-small btn-extract" data-action="kanban-extract" data-url="' + extractUrl + '" data-idx="' + it.idx + '" data-doctype="' + escapeHtml(it.docCode) + '">提取内容</button>' : ''}
               ${downloadUrl ? '<button class="btn-small btn-download" data-action="kanban-download" data-url="' + downloadUrl + '" data-filename="' + escapeHtml(it.docCode) + '_' + escapeHtml(it.date.replace(/\//g, '-')) + '.pdf">下载</button>' : ''}
+              ${downloadUrl ? '<button class="btn-small btn-view-pdf" data-action="kanban-view-pdf" data-idx="' + it.idx + '">查看PDF</button>' : ''}
             </div>
             <div id="kanban-extracted-${it.idx}" class="kanban-extracted hidden"></div>
           </div>
@@ -645,10 +1255,77 @@ function renderOverview(data) {
   const office = OFFICE_NAMES[data.office] || data.office;
 
   let title = "";
-  if (data.documents && data.documents.title) {
+  let inventors = "";
+  let applicants = "";
+  let filingDate = "";
+  let publicationDate = "";
+  let priorityDate = "";
+  let ipcClasses = "";
+  let cpcClasses = "";
+  let legalStatus = "";
+
+  if (data.family) {
+    const members = extractFamilyMembers(data.family);
+    if (members.length > 0) {
+      // Find the member matching the queried office, fall back to first member
+      let m = members.find(mem => mem.countryCode === data.office) || members[0];
+      // Also check docList for richer data (US members store title/applicants in docList)
+      const dl = m.docList || {};
+      title = m.title || dl.title || m.inventionTitle || "";
+      // applicantNames in GD API actually contains inventor names for US patents
+      // The field is misleadingly named - it returns first/last name format which is inventors
+      const applicantNamesArr = m.applicantNames || dl.applicantNames || [];
+      const namesStr = Array.isArray(applicantNamesArr) ? applicantNamesArr.join(", ") : (applicantNamesArr || "");
+      // For US patents, applicantNames = inventors; for EP/CN/JP it may be actual applicants
+      if (data.office === "US") {
+        inventors = namesStr || m.inventors || m.inventorName || "";
+      } else {
+        applicants = namesStr || m.applicants || m.applicantName || "";
+        inventors = m.inventors || m.inventorName || "";
+      }
+      // filing date: appDateStr or appDate (epoch ms)
+      filingDate = m.appDateStr || m.filingDate || m.applicationDate || "";
+      if (!filingDate && m.appDate) {
+        try { filingDate = new Date(m.appDate).toLocaleDateString("en-US"); } catch(e) {}
+      }
+      // publication date: from pubList
+      if (m.pubList && Array.isArray(m.pubList) && m.pubList.length > 0) {
+        publicationDate = m.pubList[0].pubDateStr || "";
+        if (!publicationDate && m.pubList[0].pubDate) {
+          try { publicationDate = new Date(m.pubList[0].pubDate).toLocaleDateString("en-US"); } catch(e2) {}
+        }
+      }
+      publicationDate = publicationDate || m.publicationDate || m.pubDate || "";
+      // priority date: from docNum.date or priorityClaimList
+      if (m.docNum && m.docNum.date) {
+        priorityDate = m.docNum.date;
+      }
+      if (!priorityDate && m.priorityClaimList && Array.isArray(m.priorityClaimList) && m.priorityClaimList.length > 0) {
+        priorityDate = m.priorityClaimList[0].date || "";
+      }
+      // IPC/CPC not available in GD family API
+      ipcClasses = m.ipc || m.ipcClass || m.classification || "";
+      if (Array.isArray(ipcClasses)) ipcClasses = ipcClasses.join(", ");
+      cpcClasses = m.cpcClass || m.cpc || "";
+      if (Array.isArray(cpcClasses)) cpcClasses = cpcClasses.join(", ");
+      // Infer legal status from document types
+      const docItems = kanbanState.documents || [];
+      const hasAllowance = docItems.some(it => it.type === "allowance");
+      const hasOA = docItems.some(it => it.type === "office_action");
+      const hasResponse = docItems.some(it => it.type === "response");
+      if (hasAllowance) {
+        legalStatus = "已授权 (Granted)";
+      } else if (hasOA && !hasResponse) {
+        legalStatus = "待答复 (Pending Response)";
+      } else if (hasOA && hasResponse) {
+        legalStatus = "审查中 (Under Examination)";
+      } else {
+        legalStatus = m.legalStatus || m.status || "";
+      }
+    }
+  }
+  if (data.documents && data.documents.title && !title) {
     title = data.documents.title;
-  } else if (data.family && data.family.list && data.family.list.length > 0) {
-    title = data.family.list[0].title || "";
   }
 
   const queryTypeLabel = data.queryType === "publication" ? "公开号/专利号" : "申请号";
@@ -658,19 +1335,54 @@ function renderOverview(data) {
     <div class="info-row"><span class="info-label">${queryTypeLabel}</span><span class="info-value">${data.applicationNumber || "-"}</span></div>
     ${data.documents && data.documents.docNumber ? '<div class="info-row"><span class="info-label">文档编号</span><span class="info-value">' + escapeHtml(data.documents.docNumber) + '</span></div>' : ''}
     ${title ? '<div class="info-row"><span class="info-label">标题</span><span class="info-value">' + escapeHtml(title) + '</span></div>' : ''}
+    ${inventors ? '<div class="info-row"><span class="info-label">发明人</span><span class="info-value">' + escapeHtml(inventors) + '</span></div>' : ''}
+    ${applicants ? '<div class="info-row"><span class="info-label">申请人</span><span class="info-value">' + escapeHtml(applicants) + '</span></div>' : ''}
+    ${filingDate ? '<div class="info-row"><span class="info-label">申请日</span><span class="info-value">' + escapeHtml(filingDate) + '</span></div>' : ''}
+    ${publicationDate ? '<div class="info-row"><span class="info-label">公开日</span><span class="info-value">' + escapeHtml(publicationDate) + '</span></div>' : ''}
+    ${priorityDate ? '<div class="info-row"><span class="info-label">优先权日</span><span class="info-value">' + escapeHtml(priorityDate) + '</span></div>' : ''}
+    ${ipcClasses ? '<div class="info-row"><span class="info-label">IPC分类</span><span class="info-value">' + escapeHtml(ipcClasses) + '</span></div>' : ''}
+    ${cpcClasses ? '<div class="info-row"><span class="info-label">CPC分类</span><span class="info-value">' + escapeHtml(cpcClasses) + '</span></div>' : ''}
   `;
 
   const family = data.family;
-  if (family) {
-    const famCount = countFamilyMembers(family);
-    const docCount = countDocuments(data.documents);
-    appStatus.innerHTML = `
-      <div class="info-row"><span class="info-label">同族成员</span><span class="info-value">${famCount} 个</span></div>
-      <div class="info-row"><span class="info-label">审查文档</span><span class="info-value">${docCount} 份</span></div>
-    `;
-  } else {
-    appStatus.innerHTML = '<p class="placeholder">暂无状态信息</p>';
+  const items = kanbanState.documents;
+  const famCount = family ? countFamilyMembers(family) : 0;
+  // Only count substantive documents (exclude misc like descriptions, drawings, receipts)
+  const substantiveItems = items.filter(it => it.type !== "misc");
+  const docCount = substantiveItems.length;
+  const oaCount = substantiveItems.filter(it => it.type === "office_action").length;
+  const respCount = substantiveItems.filter(it => it.type === "response").length;
+  const allowCount = substantiveItems.filter(it => it.type === "allowance").length;
+  const notifCount = substantiveItems.filter(it => it.type === "notification").length;
+  const reqCount = substantiveItems.filter(it => it.type === "request").length;
+
+  let statusHtml = '';
+  if (legalStatus) {
+    statusHtml += '<div class="info-row"><span class="info-label">法律状态</span><span class="info-value">' + escapeHtml(legalStatus) + '</span></div>';
   }
+  if (famCount > 0) {
+    statusHtml += '<div class="info-row"><span class="info-label">同族成员</span><span class="info-value">' + famCount + ' 个</span></div>';
+  }
+  if (docCount > 0) {
+    statusHtml += '<div class="info-row"><span class="info-label">审查文档</span><span class="info-value">' + docCount + ' 份</span></div>';
+  }
+  if (items.length > 0) {
+    statusHtml += '<div class="info-row"><span class="info-label">审查意见</span><span class="info-value">' + oaCount + ' 份</span></div>';
+    statusHtml += '<div class="info-row"><span class="info-label">申请人答复</span><span class="info-value">' + respCount + ' 份</span></div>';
+    if (allowCount > 0) {
+      statusHtml += '<div class="info-row"><span class="info-label">授权通知</span><span class="info-value">' + allowCount + ' 份</span></div>';
+    }
+    if (notifCount > 0) {
+      statusHtml += '<div class="info-row"><span class="info-label">通知文件</span><span class="info-value">' + notifCount + ' 份</span></div>';
+    }
+    if (reqCount > 0) {
+      statusHtml += '<div class="info-row"><span class="info-label">请求文件</span><span class="info-value">' + reqCount + ' 份</span></div>';
+    }
+  }
+  if (!statusHtml) {
+    statusHtml = '<p class="placeholder">暂无状态信息</p>';
+  }
+  appStatus.innerHTML = statusHtml;
 }
 
 function countFamilyMembers(family) {
@@ -951,18 +1663,22 @@ async function extractDocumentText(url, idx, docType) {
     container._docType = docType;
 
     kanbanState.extractions[idx] = { text, markdown, engine: usedEngine, blocks, pageDimensions };
+    kanbanState.hasUnsavedWork = true;
     if (blocks.length > 0) {
       blocks.forEach(b => {
-        kanbanState.traceIndex[b.block_id] = {
+        const traceKey = "D" + idx + "_" + b.block_id;
+        kanbanState.traceIndex[traceKey] = {
           docIdx: idx,
           page: b.page,
           bbox: b.bbox,
           content: b.content,
           label: b.label,
+          originalBlockId: b.block_id,
           pageDimensions: pageDimensions[b.page] || null,
         };
       });
     }
+    autoSaveCache();
   } catch (e) {
     container.innerHTML = '<p class="extract-error">提取失败: ' + escapeHtml(e.message) + '</p>';
   }
@@ -1010,6 +1726,10 @@ async function aiAnalyzeDocument(idx, docType) {
 
   try {
     let fullText = "";
+    let _rafPending = false;
+    // Create stable container once
+    if (aiSummaryResult) aiSummaryResult.innerHTML = '<div class="ai-summary-content markdown-body"></div>';
+    const streamContainer = aiSummaryResult ? aiSummaryResult.querySelector(".ai-summary-content") : null;
     for await (const chunk of window.AI.streamChat(
       provider.type, provider.apiKey, provider.baseUrl,
       {
@@ -1024,9 +1744,17 @@ async function aiAnalyzeDocument(idx, docType) {
     )) {
       if (chunk.content) {
         fullText += chunk.content;
-        if (aiSummaryResult) aiSummaryResult.innerHTML = '<div class="ai-summary-content markdown-body">' + renderMarkdown(fullText) + "</div>";
+        if (!_rafPending) {
+          _rafPending = true;
+          requestAnimationFrame(() => {
+            if (streamContainer) streamContainer.innerHTML = renderMarkdown(fullText);
+            _rafPending = false;
+          });
+        }
       }
     }
+    // Final render
+    if (streamContainer) streamContainer.innerHTML = renderMarkdown(fullText);
     if (aiStatus) {
       aiStatus.textContent = "分析完成 ✓";
       aiStatus.className = "ai-status ai-status-success";
@@ -1117,7 +1845,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.classList.add("active");
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
     const app = document.getElementById("app");
-    const wideTabs = ["kanban", "ai-analysis", "timeline"];
+    const wideTabs = ["kanban", "ai-analysis"];
     if (wideTabs.includes(btn.dataset.tab)) {
       app.classList.add("wide-layout");
     } else {
@@ -1169,38 +1897,148 @@ aiSaveBtn.addEventListener("click", () => {
     config[type].baseUrl = aiBaseUrlInput.value.trim();
     config[type].model = aiModelSelect.value;
   }
-  const ocrConfig = window.AI.getOCRConfig(config);
-  ocrConfig.engine = ocrEngineSelect.value;
-  ocrConfig.glmKey = ocrGlmKeyInput.value.trim();
-
-  // Save custom prompts
-  const promptKeys = [
-    { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
-    { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
-    { id: "prompt-doc-analysis", key: "docAnalysis" },
-    { id: "prompt-history-summary", key: "historySummary" },
-  ];
-  promptKeys.forEach(p => {
-    const el = document.getElementById(p.id);
-    if (el) {
-      const val = el.value.trim();
-      const defaultVal = window.AI.getDefaultPrompt(p.key);
-      if (val && val !== defaultVal) {
-        window.AI.saveCustomPrompt(config, p.key, val);
-      } else {
-        window.AI.resetPrompt(config, p.key);
-      }
-    }
-  });
-
   window.AI.saveAIConfig(config);
+  aiTestResult.classList.add("hidden");
   aiSettingsModal.classList.add("hidden");
 });
+
+// OCR save button
+const ocrSaveBtn = document.getElementById("ocr-save-btn");
+if (ocrSaveBtn) {
+  ocrSaveBtn.addEventListener("click", () => {
+    const config = window.AI.loadAIConfig();
+    const ocrConfig = window.AI.getOCRConfig(config);
+    ocrConfig.engine = ocrEngineSelect.value;
+    ocrConfig.glmKey = ocrGlmKeyInput.value.trim();
+    const autoCheckbox = document.getElementById("ocr-auto-checkbox");
+    ocrConfig.autoOcr = autoCheckbox ? autoCheckbox.checked : true;
+    window.AI.saveAIConfig(config);
+    aiSettingsModal.classList.add("hidden");
+  });
+}
+
+// Translate save button
+const translateSaveBtn = document.getElementById("translate-save-btn");
+if (translateSaveBtn) {
+  translateSaveBtn.addEventListener("click", () => {
+    const config = window.AI.loadAIConfig();
+    const translateProviderSelect = document.getElementById("translate-provider-select");
+    const translateApiKeyInput = document.getElementById("translate-api-key-input");
+    const translateModelSelect = document.getElementById("translate-model-select");
+    const translateDefaultLang = document.getElementById("translate-default-lang");
+
+    if (!config.translate) config.translate = {};
+    config.translate.provider = translateProviderSelect ? translateProviderSelect.value : "";
+    config.translate.apiKey = translateApiKeyInput ? translateApiKeyInput.value.trim() : "";
+    config.translate.model = translateModelSelect ? translateModelSelect.value : "";
+    config.translate.defaultLang = translateDefaultLang ? translateDefaultLang.value : "zh";
+    window.AI.saveAIConfig(config);
+    aiSettingsModal.classList.add("hidden");
+  });
+}
+
+// Prompts save button
+const promptsSaveBtn = document.getElementById("prompts-save-btn");
+if (promptsSaveBtn) {
+  promptsSaveBtn.addEventListener("click", () => {
+    const config = window.AI.loadAIConfig();
+    const promptKeys = [
+      { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
+      { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
+      { id: "prompt-doc-analysis", key: "docAnalysis" },
+      { id: "prompt-cited-refs-analysis", key: "citedRefsAnalysis" },
+    ];
+    promptKeys.forEach(p => {
+      const el = document.getElementById(p.id);
+      if (el) {
+        const val = el.value.trim();
+        const defaultVal = window.AI.getDefaultPrompt(p.key);
+        if (val && val !== defaultVal) {
+          window.AI.saveCustomPrompt(config, p.key, val);
+        } else {
+          window.AI.resetPrompt(config, p.key);
+        }
+      }
+    });
+    window.AI.saveAIConfig(config);
+    aiSettingsModal.classList.add("hidden");
+  });
+}
+
+// Prompt group expand/collapse
+document.querySelectorAll(".prompt-toggle-btn").forEach(btn => {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const group = btn.closest(".prompt-group");
+    if (!group) return;
+    const body = group.querySelector(".prompt-group-body");
+    if (body) body.classList.toggle("collapsed");
+  });
+});
+// Also allow clicking the header to toggle
+document.querySelectorAll(".prompt-group-header").forEach(header => {
+  header.addEventListener("click", () => {
+    const group = header.closest(".prompt-group");
+    if (!group) return;
+    const body = group.querySelector(".prompt-group-body");
+    if (body) body.classList.toggle("collapsed");
+  });
+});
+
+// Settings tab switching
+document.querySelectorAll(".settings-tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const tabId = btn.dataset.settingsTab;
+    document.querySelectorAll(".settings-tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".settings-tab-content").forEach(c => c.classList.remove("active"));
+    btn.classList.add("active");
+    const tabContent = document.getElementById("settings-tab-" + tabId);
+    if (tabContent) tabContent.classList.add("active");
+    // Refresh cache tab data when selected
+    if (tabId === "cache") {
+      refreshHistoryList();
+    }
+  });
+});
+
+// Translate provider select change
+const translateProviderSelectEl = document.getElementById("translate-provider-select");
+if (translateProviderSelectEl) {
+  translateProviderSelectEl.addEventListener("change", () => {
+    const type = translateProviderSelectEl.value;
+    const translateApiKeyGroup = document.getElementById("translate-api-key-group");
+    const translateModelSelect = document.getElementById("translate-model-select");
+
+    if (type) {
+      if (translateApiKeyGroup) translateApiKeyGroup.style.display = "";
+      updateTranslateModelOptions(type);
+    } else {
+      if (translateApiKeyGroup) translateApiKeyGroup.style.display = "none";
+      if (translateModelSelect) translateModelSelect.innerHTML = '<option value="">跟随 AI 服务模型</option>';
+    }
+  });
+}
+
+function updateTranslateModelOptions(type) {
+  const translateModelSelect = document.getElementById("translate-model-select");
+  if (!translateModelSelect) return;
+  const models = window.AI.getAvailableModels(type);
+  const defaultModel = window.AI.getDefaultTranslateModel(type);
+  translateModelSelect.innerHTML = "";
+  models.forEach(model => {
+    const option = document.createElement("option");
+    option.value = model.value;
+    option.textContent = model.label + (model.value === defaultModel ? " (推荐)" : "");
+    translateModelSelect.appendChild(option);
+  });
+  // Set default
+  translateModelSelect.value = defaultModel;
+}
 
 function loadAISettingsToForm() {
   const config = window.AI.loadAIConfig();
   let type = aiProviderSelect.value;
-  if (!config[type]) type = Object.keys(config).find(k => k !== "ocr" && k !== "prompts") || "zhipu";
+  if (!config[type]) type = Object.keys(config).find(k => k !== "ocr" && k !== "prompts" && k !== "translate") || "zhipu";
   if (config[type]) {
     aiApiKeyInput.value = config[type].apiKey || "";
     aiBaseUrlInput.value = config[type].baseUrl || "";
@@ -1213,14 +2051,38 @@ function loadAISettingsToForm() {
   const ocrConfig = window.AI.getOCRConfig(config);
   if (ocrEngineSelect) ocrEngineSelect.value = ocrConfig.engine || "paddle_ocr_vl";
   if (ocrGlmKeyInput) ocrGlmKeyInput.value = ocrConfig.glmKey || "";
+  const autoCheckbox = document.getElementById("ocr-auto-checkbox");
+  if (autoCheckbox) autoCheckbox.checked = ocrConfig.autoOcr !== false;
   toggleOcrGlmKeyVisibility();
+
+  // Load translate settings
+  const translateProviderSelect = document.getElementById("translate-provider-select");
+  const translateApiKeyInput = document.getElementById("translate-api-key-input");
+  const translateDefaultLang = document.getElementById("translate-default-lang");
+  const translateApiKeyGroup = document.getElementById("translate-api-key-group");
+  const translate = config.translate || {};
+  if (translateProviderSelect) {
+    translateProviderSelect.value = translate.provider || "";
+    if (translate.provider) {
+      if (translateApiKeyGroup) translateApiKeyGroup.style.display = "";
+      updateTranslateModelOptions(translate.provider);
+      const translateModelSelect = document.getElementById("translate-model-select");
+      if (translateModelSelect && translate.model) translateModelSelect.value = translate.model;
+    } else {
+      if (translateApiKeyGroup) translateApiKeyGroup.style.display = "none";
+      const translateModelSelect = document.getElementById("translate-model-select");
+      if (translateModelSelect) translateModelSelect.innerHTML = '<option value="">跟随 AI 服务模型</option>';
+    }
+  }
+  if (translateApiKeyInput) translateApiKeyInput.value = translate.apiKey || "";
+  if (translateDefaultLang) translateDefaultLang.value = translate.defaultLang || "zh";
 
   // Load custom prompts
   const promptKeys = [
     { id: "prompt-kanban-analysis", key: "kanbanAnalysis" },
     { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
     { id: "prompt-doc-analysis", key: "docAnalysis" },
-    { id: "prompt-history-summary", key: "historySummary" },
+    { id: "prompt-cited-refs-analysis", key: "citedRefsAnalysis" },
   ];
   promptKeys.forEach(p => {
     const el = document.getElementById(p.id);
@@ -1241,7 +2103,7 @@ document.querySelectorAll("[id^='reset-prompt-']").forEach(btn => {
       "kanban-analysis": "kanbanAnalysis",
       "kanban-simple": "kanbanAnalysisSimple",
       "doc-analysis": "docAnalysis",
-      "history-summary": "historySummary",
+      "cited-refs-analysis": "citedRefsAnalysis",
     };
     const key = keyMap[promptId];
     if (!key) return;
@@ -1415,512 +2277,396 @@ function buildTimelineSummary(office, documents) {
   return lines.join("\n");
 }
 
-kanbanAutoBtn.addEventListener("click", async () => {
-  if (!currentData) { showError("请先查询专利"); return; }
+async function runCitedRefsAnalysis(selectedIdxs) {
+  if (!currentData || !kanbanState.documents.length) return;
+
   const config = window.AI.loadAIConfig();
   const provider = window.AI.getCurrentProvider(config);
   if (!provider) {
     showError("请先在 AI 设置中配置并选择一个 AI 服务商");
-    aiSettingsBtn.click();
     return;
   }
 
-  const items = kanbanState.documents;
-  if (!items || items.length === 0) { showError("请先查询专利并加载审查文档"); return; }
-
-  kanbanAutoBtn.disabled = true;
-  kanbanAutoAbortController = new AbortController();
-  const kanbanAutoAbortBtn = document.getElementById("kanban-auto-abort-btn");
-  kanbanAutoBtn.classList.add("hidden");
-  if (kanbanAutoAbortBtn) kanbanAutoAbortBtn.classList.remove("hidden");
-
-  const analysisSection = document.getElementById("kanban-analysis");
-  const analysisContent = document.getElementById("kanban-analysis-content");
-
-  const canDownload = currentData.office === "US" || currentData.office === "EP";
-  if (!canDownload) {
-    analysisSection.classList.remove("hidden");
-    analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">CN / DE / JP 专利暂不支持文档下载与提取，无法进行 AI 梳理。仅 US / EP 专利支持审查文档原文获取。</p>';
-    kanbanAutoBtn.disabled = false;
-    kanbanAutoBtn.classList.remove("hidden");
-    if (kanbanAutoAbortBtn) kanbanAutoAbortBtn.classList.add("hidden");
-    kanbanAutoAbortController = null;
-    return;
+  const citedRefsManualBtn = document.getElementById("cited-refs-manual-btn");
+  if (citedRefsManualBtn) citedRefsManualBtn.disabled = true;
+  // Interrupt any existing process
+  if (activeAnalysisProcess) {
+    abortActiveProcess();
   }
-
-  analysisSection.classList.remove("hidden");
-  analysisContent.innerHTML = '<p class="extracting">正在准备审查意见和答复的提取内容...</p>';
-
-  const CLAIMS_CODES = ["CLM", "FWCLM"];
-  const oaItems = items.filter(it => shouldIncludeInAIAnalysis(currentData.office, it.type) || CLAIMS_CODES.includes(it.docCode));
-  if (oaItems.length === 0) {
-    analysisContent.innerHTML = '<p class="placeholder">未找到审查意见或答复类文档</p>';
-    kanbanAutoBtn.disabled = false;
-    kanbanAutoBtn.classList.remove("hidden");
-    if (kanbanAutoAbortBtn) kanbanAutoAbortBtn.classList.add("hidden");
-    kanbanAutoAbortController = null;
-    return;
-  }
-
-  const ocrConfig = window.AI.getOCRConfig(config);
-  const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
-  const glmApiKey = window.AI.getGlmOcrApiKey(config);
-  const statusEl = document.getElementById("ai-analysis-status");
-  const isUS = currentData.office === "US";
-  const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
-
-  const MAX_RETRIES = 2;
-  const extractReport = { success: [], empty: [], failed: [] };
-
-  async function extractWithRetry(it, engine, retriesLeft) {
-    const container = document.getElementById("kanban-extracted-" + it.idx);
-    if (container) {
-      container.classList.remove("hidden");
-      const attemptNum = MAX_RETRIES - retriesLeft + 1;
-      container.innerHTML = '<p class="extracting">正在提取（' + escapeHtml(engine) + '）' + (attemptNum > 1 ? '第' + attemptNum + '次尝试' : '') + '...</p>';
-    }
-    try {
-      const useApiKey = engine === "glm_ocr" ? glmApiKey : "";
-      const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, useApiKey);
-      if (result.error) {
-        if (retriesLeft > 0) {
-          const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
-          if (fallbackEngine === "glm_ocr" && !glmApiKey) {
-            if (statusEl) statusEl.textContent = it.name + " 提取失败，无 GLM Key 无法切换 GLM OCR";
-            extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: result.error + "（无 GLM Key，无法降级）" });
-            if (container) container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>';
-            return false;
-          }
-          if (statusEl) statusEl.textContent = it.name + " 提取失败，切换引擎重试...";
-          return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
-        }
-        extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: result.error });
-        if (container) container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>';
-        return false;
-      }
-      const text = result.text || "";
-      const markdown = result.markdown || "";
-      if (!text && !markdown) {
-        if (retriesLeft > 0) {
-          const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
-          if (fallbackEngine === "glm_ocr" && !glmApiKey) {
-            if (statusEl) statusEl.textContent = it.name + " 内容为空，无 GLM Key 无法切换 GLM OCR";
-            extractReport.empty.push({ name: it.name, docCode: it.docCode });
-            if (container) container.innerHTML = '<p class="extract-empty">未能提取到文本（无 GLM Key，无法降级）</p>';
-            return false;
-          }
-          if (statusEl) statusEl.textContent = it.name + " 内容为空，切换引擎重试...";
-          return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
-        }
-        extractReport.empty.push({ name: it.name, docCode: it.docCode });
-        if (container) container.innerHTML = '<p class="extract-empty">未能提取到文本（已尝试 ' + MAX_RETRIES + ' 次）</p>';
-        return false;
-      }
-      const blocks = result.blocks || [];
-      const pageDimensions = result.page_dimensions || {};
-      kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
-      if (blocks.length > 0) {
-        blocks.forEach(b => {
-          kanbanState.traceIndex[b.block_id] = {
-            docIdx: it.idx, page: b.page, bbox: b.bbox,
-            content: b.content, label: b.label,
-            pageDimensions: pageDimensions[b.page] || null,
-          };
-        });
-      }
-      extractReport.success.push({ name: it.name, docCode: it.docCode, chars: (markdown || text).length, engine: result.engine });
-      if (container) {
-        const displayText = markdown || text;
-        const blocksInfo = blocks.length > 0 ? ` · ${blocks.length} blocks` : "";
-        container.innerHTML = `
-          <div class="extracted-header">
-            <span class="extracted-engine">引擎: ${escapeHtml(result.engine)}</span>
-            <span class="extracted-chars">字符数: ${displayText.length}${blocksInfo}</span>
-          </div>
-          <pre class="extracted-text">${escapeHtml(displayText.length > 6000 ? displayText.substring(0, 6000) + "\n\n[...已截断...]" : displayText)}</pre>
-        `;
-      }
-      return true;
-    } catch (e) {
-      if (retriesLeft > 0) {
-        if (statusEl) statusEl.textContent = it.name + " 提取异常，重试中...";
-        await new Promise(r => setTimeout(r, 2000));
-        return await extractWithRetry(it, engine, retriesLeft - 1);
-      }
-      extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: e.message });
-      const container = document.getElementById("kanban-extracted-" + it.idx);
-      if (container) container.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
-      return false;
-    }
-  }
-
-  const missing = oaItems.filter(it => !kanbanState.extractions[it.idx]);
-  for (let i = 0; i < missing.length; i++) {
-    const it = missing[i];
-    if (statusEl) statusEl.textContent = "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
-    await extractWithRetry(it, primaryEngine, MAX_RETRIES);
-  }
-
-  const successCount = extractReport.success.length;
-  const emptyCount = extractReport.empty.length;
-  const failedCount = extractReport.failed.length;
-  const totalCount = oaItems.length;
-
-  if (statusEl) {
-    let statusText = "提取完成: " + successCount + "/" + totalCount + " 成功";
-    if (emptyCount > 0) statusText += ", " + emptyCount + " 为空";
-    if (failedCount > 0) statusText += ", " + failedCount + " 失败";
-    statusEl.textContent = statusText;
-  }
-
-  if (successCount === 0) {
-    analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有文档提取均失败，无法进行 AI 分析。请检查网络连接或尝试切换 OCR 引擎。</p>';
-    kanbanAutoBtn.disabled = false;
-    return;
-  }
-
-  if (statusEl) statusEl.textContent = "正在用 AI 整理审查历史...";
-  analysisContent.innerHTML = '<p class="extracting">AI 正在整理审查意见和答复...</p>';
-
-  const hasBlocks = oaItems.some(it => {
-    const ext = kanbanState.extractions[it.idx];
-    return ext && ext.blocks && ext.blocks.length > 0;
+  activeAnalysisProcess = "citedRefs";
+  citedRefsAbortController = new AbortController();
+  const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
+  // Hide all action buttons, show abort
+  ["kanban-manual-select-btn", "cited-refs-manual-btn"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hidden");
   });
-
-  const annotatedLines = [];
-
-  // Build timeline summary so AI knows the current procedural status
-  const timelineSummary = buildTimelineSummary(currentData.office, kanbanState.documents);
-
-  oaItems.forEach((it, idx) => {
-    const ext = kanbanState.extractions[it.idx];
-    if (!ext) {
-      const isClaimsDoc = CLAIMS_CODES.includes(it.docCode);
-      const missingHeader = isClaimsDoc
-        ? `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）[权利要求/说明书参考]`
-        : `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）`;
-      annotatedLines.push(missingHeader + "\n[未能提取内容]");
-      return;
-    }
-    const isClaimsDoc = CLAIMS_CODES.includes(it.docCode);
-    const header = isClaimsDoc
-      ? `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）[权利要求/说明书参考]`
-      : `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）`;
-    if (hasBlocks && ext.blocks && ext.blocks.length > 0) {
-      const blockParts = ext.blocks
-        .filter(b => b.content && b.content.trim())
-        .map(b => `[ref:${b.block_id}]${b.content}[/ref:${b.block_id}]`)
-        .join("\n\n");
-      annotatedLines.push(header + "\n" + blockParts);
-    } else {
-      const content = (ext.markdown || ext.text || "").substring(0, 12000);
-      annotatedLines.push(header + "\n" + content);
-    }
-  });
-
-  const promptConfig = window.AI.loadAIConfig();
-  const systemPrompt = hasBlocks
-    ? window.AI.getCustomPrompt(promptConfig, "kanbanAnalysis")
-    : window.AI.getCustomPrompt(promptConfig, "kanbanAnalysisSimple");
-
-  const userMessage = timelineSummary + annotatedLines.join("\n\n---\n\n");
+  if (citedRefsAbortBtn) citedRefsAbortBtn.classList.remove("hidden");
 
   try {
+    const citedDocs = kanbanState.documents.filter(d => selectedIdxs.includes(d.idx));
+
+    const analysisSection = document.getElementById("kanban-analysis");
+    const analysisContent = document.getElementById("kanban-analysis-content");
+    if (!analysisSection || !analysisContent) {
+      showError("分析区域未找到");
+      return;
+    }
+    analysisSection.classList.remove("hidden");
+    analysisContent.innerHTML = '<p class="extracting">正在提取引用文献内容并分析...</p>';
+
+    // 先提取引用文献文档内容（如果尚未提取）— 断点续OCR
+    const ocrConfig = window.AI.getOCRConfig(config);
+    const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
+    const glmApiKey = window.AI.getGlmOcrApiKey(config);
+    const isUS = currentData.office === "US";
+    const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+
+    const CITED_MAX_RETRIES = 5;
+    const CITED_RETRY_BASE_DELAY = 8000;
+    const citedMissing = citedDocs.filter(doc => !kanbanState.extractions[doc.idx] || (!kanbanState.extractions[doc.idx].text && !kanbanState.extractions[doc.idx].markdown));
+
+    for (let i = 0; i < citedMissing.length; i++) {
+      const doc = citedMissing[i];
+      // Double-check: may have been filled
+      if (kanbanState.extractions[doc.idx] && (kanbanState.extractions[doc.idx].text || kanbanState.extractions[doc.idx].markdown)) continue;
+      if (citedRefsAbortController && citedRefsAbortController.signal.aborted) break;
+
+      analysisContent.innerHTML = `<p class="extracting">正在提取引用文献 (${i + 1}/${citedMissing.length}): ${doc.docCode} - ${doc.name}...</p>`;
+
+      // Retry loop with exponential backoff
+      let extracted = false;
+      for (let attempt = 0; attempt < CITED_MAX_RETRIES && !extracted; attempt++) {
+        try {
+          const useApiKey = primaryEngine === "glm_ocr" ? glmApiKey : "";
+          const result = await doExtractText(currentData.office, urlDocNum, doc.docId, doc.numberOfPages, doc.docFormat, primaryEngine, useApiKey);
+
+          if (result.error) {
+            const isRateLimit = result.error.includes("429") || result.error.includes("rate") || result.error.includes("limit");
+            // Try fallback engine
+            const fallbackEngine = primaryEngine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
+            if (glmApiKey && fallbackEngine === "glm_ocr") {
+              const fbResult = await doExtractText(currentData.office, urlDocNum, doc.docId, doc.numberOfPages, doc.docFormat, "glm_ocr", glmApiKey);
+              if (!fbResult.error && (fbResult.text || fbResult.markdown)) {
+                kanbanState.extractions[doc.idx] = {
+                  markdown: fbResult.markdown || "", text: fbResult.text || "",
+                  blocks: fbResult.blocks || [], pageDims: fbResult.page_dimensions || {},
+                  engine: "glm_ocr",
+                };
+                kanbanState.hasUnsavedWork = true;
+                extracted = true;
+                break;
+              }
+            }
+            // Retry with delay
+            if (attempt < CITED_MAX_RETRIES - 1) {
+              const delay = isRateLimit
+                ? CITED_RETRY_BASE_DELAY * Math.pow(2, attempt) + Math.random() * 3000
+                : CITED_RETRY_BASE_DELAY * Math.pow(1.5, attempt);
+              analysisContent.innerHTML = `<p class="extracting" style="color:var(--warning)">${doc.name} ${isRateLimit ? '因限速等待重试' : '提取出错'} (${attempt + 1}/${CITED_MAX_RETRIES})，约${Math.round(delay/1000)}秒后重试...</p>`;
+              await new Promise(r => setTimeout(r, delay));
+              continue;
+            }
+            kanbanState.extractions[doc.idx] = { text: "", error: result.error };
+          } else if (result.text || result.markdown) {
+            kanbanState.extractions[doc.idx] = {
+              markdown: result.markdown || "", text: result.text || "",
+              blocks: result.blocks || [], pageDims: result.page_dimensions || {},
+              engine: result.engine || primaryEngine,
+            };
+            kanbanState.hasUnsavedWork = true;
+            extracted = true;
+          } else {
+            // Empty result, retry
+            if (attempt < CITED_MAX_RETRIES - 1) {
+              const delay = CITED_RETRY_BASE_DELAY * Math.pow(1.5, attempt);
+              analysisContent.innerHTML = `<p class="extracting" style="color:var(--warning)">${doc.name} 提取结果为空，重试中 (${attempt + 1}/${CITED_MAX_RETRIES})...</p>`;
+              await new Promise(r => setTimeout(r, delay));
+              continue;
+            }
+            kanbanState.extractions[doc.idx] = { text: "", error: "提取结果为空" };
+          }
+        } catch (e) {
+          if (attempt < CITED_MAX_RETRIES - 1) {
+            const delay = CITED_RETRY_BASE_DELAY * Math.pow(1.5, attempt);
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+          }
+          kanbanState.extractions[doc.idx] = { text: "", error: e.message };
+        }
+      }
+    }
+    autoSaveCache();
+
+    // 构建分析内容
+    const lines = [];
+    lines.push(`# 引用文献梳理\n\n专利号: ${currentData.applicationNumber}\n\n`);
+    lines.push("## 引用文献相关文档\n");
+
+    let hasContent = false;
+    for (const doc of citedDocs) {
+      const extraction = kanbanState.extractions[doc.idx];
+      if (extraction && extraction.text) {
+        lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n${extraction.text}\n`);
+        hasContent = true;
+      } else {
+        lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n[未能提取内容]\n`);
+      }
+    }
+
+    if (!hasContent) {
+      analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有引用文献文档均未能提取到内容</p>';
+      return;
+    }
+
+    // 使用自定义提示词
+    const citedRefsPrompt = window.AI.getCustomPrompt(config, "citedRefsAnalysis");
+
+    lines.push("\n## 分析要求\n");
+    lines.push(citedRefsPrompt || "请对以上引用文献相关文档进行分析，包括：\n1. 审查员引用了哪些文献？列出每篇引用文献的编号、类型和相关性说明\n2. 申请人引用了哪些文献？与审查员引用有何异同\n3. 引用文献的技术领域分布，是否涉及竞争对手专利\n4. 引用文献对本专利权利要求的影响评估\n5. 建议关注的引用文献和潜在风险");
+
+    const prompt = `你是一位资深专利分析师，专注于引用文献分析。请根据以下引用文献相关文档，进行系统梳理和分析。\n\n${lines.join("\n")}`;
+
+    analysisContent.innerHTML = '<div class="kanban-analysis-content markdown-body"></div>';
+    const streamContainer = analysisContent.querySelector(".kanban-analysis-content");
     let fullText = "";
+    let _streamRafPending = false;
+    let _lastRenderLen = 0;
     for await (const chunk of window.AI.streamChat(
       provider.type, provider.apiKey, provider.baseUrl,
       {
         model: provider.model,
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
+          { role: "system", content: "你是一位资深专利分析师，专注于引用文献分析。" },
+          { role: "user", content: prompt },
         ],
         temperature: 0.3,
         maxTokens: 32768,
       },
-      kanbanAutoAbortController ? kanbanAutoAbortController.signal : undefined
+      citedRefsAbortController ? citedRefsAbortController.signal : undefined
     )) {
       if (chunk.content) {
         fullText += chunk.content;
-        analysisContent.innerHTML = '<div class="kanban-analysis-content markdown-body">' + renderMarkdownWithTrace(fullText) + "</div>";
-      }
-    }
-    kanbanState.analysis = fullText;
-    // Save context for continued chat
-    kanbanState.analysisSystemPrompt = systemPrompt;
-    kanbanState.analysisUserMessage = userMessage;
-    analysisChatHistory = [];
-    showAnalysisChatToggle();
-    if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份审查/答复文档" + (hasBlocks ? "（含溯源标记）" : "");
-
-    let reportHtml = "";
-    if (emptyCount > 0 || failedCount > 0) {
-      reportHtml = '<div class="extract-report"><h4>提取完整性报告</h4>';
-      if (extractReport.success.length > 0) {
-        reportHtml += '<div class="report-success">✓ 成功: ' + extractReport.success.map(s => escapeHtml(s.name) + ' (' + s.chars + '字/' + s.engine + ')').join('、') + '</div>';
-      }
-      if (emptyCount > 0) {
-        reportHtml += '<div class="report-warning">内容为空: ' + extractReport.empty.map(s => escapeHtml(s.name)).join('、') + '</div>';
-      }
-      if (failedCount > 0) {
-        reportHtml += '<div class="report-error">✗ 提取失败: ' + extractReport.failed.map(s => escapeHtml(s.name) + ' (' + escapeHtml(s.reason) + ')').join('、') + '</div>';
-      }
-      reportHtml += '</div>';
-      analysisContent.innerHTML = reportHtml + '<div class="kanban-analysis-content markdown-body">' + renderMarkdownWithTrace(fullText) + "</div>";
-    }
-  } catch (e) {
-    analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
-    if (statusEl) statusEl.textContent = "AI 整理失败 ✗";
-  } finally {
-    kanbanAutoBtn.disabled = false;
-    kanbanAutoBtn.classList.remove("hidden");
-    const kanbanAutoAbortBtn = document.getElementById("kanban-auto-abort-btn");
-    if (kanbanAutoAbortBtn) kanbanAutoAbortBtn.classList.add("hidden");
-    kanbanAutoAbortController = null;
-  }
-});
-
-const kanbanAutoAbortBtn = document.getElementById("kanban-auto-abort-btn");
-if (kanbanAutoAbortBtn) {
-  kanbanAutoAbortBtn.addEventListener("click", () => {
-    if (kanbanAutoAbortController) {
-      kanbanAutoAbortController.abort();
-      kanbanAutoAbortController = null;
-    }
-    kanbanAutoAbortBtn.classList.add("hidden");
-    kanbanAutoBtn.classList.remove("hidden");
-    kanbanAutoBtn.disabled = false;
-    const statusEl = document.getElementById("ai-analysis-status");
-    if (statusEl) statusEl.textContent = "梳理已中止";
-  });
-}
-
-const citedRefsBtn = document.getElementById("cited-refs-btn");
-if (citedRefsBtn) {
-  citedRefsBtn.addEventListener("click", async () => {
-    if (!currentData || !kanbanState.documents.length) return;
-    citedRefsBtn.disabled = true;
-    citedRefsAbortController = new AbortController();
-    const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
-    citedRefsBtn.classList.add("hidden");
-    if (citedRefsAbortBtn) citedRefsAbortBtn.classList.remove("hidden");
-
-    try {
-      const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
-      const citedDocs = kanbanState.documents.filter(d => CITED_DOC_CODES.includes(d.docCode));
-
-      if (citedDocs.length === 0) {
-        showError("未找到引用文献相关文档（FOR/892/1449/IDS/SRNT/SRFW）");
-        return;
-      }
-
-      const analysisSection = document.getElementById("kanban-analysis");
-      const analysisContent = document.getElementById("kanban-analysis-content");
-      if (!analysisSection || !analysisContent) {
-        showError("分析区域未找到");
-        return;
-      }
-      analysisSection.classList.remove("hidden");
-      analysisContent.innerHTML = '<p class="extracting">正在提取引用文献内容并分析...</p>';
-
-      // 先提取引用文献文档内容（如果尚未提取）
-      const config = window.AI.loadAIConfig();
-      const ocrConfig = window.AI.getOCRConfig(config);
-      const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
-      const glmApiKey = window.AI.getGlmOcrApiKey(config);
-      const isUS = currentData.office === "US";
-      const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
-
-      for (const doc of citedDocs) {
-        if (kanbanState.extractions[doc.idx] && kanbanState.extractions[doc.idx].text) continue;
-
-        // 需要先提取此文档
-        const extractUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${doc.docId}/${doc.numberOfPages}/${doc.docFormat}`;
-        try {
-          analysisContent.innerHTML = `<p class="extracting">正在提取 ${doc.docCode} - ${doc.name}...</p>`;
-          const resp = await fetch(extractUrl);
-          if (!resp.ok) {
-            kanbanState.extractions[doc.idx] = { text: "", error: `HTTP ${resp.status}` };
-            continue;
-          }
-          const arrayBuf = await resp.arrayBuffer();
-          const b64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
-
-          const ocrResp = await fetch("/api/gd/extract-text/ocr", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pdf_base64: b64, engine: primaryEngine }),
-          });
-          if (!ocrResp.ok) {
-            kanbanState.extractions[doc.idx] = { text: "", error: `OCR HTTP ${ocrResp.status}` };
-            continue;
-          }
-          const ocrResult = await ocrResp.json();
-          if (ocrResult.error) {
-            // 降级尝试 GLM OCR
-            if (glmApiKey && primaryEngine !== "glm_ocr") {
-              try {
-                const glmResp = await fetch("/api/gd/extract-text/ocr", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ pdf_base64: b64, engine: "glm_ocr", glm_api_key: glmApiKey }),
-                });
-                const glmResult = await glmResp.json();
-                if (!glmResult.error && glmResult.text) {
-                  kanbanState.extractions[doc.idx] = {
-                    markdown: glmResult.markdown || "",
-                    text: glmResult.text || "",
-                    blocks: glmResult.blocks || [],
-                    pageDims: glmResult.pageDims || {},
-                    engine: "glm_ocr",
-                  };
-                  continue;
-                }
-              } catch {}
+        if (!_streamRafPending && (fullText.length - _lastRenderLen > 20 || fullText.length < 200)) {
+          _streamRafPending = true;
+          requestAnimationFrame(() => {
+            if (streamContainer) {
+              streamContainer.innerHTML = marked.parse(fullText);
             }
-            kanbanState.extractions[doc.idx] = { text: "", error: ocrResult.error };
-            continue;
-          }
-          kanbanState.extractions[doc.idx] = {
-            markdown: ocrResult.markdown || "",
-            text: ocrResult.text || "",
-            blocks: ocrResult.blocks || [],
-            pageDims: ocrResult.pageDims || {},
-            engine: ocrResult.engine || primaryEngine,
-          };
-        } catch (e) {
-          kanbanState.extractions[doc.idx] = { text: "", error: e.message };
+            _lastRenderLen = fullText.length;
+            _streamRafPending = false;
+          });
         }
       }
-
-      // 构建分析内容
-      const lines = [];
-      lines.push(`# 引用文献梳理\n\n专利号: ${currentData.applicationNumber}\n\n`);
-      lines.push("## 引用文献相关文档\n");
-
-      let hasContent = false;
-      for (const doc of citedDocs) {
-        const extraction = kanbanState.extractions[doc.idx];
-        if (extraction && extraction.text) {
-          lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n${extraction.text}\n`);
-          hasContent = true;
-        } else {
-          lines.push(`### ${doc.docCode} - ${doc.name}（${doc.date}）\n[未能提取内容]\n`);
-        }
-      }
-
-      if (!hasContent) {
-        analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有引用文献文档均未能提取到内容</p>';
-        return;
-      }
-
-      lines.push("\n## 分析要求\n");
-      lines.push("请对以上引用文献相关文档进行分析，包括：");
-      lines.push("1. 审查员引用了哪些文献？列出每篇引用文献的编号、类型和相关性说明");
-      lines.push("2. 申请人引用了哪些文献？与审查员引用有何异同");
-      lines.push("3. 引用文献的技术领域分布，是否涉及竞争对手专利");
-      lines.push("4. 引用文献对本专利权利要求的影响评估");
-      lines.push("5. 建议关注的引用文献和潜在风险");
-
-      const provider = window.AI.getCurrentProvider(config);
-      if (!provider) {
-        analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">请先配置 AI 服务（设置 → AI 配置）</p>';
-        return;
-      }
-
-      const prompt = `你是一位资深专利分析师，专注于引用文献分析。请根据以下引用文献相关文档，进行系统梳理和分析。
-
-${lines.join("\n")}`;
-
-      analysisContent.innerHTML = '';
-      let fullText = "";
-      for await (const chunk of window.AI.streamChat(
-        provider.type, provider.apiKey, provider.baseUrl,
-        {
-          model: provider.model,
-          messages: [
-            { role: "system", content: "你是一位资深专利分析师，专注于引用文献分析。" },
-            { role: "user", content: prompt },
-          ],
-          temperature: 0.3,
-          maxTokens: 32768,
-        },
-        citedRefsAbortController ? citedRefsAbortController.signal : undefined
-      )) {
-        if (chunk.content) {
-          fullText += chunk.content;
-          analysisContent.innerHTML = marked.parse(fullText);
-          analysisSection.scrollTop = analysisSection.scrollHeight;
-        }
-      }
-
-      kanbanState.citedRefsAnalysis = fullText;
-    } catch (e) {
-      const analysisContent = document.getElementById("kanban-analysis-content");
-      if (analysisContent) analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + '</p>';
-      showError("引用文献梳理失败: " + e.message);
-    } finally {
-      citedRefsBtn.disabled = false;
-      citedRefsBtn.classList.remove("hidden");
-      const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
-      if (citedRefsAbortBtn) citedRefsAbortBtn.classList.add("hidden");
-      citedRefsAbortController = null;
     }
-  });
+    // Final render
+    if (streamContainer) streamContainer.innerHTML = marked.parse(fullText);
+
+    kanbanState.citedRefsAnalysis = fullText;
+    kanbanState.hasUnsavedWork = true;
+    autoSaveCache();
+  } catch (e) {
+    const analysisContent = document.getElementById("kanban-analysis-content");
+    if (analysisContent) analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + '</p>';
+    showError("引用文献梳理失败: " + e.message);
+  } finally {
+    activeAnalysisProcess = null;
+    ["kanban-manual-select-btn", "cited-refs-manual-btn"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.disabled = false; el.classList.remove("hidden"); }
+    });
+    const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
+    if (citedRefsAbortBtn) citedRefsAbortBtn.classList.add("hidden");
+    citedRefsAbortController = null;
+  }
 }
 
 // Cited refs abort button handler
 const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
 if (citedRefsAbortBtn) {
   citedRefsAbortBtn.addEventListener("click", () => {
-    if (citedRefsAbortController) {
-      citedRefsAbortController.abort();
-      citedRefsAbortController = null;
-    }
-    citedRefsAbortBtn.classList.add("hidden");
-    citedRefsBtn.classList.remove("hidden");
-    citedRefsBtn.disabled = false;
+    abortActiveProcess();
     const statusEl = document.getElementById("ai-analysis-status");
     if (statusEl) statusEl.textContent = "引用文献梳理已中止";
   });
 }
 
-// Manual select button - add it dynamically next to kanbanAutoBtn
-const manualSelectBtn = document.createElement("button");
-manualSelectBtn.id = "kanban-manual-select-btn";
-manualSelectBtn.className = "btn-secondary";
-manualSelectBtn.innerHTML = '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> 手动选择';
-manualSelectBtn.disabled = true;
-const aiAnalysisActions = document.querySelector(".ai-analysis-actions");
-if (aiAnalysisActions) {
-  aiAnalysisActions.insertBefore(manualSelectBtn, citedRefsBtn);
+// Manual select button - now in HTML
+const manualSelectBtn = document.getElementById("kanban-manual-select-btn");
+if (manualSelectBtn) {
+  manualSelectBtn.addEventListener("click", () => {
+    buildReviewManualSelectPanel();
+  });
 }
 
-manualSelectBtn.addEventListener("click", () => {
+// Cited refs manual select button - now in HTML
+const citedRefsManualBtn = document.getElementById("cited-refs-manual-btn");
+
+if (citedRefsManualBtn) {
+  citedRefsManualBtn.addEventListener("click", () => {
+    const manualSelectPanel = document.getElementById("ai-manual-select");
+    if (!manualSelectPanel) return;
+
+    // Interrupt any existing process
+    if (activeAnalysisProcess) {
+      abortActiveProcess();
+    }
+
+    const items = kanbanState.documents;
+    const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
+
+    let html = '<div class="ai-manual-header"><span class="ai-manual-title">选择引用文献文件范围</span></div>';
+    html += '<div class="ai-manual-toolbar">';
+    html += '<input type="text" id="cited-manual-search-input" class="merge-search-input" placeholder="搜索文档名称、代码、日期...">';
+    html += '<div class="ai-manual-select-all"><button id="cited-manual-select-all" class="btn-small btn-extract">全选</button><button id="cited-manual-select-none" class="btn-small btn-extract">全不选</button><button id="cited-manual-select-default" class="btn-small btn-extract">默认选择</button></div>';
+    html += '</div>';
+    html += '<div class="ai-manual-docs">';
+    items.forEach(it => {
+      const searchText = ((it.name || '') + ' ' + (it.docCode || '') + ' ' + (it.date || '')).toLowerCase();
+      html += `
+        <label class="ai-manual-doc-item" data-search-text="${escapeHtml(searchText)}">
+          <input type="checkbox" class="cited-manual-select-checkbox" data-idx="${it.idx}" ${CITED_DOC_CODES.includes(it.docCode) ? 'checked' : ''}>
+          <div class="ai-manual-doc-info">
+            <span class="ai-manual-doc-code">${escapeHtml(it.docCode)}</span>
+            <span class="ai-manual-doc-name">${escapeHtml(it.name)}</span>
+            <span class="ai-manual-doc-date">${escapeHtml(it.date)}</span>
+          </div>
+        </label>
+      `;
+    });
+    html += '</div>';
+    html += '<div id="cited-manual-selected-summary" class="manual-selected-summary"></div>';
+    html += '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">';
+    html += '<button id="cited-manual-select-cancel" class="btn-secondary">取消</button>';
+    html += '<button id="cited-manual-select-merge-btn" class="btn-secondary">合并导出选中文档</button>';
+    html += '<button id="cited-manual-select-confirm" class="btn-primary">确认并开始AI梳理</button>';
+    html += '</div>';
+
+    manualSelectPanel.innerHTML = html;
+    manualSelectPanel.classList.remove("hidden");
+
+    // Try to load saved selections, fall back to defaults
+    if (!loadManualSelection("cited", items, ".cited-manual-select-checkbox", manualSelectPanel, null)) {
+      // Apply default checks (already set in HTML via CITED_DOC_CODES)
+    }
+
+    // Update selected summary
+    function updateCitedSummary() {
+      const summaryEl = document.getElementById("cited-manual-selected-summary");
+      if (!summaryEl) return;
+      const checkedIdxs = [];
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox:checked").forEach(cb => {
+        checkedIdxs.push(parseInt(cb.dataset.idx));
+      });
+      if (checkedIdxs.length === 0) {
+        summaryEl.innerHTML = '<span class="summary-empty">未选择任何文档</span>';
+      } else {
+        const names = checkedIdxs.map(idx => {
+          const it = items.find(d => d.idx === idx);
+          return it ? escapeHtml(it.docCode + ' - ' + (it.name || '')) : '';
+        }).filter(Boolean);
+        summaryEl.innerHTML = '<span class="summary-label">已选 ' + checkedIdxs.length + ' 份：</span>' + names.join('<span class="summary-sep">、</span>');
+      }
+    }
+    updateCitedSummary();
+
+    // Auto-save on every checkbox change
+    function onCitedCheckboxChange() {
+      saveManualSelection("cited", items, ".cited-manual-select-checkbox", manualSelectPanel);
+      updateCitedSummary();
+    }
+    manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => {
+      cb.addEventListener("change", onCitedCheckboxChange);
+    });
+
+    // Search filter
+    const searchInput = document.getElementById("cited-manual-search-input");
+    if (searchInput) {
+      searchInput.oninput = () => {
+        const keyword = searchInput.value.trim().toLowerCase();
+        manualSelectPanel.querySelectorAll(".ai-manual-doc-item").forEach(item => {
+          if (!keyword) { item.style.display = ""; return; }
+          const st = item.dataset.searchText || "";
+          item.style.display = st.includes(keyword) ? "" : "none";
+        });
+      };
+    }
+
+    document.getElementById("cited-manual-select-all").addEventListener("click", () => {
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => cb.checked = true);
+      onCitedCheckboxChange();
+    });
+    document.getElementById("cited-manual-select-none").addEventListener("click", () => {
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => cb.checked = false);
+      onCitedCheckboxChange();
+    });
+    document.getElementById("cited-manual-select-default").addEventListener("click", () => {
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => {
+        const idx = parseInt(cb.dataset.idx);
+        const it = items.find(d => d.idx === idx);
+        cb.checked = it && CITED_DOC_CODES.includes(it.docCode);
+      });
+      onCitedCheckboxChange();
+    });
+    document.getElementById("cited-manual-select-cancel").addEventListener("click", () => {
+      manualSelectPanel.classList.add("hidden");
+    });
+    document.getElementById("cited-manual-select-merge-btn").addEventListener("click", async () => {
+      const selectedIdxs = [];
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox:checked").forEach(cb => {
+        selectedIdxs.push(parseInt(cb.dataset.idx));
+      });
+      if (selectedIdxs.length === 0) {
+        showError("请至少选择一个文档");
+        return;
+      }
+      const mergeBtn = document.getElementById("cited-manual-select-merge-btn");
+      if (mergeBtn) { mergeBtn.disabled = true; mergeBtn.textContent = "导出中..."; }
+      await doMergeExportWithItems(selectedIdxs);
+      if (mergeBtn) { mergeBtn.disabled = false; mergeBtn.textContent = "合并导出选中文档"; }
+    });
+    document.getElementById("cited-manual-select-confirm").addEventListener("click", async () => {
+      const selectedIdxs = [];
+      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox:checked").forEach(cb => {
+        selectedIdxs.push(parseInt(cb.dataset.idx));
+      });
+      if (selectedIdxs.length === 0) {
+        showError("请至少选择一个文档");
+        return;
+      }
+      saveManualSelection("cited", items, ".cited-manual-select-checkbox", manualSelectPanel);
+      manualSelectPanel.classList.add("hidden");
+
+      // Run cited refs analysis with selected documents
+      await runCitedRefsAnalysis(selectedIdxs);
+    });
+  });
+}
+
+// ── Build review manual selection panel ──
+function buildReviewManualSelectPanel() {
   const items = kanbanState.documents;
-  if (!items || items.length === 0) {
-    showError("请先查询专利并加载审查文档");
-    return;
-  }
+  if (!items || items.length === 0) return;
 
   const manualSelectPanel = document.getElementById("ai-manual-select");
   if (!manualSelectPanel) return;
 
   const canDownload = currentData && (currentData.office === "US" || currentData.office === "EP");
-  if (!canDownload) {
-    showError("CN / DE / JP 专利暂不支持文档下载与提取，无法进行 AI 梳理");
-    return;
-  }
+  if (!canDownload) return;
 
   // Build checkbox list
   const typeLabels = { office_action: "审查意见", response: "答复", request: "请求", allowance: "授权", notification: "通知", misc: "其他" };
-  let html = '<div class="ai-manual-header"><span class="ai-manual-title">手动选择分析文件范围</span></div>';
+  let html = '<div class="ai-manual-header"><span class="ai-manual-title">选择分析文件范围</span></div>';
+  html += '<div class="ai-manual-toolbar">';
+  html += '<input type="text" id="manual-search-input" class="merge-search-input" placeholder="搜索文档名称、代码、日期...">';
   html += '<div class="ai-manual-select-all"><button id="manual-select-all" class="btn-small btn-extract">全选</button><button id="manual-select-none" class="btn-small btn-extract">全不选</button><button id="manual-select-default" class="btn-small btn-extract">默认选择</button></div>';
+  html += '</div>';
   html += '<div class="ai-manual-docs">';
   items.forEach(it => {
     const typeLabel = typeLabels[it.type] || it.type;
+    const searchText = ((it.name || '') + ' ' + (it.docCode || '') + ' ' + (it.date || '') + ' ' + typeLabel).toLowerCase();
     html += `
-      <label class="ai-manual-doc-item">
+      <label class="ai-manual-doc-item" data-search-text="${escapeHtml(searchText)}">
         <input type="checkbox" class="manual-select-checkbox" data-idx="${it.idx}" ${shouldIncludeInAIAnalysis(currentData.office, it.type) ? 'checked' : ''}>
         <div class="ai-manual-doc-info">
           <span class="ai-manual-doc-code">${escapeHtml(it.docCode)}</span>
@@ -1932,19 +2678,70 @@ manualSelectBtn.addEventListener("click", () => {
     `;
   });
   html += '</div>';
+  html += '<div id="manual-selected-summary" class="manual-selected-summary"></div>';
   html += '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">';
   html += '<button id="manual-select-cancel" class="btn-secondary">取消</button>';
-  html += '<button id="manual-select-confirm" class="btn-primary">确认选择并开始梳理</button>';
+  html += '<button id="manual-select-merge-btn" class="btn-secondary">合并导出选中文档</button>';
+  html += '<button id="manual-select-confirm" class="btn-primary">确认并开始AI梳理</button>';
   html += '</div>';
 
   manualSelectPanel.innerHTML = html;
   manualSelectPanel.classList.remove("hidden");
 
+  // Try to load saved selections, fall back to defaults
+  if (!loadManualSelection("review", items, ".manual-select-checkbox", manualSelectPanel, null)) {
+    // Apply default checks (already set in HTML via shouldIncludeInAIAnalysis)
+  }
+
+  // Update selected summary
+  function updateReviewSummary() {
+    const summaryEl = document.getElementById("manual-selected-summary");
+    if (!summaryEl) return;
+    const checkedIdxs = [];
+    manualSelectPanel.querySelectorAll(".manual-select-checkbox:checked").forEach(cb => {
+      checkedIdxs.push(parseInt(cb.dataset.idx));
+    });
+    if (checkedIdxs.length === 0) {
+      summaryEl.innerHTML = '<span class="summary-empty">未选择任何文档</span>';
+    } else {
+      const names = checkedIdxs.map(idx => {
+        const it = items.find(d => d.idx === idx);
+        return it ? escapeHtml(it.docCode + ' - ' + (it.name || '')) : '';
+      }).filter(Boolean);
+      summaryEl.innerHTML = '<span class="summary-label">已选 ' + checkedIdxs.length + ' 份：</span>' + names.join('<span class="summary-sep">、</span>');
+    }
+  }
+  updateReviewSummary();
+
+  // Auto-save on every checkbox change
+  function onCheckboxChange() {
+    saveManualSelection("review", items, ".manual-select-checkbox", manualSelectPanel);
+    updateReviewSummary();
+  }
+  manualSelectPanel.querySelectorAll(".manual-select-checkbox").forEach(cb => {
+    cb.addEventListener("change", onCheckboxChange);
+  });
+
+  // Search filter
+  const searchInput = document.getElementById("manual-search-input");
+  if (searchInput) {
+    searchInput.oninput = () => {
+      const keyword = searchInput.value.trim().toLowerCase();
+      manualSelectPanel.querySelectorAll(".ai-manual-doc-item").forEach(item => {
+        if (!keyword) { item.style.display = ""; return; }
+        const st = item.dataset.searchText || "";
+        item.style.display = st.includes(keyword) ? "" : "none";
+      });
+    };
+  }
+
   document.getElementById("manual-select-all").addEventListener("click", () => {
     manualSelectPanel.querySelectorAll(".manual-select-checkbox").forEach(cb => cb.checked = true);
+    onCheckboxChange();
   });
   document.getElementById("manual-select-none").addEventListener("click", () => {
     manualSelectPanel.querySelectorAll(".manual-select-checkbox").forEach(cb => cb.checked = false);
+    onCheckboxChange();
   });
   document.getElementById("manual-select-default").addEventListener("click", () => {
     manualSelectPanel.querySelectorAll(".manual-select-checkbox").forEach(cb => {
@@ -1952,10 +2749,26 @@ manualSelectBtn.addEventListener("click", () => {
       const it = items.find(d => d.idx === idx);
       cb.checked = it && shouldIncludeInAIAnalysis(currentData.office, it.type);
     });
+    onCheckboxChange();
   });
 
   document.getElementById("manual-select-cancel").addEventListener("click", () => {
     manualSelectPanel.classList.add("hidden");
+  });
+
+  document.getElementById("manual-select-merge-btn").addEventListener("click", async () => {
+    const selectedIdxs = [];
+    manualSelectPanel.querySelectorAll(".manual-select-checkbox:checked").forEach(cb => {
+      selectedIdxs.push(parseInt(cb.dataset.idx));
+    });
+    if (selectedIdxs.length === 0) {
+      showError("请至少选择一个文档");
+      return;
+    }
+    const mergeBtn = document.getElementById("manual-select-merge-btn");
+    if (mergeBtn) { mergeBtn.disabled = true; mergeBtn.textContent = "导出中..."; }
+    await doMergeExportWithItems(selectedIdxs);
+    if (mergeBtn) { mergeBtn.disabled = false; mergeBtn.textContent = "合并导出选中文档"; }
   });
 
   document.getElementById("manual-select-confirm").addEventListener("click", async () => {
@@ -1967,6 +2780,7 @@ manualSelectBtn.addEventListener("click", () => {
       showError("请至少选择一个文档");
       return;
     }
+    saveManualSelection("review", items, ".manual-select-checkbox", manualSelectPanel);
     manualSelectPanel.classList.add("hidden");
 
     // Trigger AI analysis with selected documents only
@@ -1978,11 +2792,19 @@ manualSelectBtn.addEventListener("click", () => {
       return;
     }
 
-    kanbanAutoBtn.disabled = true;
+    const manualSelectBtnEl = document.getElementById("kanban-manual-select-btn");
+    if (manualSelectBtnEl) manualSelectBtnEl.disabled = true;
+    // Interrupt any existing process
+    if (activeAnalysisProcess) {
+      abortActiveProcess();
+    }
+    activeAnalysisProcess = "review";
     kanbanAutoAbortController = new AbortController();
-    const kanbanAutoAbortBtn = document.getElementById("kanban-auto-abort-btn");
-    kanbanAutoBtn.classList.add("hidden");
-    if (kanbanAutoAbortBtn) kanbanAutoAbortBtn.classList.remove("hidden");
+    // Hide all action buttons, show abort
+    ["kanban-manual-select-btn", "cited-refs-manual-btn"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add("hidden");
+    });
 
     const analysisSection = document.getElementById("kanban-analysis");
     const analysisContent = document.getElementById("kanban-analysis-content");
@@ -2000,26 +2822,37 @@ manualSelectBtn.addEventListener("click", () => {
     const isUS = currentData.office === "US";
     const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
 
-    const MAX_RETRIES = 2;
-    const extractReport = { success: [], empty: [], failed: [] };
+    const MAX_RETRIES = 5;
+    const RETRY_BASE_DELAY = 8000; // 8s base, exponential backoff
+    const extractReport = { success: [], empty: [], failed: [], retrying: [] };
 
     async function extractWithRetry(it, engine, retriesLeft) {
       const container = document.getElementById("kanban-extracted-" + it.idx);
+      const attemptNum = MAX_RETRIES - retriesLeft + 1;
       if (container) {
         container.classList.remove("hidden");
-        const attemptNum = MAX_RETRIES - retriesLeft + 1;
         container.innerHTML = '<p class="extracting">正在提取（' + escapeHtml(engine) + '）' + (attemptNum > 1 ? '第' + attemptNum + '次尝试' : '') + '...</p>';
       }
       try {
         const useApiKey = engine === "glm_ocr" ? glmApiKey : "";
         const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, useApiKey);
         if (result.error) {
+          const isRateLimit = result.error.includes("429") || result.error.includes("rate") || result.error.includes("limit") || result.error.includes("Too Many");
           if (retriesLeft > 0) {
+            const delay = isRateLimit
+              ? RETRY_BASE_DELAY * Math.pow(2, attemptNum - 1) + Math.random() * 3000  // longer for rate-limit
+              : RETRY_BASE_DELAY * Math.pow(1.5, attemptNum - 1);
+            if (statusEl) statusEl.textContent = `${it.name} 遇到${isRateLimit ? '限速' : '提取错误'}，${Math.round(delay/1000)}秒后重试 (${attemptNum}/${MAX_RETRIES})...`;
+            if (container) container.innerHTML = `<p class="extracting" style="color:var(--warning)">${isRateLimit ? '因限速正在等待重试' : '提取出错，正在重试'} (${attemptNum}/${MAX_RETRIES})，约${Math.round(delay/1000)}秒后重试...</p>`;
+            extractReport.retrying.push({ name: it.name, docCode: it.docCode, attempt: attemptNum, reason: result.error });
+            await new Promise(r => setTimeout(r, delay));
+            // On rate-limit, try same engine first; on other errors, try fallback
+            if (isRateLimit) {
+              return await extractWithRetry(it, engine, retriesLeft - 1);
+            }
             const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
             if (fallbackEngine === "glm_ocr" && !glmApiKey) {
-              extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: result.error + "（无 GLM Key，无法降级）" });
-              if (container) container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>';
-              return false;
+              return await extractWithRetry(it, engine, retriesLeft - 1);
             }
             return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
           }
@@ -2031,11 +2864,12 @@ manualSelectBtn.addEventListener("click", () => {
         const markdown = result.markdown || "";
         if (!text && !markdown) {
           if (retriesLeft > 0) {
+            const delay = RETRY_BASE_DELAY * Math.pow(1.5, attemptNum - 1);
+            if (statusEl) statusEl.textContent = `${it.name} 提取结果为空，${Math.round(delay/1000)}秒后重试...`;
+            if (container) container.innerHTML = `<p class="extracting" style="color:var(--warning)">提取结果为空，正在重试 (${attemptNum}/${MAX_RETRIES})...</p>`;
             const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
             if (fallbackEngine === "glm_ocr" && !glmApiKey) {
-              extractReport.empty.push({ name: it.name, docCode: it.docCode });
-              if (container) container.innerHTML = '<p class="extract-empty">未能提取到文本（无 GLM Key，无法降级）</p>';
-              return false;
+              return await extractWithRetry(it, engine, retriesLeft - 1);
             }
             return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
           }
@@ -2046,11 +2880,13 @@ manualSelectBtn.addEventListener("click", () => {
         const blocks = result.blocks || [];
         const pageDimensions = result.page_dimensions || {};
         kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
+        kanbanState.hasUnsavedWork = true;
         if (blocks.length > 0) {
           blocks.forEach(b => {
-            kanbanState.traceIndex[b.block_id] = {
+            const traceKey = "D" + it.idx + "_" + b.block_id;
+            kanbanState.traceIndex[traceKey] = {
               docIdx: it.idx, page: b.page, bbox: b.bbox,
-              content: b.content, label: b.label,
+              content: b.content, label: b.label, originalBlockId: b.block_id,
               pageDimensions: pageDimensions[b.page] || null,
             };
           });
@@ -2069,35 +2905,56 @@ manualSelectBtn.addEventListener("click", () => {
         }
         return true;
       } catch (e) {
+        const isRateLimit = e.message && (e.message.includes("429") || e.message.includes("rate") || e.message.includes("limit"));
         if (retriesLeft > 0) {
-          await new Promise(r => setTimeout(r, 2000));
+          const delay = isRateLimit
+            ? RETRY_BASE_DELAY * Math.pow(2, attemptNum - 1) + Math.random() * 3000
+            : 2000 * attemptNum;
+          if (statusEl) statusEl.textContent = `${it.name} ${isRateLimit ? '限速等待重试' : '提取异常重试中'} (${attemptNum}/${MAX_RETRIES})...`;
+          if (container) container.innerHTML = `<p class="extracting" style="color:var(--warning)">${isRateLimit ? '因限速正在等待重试' : '提取异常，正在重试'} (${attemptNum}/${MAX_RETRIES})...</p>`;
+          await new Promise(r => setTimeout(r, delay));
           return await extractWithRetry(it, engine, retriesLeft - 1);
         }
         extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: e.message });
-        const container = document.getElementById("kanban-extracted-" + it.idx);
-        if (container) container.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
+        const container2 = document.getElementById("kanban-extracted-" + it.idx);
+        if (container2) container2.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
         return false;
       }
     }
 
-    const missing = oaItems.filter(it => !kanbanState.extractions[it.idx]);
-    for (let i = 0; i < missing.length; i++) {
-      const it = missing[i];
-      if (statusEl) statusEl.textContent = "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
-      await extractWithRetry(it, primaryEngine, MAX_RETRIES);
+    // 断点续OCR：已有缓存（kanbanState.extractions）的跳过，只提取缺失的
+    const missing = oaItems.filter(it => !kanbanState.extractions[it.idx] || (!kanbanState.extractions[it.idx].text && !kanbanState.extractions[it.idx].markdown));
+    if (missing.length > 0) {
+      for (let i = 0; i < missing.length; i++) {
+        const it = missing[i];
+        // Double-check: another parallel flow may have filled it
+        if (kanbanState.extractions[it.idx] && (kanbanState.extractions[it.idx].text || kanbanState.extractions[it.idx].markdown)) continue;
+        if (statusEl) statusEl.textContent = "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
+        await extractWithRetry(it, primaryEngine, MAX_RETRIES);
+        if (kanbanAutoAbortController && kanbanAutoAbortController.signal.aborted) break;
+      }
     }
+    autoSaveCache();
 
+    // 务必等所有文档提取完毕再进入AI梳理
     const successCount = extractReport.success.length;
+    const failedCount = extractReport.failed.length + extractReport.empty.length;
+
     if (successCount === 0) {
       analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有文档提取均失败，无法进行 AI 分析。</p>';
-      kanbanAutoBtn.disabled = false;
-      kanbanAutoBtn.classList.remove("hidden");
-      if (kanbanAutoAbortBtn) kanbanAutoAbortBtn.classList.add("hidden");
+      const manualSelectBtnEl2 = document.getElementById("kanban-manual-select-btn");
+      if (manualSelectBtnEl2) { manualSelectBtnEl2.disabled = false; manualSelectBtnEl2.classList.remove("hidden"); }
       kanbanAutoAbortController = null;
       return;
     }
 
-    if (statusEl) statusEl.textContent = "正在用 AI 整理审查历史...";
+    // 如果有部分失败，提示用户但仍继续AI分析
+    if (failedCount > 0) {
+      const failedNames = [...extractReport.failed, ...extractReport.empty].map(f => f.docCode || f.name).join(", ");
+      if (statusEl) statusEl.textContent = `${successCount} 个文档提取成功，${failedCount} 个失败（${failedNames}），正在用 AI 整理...`;
+    } else {
+      if (statusEl) statusEl.textContent = "全部文档提取完成，正在用 AI 整理审查历史...";
+    }
     analysisContent.innerHTML = '<p class="extracting">AI 正在整理选中的文档...</p>';
 
     const hasBlocks = oaItems.some(it => {
@@ -2108,24 +2965,31 @@ manualSelectBtn.addEventListener("click", () => {
     const annotatedLines = [];
     const timelineSummary = buildTimelineSummary(currentData.office, kanbanState.documents);
 
-    oaItems.forEach((it, idx) => {
+    // Sort oaItems by date for consistent timeline in AI context
+    const sortedOaItems = [...oaItems].sort((a, b) => {
+      const da = parseDate(a.date);
+      const db = parseDate(b.date);
+      return da - db;
+    });
+
+    sortedOaItems.forEach((it) => {
       const ext = kanbanState.extractions[it.idx];
       if (!ext) {
         const isClaimsDoc = CLAIMS_CODES_MANUAL.includes(it.docCode);
         const missingHeader = isClaimsDoc
-          ? `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）[权利要求参考]`
-          : `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）`;
+          ? `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）[权利要求参考]`
+          : `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）`;
         annotatedLines.push(missingHeader + "\n[未能提取内容]");
         return;
       }
       const isClaimsDoc = CLAIMS_CODES_MANUAL.includes(it.docCode);
       const header = isClaimsDoc
-        ? `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）[权利要求参考]`
-        : `【${idx + 1}】${it.docCode} - ${it.name}（${it.date}）`;
+        ? `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）[权利要求参考]`
+        : `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）`;
       if (hasBlocks && ext.blocks && ext.blocks.length > 0) {
         const blockParts = ext.blocks
           .filter(b => b.content && b.content.trim())
-          .map(b => `[ref:${b.block_id}]${b.content}[/ref:${b.block_id}]`)
+          .map(b => `[ref:D${it.idx}_${b.block_id}]${b.content}[/ref:D${it.idx}_${b.block_id}]`)
           .join("\n\n");
         annotatedLines.push(header + "\n" + blockParts);
       } else {
@@ -2143,6 +3007,11 @@ manualSelectBtn.addEventListener("click", () => {
 
     try {
       let fullText = "";
+      // Create a stable container once to avoid full DOM replacement on each chunk
+      analysisContent.innerHTML = '<div class="kanban-analysis-content markdown-body"></div>';
+      const streamContainer = analysisContent.querySelector(".kanban-analysis-content");
+      let _streamRafPending = false;
+      let _lastRenderLen = 0;
       for await (const chunk of window.AI.streamChat(
         provider.type, provider.apiKey, provider.baseUrl,
         {
@@ -2158,15 +3027,29 @@ manualSelectBtn.addEventListener("click", () => {
       )) {
         if (chunk.content) {
           fullText += chunk.content;
-          analysisContent.innerHTML = '<div class="kanban-analysis-content markdown-body">' + renderMarkdownWithTrace(fullText) + "</div>";
+          // Throttle rendering: only render if enough new content or enough time passed
+          if (!_streamRafPending && (fullText.length - _lastRenderLen > 20 || fullText.length < 200)) {
+            _streamRafPending = true;
+            requestAnimationFrame(() => {
+              if (streamContainer) {
+                streamContainer.innerHTML = renderMarkdownWithTrace(fullText);
+              }
+              _lastRenderLen = fullText.length;
+              _streamRafPending = false;
+            });
+          }
         }
       }
+      // Final render to ensure all content is displayed
+      if (streamContainer) streamContainer.innerHTML = renderMarkdownWithTrace(fullText);
       kanbanState.analysis = fullText;
+      kanbanState.hasUnsavedWork = true;
       // Save context for continued chat
       kanbanState.analysisSystemPrompt = systemPrompt;
       kanbanState.analysisUserMessage = userMessage;
       analysisChatHistory = [];
       showAnalysisChatToggle();
+      autoSaveCache();
       if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份文档" + (hasBlocks ? "（含溯源标记）" : "");
 
       let reportHtml = "";
@@ -2182,19 +3065,24 @@ manualSelectBtn.addEventListener("click", () => {
           reportHtml += '<div class="report-error">✗ 提取失败: ' + extractReport.failed.map(s => escapeHtml(s.name) + ' (' + escapeHtml(s.reason) + ')').join('、') + '</div>';
         }
         reportHtml += '</div>';
-        analysisContent.innerHTML = reportHtml + '<div class="kanban-analysis-content markdown-body">' + renderMarkdownWithTrace(fullText) + "</div>";
+        // Prepend report before the stable stream container
+        const reportDiv = document.createElement("div");
+        reportDiv.innerHTML = reportHtml;
+        analysisContent.insertBefore(reportDiv.firstChild, streamContainer);
       }
     } catch (e) {
       analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
       if (statusEl) statusEl.textContent = "AI 整理失败 ✗";
     } finally {
-      kanbanAutoBtn.disabled = false;
-      kanbanAutoBtn.classList.remove("hidden");
-      if (kanbanAutoAbortBtn) kanbanAutoAbortBtn.classList.add("hidden");
+      activeAnalysisProcess = null;
+      ["kanban-manual-select-btn", "cited-refs-manual-btn"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.disabled = false; el.classList.remove("hidden"); }
+      });
       kanbanAutoAbortController = null;
     }
   });
-});
+}
 
 function renderMarkdown(text) {
   if (!text) return "";
@@ -2211,7 +3099,7 @@ function renderMarkdown(text) {
 function renderMarkdownWithTrace(text) {
   if (!text) return "";
   const processed = text.replace(/【来源:\s*([^\】]+)】/g, (match, refsStr) => {
-    const refs = refsStr.split(",").map(r => r.trim()).filter(r => r.startsWith("B_"));
+    const refs = refsStr.split(",").map(r => r.trim()).filter(r => /^D\d+_B_/.test(r));
     if (refs.length === 0) return "";
     const validRefs = refs.filter(r => kanbanState.traceIndex[r]);
     if (validRefs.length === 0) {
@@ -2227,10 +3115,10 @@ function renderMarkdownWithTrace(text) {
       const docLabel = doc ? `${doc.name} (${doc.docCode})` : `文档${info.docIdx}`;
       const key = `${info.docIdx}|${info.page}|${docLabel}`;
       if (!grouped[key]) grouped[key] = [];
-      // Extract block index from block_id like "B_p2_5" -> 5
-      const blockMatch = ref.match(/B_p(\d+)_(\d+)/);
+      // Extract docIdx, page, blockIdx from traceIndex key like "D0_B_p2_5" -> docIdx=0, page=2, blockIdx=5
+      const blockMatch = ref.match(/^D(\d+)_B_p(\d+)_(\d+)$/);
       if (blockMatch) {
-        grouped[key].push({ ref, blockIdx: parseInt(blockMatch[2]), page: parseInt(blockMatch[1]) });
+        grouped[key].push({ ref, blockIdx: parseInt(blockMatch[3]), page: parseInt(blockMatch[2]) });
       } else {
         grouped[key].push({ ref, blockIdx: -1, page: info.page });
       }
@@ -2239,6 +3127,7 @@ function renderMarkdownWithTrace(text) {
     Object.keys(grouped).forEach(key => {
       const [docIdxStr, pageStr, docLabel] = key.split("|");
       const page = parseInt(pageStr);
+      const docIdx = parseInt(docIdxStr);
       const entries = grouped[key].sort((a, b) => a.blockIdx - b.blockIdx);
 
       // Merge consecutive block indices into ranges
@@ -2259,7 +3148,7 @@ function renderMarkdownWithTrace(text) {
       ranges.forEach(range => {
         const allRefs = [];
         for (let bi = range.start.blockIdx; bi <= range.end.blockIdx; bi++) {
-          const refId = `B_p${page}_${bi}`;
+          const refId = `D${docIdx}_B_p${page}_${bi}`;
           if (kanbanState.traceIndex[refId]) allRefs.push(refId);
         }
         const dataBlockIds = allRefs.map(r => escapeHtml(r)).join(",");
@@ -2298,63 +3187,89 @@ function onTraceClick(blockIdStr) {
     showError("溯源信息不存在: " + primaryBlockId);
     return;
   }
+
+  // Use originalBlockId for PDF overlay and text view block queries,
+  // since overlay data-block-id uses the original format (e.g., "B_p1_0")
+  const originalId = info.originalBlockId || primaryBlockId;
+  const rangeOriginalIds = blockIds.map(id => {
+    const entry = kanbanState.traceIndex[id];
+    return entry ? (entry.originalBlockId || id) : id;
+  });
+
+  // Set pending highlight using originalBlockId for overlay matching
+  pdfViewState.pendingHighlight = originalId;
+  pdfViewState.pendingHighlightRange = rangeOriginalIds;
+  pdfViewState.traceJumpPending = true;
+
+  // Set the correct doc index BEFORE toggling PDF view,
+  // so togglePdfView renders the right document if it triggers renderPdfView
+  pdfViewState.currentDocIdx = info.docIdx;
+
   if (readerModal.classList.contains("hidden")) {
-    openReader(true);
+    openReader(true, true); // skipRender=true — selectReaderDoc will handle the render
   }
-  // Auto-switch to PDF view
+  // Auto-switch to PDF view (skipRender=true to avoid double render — selectReaderDoc will handle it)
   if (!pdfViewState.active) {
-    togglePdfView();
+    togglePdfView(true);
   }
-  // Set pending highlight before selectReaderDoc so renderPdfView can apply it
-  // after async PDF rendering completes
-  if (pdfViewState.active) {
-    pdfViewState.pendingHighlight = primaryBlockId;
-    pdfViewState.pendingHighlightRange = blockIds;
-  }
+
   selectReaderDoc(info.docIdx);
+
+  // Fallback: try to highlight after a delay if PDF was already rendered
+  // (covers the case where renderPdfView already completed before we get here)
   setTimeout(() => {
-    // If PDF view is active, highlight the overlay block
-    if (pdfViewState.active) {
-      highlightPdfBlock(primaryBlockId);
-      // Also highlight range blocks with a lighter highlight
-      blockIds.forEach(id => {
-        if (id !== primaryBlockId) {
-          const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
-          if (overlay) overlay.classList.add("highlight-range");
-        }
-      });
+    if (pdfViewState.active && !pdfViewState.pendingHighlight) {
+      // pendingHighlight was already consumed by renderPdfView, highlight is done
       return;
     }
-
-    const md = kanbanState.extractions[info.docIdx];
-    if (!md) return;
-    const content = md.markdown || md.text || "";
-    const blocks = md.blocks || [];
-    const targetBlock = blocks.find(b => b.block_id === primaryBlockId);
-    if (targetBlock && targetBlock.content) {
-      const snippet = targetBlock.content.substring(0, 80);
-      const el = readerContent.querySelector(`[data-block-id="${primaryBlockId}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        el.classList.add("trace-highlight");
-        setTimeout(() => el.classList.remove("trace-highlight"), 3000);
-        return;
+    // If pendingHighlight is still set, try direct highlight using originalBlockId
+    if (pdfViewState.active) {
+      const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${originalId}"]`);
+      if (overlay) {
+        highlightPdfBlock(originalId);
+        rangeOriginalIds.forEach(id => {
+          if (id !== originalId) {
+            const el = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
+            if (el) el.classList.add("highlight-range");
+          }
+        });
+        pdfViewState.pendingHighlight = null;
+        pdfViewState.pendingHighlightRange = null;
+        pdfViewState.traceJumpPending = false;
       }
     }
-    const traceEl = document.createElement("div");
-    traceEl.className = "trace-locator";
-    traceEl.innerHTML = `
-      <div class="trace-locator-header">
-        <span class="trace-locator-id">${escapeHtml(primaryBlockId)}</span>
-        <span class="trace-locator-page">第 ${info.page} 页</span>
-        <button class="trace-locator-close" onclick="this.parentElement.parentElement.remove()">×</button>
-      </div>
-      <div class="trace-locator-content">${escapeHtml((info.content || "").substring(0, 300))}${info.content && info.content.length > 300 ? "..." : ""}</div>
-      ${info.bbox ? '<div class="trace-locator-bbox">区域坐标: [' + info.bbox.join(", ") + "]</div>" : ""}
-    `;
-    readerContent.insertBefore(traceEl, readerContent.firstChild);
-    traceEl.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, 500);
+
+    // Text view fallback — use originalBlockId for data-block-id matching
+    if (!pdfViewState.active) {
+      const md = kanbanState.extractions[info.docIdx];
+      if (!md) return;
+      const content = md.markdown || md.text || "";
+      const blocks = md.blocks || [];
+      const targetBlock = blocks.find(b => b.block_id === originalId);
+      if (targetBlock && targetBlock.content) {
+        const el = readerContent.querySelector(`[data-block-id="${originalId}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.add("trace-highlight");
+          setTimeout(() => el.classList.remove("trace-highlight"), 3000);
+          return;
+        }
+      }
+      const traceEl = document.createElement("div");
+      traceEl.className = "trace-locator";
+      traceEl.innerHTML = `
+        <div class="trace-locator-header">
+          <span class="trace-locator-id">${escapeHtml(originalId)}</span>
+          <span class="trace-locator-page">第 ${info.page} 页</span>
+          <button class="trace-locator-close" onclick="this.parentElement.parentElement.remove()">×</button>
+        </div>
+        <div class="trace-locator-content">${escapeHtml((info.content || "").substring(0, 300))}${info.content && info.content.length > 300 ? "..." : ""}</div>
+        ${info.bbox ? '<div class="trace-locator-bbox">区域坐标: [' + info.bbox.join(", ") + "]</div>" : ""}
+      `;
+      readerContent.insertBefore(traceEl, readerContent.firstChild);
+      traceEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, 800);
 }
 
 function renderTimeline(data) {
@@ -2369,8 +3284,16 @@ function renderTimeline(data) {
     return;
   }
 
-  const importantTypes = ["office_action", "response", "allowance", "request"];
-  const timelineItems = items.filter(it => importantTypes.indexOf(it.type) !== -1);
+  const importantTypes = ["office_action", "response", "allowance", "request", "notification"];
+  const importantDocCodes = ["IDS", "WDR", "ETCL", "DAFP", "AFCP", "BRAP", "EXBR", "REBR", "CTNF", "CTFR", "CTRA", "CTAL"];
+  // Exclude receipt and payment types from timeline
+  const excludeDocCodes = ["N417", "N417.PYMT", "APP.FILE.REC", "WFEE", "PTO.FEE", "IFEE", "RCFR", "RECEIPT-OLF", "FEES-RO", "PAYREJ"];
+  const excludeNamePatterns = /回执|缴费|receipt|payment|fee/i;
+  const timelineItems = items.filter(it => {
+    if (excludeDocCodes.includes(it.docCode)) return false;
+    if (excludeNamePatterns.test(it.name || "")) return false;
+    return importantTypes.indexOf(it.type) !== -1 || importantDocCodes.includes(it.docCode);
+  });
 
   const sorted = [...timelineItems].sort((a, b) => {
     const da = parseDate(a.date);
@@ -2444,7 +3367,7 @@ function parseDate(dateStr) {
   return new Date(dateStr).getTime();
 }
 
-function openReader(defaultToPdf = false) {
+function openReader(defaultToPdf = true, skipRender = false) {
   if (!readerModal) return;
   const items = kanbanState.documents;
   if (!items || items.length === 0) {
@@ -2453,12 +3376,21 @@ function openReader(defaultToPdf = false) {
   }
 
   readerModal.classList.remove("hidden");
-  if (defaultToPdf && !pdfViewState.active) {
-    togglePdfView();
+  // Update floating ball state: reader is visible
+  if (readerFloatingBall) {
+    readerFloatingBall.classList.remove("hidden");
+    const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
+    const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
+    readerFloatingBall.title = "点击回到报告";
+    if (iconOpen) iconOpen.classList.add("hidden");
+    if (iconBack) iconBack.classList.remove("hidden");
+  }
+  // Always open in PDF view mode
+  if (!pdfViewState.active) {
+    togglePdfView(skipRender);
   }
 
-  const importantTypes = ["office_action", "response", "allowance"];
-  const readerItems = items.filter(it => importantTypes.indexOf(it.type) !== -1);
+  const readerItems = items;
 
   let listHtml = "";
   readerItems.forEach((it, idx) => {
@@ -2489,16 +3421,28 @@ function selectReaderDoc(idx) {
   chatHistory = [];
   if (chatMessages) chatMessages.innerHTML = "";
 
+  // Hide any OCR progress overlay from previous document
+  hideOcrProgressOverlay();
+
   const items = kanbanState.documents;
   const it = items.find(d => d.idx === idx);
   if (!it) return;
 
   document.querySelectorAll(".reader-doc-item").forEach(el => el.classList.remove("active"));
   const activeEl = document.querySelector(`.reader-doc-item[data-idx="${idx}"]`);
-  if (activeEl) activeEl.classList.add("active");
+  if (activeEl) {
+    activeEl.classList.add("active");
+    activeEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
 
   // Track the currently selected document for PDF view
   pdfViewState.currentDocIdx = idx;
+
+  // Reset search state
+  pdfViewState.searchMatches = [];
+  pdfViewState.searchCurrentIdx = -1;
+  const searchInfo = document.getElementById("pdf-search-info");
+  if (searchInfo) searchInfo.textContent = "";
 
   // Reset OCR/search state for new document
   const ext = kanbanState.extractions[idx];
@@ -2507,12 +3451,17 @@ function selectReaderDoc(idx) {
   if (ext && ext.blocks && ext.blocks.length > 0) {
     if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
     if (searchBtn) searchBtn.disabled = false;
-    if (pdfOcrBtn) { pdfOcrBtn.textContent = "已提取"; pdfOcrBtn.disabled = true; }
   } else {
     if (searchInput) { searchInput.disabled = true; searchInput.placeholder = "请先OCR提取..."; }
     if (searchBtn) searchBtn.disabled = true;
-    if (pdfOcrBtn) { pdfOcrBtn.textContent = "OCR 提取"; pdfOcrBtn.disabled = false; }
   }
+  // Translate button always enabled (auto-OCR if needed)
+  // Reset translate panel
+  if (pdfTranslatePanel) pdfTranslatePanel.classList.add("hidden");
+  if (pdfTranslateContent) pdfTranslateContent.innerHTML = '<p class="placeholder">点击"翻译全文档"按钮翻译当前文档</p>';
+
+  // Update extract panel for new document
+  updateExtractPanel();
 
   // Render PDF view if active
   if (pdfViewState.active) {
@@ -2564,23 +3513,63 @@ function selectReaderAnalysis() {
 
 // ============ PDF Viewer with Overlay Blocks ============
 
-function togglePdfView() {
+function togglePdfView(skipRender) {
   if (pdfViewState.active) {
     pdfViewState.active = false;
     readerPdfView.classList.add("hidden");
     readerContent.classList.remove("hidden");
-    readerPdfToggle.classList.remove("active");
-    readerPdfToggle.textContent = "PDF 视图";
+    if (readerPdfToggle) {
+      readerPdfToggle.classList.remove("active");
+      readerPdfToggle.textContent = "PDF 视图";
+    }
   } else {
     pdfViewState.active = true;
     readerPdfView.classList.remove("hidden");
     readerContent.classList.add("hidden");
-    readerPdfToggle.classList.add("active");
-    readerPdfToggle.textContent = "文本视图";
-    if (pdfViewState.currentDocIdx !== null) {
+    if (readerPdfToggle) {
+      readerPdfToggle.classList.add("active");
+      readerPdfToggle.textContent = "文本视图";
+    }
+    if (!skipRender && pdfViewState.currentDocIdx !== null) {
       renderPdfView(pdfViewState.currentDocIdx);
     }
   }
+}
+
+function showOcrProgressOverlay(statusText, progress) {
+  const existing = document.getElementById("ocr-progress-overlay");
+  if (existing) {
+    // Update existing overlay
+    const textEl = existing.querySelector(".ocr-progress-label");
+    const fillEl = existing.querySelector(".ocr-progress-fill");
+    const pctEl = existing.querySelector(".ocr-progress-pct");
+    if (textEl && statusText) textEl.textContent = statusText;
+    if (fillEl && typeof progress === "number") {
+      fillEl.style.width = progress + "%";
+      fillEl.classList.remove("ocr-progress-indeterminate");
+    }
+    if (pctEl && typeof progress === "number") pctEl.textContent = Math.round(progress) + "%";
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.id = "ocr-progress-overlay";
+  overlay.style.cssText = "position:sticky;top:0;z-index:50;padding:10px 16px 12px;background:var(--accent-dim);border-bottom:2px solid var(--accent);font-size:13px;color:var(--accent);";
+  const isIndeterminate = typeof progress !== "number";
+  overlay.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+      <div class="ocr-progress-spinner" style="width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></div>
+      <span class="ocr-progress-label" style="flex:1;">${statusText || "正在 OCR 识别中..."}</span>
+      <span class="ocr-progress-pct" style="font-size:12px;font-weight:600;min-width:36px;text-align:right;">${typeof progress === "number" ? Math.round(progress) + "%" : ""}</span>
+    </div>
+    <div class="ocr-progress-bar" style="width:100%;height:4px;background:rgba(79,143,247,0.15);border-radius:2px;overflow:hidden;">
+      <div class="ocr-progress-fill ${isIndeterminate ? "ocr-progress-indeterminate" : ""}" style="height:100%;background:var(--accent);border-radius:2px;transition:width 0.3s ease;${typeof progress === "number" ? "width:" + progress + "%;" : ""}"></div>
+    </div>`;
+  readerPdfContainer.prepend(overlay);
+}
+
+function hideOcrProgressOverlay() {
+  const existing = document.getElementById("ocr-progress-overlay");
+  if (existing) existing.remove();
 }
 
 async function renderPdfView(idx) {
@@ -2594,6 +3583,8 @@ async function renderPdfView(idx) {
   }
 
   pdfViewState.currentDocIdx = idx;
+  // Increment render version to cancel any stale render
+  const thisVersion = ++pdfViewState.renderVersion;
 
   if (typeof pdfjsLib === "undefined") {
     readerPdfContainer.innerHTML = '<p class="pdf-error">PDF.js 库未加载，无法显示 PDF 视图。请检查网络连接后刷新页面。</p>';
@@ -2613,8 +3604,13 @@ async function renderPdfView(idx) {
 
   readerPdfContainer.innerHTML = '<p class="pdf-loading">正在加载 PDF 文件...</p>';
 
+  // Clear stale pdfDoc while loading to prevent rerenderPdfPages from using wrong doc
+  pdfViewState.pdfDoc = null;
+
   try {
     const resp = await fetch(pdfUrl, { headers: { "Accept": "application/pdf,*/*" } });
+    // Check if a newer render has started — abort this one
+    if (pdfViewState.renderVersion !== thisVersion) return;
     if (!resp.ok) throw new Error("PDF 下载失败: HTTP " + resp.status);
 
     const contentType = resp.headers.get("content-type") || "";
@@ -2626,11 +3622,13 @@ async function renderPdfView(idx) {
     }
 
     const arrayBuffer = await resp.arrayBuffer();
+    if (pdfViewState.renderVersion !== thisVersion) return;
     if (arrayBuffer.byteLength < 100) {
       throw new Error("下载的文件过小，文档可能暂不可用");
     }
 
     const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    if (pdfViewState.renderVersion !== thisVersion) return;
     pdfViewState.pdfDoc = pdfDoc;
     pdfViewState.totalPages = pdfDoc.numPages;
     pdfViewState.currentPage = 1;
@@ -2638,23 +3636,30 @@ async function renderPdfView(idx) {
 
     readerPdfContainer.innerHTML = "";
 
-    const containerWidth = readerPdfContainer.clientWidth - 32;
+    // Wait for layout to stabilize if container is not yet visible
+    let containerWidth = readerPdfContainer.clientWidth - 32;
+    if (containerWidth <= 0) {
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      containerWidth = readerPdfContainer.clientWidth - 32;
+    }
     const firstPage = await pdfDoc.getPage(1);
     const viewport = firstPage.getViewport({ scale: 1.0 });
-    pdfViewState.baseScale = containerWidth / viewport.width;
+    pdfViewState.baseScale = containerWidth > 0 ? Math.min(containerWidth / viewport.width, 1.5) : 1.0;
     pdfViewState.scale = pdfViewState.baseScale;
 
     updatePdfToolbar();
     await renderAllPdfPages(pdfDoc, blocks, pageDimensions, pdfViewState.scale);
+    if (pdfViewState.renderVersion !== thisVersion) return;
 
     // Apply pending highlight from onTraceClick if set
-    if (pdfViewState.pendingHighlight) {
+    // Only consume pendingHighlight if blocks are available (overlay elements exist)
+    if (pdfViewState.pendingHighlight && blocks.length > 0) {
       const blockId = pdfViewState.pendingHighlight;
       const rangeIds = pdfViewState.pendingHighlightRange || [];
       pdfViewState.pendingHighlight = null;
       pdfViewState.pendingHighlightRange = null;
+      pdfViewState.traceJumpPending = false;
       highlightPdfBlock(blockId);
-      // Also highlight range blocks with a lighter highlight
       rangeIds.forEach(id => {
         if (id !== blockId) {
           const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
@@ -2662,7 +3667,24 @@ async function renderPdfView(idx) {
         }
       });
     }
+
+    // Auto-OCR: if no extraction exists and autoOcr is enabled, trigger OCR
+    // But skip if this is a trace jump (document should already have OCR data from analysis)
+    if (blocks.length === 0 && !pdfViewState.traceJumpPending) {
+      const config = window.AI.loadAIConfig();
+      const ocrConfig = window.AI.getOCRConfig(config);
+      if (ocrConfig.autoOcr !== false) {
+        // Show OCR progress overlay on top of the already-rendered PDF
+        showOcrProgressOverlay("正在自动 OCR 识别中，PDF 已可浏览...");
+        ocrPdf(); // fire-and-forget, will re-render on completion
+      }
+    }
+    // Clear trace jump flag after renderPdfView has processed it
+    if (pdfViewState.traceJumpPending && blocks.length > 0) {
+      pdfViewState.traceJumpPending = false;
+    }
   } catch (e) {
+    if (pdfViewState.renderVersion !== thisVersion) return;
     pdfViewState.pendingHighlight = null;
     pdfViewState.pendingHighlightRange = null;
     readerPdfContainer.innerHTML = '<p class="pdf-error">' + escapeHtml(e.message) + '<br><small>请切换到文本视图查看提取的内容</small></p>';
@@ -2694,6 +3716,12 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
 
     const pageBlocks = blocks.filter(b => b.page === pageNum);
     const pageDim = pageDimensions[pageNum];
+
+    // 添加框选矩形层
+    const selectionRect = document.createElement("div");
+    selectionRect.className = "pdf-selection-rect";
+    wrapper.appendChild(selectionRect);
+
     if (pageBlocks.length > 0 && pageDim) {
       const scaleX = viewport.width / pageDim.width;
       const scaleY = viewport.height / pageDim.height;
@@ -2715,19 +3743,127 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
         tooltip.textContent = b.block_id + " [" + (b.label || "text") + "]";
         overlay.appendChild(tooltip);
 
-        overlay.addEventListener("click", () => {
-          document.querySelectorAll(".pdf-block-overlay.highlight").forEach(el => el.classList.remove("highlight"));
-          overlay.classList.add("highlight");
-          setTimeout(() => overlay.classList.remove("highlight"), 3000);
+        overlay.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          // 单击切换选中状态（选中后保持持久，用于翻译范围选择）
+          const blockId = b.block_id;
+          const idx = pdfViewState.selectedBlockIds.indexOf(blockId);
+          if (idx >= 0) {
+            pdfViewState.selectedBlockIds.splice(idx, 1);
+            overlay.classList.remove("block-selected");
+          } else {
+            pdfViewState.selectedBlockIds.push(blockId);
+            overlay.classList.add("block-selected");
+          }
+          updatePdfSelectionInfo();
+        });
+
+        overlay.addEventListener("contextmenu", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          // 右键：如果此框已在选中集合中，翻译整个范围；否则先选中此框再翻译
+          const blockId = b.block_id;
+          const isInSelection = pdfViewState.selectedBlockIds.includes(blockId);
+          if (!isInSelection) {
+            if (!ev.shiftKey) {
+              clearPdfBlockSelection();
+            }
+            pdfViewState.selectedBlockIds.push(blockId);
+            refreshPdfBlockSelectionVisual();
+            updatePdfSelectionInfo();
+          }
+          showPdfBlockContextMenu(ev.clientX, ev.clientY, blockId);
         });
 
         wrapper.appendChild(overlay);
       });
     }
 
+    // 框选：在 wrapper 内按住鼠标左键拖动
+    wrapper.addEventListener("mousedown", (ev) => {
+      if (ev.button !== 0) return;
+      if (ev.target.classList && ev.target.classList.contains("pdf-block-overlay")) return;
+      ev.preventDefault();
+      const rect = wrapper.getBoundingClientRect();
+      const startX = ev.clientX - rect.left;
+      const startY = ev.clientY - rect.top;
+      pdfViewState.selecting = true;
+      pdfViewState.selectStart = { x: startX, y: startY, page: pageNum };
+      pdfViewState.selectEnd = { x: startX, y: startY, page: pageNum };
+      // 如果不按 Shift，先清除之前的选择
+      if (!ev.shiftKey) {
+        clearPdfBlockSelection();
+      }
+      selectionRect.style.display = "block";
+      selectionRect.style.left = startX + "px";
+      selectionRect.style.top = startY + "px";
+      selectionRect.style.width = "0px";
+      selectionRect.style.height = "0px";
+    });
+
     readerPdfContainer.appendChild(wrapper);
     pdfViewState.renderedPages[pageNum] = wrapper;
   }
+
+  // 全局 mousemove / mouseup 用于框选
+  if (readerPdfContainer._selectionHandlersInstalled) return;
+  readerPdfContainer._selectionHandlersInstalled = true;
+
+  document.addEventListener("mousemove", (ev) => {
+    if (!pdfViewState.selecting || !pdfViewState.selectStart) return;
+    const page = pdfViewState.selectStart.page;
+    const wrapper = pdfViewState.renderedPages[page];
+    if (!wrapper) return;
+    const rect = wrapper.getBoundingClientRect();
+    const x = Math.max(0, Math.min(ev.clientX - rect.left, rect.width));
+    const y = Math.max(0, Math.min(ev.clientY - rect.top, rect.height));
+    pdfViewState.selectEnd = { x, y, page };
+    const selectionRect = wrapper.querySelector(".pdf-selection-rect");
+    if (selectionRect) {
+      const left = Math.min(pdfViewState.selectStart.x, x);
+      const top = Math.min(pdfViewState.selectStart.y, y);
+      const width = Math.abs(x - pdfViewState.selectStart.x);
+      const height = Math.abs(y - pdfViewState.selectStart.y);
+      selectionRect.style.left = left + "px";
+      selectionRect.style.top = top + "px";
+      selectionRect.style.width = width + "px";
+      selectionRect.style.height = height + "px";
+    }
+    // 实时高亮被框中的 blocks（仅视觉预览）
+    refreshPdfBoxSelectionVisual(left, top, width, height, page);
+  });
+
+  document.addEventListener("mouseup", (ev) => {
+    if (!pdfViewState.selecting) return;
+    pdfViewState.selecting = false;
+    const page = pdfViewState.selectStart ? pdfViewState.selectStart.page : null;
+    if (page) {
+      const wrapper = pdfViewState.renderedPages[page];
+      if (wrapper) {
+        const selectionRect = wrapper.querySelector(".pdf-selection-rect");
+        if (selectionRect) selectionRect.style.display = "none";
+      }
+      const s = pdfViewState.selectStart;
+      const e = pdfViewState.selectEnd;
+      if (s && e) {
+        const left = Math.min(s.x, e.x);
+        const top = Math.min(s.y, e.y);
+        const width = Math.abs(e.x - s.x);
+        const height = Math.abs(e.y - s.y);
+        if (width > 5 && height > 5) {
+          // 真正的框选，将框中的 blocks 加入选中集合
+          selectBlocksInRect(left, top, width, height, page);
+        } else {
+          // 过小的拖动视为点击空白，清除选择
+          clearPdfBlockSelection();
+        }
+      }
+    }
+    pdfViewState.selectStart = null;
+    pdfViewState.selectEnd = null;
+    refreshPdfBlockSelectionVisual();
+    updatePdfSelectionInfo();
+  });
 }
 
 async function rerenderPdfPages() {
@@ -2738,6 +3874,9 @@ async function rerenderPdfPages() {
   const pageDimensions = ext ? (ext.pageDimensions || {}) : {};
   await renderAllPdfPages(pdfViewState.pdfDoc, blocks, pageDimensions, pdfViewState.scale);
   updatePdfToolbar();
+  // Restore selection visual after re-render
+  refreshPdfBlockSelectionVisual();
+  updatePdfSelectionInfo();
 }
 
 function updatePdfToolbar() {
@@ -2782,6 +3921,723 @@ function highlightPdfBlock(blockId) {
     overlay.scrollIntoView({ behavior: "smooth", block: "center" });
     setTimeout(() => overlay.classList.remove("highlight"), 3000);
   }
+}
+
+function clearPdfBlockSelection() {
+  pdfViewState.selectedBlockIds = [];
+  document.querySelectorAll(".pdf-block-overlay.block-selected").forEach(el => el.classList.remove("block-selected"));
+  document.querySelectorAll(".pdf-block-overlay.block-preview").forEach(el => el.classList.remove("block-preview"));
+  updatePdfSelectionInfo();
+}
+
+function refreshPdfBlockSelectionVisual() {
+  document.querySelectorAll(".pdf-block-overlay").forEach(el => {
+    const bid = el.dataset.blockId;
+    if (pdfViewState.selectedBlockIds.includes(bid)) {
+      el.classList.add("block-selected");
+    } else {
+      el.classList.remove("block-selected");
+    }
+    el.classList.remove("block-preview");
+  });
+}
+
+function refreshPdfBoxSelectionVisual(left, top, width, height, page) {
+  const wrapper = pdfViewState.renderedPages[page];
+  if (!wrapper) return;
+  const overlays = wrapper.querySelectorAll(".pdf-block-overlay");
+  overlays.forEach(el => {
+    const bx = parseFloat(el.style.left);
+    const by = parseFloat(el.style.top);
+    const bw = parseFloat(el.style.width);
+    const bh = parseFloat(el.style.height);
+    const cx = bx + bw / 2;
+    const cy = by + bh / 2;
+    const inside = cx >= left && cx <= left + width && cy >= top && cy <= top + height;
+    if (inside) {
+      el.classList.add("block-preview");
+    } else {
+      el.classList.remove("block-preview");
+    }
+  });
+}
+
+function selectBlocksInRect(left, top, width, height, page) {
+  const wrapper = pdfViewState.renderedPages[page];
+  if (!wrapper) return;
+  const overlays = wrapper.querySelectorAll(".pdf-block-overlay");
+  overlays.forEach(el => {
+    const bx = parseFloat(el.style.left);
+    const by = parseFloat(el.style.top);
+    const bw = parseFloat(el.style.width);
+    const bh = parseFloat(el.style.height);
+    const cx = bx + bw / 2;
+    const cy = by + bh / 2;
+    const inside = cx >= left && cx <= left + width && cy >= top && cy <= top + height;
+    if (inside) {
+      const bid = el.dataset.blockId;
+      if (!pdfViewState.selectedBlockIds.includes(bid)) {
+        pdfViewState.selectedBlockIds.push(bid);
+      }
+    }
+  });
+  refreshPdfBlockSelectionVisual();
+  updatePdfSelectionInfo();
+}
+
+function updatePdfSelectionInfo() {
+  const info = document.getElementById("pdf-selection-info");
+  if (!info) return;
+  const n = pdfViewState.selectedBlockIds.length;
+  info.textContent = n > 0 ? `已选 ${n} 块` : "";
+  info.classList.toggle("hidden", n === 0);
+  const clearBtn = document.getElementById("pdf-clear-selection-btn");
+  if (clearBtn) {
+    clearBtn.style.display = n > 0 ? "" : "none";
+  }
+  const translateSelBtn = document.getElementById("pdf-translate-selection-btn");
+  if (translateSelBtn) {
+    translateSelBtn.style.display = n > 0 ? "" : "none";
+  }
+}
+
+// 右键菜单
+let _pdfCtxMenu = null;
+
+function showPdfBlockContextMenu(clientX, clientY, blockId) {
+  hidePdfBlockContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "pdf-block-context-menu";
+  menu.style.left = clientX + "px";
+  menu.style.top = clientY + "px";
+
+  const n = pdfViewState.selectedBlockIds.length;
+  const translateAllItem = document.createElement("div");
+  translateAllItem.className = "pdf-ctx-menu-item";
+  translateAllItem.textContent = n > 1 ? `翻译已选 ${n} 块` : "翻译此文本块";
+  translateAllItem.addEventListener("click", () => {
+    hidePdfBlockContextMenu();
+    translateSelectedBlocks();
+  });
+  menu.appendChild(translateAllItem);
+
+  if (n > 0) {
+    const clearItem = document.createElement("div");
+    clearItem.className = "pdf-ctx-menu-item";
+    clearItem.textContent = "清除选择";
+    clearItem.addEventListener("click", () => {
+      hidePdfBlockContextMenu();
+      clearPdfBlockSelection();
+    });
+    menu.appendChild(clearItem);
+  }
+
+  document.body.appendChild(menu);
+  _pdfCtxMenu = menu;
+
+  // 菜单显示后如果超出视口，向左/上调整
+  const r = menu.getBoundingClientRect();
+  const maxX = window.innerWidth - 16;
+  const maxY = window.innerHeight - 16;
+  if (r.right > maxX) menu.style.left = (maxX - r.width) + "px";
+  if (r.bottom > maxY) menu.style.top = (maxY - r.height) + "px";
+}
+
+function hidePdfBlockContextMenu() {
+  if (_pdfCtxMenu && _pdfCtxMenu.parentNode) {
+    _pdfCtxMenu.parentNode.removeChild(_pdfCtxMenu);
+  }
+  _pdfCtxMenu = null;
+}
+
+document.addEventListener("mousedown", (ev) => {
+  if (_pdfCtxMenu && !_pdfCtxMenu.contains(ev.target)) {
+    hidePdfBlockContextMenu();
+  }
+});
+document.addEventListener("scroll", () => hidePdfBlockContextMenu(), true);
+window.addEventListener("resize", () => hidePdfBlockContextMenu());
+
+// ===== PDF keyword search =====
+
+function searchPdfKeyword() {
+  const input = document.getElementById("pdf-search-input");
+  if (!input) return;
+  const keyword = input.value.trim().toLowerCase();
+  if (!keyword) return;
+
+  const idx = pdfViewState.currentDocIdx;
+  if (idx == null) return;
+  const ext = kanbanState.extractions[idx];
+  if (!ext || !ext.blocks || ext.blocks.length === 0) {
+    showError("请先提取文档内容（OCR提取）");
+    return;
+  }
+
+  // Clear previous search highlights
+  document.querySelectorAll(".pdf-block-overlay.pdf-search-match").forEach(el => el.classList.remove("pdf-search-match", "pdf-search-current"));
+  pdfViewState.searchMatches = [];
+  pdfViewState.searchCurrentIdx = -1;
+
+  // Find matching blocks
+  ext.blocks.forEach(b => {
+    if (b.content && b.content.toLowerCase().includes(keyword)) {
+      pdfViewState.searchMatches.push(b.block_id);
+    }
+  });
+
+  const searchInfo = document.getElementById("pdf-search-info");
+  if (pdfViewState.searchMatches.length === 0) {
+    if (searchInfo) searchInfo.textContent = "0/0";
+    return;
+  }
+
+  // Highlight all matches
+  pdfViewState.searchMatches.forEach(id => {
+    const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
+    if (overlay) overlay.classList.add("pdf-search-match");
+  });
+
+  // Jump to first match
+  pdfViewState.searchCurrentIdx = 0;
+  const firstId = pdfViewState.searchMatches[0];
+  const firstOverlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${firstId}"]`);
+  if (firstOverlay) {
+    firstOverlay.classList.add("pdf-search-current");
+    firstOverlay.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  updateSearchInfo();
+}
+
+function searchPdfNext() {
+  if (pdfViewState.searchMatches.length === 0) {
+    searchPdfKeyword();
+    return;
+  }
+
+  // Remove current highlight
+  document.querySelectorAll(".pdf-block-overlay.pdf-search-current").forEach(el => el.classList.remove("pdf-search-current"));
+
+  pdfViewState.searchCurrentIdx = (pdfViewState.searchCurrentIdx + 1) % pdfViewState.searchMatches.length;
+  const id = pdfViewState.searchMatches[pdfViewState.searchCurrentIdx];
+  const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
+  if (overlay) {
+    overlay.classList.add("pdf-search-current");
+    overlay.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  updateSearchInfo();
+}
+
+function searchPdfPrev() {
+  if (pdfViewState.searchMatches.length === 0) return;
+
+  // Remove current highlight
+  document.querySelectorAll(".pdf-block-overlay.pdf-search-current").forEach(el => el.classList.remove("pdf-search-current"));
+
+  pdfViewState.searchCurrentIdx = (pdfViewState.searchCurrentIdx - 1 + pdfViewState.searchMatches.length) % pdfViewState.searchMatches.length;
+  const id = pdfViewState.searchMatches[pdfViewState.searchCurrentIdx];
+  const overlay = readerPdfContainer.querySelector(`.pdf-block-overlay[data-block-id="${id}"]`);
+  if (overlay) {
+    overlay.classList.add("pdf-search-current");
+    overlay.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  updateSearchInfo();
+}
+
+function updateSearchInfo() {
+  const searchInfo = document.getElementById("pdf-search-info");
+  if (searchInfo) searchInfo.textContent = `${pdfViewState.searchCurrentIdx + 1}/${pdfViewState.searchMatches.length}`;
+  const prevBtn = document.getElementById("pdf-search-prev-btn");
+  const nextBtn = document.getElementById("pdf-search-next-btn");
+  if (prevBtn) prevBtn.disabled = pdfViewState.searchMatches.length === 0;
+  if (nextBtn) nextBtn.disabled = pdfViewState.searchMatches.length === 0;
+}
+
+// ===== OCR extract button for single document =====
+
+async function ocrPdf() {
+  const idx = pdfViewState.currentDocIdx;
+  if (idx == null) {
+    showError("请先选择一个文档");
+    return;
+  }
+
+  const it = kanbanState.documents.find(d => d.idx === idx);
+  if (!it) {
+    showError("找不到文档信息");
+    return;
+  }
+
+  if (!currentData) { showError("请先查询专利"); return; }
+
+  const config = window.AI.loadAIConfig();
+  const ocrConfig = window.AI.getOCRConfig(config);
+  const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
+  const glmApiKey = window.AI.getGlmOcrApiKey(config);
+
+  const isUS = currentData.office === "US";
+  const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+
+  const totalPages = it.numberOfPages ? parseInt(it.numberOfPages) : 0;
+
+  // Show progress overlay with phase indicators
+  showOcrProgressOverlay("正在下载 PDF 文档...", 5);
+
+  // Simulate download phase progress
+  let downloadTimer = null;
+  let downloadProgress = 5;
+  if (totalPages > 0) {
+    downloadTimer = setInterval(() => {
+      if (downloadProgress < 30) {
+        downloadProgress += 3;
+        showOcrProgressOverlay("正在下载 PDF 文档...", downloadProgress);
+      }
+    }, 500);
+  }
+
+  const MAX_RETRIES = 2;
+  let success = false;
+
+  async function tryExtract(engine, retriesLeft) {
+    try {
+      // Update progress to OCR phase
+      if (downloadTimer) clearInterval(downloadTimer);
+      showOcrProgressOverlay("正在 OCR 识别 (" + (engine === "paddle_ocr_vl" ? "PaddleOCR" : "GLM OCR") + ")...", 35);
+
+      // Simulate OCR phase progress
+      let ocrTimer = null;
+      let ocrProgress = 35;
+      if (totalPages > 0) {
+        ocrTimer = setInterval(() => {
+          if (ocrProgress < 85) {
+            ocrProgress += Math.max(1, Math.floor((85 - ocrProgress) * 0.08));
+            showOcrProgressOverlay("正在 OCR 识别 (" + (engine === "paddle_ocr_vl" ? "PaddleOCR" : "GLM OCR") + ")... " + Math.round(ocrProgress * totalPages / 85) + "/" + totalPages + " 页", ocrProgress);
+          }
+        }, 800);
+      }
+
+      const useApiKey = engine === "glm_ocr" ? glmApiKey : "";
+      const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, useApiKey);
+
+      if (ocrTimer) clearInterval(ocrTimer);
+
+      if (result.error) {
+        if (retriesLeft > 0) {
+          const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
+          if (fallbackEngine === "glm_ocr" && !glmApiKey) return false;
+          return await tryExtract(fallbackEngine, retriesLeft - 1);
+        }
+        showError("OCR 提取失败: " + result.error);
+        return false;
+      }
+      const text = result.text || "";
+      const markdown = result.markdown || "";
+      if (!text && !markdown) {
+        if (retriesLeft > 0) {
+          const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
+          if (fallbackEngine === "glm_ocr" && !glmApiKey) return false;
+          return await tryExtract(fallbackEngine, retriesLeft - 1);
+        }
+        showError("OCR 提取内容为空");
+        return false;
+      }
+      showOcrProgressOverlay("正在解析 OCR 结果...", 90);
+      const blocks = result.blocks || [];
+      const pageDimensions = result.page_dimensions || {};
+      kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
+      kanbanState.hasUnsavedWork = true;
+      if (blocks.length > 0) {
+        blocks.forEach(b => {
+          const traceKey = "D" + it.idx + "_" + b.block_id;
+          kanbanState.traceIndex[traceKey] = {
+            docIdx: it.idx, page: b.page, bbox: b.bbox,
+            content: b.content, label: b.label, originalBlockId: b.block_id,
+            pageDimensions: pageDimensions[b.page] || null,
+          };
+        });
+      }
+      showOcrProgressOverlay("OCR 完成", 100);
+      updateExtractPanel();
+      autoSaveCache();
+      return true;
+    } catch (e) {
+      if (retriesLeft > 0) {
+        return await tryExtract(engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl", retriesLeft - 1);
+      }
+      showError("OCR 提取失败: " + e.message);
+      return false;
+    }
+  }
+
+  success = await tryExtract(primaryEngine, MAX_RETRIES);
+
+  if (success) {
+    const searchInput = document.getElementById("pdf-search-input");
+    const searchBtn = document.getElementById("pdf-search-btn");
+    if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
+    if (searchBtn) searchBtn.disabled = false;
+    // Re-render PDF with block overlays, preserving scroll position
+    if (pdfViewState.active) {
+      // Save current scroll position
+      const scrollTop = readerPdfContainer.scrollTop;
+      const scrollRatio = readerPdfContainer.scrollHeight > 0 ? scrollTop / readerPdfContainer.scrollHeight : 0;
+      await renderPdfView(idx);
+      // Restore scroll position after re-render
+      requestAnimationFrame(() => {
+        const newScrollTop = Math.round(scrollRatio * readerPdfContainer.scrollHeight);
+        readerPdfContainer.scrollTop = newScrollTop;
+      });
+    }
+    // Hide OCR progress overlay
+    hideOcrProgressOverlay();
+  } else {
+    // Hide OCR progress overlay on failure too
+    hideOcrProgressOverlay();
+  }
+}
+
+// ===== PDF Translation =====
+
+function _buildBlockText(blocks, rangeLabel) {
+  const cleanOcrText = (text) => {
+    return text
+      .replace(/\$\s*\\Box\s*\$/g, '☐')
+      .replace(/\$\s*\\surd\s*\$/g, '☑')
+      .replace(/\$\s*\\§\s*(\d+)\s*\$/g, '§$1')
+      .replace(/\$\s*\\[^$]+\$/g, '')
+      .replace(/\$\{[^}]+\}/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  };
+  const typeLabels = { title: "标题", table: "表格", formula: "公式", figure: "图注", caption: "说明" };
+  const originalParts = [];
+  blocks.forEach(b => {
+    if (b.content && b.content.trim()) {
+      const cleaned = cleanOcrText(b.content);
+      if (!cleaned) return;
+      const typeHint = typeLabels[b.label];
+      if (typeHint) {
+        originalParts.push(`[${typeHint}] ${cleaned}`);
+      } else {
+        originalParts.push(cleaned);
+      }
+    }
+  });
+  return originalParts.join("\n\n");
+}
+
+async function _doTranslateBlocks(idx, blocks, targetLang, langNames, cacheKey, loadingHint) {
+  const config = window.AI.loadAIConfig();
+  const translateProvider = window.AI.getTranslateProvider(config);
+  if (!translateProvider || !translateProvider.apiKey) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">请先在设置中配置 AI 服务的 API Key</p>';
+    }
+    return;
+  }
+
+  const text = _buildBlockText(blocks);
+  if (!text.trim()) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder">选中范围内无有效文字内容</p>';
+    }
+    return;
+  }
+
+  if (translatePageCache[cacheKey]) {
+    renderTranslateContent(translatePageCache[cacheKey]);
+    return;
+  }
+
+  if (pdfTranslateContent) {
+    pdfTranslateContent.innerHTML = loadingHint || '<div class="pdf-translate-translating-hint">正在翻译，请稍候...</div>';
+  }
+  if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译中..."; pdfTranslateBtn.disabled = true; }
+  translateAbortController = new AbortController();
+
+  try {
+    const systemPrompt = `你是一个专业的专利文档翻译专家。请将以下专利文档内容翻译为${langNames[targetLang] || "中文"}。
+
+## 翻译规则
+
+1. 原文中部分段落前标有[类型]标记，表示该段落的版面类型：
+   - [标题]：文档标题、章节标题，翻译时保持简洁有力
+   - [表格]：表格内容，保持行列结构，用 | 分隔各列
+   - [公式]：数学公式或化学式，保留原始公式符号，仅翻译公式旁的文字说明
+   - [图注]：图片说明文字，简洁翻译
+   - [说明]：图表说明，准确翻译
+   - 无标记的段落为正文，逐句准确翻译，保持技术术语一致性
+
+2. 翻译时请去掉所有[类型]标记，直接输出翻译后的连续文档
+3. 保持原文的段落结构，每个段落对应一段翻译
+4. 只输出翻译结果，不要添加任何解释或注释
+5. 如果原文已经是目标语言，则直接返回原文
+6. 专利技术术语请使用该领域的标准译法
+7. 原文中的☐表示空复选框，☑表示已勾选复选框，§表示条款号，请保留这些符号
+8. 请将所有页面的内容整合翻译，输出完整连贯的译文`;
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: text },
+    ];
+
+    let fullResponse = "";
+    let _rafPending = false;
+    if (pdfTranslateContent) pdfTranslateContent.innerHTML = '<div class="pdf-translate-result"></div>';
+    const translateContainer = pdfTranslateContent ? pdfTranslateContent.querySelector(".pdf-translate-result") : null;
+    const stream = window.AI.streamChat(translateProvider.type, translateProvider.apiKey, translateProvider.baseUrl, {
+      model: translateProvider.model,
+      messages: messages,
+      temperature: 0.1,
+      maxTokens: 16384,
+    }, translateAbortController.signal);
+
+    for await (const chunk of stream) {
+      if (translateAbortController.signal.aborted) break;
+      if (chunk.content) {
+        fullResponse += chunk.content;
+        if (!_rafPending) {
+          _rafPending = true;
+          requestAnimationFrame(() => {
+            if (translateContainer) translateContainer.innerHTML = renderMarkdown(fullResponse);
+            _rafPending = false;
+          });
+        }
+      }
+    }
+    if (translateContainer) translateContainer.innerHTML = renderMarkdown(fullResponse);
+
+    translatePageCache[cacheKey] = { translated: fullResponse };
+    renderTranslateContent(translatePageCache[cacheKey]);
+
+  } catch (e) {
+    if (e.name !== "AbortError") {
+      showError("翻译出错: " + e.message);
+    }
+  } finally {
+    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译全文档"; pdfTranslateBtn.disabled = false; }
+    translateAbortController = null;
+  }
+}
+
+async function translatePdfPage() {
+  const idx = pdfViewState.currentDocIdx;
+  if (idx == null) {
+    showError("请先选择一个文档");
+    return;
+  }
+
+  if (pdfTranslatePanel) pdfTranslatePanel.classList.remove("hidden");
+  enterReadingMode("translate");
+  if (pdfTranslateContent) {
+    pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">准备中...</p>';
+  }
+
+  let extraction = kanbanState.extractions[idx];
+  if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
+    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "OCR中..."; pdfTranslateBtn.disabled = true; }
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">正在 OCR 提取文字，请稍候...</p>';
+    }
+    await ocrPdf();
+    extraction = kanbanState.extractions[idx];
+    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译中..."; pdfTranslateBtn.disabled = true; }
+    if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
+      if (pdfTranslateContent) {
+        pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">OCR 提取失败，无法翻译</p>';
+      }
+      if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译全文档"; pdfTranslateBtn.disabled = false; }
+      return;
+    }
+  }
+
+  const config = window.AI.loadAIConfig();
+  const translateProvider = window.AI.getTranslateProvider(config);
+  if (!translateProvider || !translateProvider.apiKey) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">请先在设置中配置 AI 服务的 API Key</p>';
+    }
+    if (pdfTranslateBtn) { pdfTranslateBtn.textContent = "翻译全文档"; pdfTranslateBtn.disabled = false; }
+    return;
+  }
+
+  const targetLang = pdfTranslateLang ? pdfTranslateLang.value : (config.translate && config.translate.defaultLang) || "zh";
+  const langNames = { zh: "中文", en: "English", ja: "日本語", ko: "한국어" };
+
+  const allBlocks = extraction.blocks || [];
+  if (allBlocks.length === 0) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder">当前文档无 OCR 文字内容</p>';
+    }
+    return;
+  }
+
+  const cacheKey = `${idx}_${targetLang}_full`;
+  await _doTranslateBlocks(idx, allBlocks, targetLang, langNames, cacheKey, '<div class="pdf-translate-translating-hint">正在翻译全文，请稍候...</div>');
+}
+
+async function translateSelectedBlocks() {
+  const idx = pdfViewState.currentDocIdx;
+  if (idx == null) {
+    showError("请先选择一个文档");
+    return;
+  }
+
+  if (pdfViewState.selectedBlockIds.length === 0) {
+    showError("请先在 PDF 中选中要翻译的文本块");
+    return;
+  }
+
+  if (pdfTranslatePanel) pdfTranslatePanel.classList.remove("hidden");
+  enterReadingMode("translate");
+  if (pdfTranslateContent) {
+    pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">准备中...</p>';
+  }
+
+  let extraction = kanbanState.extractions[idx];
+  if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;">正在 OCR 提取文字，请稍候...</p>';
+    }
+    await ocrPdf();
+    extraction = kanbanState.extractions[idx];
+    if (!extraction || !extraction.blocks || extraction.blocks.length === 0) {
+      if (pdfTranslateContent) {
+        pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">OCR 提取失败，无法翻译</p>';
+      }
+      return;
+    }
+  }
+
+  const config = window.AI.loadAIConfig();
+  const translateProvider = window.AI.getTranslateProvider(config);
+  if (!translateProvider || !translateProvider.apiKey) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder" style="text-align:center;padding:40px 0;color:var(--danger);">请先在设置中配置 AI 服务的 API Key</p>';
+    }
+    return;
+  }
+
+  const targetLang = pdfTranslateLang ? pdfTranslateLang.value : (config.translate && config.translate.defaultLang) || "zh";
+  const langNames = { zh: "中文", en: "English", ja: "日本語", ko: "한국어" };
+
+  // 按 block 出现顺序保留选中的 blocks
+  const idSet = new Set(pdfViewState.selectedBlockIds);
+  const selectedBlocks = (extraction.blocks || []).filter(b => idSet.has(b.block_id));
+  if (selectedBlocks.length === 0) {
+    if (pdfTranslateContent) {
+      pdfTranslateContent.innerHTML = '<p class="placeholder">选中的文本块无有效内容</p>';
+    }
+    return;
+  }
+
+  const sortedIds = pdfViewState.selectedBlockIds.slice().sort().join(",");
+  const cacheKey = `${idx}_${targetLang}_sel_${sortedIds}`;
+  const loadingHint = `<div class="pdf-translate-translating-hint">正在翻译已选 ${selectedBlocks.length} 个文本块，请稍候...</div>`;
+  await _doTranslateBlocks(idx, selectedBlocks, targetLang, langNames, cacheKey, loadingHint);
+}
+
+function renderTranslateContent(data) {
+  if (!pdfTranslateContent) return;
+  pdfTranslateContent.innerHTML = `<div class="pdf-translate-result">${renderMarkdown(data.translated)}</div>`;
+  pdfTranslateContent.scrollTop = 0;
+}
+
+// ===== Reading Mode Management =====
+
+function enterReadingMode(activePanel) {
+  const readerBody = document.querySelector(".reader-body");
+  const rightPanel = document.getElementById("reader-right-panel");
+  if (readerBody) readerBody.classList.add("reading-mode");
+  if (rightPanel) rightPanel.classList.remove("hidden");
+  // Tuck floating ball to the right when panel is open
+  if (readerFloatingBall) readerFloatingBall.classList.add("tucked");
+  // Switch to the specified panel tab
+  if (activePanel) {
+    switchRightPanelTab(activePanel);
+  }
+}
+
+function exitReadingMode() {
+  const readerBody = document.querySelector(".reader-body");
+  const rightPanel = document.getElementById("reader-right-panel");
+  const extractPanel = document.getElementById("reader-extract-panel");
+  const translatePanel = document.getElementById("pdf-translate-panel");
+  const chatPanel = document.getElementById("reader-chat-panel");
+  // Hide all panels
+  if (extractPanel) extractPanel.classList.add("hidden");
+  if (translatePanel) translatePanel.classList.add("hidden");
+  if (chatPanel) chatPanel.classList.add("hidden");
+  if (readerBody) readerBody.classList.remove("reading-mode");
+  // Restore floating ball position
+  if (readerFloatingBall) readerFloatingBall.classList.remove("tucked");
+  if (rightPanel) rightPanel.classList.add("hidden");
+  // Deactivate chat toggle button
+  if (readerChatToggle) readerChatToggle.classList.remove("active");
+}
+
+function switchRightPanelTab(panelName) {
+  const extractPanel = document.getElementById("reader-extract-panel");
+  const translatePanel = document.getElementById("pdf-translate-panel");
+  const chatPanel = document.getElementById("reader-chat-panel");
+  const tabs = document.querySelectorAll(".right-panel-tab");
+
+  // Update tab active states
+  tabs.forEach(tab => {
+    tab.classList.toggle("active", tab.dataset.panel === panelName);
+  });
+
+  // Show/hide panels
+  if (extractPanel) extractPanel.classList.add("hidden");
+  if (translatePanel) translatePanel.classList.add("hidden");
+  if (chatPanel) chatPanel.classList.add("hidden");
+
+  if (panelName === "extract") {
+    if (extractPanel) extractPanel.classList.remove("hidden");
+    updateExtractPanel();
+  } else if (panelName === "translate") {
+    if (translatePanel) translatePanel.classList.remove("hidden");
+  } else if (panelName === "chat") {
+    if (chatPanel) chatPanel.classList.remove("hidden");
+  }
+}
+
+// Update the extract panel content for the current document
+function updateExtractPanel() {
+  const contentEl = document.getElementById("reader-extract-content");
+  if (!contentEl) return;
+  const idx = pdfViewState.currentDocIdx;
+  const ext = kanbanState.extractions ? kanbanState.extractions[idx] : null;
+  if (!ext || (!ext.text && !ext.markdown)) {
+    contentEl.innerHTML = '<p class="placeholder">该文档尚未进行 OCR 提取</p>';
+    return;
+  }
+  const text = ext.markdown || ext.text || "";
+  if (!text.trim()) {
+    contentEl.innerHTML = '<p class="placeholder">该文档尚未进行 OCR 提取</p>';
+    return;
+  }
+  // Show blocks info if available
+  let blocksInfo = "";
+  if (ext.blocks && ext.blocks.length > 0) {
+    blocksInfo = `<div class="extract-blocks-info">共 ${ext.blocks.length} 个文本块</div>`;
+  }
+  contentEl.innerHTML = blocksInfo + '<pre class="extract-pre">' + escapeHtml(text) + '</pre>';
+}
+
+// ===== Open reader for specific document from kanban =====
+
+function openReaderForDoc(idx, defaultToPdf) {
+  // Set the correct doc index before opening to avoid rendering the wrong document
+  pdfViewState.currentDocIdx = idx;
+  openReader(defaultToPdf, true); // skipRender=true — selectReaderDoc will handle the render
+  // Select the document after reader opens
+  setTimeout(() => {
+    selectReaderDoc(idx);
+    if (defaultToPdf && !pdfViewState.active) {
+      togglePdfView();
+    }
+  }, 100);
 }
 
 // ============ 浏览器插件数据处理 ============
@@ -2901,8 +4757,10 @@ function handleExtensionAnalyze(data) {
   // 流式分析
   const readerContent = document.getElementById("reader-content");
   if (readerContent) {
-    readerContent.innerHTML = "<h3>AI 分析中...</h3>";
+    readerContent.innerHTML = '<div class="markdown-body"></div>';
+    const streamContainer = readerContent.querySelector(".markdown-body");
     let fullContent = "";
+    let _rafPending = false;
 
     AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
       model: provider.model,
@@ -2912,9 +4770,16 @@ function handleExtensionAnalyze(data) {
       for await (const chunk of stream) {
         if (chunk.content) {
           fullContent += chunk.content;
-          readerContent.innerHTML = marked.parse(fullContent);
+          if (!_rafPending) {
+            _rafPending = true;
+            requestAnimationFrame(() => {
+              if (streamContainer) streamContainer.innerHTML = marked.parse(fullContent);
+              _rafPending = false;
+            });
+          }
         }
       }
+      if (streamContainer) streamContainer.innerHTML = marked.parse(fullContent);
     }).catch((err) => {
       readerContent.innerHTML = `<p class="error">分析失败: ${err.message}</p>`;
     });
@@ -2953,7 +4818,98 @@ async function exportToWord() {
     return;
   }
 
-  // Parse markdown table helper
+  // Load logo image for header
+  let logoBase64 = null;
+  try {
+    const logoResp = await fetch("PATENTLENSNEWLOGO.png");
+    if (logoResp.ok) {
+      const logoBlob = await logoResp.blob();
+      logoBase64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result.split(",")[1]);
+        reader.readAsDataURL(logoBlob);
+      });
+    }
+  } catch (e) {
+    // Logo loading failed, continue without it
+  }
+
+  // ── Inline markdown parser (recursive) ──
+  function parseInlineMarkdown(text) {
+    const runs = [];
+    let remaining = text;
+    while (remaining.length > 0) {
+      // Bold **text**
+      let m = remaining.match(/^(.*?)\*\*(.+?)\*\*(.*)/s);
+      if (m) {
+        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
+        runs.push(new docx.TextRun({ text: m[2], bold: true, size: 20, font: "Microsoft YaHei" }));
+        remaining = m[3];
+        continue;
+      }
+      // Italic *text*
+      m = remaining.match(/^(.*?)\*([^*]+?)\*(.*)/s);
+      if (m) {
+        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
+        runs.push(new docx.TextRun({ text: m[2], italics: true, size: 20, font: "Microsoft YaHei" }));
+        remaining = m[3];
+        continue;
+      }
+      // Code `text`
+      m = remaining.match(/^(.*?)`([^`]+?)`(.*)/s);
+      if (m) {
+        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
+        runs.push(new docx.TextRun({ text: m[2], size: 18, font: "Consolas", shading: { fill: "f0f0f0" } }));
+        remaining = m[3];
+        continue;
+      }
+      // Trace marks 【来源: ...】
+      m = remaining.match(/^(.*?)【来源:\s*([^】]+)】(.*)/s);
+      if (m) {
+        if (m[1]) runs.push(...parseInlineMarkdown(m[1]));
+        // Convert trace IDs to readable format
+        const ids = m[2].split(",").map(s => s.trim());
+        const readableIds = [];
+        let currentDoc = null;
+        let currentPage = null;
+        let rangeStart = null;
+        let rangeEnd = null;
+        ids.forEach(id => {
+          const trace = kanbanState.traceIndex[id];
+          if (trace) {
+            const doc = kanbanState.documents.find(d => d.idx === trace.docIdx);
+            const docName = doc ? doc.name : "";
+            if (docName !== currentDoc || trace.page !== currentPage) {
+              if (currentDoc !== null && rangeStart !== null) {
+                readableIds.push(`${currentDoc} 第${currentPage}页§${rangeStart}${rangeEnd !== rangeStart ? "-" + rangeEnd : ""}`);
+              }
+              currentDoc = docName;
+              currentPage = trace.page;
+              const blockMatch = id.match(/B_p\d+_(\d+)/);
+              rangeStart = blockMatch ? parseInt(blockMatch[1]) : 0;
+              rangeEnd = rangeStart;
+            } else {
+              const blockMatch = id.match(/B_p\d+_(\d+)/);
+              if (blockMatch) rangeEnd = parseInt(blockMatch[1]);
+            }
+          }
+        });
+        if (currentDoc !== null && rangeStart !== null) {
+          readableIds.push(`${currentDoc} 第${currentPage}页§${rangeStart}${rangeEnd !== rangeStart ? "-" + rangeEnd : ""}`);
+        }
+        const label = readableIds.length > 0 ? readableIds.join("; ") : m[2];
+        runs.push(new docx.TextRun({ text: `[来源: ${label}]`, italics: true, size: 18, color: "4A90D9", font: "Microsoft YaHei" }));
+        remaining = m[3];
+        continue;
+      }
+      // No more patterns, push rest as plain text
+      runs.push(new docx.TextRun({ text: remaining, size: 20, font: "Microsoft YaHei" }));
+      remaining = "";
+    }
+    return runs;
+  }
+
+  // ── Parse markdown table ──
   function parseMarkdownTable(lines, startIdx) {
     const tableLines = [];
     let i = startIdx;
@@ -2963,47 +4919,107 @@ async function exportToWord() {
     }
     if (tableLines.length < 2) return { elements: [], nextIdx: i };
 
-    // Parse header
     const headerCells = tableLines[0].split("|").map(c => c.trim()).filter(c => c);
-    // Skip separator line (line with ---)
     const dataStartIdx = (tableLines.length > 1 && tableLines[1].match(/^\|[\s\-:|]+\|$/)) ? 2 : 1;
 
     const rows = [];
-    // Header row
     rows.push(headerCells.map(cell => new docx.TableCell({
-      children: [new docx.Paragraph({ children: [new docx.TextRun({ text: cell, bold: true, size: 20, font: "Microsoft YaHei" })] })],
+      children: [new docx.Paragraph({ children: [new docx.TextRun({ text: cell.replace(/\*+/g, ""), bold: true, size: 20, font: "Microsoft YaHei" })] })],
       shading: { fill: "2e3348" },
     })));
 
-    // Data rows
     for (let r = dataStartIdx; r < tableLines.length; r++) {
       const cells = tableLines[r].split("|").map(c => c.trim()).filter(c => c);
-      rows.push(cells.map(cell => {
-        // Handle bold text in cells
-        const boldParts = cell.split(/\*\*(.*?)\*\*/g);
-        const runs = boldParts.map((part, j) => {
-          if (j % 2 === 1) return new docx.TextRun({ text: part, bold: true, size: 18, font: "Microsoft YaHei" });
-          return new docx.TextRun({ text: part, size: 18, font: "Microsoft YaHei" });
-        });
-        return new docx.TableCell({
-          children: [new docx.Paragraph({ children: runs })],
-        });
-      }));
+      rows.push(cells.map(cell => new docx.TableCell({
+        children: [new docx.Paragraph({ children: parseInlineMarkdown(cell) })],
+      })));
     }
 
     const table = new docx.Table({
       rows: rows.map(cells => new docx.TableRow({ children: cells })),
       width: { size: 100, type: docx.WidthType.PERCENTAGE },
     });
-
     return { elements: [table], nextIdx: i };
   }
 
-  const items = kanbanState.documents;
-  const importantTypes = ["office_action", "response", "allowance"];
-  const exportItems = items ? items.filter(it => importantTypes.indexOf(it.type) !== -1) : [];
+  // ── Process markdown lines with full support ──
+  function processMarkdownLines(lines) {
+    const elements = [];
+    let i = 0;
+    while (i < lines.length) {
+      const trimmed = lines[i].trim();
+      if (!trimmed) {
+        elements.push(new docx.Paragraph({ children: [] }));
+        i++;
+        continue;
+      }
+      // Table
+      if (trimmed.startsWith("|") && trimmed.includes("|")) {
+        const { elements: tableEls, nextIdx } = parseMarkdownTable(lines, i);
+        tableEls.forEach(el => elements.push(el));
+        i = nextIdx;
+        continue;
+      }
+      // Headings (clean * from heading text)
+      if (trimmed.startsWith("#### ")) {
+        elements.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(5).replace(/\*+/g, ""), bold: true, size: 21, font: "Microsoft YaHei" })],
+          spacing: { before: 100, after: 50 },
+        }));
+      } else if (trimmed.startsWith("### ")) {
+        elements.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(4).replace(/\*+/g, ""), bold: true, size: 22, font: "Microsoft YaHei" })],
+          spacing: { before: 120, after: 60 },
+        }));
+      } else if (trimmed.startsWith("## ")) {
+        elements.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(3).replace(/\*+/g, ""), bold: true, size: 24, font: "Microsoft YaHei" })],
+          spacing: { before: 160, after: 80 },
+        }));
+      } else if (trimmed.startsWith("# ")) {
+        elements.push(new docx.Paragraph({
+          children: [new docx.TextRun({ text: trimmed.slice(2).replace(/\*+/g, ""), bold: true, size: 28, font: "Microsoft YaHei" })],
+          spacing: { before: 200, after: 100 },
+        }));
+      } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+        elements.push(new docx.Paragraph({
+          children: parseInlineMarkdown(trimmed.slice(2)),
+          bullet: { level: 0 },
+        }));
+      } else if (/^\d+\.\s/.test(trimmed)) {
+        const text = trimmed.replace(/^\d+\.\s/, "");
+        elements.push(new docx.Paragraph({
+          children: parseInlineMarkdown(text),
+          numbering: { reference: "ordered-list", level: 0 },
+        }));
+      } else {
+        elements.push(new docx.Paragraph({
+          children: parseInlineMarkdown(trimmed),
+          spacing: { after: 60 },
+        }));
+      }
+      i++;
+    }
+    return elements;
+  }
 
   const children = [];
+
+  // ── Logo + Title ──
+  if (logoBase64) {
+    children.push(
+      new docx.Paragraph({
+        children: [
+          new docx.ImageRun({
+            data: Uint8Array.from(atob(logoBase64), c => c.charCodeAt(0)),
+            transformation: { width: 60, height: 60 },
+            type: "png",
+          }),
+        ],
+        spacing: { after: 100 },
+      })
+    );
+  }
 
   children.push(
     new docx.Paragraph({
@@ -3012,108 +5028,197 @@ async function exportToWord() {
     })
   );
 
+  // ── Patent overview table ──
   if (currentData) {
-    const info = `专利号: ${currentData.docNumber || ""} | 申请号: ${currentData.applicationNumber || ""} | 申请人: ${currentData.applicantName || ""}`;
     children.push(
       new docx.Paragraph({
-        children: [new docx.TextRun({ text: info, size: 20, color: "666666", font: "Microsoft YaHei" })],
-        spacing: { after: 400 },
-      })
-    );
-  }
-
-  if (kanbanState.analysis) {
-    children.push(
-      new docx.Paragraph({
-        children: [new docx.TextRun({ text: "审查历史综合分析", bold: true, size: 28, font: "Microsoft YaHei" })],
+        children: [new docx.TextRun({ text: "专利概览", bold: true, size: 26, font: "Microsoft YaHei" })],
         spacing: { before: 200, after: 100 },
       })
     );
 
-    const lines = kanbanState.analysis.split("\n");
-    let i = 0;
-    while (i < lines.length) {
-      const trimmed = lines[i].trim();
-      if (!trimmed) {
-        children.push(new docx.Paragraph({ children: [] }));
-        i++;
-        continue;
-      }
-      // Check for markdown table
-      if (trimmed.startsWith("|") && trimmed.includes("|")) {
-        const { elements, nextIdx } = parseMarkdownTable(lines, i);
-        elements.forEach(el => children.push(el));
-        i = nextIdx;
-        continue;
-      }
-      if (trimmed.startsWith("# ")) {
-        children.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(2), bold: true, size: 28, font: "Microsoft YaHei" })],
-          spacing: { before: 200, after: 100 },
-        }));
-      } else if (trimmed.startsWith("## ")) {
-        children.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(3), bold: true, size: 24, font: "Microsoft YaHei" })],
-          spacing: { before: 160, after: 80 },
-        }));
-      } else if (trimmed.startsWith("### ")) {
-        children.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(4), bold: true, size: 22, font: "Microsoft YaHei" })],
-          spacing: { before: 120, after: 60 },
-        }));
-      } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-        children.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: trimmed.slice(2), size: 20, font: "Microsoft YaHei" })],
-          bullet: { level: 0 },
-        }));
-      } else {
-        const boldParts = trimmed.split(/\*\*(.*?)\*\*/g);
-        const runs = boldParts.map((part, idx) => {
-          if (idx % 2 === 1) {
-            return new docx.TextRun({ text: part, bold: true, size: 20, font: "Microsoft YaHei" });
+    const overviewRows = [];
+    const addRow = (label, value) => {
+      overviewRows.push(new docx.TableRow({
+        children: [
+          new docx.TableCell({
+            children: [new docx.Paragraph({ children: [new docx.TextRun({ text: label, bold: true, size: 20, font: "Microsoft YaHei" })] })],
+            shading: { fill: "f0f0f0" },
+            width: { size: 25, type: docx.WidthType.PERCENTAGE },
+          }),
+          new docx.TableCell({
+            children: [new docx.Paragraph({ children: [new docx.TextRun({ text: value || "-", size: 20, font: "Microsoft YaHei" })] })],
+          }),
+        ],
+      }));
+    };
+
+    addRow("专利号", currentData.docNumber || "");
+    addRow("申请号", currentData.applicationNumber || "");
+    addRow("申请局", OFFICE_NAMES[currentData.office] || currentData.office || "");
+
+    // Get title, inventor, dates from family data (same logic as renderOverview)
+    let title = "";
+    let inventors = "";
+    let applicants = "";
+    let filingDate = "";
+    let publicationDate = "";
+    let priorityDate = "";
+    let ipcClasses = "";
+    let cpcClasses = "";
+    let legalStatus = "";
+
+    if (currentData.family) {
+      const members = extractFamilyMembers(currentData.family);
+      if (members.length > 0) {
+        let m = members.find(mem => mem.countryCode === currentData.office) || members[0];
+        const dl = m.docList || {};
+        title = m.title || dl.title || m.inventionTitle || "";
+        const applicantNamesArr = m.applicantNames || dl.applicantNames || [];
+        const namesStr = Array.isArray(applicantNamesArr) ? applicantNamesArr.join(", ") : (applicantNamesArr || "");
+        if (currentData.office === "US") {
+          inventors = namesStr || m.inventors || m.inventorName || "";
+        } else {
+          applicants = namesStr || m.applicants || m.applicantName || "";
+          inventors = m.inventors || m.inventorName || "";
+        }
+        filingDate = m.appDateStr || m.filingDate || m.applicationDate || "";
+        if (!filingDate && m.appDate) {
+          try { filingDate = new Date(m.appDate).toLocaleDateString("en-US"); } catch(e) {}
+        }
+        if (m.pubList && Array.isArray(m.pubList) && m.pubList.length > 0) {
+          publicationDate = m.pubList[0].pubDateStr || "";
+          if (!publicationDate && m.pubList[0].pubDate) {
+            try { publicationDate = new Date(m.pubList[0].pubDate).toLocaleDateString("en-US"); } catch(e2) {}
           }
-          return new docx.TextRun({ text: part, size: 20, font: "Microsoft YaHei" });
-        });
-        children.push(new docx.Paragraph({ children: runs, spacing: { after: 60 } }));
+        }
+        publicationDate = publicationDate || m.publicationDate || m.pubDate || "";
+        if (m.docNum && m.docNum.date) {
+          priorityDate = m.docNum.date;
+        }
+        if (!priorityDate && m.priorityClaimList && Array.isArray(m.priorityClaimList) && m.priorityClaimList.length > 0) {
+          priorityDate = m.priorityClaimList[0].date || "";
+        }
+        ipcClasses = m.ipc || m.ipcClass || m.classification || "";
+        if (Array.isArray(ipcClasses)) ipcClasses = ipcClasses.join(", ");
+        cpcClasses = m.cpcClass || m.cpc || "";
+        if (Array.isArray(cpcClasses)) cpcClasses = cpcClasses.join(", ");
+        const docItems = kanbanState.documents || [];
+        const hasAllowance = docItems.some(it => it.type === "allowance");
+        const hasOA = docItems.some(it => it.type === "office_action");
+        const hasResponse = docItems.some(it => it.type === "response");
+        if (hasAllowance) {
+          legalStatus = "已授权 (Granted)";
+        } else if (hasOA && !hasResponse) {
+          legalStatus = "待答复 (Pending Response)";
+        } else if (hasOA && hasResponse) {
+          legalStatus = "审查中 (Under Examination)";
+        } else {
+          legalStatus = m.legalStatus || m.status || "";
+        }
       }
-      i++;
     }
+
+    addRow("标题", title);
+    addRow("发明人", inventors);
+    addRow("申请人", applicants);
+    addRow("申请日", filingDate);
+    addRow("公开日", publicationDate);
+    if (priorityDate) addRow("优先权日", priorityDate);
+    if (ipcClasses) addRow("IPC分类", ipcClasses);
+    if (cpcClasses) addRow("CPC分类", cpcClasses);
+    if (legalStatus) addRow("法律状态", legalStatus);
+
+    children.push(new docx.Table({
+      rows: overviewRows,
+      width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    }));
   }
 
-  children.push(
-    new docx.Paragraph({
-      children: [new docx.TextRun({ text: "审查文档详情", bold: true, size: 28, font: "Microsoft YaHei" })],
-      spacing: { before: 400, after: 100 },
-    })
-  );
-
-  for (const it of exportItems) {
+  // ── Timeline table ──
+  if (currentData && kanbanState.documents && kanbanState.documents.length > 0) {
     children.push(
       new docx.Paragraph({
-        children: [new docx.TextRun({ text: `${it.docCode} - ${it.name}（${it.date}）`, bold: true, size: 22, font: "Microsoft YaHei" })],
-        spacing: { before: 200, after: 60 },
+        children: [new docx.TextRun({ text: "审查时间线", bold: true, size: 26, font: "Microsoft YaHei" })],
+        spacing: { before: 300, after: 100 },
       })
     );
 
-    const ext = kanbanState.extractions[it.idx];
-    if (ext) {
-      const content = ext.markdown || ext.text || "";
-      const contentLines = content.split("\n").slice(0, 100);
-      for (const line of contentLines) {
-        children.push(new docx.Paragraph({
-          children: [new docx.TextRun({ text: line, size: 18, font: "Microsoft YaHei" })],
-          spacing: { after: 30 },
-        }));
-      }
-    } else {
-      children.push(new docx.Paragraph({
-        children: [new docx.TextRun({ text: "（未提取内容）", italics: true, size: 18, color: "999999", font: "Microsoft YaHei" })],
+    const tlHeader = ["序号", "日期", "文档代码", "文档名称", "类型", "阶段"].map(h =>
+      new docx.TableCell({
+        children: [new docx.Paragraph({ children: [new docx.TextRun({ text: h, bold: true, size: 18, color: "FFFFFF", font: "Microsoft YaHei" })] })],
+        shading: { fill: "2e3348" },
+      })
+    );
+    const tlRows = [new docx.TableRow({ children: tlHeader })];
+
+    const sortedDocs = [...kanbanState.documents].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    sortedDocs.forEach((it, idx) => {
+      const typeNames = { "office_action": "审查意见", "response": "答复", "request": "请求", "allowance": "授权", "notification": "通知", "misc": "其他" };
+      tlRows.push(new docx.TableRow({
+        children: [
+          new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(idx + 1), size: 18, font: "Microsoft YaHei" })] })] }),
+          new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: it.date || "", size: 18, font: "Microsoft YaHei" })] })] }),
+          new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: it.docCode || "", size: 18, font: "Microsoft YaHei" })] })] }),
+          new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: it.name || "", size: 18, font: "Microsoft YaHei" })] })] }),
+          new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: typeNames[it.type] || it.type || "", size: 18, font: "Microsoft YaHei" })] })] }),
+          new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: it.stage || "", size: 18, font: "Microsoft YaHei" })] })] }),
+        ],
       }));
-    }
+    });
+
+    children.push(new docx.Table({
+      rows: tlRows,
+      width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    }));
   }
 
+  // ── AI Analysis content ──
+  if (kanbanState.analysis) {
+    children.push(
+      new docx.Paragraph({
+        children: [new docx.TextRun({ text: "审查历史综合分析", bold: true, size: 28, font: "Microsoft YaHei" })],
+        spacing: { before: 300, after: 100 },
+      })
+    );
+
+    const analysisLines = kanbanState.analysis.split("\n");
+    const analysisElements = processMarkdownLines(analysisLines);
+    analysisElements.forEach(el => children.push(el));
+  }
+
+  // ── Create document with header ──
+  const headerChildren = [];
+  if (logoBase64) {
+    headerChildren.push(
+      new docx.ImageRun({
+        data: Uint8Array.from(atob(logoBase64), c => c.charCodeAt(0)),
+        transformation: { width: 18, height: 18 },
+        type: "png",
+      })
+    );
+    headerChildren.push(new docx.TextRun({ text: "  ", size: 16 }));
+  }
+  headerChildren.push(new docx.TextRun({ text: "由PatentLens工具制作", italics: true, size: 16, color: "999999", font: "Microsoft YaHei" }));
+
   const doc = new docx.Document({
-    sections: [{ children }],
+    sections: [{
+      headers: {
+        default: new docx.Header({
+          children: [new docx.Paragraph({
+            alignment: docx.AlignmentType.RIGHT,
+            children: headerChildren,
+          })],
+        }),
+      },
+      children,
+    }],
+    numbering: {
+      config: [{
+        reference: "ordered-list",
+        levels: [{ level: 0, format: docx.LevelFormat.DECIMAL, text: "%1.", alignment: docx.AlignmentType.START }],
+      }],
+    },
   });
 
   const blob = await docx.Packer.toBlob(doc);
@@ -3122,27 +5227,44 @@ async function exportToWord() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  loadAISettingsToForm();
-  refreshHistoryList();
-
-  // ── 历史侧边栏展开/收起 ──
-  const historySidebar = document.getElementById("history-sidebar");
-  const historyToggle = historySidebar ? historySidebar.querySelector(".history-sidebar-toggle") : null;
-  if (historyToggle && historySidebar) {
-    historyToggle.addEventListener("click", () => {
-      historySidebar.classList.toggle("collapsed");
+  // Theme toggle
+  const themeToggleBtn = document.getElementById("theme-toggle-btn");
+  const savedTheme = localStorage.getItem("patentlens-theme") || "dark";
+  document.documentElement.setAttribute("data-theme", savedTheme);
+  function updateThemeIcon(theme) {
+    const darkIcon = themeToggleBtn ? themeToggleBtn.querySelector(".theme-icon-dark") : null;
+    const lightIcon = themeToggleBtn ? themeToggleBtn.querySelector(".theme-icon-light") : null;
+    if (darkIcon && lightIcon) {
+      darkIcon.style.display = theme === "dark" ? "" : "none";
+      lightIcon.style.display = theme === "light" ? "" : "none";
+    }
+  }
+  updateThemeIcon(savedTheme);
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme") || "dark";
+      const next = current === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      localStorage.setItem("patentlens-theme", next);
+      updateThemeIcon(next);
     });
   }
+
+  loadAISettingsToForm();
 
   // ── 监听浏览器插件发送的数据（通过 Electron 主进程注入） ──
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     if (event.data && event.data.type === "extension-data") {
       console.log("[Extension] 收到插件数据:", event.data.payload);
+      const appEl = document.getElementById("app");
+      if (appEl) appEl.classList.remove("home-mode");
       handleExtensionData(event.data.payload);
     }
     if (event.data && event.data.type === "extension-analyze") {
       console.log("[Extension] 收到分析请求:", event.data.payload);
+      const appEl = document.getElementById("app");
+      if (appEl) appEl.classList.remove("home-mode");
       handleExtensionAnalyze(event.data.payload);
     }
   });
@@ -3173,6 +5295,8 @@ document.addEventListener("DOMContentLoaded", () => {
         downloadDocument(btn.dataset.url, btn.dataset.filename);
       } else if (action === "kanban-extract") {
         kanbanManualExtract(btn.dataset.url, parseInt(btn.dataset.idx), btn.dataset.doctype);
+      } else if (action === "kanban-view-pdf") {
+        openReaderForDoc(parseInt(btn.dataset.idx), true);
       } else if (action === "ai-analyze-doc") {
         aiAnalyzeDocument(parseInt(btn.dataset.idx), btn.dataset.doctype);
       }
@@ -3186,19 +5310,32 @@ document.addEventListener("DOMContentLoaded", () => {
   if (readerCloseBtn) {
     readerCloseBtn.addEventListener("click", () => {
       readerModal.classList.add("hidden");
-      if (readerFloatingBall) readerFloatingBall.classList.add("hidden");
+      // Update floating ball: show "open reader" icon
+      if (readerFloatingBall) {
+        readerFloatingBall.classList.remove("hidden");
+        const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
+        const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
+        readerFloatingBall.title = "点击打开阅读器";
+        if (iconOpen) iconOpen.classList.remove("hidden");
+        if (iconBack) iconBack.classList.add("hidden");
+      }
       // Reset PDF view state when closing
       if (pdfViewState.active) {
         pdfViewState.active = false;
         readerPdfView.classList.add("hidden");
         readerContent.classList.remove("hidden");
-        readerPdfToggle.classList.remove("active");
-        readerPdfToggle.textContent = "PDF 视图";
+        if (readerPdfToggle) {
+          readerPdfToggle.classList.remove("active");
+          readerPdfToggle.textContent = "PDF 视图";
+        }
       }
       pdfViewState.pdfDoc = null;
       pdfViewState.renderedPages = {};
       pdfViewState.pendingHighlight = null;
       pdfViewState.pendingHighlightRange = null;
+      pdfViewState.selectedBlockIds = [];
+      pdfViewState.selecting = false;
+      pdfViewState.traceJumpPending = false;
       // Reset docked state
       const content = document.querySelector(".reader-modal-content");
       if (content) content.classList.remove("docked");
@@ -3209,31 +5346,56 @@ document.addEventListener("DOMContentLoaded", () => {
       if (readerChatToggle) readerChatToggle.classList.remove("active");
       chatHistory = [];
       if (chatMessages) chatMessages.innerHTML = "";
+      // Exit reading mode
+      exitReadingMode();
     });
   }
 
   if (readerModal) {
     readerModal.querySelector(".modal-overlay").addEventListener("click", () => {
       const content = document.querySelector(".reader-modal-content");
+      // Exit reading mode first (removes tucked, hides right panel)
+      exitReadingMode();
       if (content && content.classList.contains("docked")) {
         // In docked mode, minimize to floating ball instead of closing
         readerModal.classList.add("hidden");
-        if (readerFloatingBall) readerFloatingBall.classList.remove("hidden");
+        // Update floating ball: show "open reader" icon
+        if (readerFloatingBall) {
+          readerFloatingBall.classList.remove("hidden");
+          const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
+          const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
+          readerFloatingBall.title = "点击打开阅读器";
+          if (iconOpen) iconOpen.classList.remove("hidden");
+          if (iconBack) iconBack.classList.add("hidden");
+        }
       } else {
         // Full screen mode, close fully
         readerModal.classList.add("hidden");
-        if (readerFloatingBall) readerFloatingBall.classList.add("hidden");
+        // Update floating ball: show "open reader" icon
+        if (readerFloatingBall) {
+          readerFloatingBall.classList.remove("hidden");
+          const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
+          const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
+          readerFloatingBall.title = "点击打开阅读器";
+          if (iconOpen) iconOpen.classList.remove("hidden");
+          if (iconBack) iconBack.classList.add("hidden");
+        }
         if (pdfViewState.active) {
           pdfViewState.active = false;
           readerPdfView.classList.add("hidden");
           readerContent.classList.remove("hidden");
-          readerPdfToggle.classList.remove("active");
-          readerPdfToggle.textContent = "PDF 视图";
+          if (readerPdfToggle) {
+            readerPdfToggle.classList.remove("active");
+            readerPdfToggle.textContent = "PDF 视图";
+          }
         }
         pdfViewState.pdfDoc = null;
         pdfViewState.renderedPages = {};
         pdfViewState.pendingHighlight = null;
         pdfViewState.pendingHighlightRange = null;
+        pdfViewState.selectedBlockIds = [];
+        pdfViewState.selecting = false;
+        pdfViewState.traceJumpPending = false;
         if (content) content.classList.remove("docked");
         if (readerFullscreenBtn) readerFullscreenBtn.classList.add("hidden");
         if (readerDockBtn) readerDockBtn.classList.remove("hidden");
@@ -3266,28 +5428,28 @@ document.addEventListener("DOMContentLoaded", () => {
     readerExportBtn.addEventListener("click", exportToWord);
   }
 
-  if (readerPdfToggle) {
-    readerPdfToggle.addEventListener("click", togglePdfView);
-  }
-
-  if (readerDockBtn) {
-    readerDockBtn.addEventListener("click", () => {
-      const content = document.querySelector(".reader-modal-content");
-      if (content) {
-        content.classList.add("docked");
-        readerDockBtn.classList.add("hidden");
-        readerFullscreenBtn.classList.remove("hidden");
-      }
-    });
-  }
-
-  if (readerFullscreenBtn) {
-    readerFullscreenBtn.addEventListener("click", () => {
-      const content = document.querySelector(".reader-modal-content");
-      if (content) {
-        content.classList.remove("docked");
-        readerFullscreenBtn.classList.add("hidden");
-        readerDockBtn.classList.remove("hidden");
+  // Sidebar toggle
+  const readerSidebarToggle = document.getElementById("reader-sidebar-toggle");
+  const readerSidebar = document.getElementById("reader-sidebar");
+  const readerMain = document.querySelector(".reader-main");
+  if (readerSidebarToggle && readerSidebar) {
+    readerSidebarToggle.addEventListener("click", () => {
+      readerSidebar.classList.toggle("collapsed");
+      if (readerSidebar.classList.contains("collapsed")) {
+        // Add expand button
+        const expandBtn = document.createElement("button");
+        expandBtn.id = "reader-sidebar-expand";
+        expandBtn.className = "reader-sidebar-expand-btn";
+        expandBtn.innerHTML = '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>';
+        expandBtn.title = "展开文档列表";
+        if (readerMain) readerMain.appendChild(expandBtn);
+        expandBtn.addEventListener("click", () => {
+          readerSidebar.classList.remove("collapsed");
+          expandBtn.remove();
+        });
+      } else {
+        const expandBtn = document.getElementById("reader-sidebar-expand");
+        if (expandBtn) expandBtn.remove();
       }
     });
   }
@@ -3308,76 +5470,167 @@ document.addEventListener("DOMContentLoaded", () => {
     pdfZoomFit.addEventListener("click", pdfZoomFitAction);
   }
 
-  // Minimize to floating ball
-  if (readerMinimizeBtn) {
-    readerMinimizeBtn.addEventListener("click", () => {
-      readerModal.classList.add("hidden");
-      if (readerFloatingBall) readerFloatingBall.classList.remove("hidden");
+  // PDF OCR button
+  const pdfOcrBtn = document.getElementById("pdf-ocr-btn");
+  if (pdfOcrBtn) {
+    pdfOcrBtn.addEventListener("click", async () => {
+      if (pdfOcrBtn.disabled) return;
+      pdfOcrBtn.disabled = true;
+      pdfOcrBtn.textContent = "OCR中...";
+      await ocrPdf();
+      pdfOcrBtn.disabled = false;
+      pdfOcrBtn.textContent = "OCR 提取";
+    });
+  }
+
+  // PDF translate button
+  if (pdfTranslateBtn) {
+    pdfTranslateBtn.addEventListener("click", translatePdfPage);
+  }
+
+  // PDF translate selected blocks button
+  const translateSelBtn = document.getElementById("pdf-translate-selection-btn");
+  if (translateSelBtn) {
+    translateSelBtn.addEventListener("click", translateSelectedBlocks);
+  }
+
+  // PDF clear selection button
+  const clearSelBtn = document.getElementById("pdf-clear-selection-btn");
+  if (clearSelBtn) {
+    clearSelBtn.addEventListener("click", clearPdfBlockSelection);
+  }
+
+  // Extract copy button
+  const extractCopyBtn = document.getElementById("extract-copy-btn");
+  if (extractCopyBtn) {
+    extractCopyBtn.addEventListener("click", () => {
+      const idx = pdfViewState.currentDocIdx;
+      const ext = kanbanState.extractions ? kanbanState.extractions[idx] : null;
+      if (!ext) return;
+      const text = ext.markdown || ext.text || "";
+      if (!text.trim()) return;
+      navigator.clipboard.writeText(text).then(() => {
+        extractCopyBtn.textContent = "已复制 ✓";
+        setTimeout(() => { extractCopyBtn.textContent = "复制全文"; }, 1500);
+      }).catch(() => {
+        // Fallback for older browsers
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        extractCopyBtn.textContent = "已复制 ✓";
+        setTimeout(() => { extractCopyBtn.textContent = "复制全文"; }, 1500);
+      });
+    });
+  }
+
+  // Right panel close button (exits reading mode entirely)
+  if (rightPanelCloseBtn) {
+    rightPanelCloseBtn.addEventListener("click", () => {
+      exitReadingMode();
+    });
+  }
+
+  // Right panel tab switching
+  document.querySelectorAll(".right-panel-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const panelName = tab.dataset.panel;
+      switchRightPanelTab(panelName);
+    });
+  });
+
+  // Reader sidebar doc search filter
+  const readerDocSearch = document.getElementById("reader-doc-search");
+  if (readerDocSearch) {
+    readerDocSearch.addEventListener("input", () => {
+      const keyword = readerDocSearch.value.trim().toLowerCase();
+      document.querySelectorAll(".reader-doc-item").forEach(el => {
+        const text = el.textContent.toLowerCase();
+        el.style.display = (!keyword || text.includes(keyword)) ? "" : "none";
+      });
+    });
+  }
+
+  // PDF search
+  const pdfSearchBtn = document.getElementById("pdf-search-btn");
+  const pdfSearchInput = document.getElementById("pdf-search-input");
+  const pdfSearchPrevBtn = document.getElementById("pdf-search-prev-btn");
+  const pdfSearchNextBtn = document.getElementById("pdf-search-next-btn");
+  if (pdfSearchBtn) {
+    pdfSearchBtn.addEventListener("click", searchPdfKeyword);
+  }
+  if (pdfSearchPrevBtn) {
+    pdfSearchPrevBtn.addEventListener("click", searchPdfPrev);
+  }
+  if (pdfSearchNextBtn) {
+    pdfSearchNextBtn.addEventListener("click", searchPdfNext);
+  }
+  if (pdfSearchInput) {
+    pdfSearchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (pdfViewState.searchMatches.length > 0) {
+          searchPdfNext();
+        } else {
+          searchPdfKeyword();
+        }
+      }
+    });
+  }
+
+  // Floating ball click: toggle between reader and report view
+  function updateFloatingBallState(readerVisible) {
+    if (!readerFloatingBall) return;
+    const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
+    const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
+    if (readerVisible) {
+      // Reader is visible → ball shows "back to report" icon
+      readerFloatingBall.title = "点击回到报告";
+      if (iconOpen) iconOpen.classList.add("hidden");
+      if (iconBack) iconBack.classList.remove("hidden");
+    } else {
+      // Reader is hidden → ball shows "open reader" icon
+      readerFloatingBall.title = "点击打开阅读器";
+      if (iconOpen) iconOpen.classList.remove("hidden");
+      if (iconBack) iconBack.classList.add("hidden");
+    }
+  }
+
+  if (readerFloatingBall) {
+    readerFloatingBall.addEventListener("click", () => {
+      if (readerModal.classList.contains("hidden")) {
+        // Reader is hidden → open it
+        openReader();
+      } else {
+        // Reader is visible → minimize to report view
+        readerModal.classList.add("hidden");
+        exitReadingMode();
+        updateFloatingBallState(false);
+      }
     });
   }
 
   // Floating ball click to restore reader
-  if (readerFloatingBall) {
-    readerFloatingBall.addEventListener("click", () => {
-      readerFloatingBall.classList.add("hidden");
-      readerModal.classList.remove("hidden");
-    });
-  }
-
-  // OCR extract button in PDF toolbar
-  if (pdfOcrBtn) {
-    pdfOcrBtn.addEventListener("click", async () => {
-      if (pdfViewState.currentDocIdx == null) return;
-      const idx = pdfViewState.currentDocIdx;
-      const items = kanbanState.documents;
-      const it = items.find(d => d.idx === idx);
-      if (!it) return;
-
-      pdfOcrBtn.disabled = true;
-      pdfOcrBtn.textContent = "提取中...";
-
-      try {
-        const isUS = currentData.office === "US";
-        const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
-        const encodedDocId = encodeURIComponent(it.docId);
-        const extractUrl = `/api/gd/extract-text/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
-        await extractDocumentText(extractUrl, idx, it.type);
-        // Enable search after extraction
-        const searchInput = document.getElementById("pdf-search-input");
-        const searchBtn = document.getElementById("pdf-search-btn");
-        if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
-        if (searchBtn) searchBtn.disabled = false;
-        pdfOcrBtn.textContent = "已提取";
-        pdfOcrBtn.disabled = true;
-
-        // Re-render PDF view with overlays if active
-        if (pdfViewState.active) {
-          renderPdfView(idx);
-        }
-      } catch (e) {
-        pdfOcrBtn.textContent = "OCR 提取";
-        pdfOcrBtn.disabled = false;
-        showError("OCR 提取失败: " + e.message);
-      }
-    });
-  }
-
-  // Chat toggle
   if (readerChatToggle) {
     readerChatToggle.addEventListener("click", () => {
       if (readerChatPanel) {
-        readerChatPanel.classList.toggle("hidden");
-        readerChatToggle.classList.toggle("active");
+        const wasHidden = readerChatPanel.classList.contains("hidden");
+        if (wasHidden) {
+          readerChatPanel.classList.remove("hidden");
+          readerChatToggle.classList.add("active");
+          enterReadingMode("chat");
+        } else {
+          // Chat panel is visible, toggle off exits reading mode
+          exitReadingMode();
+        }
       }
     });
   }
 
-  if (chatCloseBtn) {
-    chatCloseBtn.addEventListener("click", () => {
-      if (readerChatPanel) readerChatPanel.classList.add("hidden");
-      if (readerChatToggle) readerChatToggle.classList.remove("active");
-    });
-  }
+  // Chat close button is now handled by the right panel close button
+  // No separate chatCloseBtn needed
 
   // Chat send
   if (chatSendBtn) {
@@ -3400,6 +5653,29 @@ document.addEventListener("DOMContentLoaded", () => {
       if (blockId) onTraceClick(blockId);
     }
   });
+
+  // ── Merge export events ──
+  const mergeExportBtn = document.getElementById("merge-export-btn");
+  const mergeExportCloseBtn = document.getElementById("merge-export-close-btn");
+  const mergeExportCancelBtn = document.getElementById("merge-export-cancel-btn");
+  const mergeExportDoBtn = document.getElementById("merge-export-do-btn");
+  const mergeExportModal = document.getElementById("merge-export-modal");
+  const mergeExportOverlay = mergeExportModal ? mergeExportModal.querySelector(".modal-overlay") : null;
+
+  if (mergeExportBtn) mergeExportBtn.addEventListener("click", openMergeExportModal);
+  if (mergeExportCloseBtn) mergeExportCloseBtn.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
+  if (mergeExportCancelBtn) mergeExportCancelBtn.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
+  if (mergeExportOverlay) mergeExportOverlay.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
+  if (mergeExportDoBtn) mergeExportDoBtn.addEventListener("click", doMergeExport);
+
+  // Splash screen - wait for GIF animation to complete at least one loop (~4.5s)
+  setTimeout(() => {
+    const splash = document.getElementById("splash-screen");
+    if (splash) {
+      splash.style.opacity = "0";
+      setTimeout(() => splash.remove(), 500);
+    }
+  }, 4500);
 });
 
 async function sendChatMessage() {
@@ -3452,6 +5728,7 @@ async function sendChatMessage() {
 
   try {
     let fullResponse = "";
+    let _rafPending = false;
     const stream = AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
       model: provider.model,
       messages: messages,
@@ -3462,12 +5739,22 @@ async function sendChatMessage() {
       if (chatAbortController.signal.aborted) break;
       if (chunk.content) {
         fullResponse += chunk.content;
-        if (assistantMsgEl) {
-          const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
-          contentEl.textContent = fullResponse;
-          chatMessages.scrollTop = chatMessages.scrollHeight;
+        if (!_rafPending) {
+          _rafPending = true;
+          requestAnimationFrame(() => {
+            if (assistantMsgEl) {
+              const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+              contentEl.innerHTML = renderMarkdown(fullResponse);
+            }
+            _rafPending = false;
+          });
         }
       }
+    }
+    // Final render
+    if (assistantMsgEl) {
+      const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+      contentEl.innerHTML = renderMarkdown(fullResponse);
     }
 
     chatHistory.push({ role: "assistant", content: fullResponse });
@@ -3486,7 +5773,7 @@ function appendChatMessage(role, content) {
   const msgEl = document.createElement("div");
   msgEl.className = `chat-msg ${role}`;
   if (role === "assistant") {
-    msgEl.innerHTML = `<div class="chat-msg-content">${escapeHtml(content)}</div>`;
+    msgEl.innerHTML = `<div class="chat-msg-content markdown-body">${renderMarkdown(content)}</div>`;
   } else if (role === "system") {
     msgEl.textContent = content;
   } else {
@@ -3500,8 +5787,8 @@ function appendChatMessage(role, content) {
 // ===== Analysis Chat (continued conversation with AI analysis report) =====
 
 function showAnalysisChatToggle() {
-  const toggleBtn = document.getElementById("analysis-chat-toggle-btn");
-  if (toggleBtn) toggleBtn.classList.remove("hidden");
+  const floatBall = document.getElementById("analysis-chat-float-ball");
+  if (floatBall) floatBall.classList.remove("hidden");
 }
 
 function appendAnalysisChatMessage(role, content) {
@@ -3510,7 +5797,7 @@ function appendAnalysisChatMessage(role, content) {
   const msgEl = document.createElement("div");
   msgEl.className = `chat-msg ${role}`;
   if (role === "assistant") {
-    msgEl.innerHTML = `<div class="chat-msg-content">${escapeHtml(content)}</div>`;
+    msgEl.innerHTML = `<div class="chat-msg-content markdown-body">${renderMarkdown(content)}</div>`;
   } else if (role === "system") {
     msgEl.textContent = content;
   } else {
@@ -3570,16 +5857,29 @@ async function sendAnalysisChatMessage() {
     }, analysisChatAbortController.signal);
 
     const messagesEl = document.getElementById("analysis-chat-messages");
+    let _rafPending = false;
+    let _lastRenderLen = 0;
     for await (const chunk of stream) {
       if (analysisChatAbortController.signal.aborted) break;
       if (chunk.content) {
         fullResponse += chunk.content;
-        if (assistantMsgEl) {
-          const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
-          contentEl.textContent = fullResponse;
-          if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+        if (assistantMsgEl && !_rafPending) {
+          _rafPending = true;
+          requestAnimationFrame(() => {
+            _rafPending = false;
+            if (fullResponse.length - _lastRenderLen > 20 || fullResponse.length < 50) {
+              _lastRenderLen = fullResponse.length;
+              const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+              contentEl.innerHTML = renderMarkdown(fullResponse);
+            }
+          });
         }
       }
+    }
+    // Final render to ensure complete content is displayed
+    if (assistantMsgEl) {
+      const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+      contentEl.innerHTML = renderMarkdown(fullResponse);
     }
 
     analysisChatHistory.push({ role: "assistant", content: fullResponse });
@@ -3596,7 +5896,7 @@ async function sendAnalysisChatMessage() {
 
 // Analysis chat event listeners (script loaded at end of body, DOM is ready)
 (function initAnalysisChat() {
-  const analysisChatToggleBtn = document.getElementById("analysis-chat-toggle-btn");
+  const analysisChatFloatBall = document.getElementById("analysis-chat-float-ball");
   const analysisChatPanel = document.getElementById("analysis-chat-panel");
   const analysisChatCloseBtn = document.getElementById("analysis-chat-close-btn");
   const analysisChatClearBtn = document.getElementById("analysis-chat-clear-btn");
@@ -3604,8 +5904,8 @@ async function sendAnalysisChatMessage() {
   const analysisChatAbortBtnEl = document.getElementById("analysis-chat-abort-btn");
   const analysisChatInput = document.getElementById("analysis-chat-input");
 
-  if (analysisChatToggleBtn) {
-    analysisChatToggleBtn.addEventListener("click", () => {
+  if (analysisChatFloatBall) {
+    analysisChatFloatBall.addEventListener("click", () => {
       if (analysisChatPanel) {
         analysisChatPanel.classList.toggle("hidden");
         if (!analysisChatPanel.classList.contains("hidden")) {
@@ -3700,14 +6000,17 @@ async function kanbanManualExtract(url, idx, docType) {
     const blocks = result.blocks || [];
     const pageDimensions = result.page_dimensions || {};
     kanbanState.extractions[idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
+    kanbanState.hasUnsavedWork = true;
     if (blocks.length > 0) {
       blocks.forEach(b => {
-        kanbanState.traceIndex[b.block_id] = {
+        const traceKey = "D" + idx + "_" + b.block_id;
+        kanbanState.traceIndex[traceKey] = {
           docIdx: idx,
           page: b.page,
           bbox: b.bbox,
           content: b.content,
           label: b.label,
+          originalBlockId: b.block_id,
           pageDimensions: pageDimensions[b.page] || null,
         };
       });
@@ -3721,7 +6024,339 @@ async function kanbanManualExtract(url, idx, docType) {
       </div>
       <pre class="extracted-text">${escapeHtml(displayText.length > 8000 ? displayText.substring(0, 8000) + "\n\n[...已截断...]" : displayText)}</pre>
     `;
+    autoSaveCache();
   } catch (e) {
     container.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
   }
 }
+
+// ── Merge Export ────────────────────────────────────────────────────────────
+
+function buildMergeDownloadUrl(item) {
+  if (!currentData || !item.docId) return null;
+  const isJP = currentData.office === "JP";
+  const isDE = currentData.office === "DE";
+  if (isDE) return null;
+
+  const isUS = currentData.office === "US";
+  const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+  const encodedDocId = encodeURIComponent(item.docId);
+
+  if (isJP) {
+    const jpDocType = mapJpDocType(item.docCode, item.type);
+    if (!jpDocType) return null;
+    return `/api/jpo/doc/${jpDocType}/${urlDocNum}`;
+  }
+
+  return `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${item.numberOfPages}/${item.docFormat}`;
+}
+
+function openMergeExportModal() {
+  const modal = document.getElementById("merge-export-modal");
+  const list = document.getElementById("merge-export-list");
+  const selectAllCb = document.getElementById("merge-select-all-cb");
+  const countEl = document.getElementById("merge-selected-count");
+  const doBtn = document.getElementById("merge-export-do-btn");
+  const progressEl = document.getElementById("merge-export-progress");
+
+  if (!modal || !list) return;
+
+  // Sort all documents by date descending (newest first)
+  const items = [...(kanbanState.documents || [])].sort((a, b) => {
+    const parseDate = (d) => {
+      if (!d) return 0;
+      // Handle formats: "2024-01-15", "01/15/2024", "2024/01/15", "20240115"
+      const cleaned = d.replace(/[\/\-]/g, "-");
+      const parts = cleaned.split("-");
+      if (parts.length === 3) {
+        const [p1, p2, p3] = parts.map(Number);
+        // If first part is 4 digits, it's YYYY-MM-DD
+        if (p1 > 1000) return new Date(p1, p2 - 1, p3).getTime();
+        // If last part is 4 digits, it's MM-DD-YYYY
+        if (p3 > 1000) return new Date(p3, p1 - 1, p2).getTime();
+      }
+      return new Date(d).getTime() || 0;
+    };
+    return parseDate(b.date) - parseDate(a.date);
+  });
+
+  // Build list
+  let html = "";
+  items.forEach((it, idx) => {
+    const downloadUrl = buildMergeDownloadUrl(it);
+    const canDownload = !!downloadUrl;
+    const typeNames = {
+      "office_action": "审查意见", "response": "答复", "request": "请求",
+      "allowance": "授权", "notification": "通知", "misc": "其他"
+    };
+
+    html += `
+      <div class="merge-export-item ${canDownload ? '' : 'disabled'}" data-idx="${it.idx}" data-date="${escapeHtml(it.date || '')}" data-url="${downloadUrl || ''}" data-search-text="${escapeHtml((it.name + ' ' + it.desc + ' ' + it.docCode + ' ' + it.date + ' ' + (typeNames[it.type] || '')).toLowerCase())}">
+        <input type="checkbox" class="merge-item-cb" ${canDownload ? 'checked' : 'disabled'} data-idx="${it.idx}">
+        <div class="merge-export-item-info">
+          <div class="merge-export-item-title">${escapeHtml(it.name || it.desc || it.docCode)}</div>
+          <div class="merge-export-item-meta">
+            <span class="merge-export-item-code">${escapeHtml(it.docCode)}</span>
+            ${it.date ? '<span>' + escapeHtml(it.date) + '</span>' : ''}
+            <span>${typeNames[it.type] || it.type || ''}</span>
+            ${!canDownload ? '<span style="color:#e74c3c">不可下载</span>' : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  list.innerHTML = html;
+
+  // Update select all state
+  const checkboxes = list.querySelectorAll(".merge-item-cb:not(:disabled)");
+  selectAllCb.checked = checkboxes.length > 0 && [...checkboxes].every(cb => cb.checked);
+
+  // Update count
+  updateMergeSelectedCount();
+
+  // Reset progress
+  if (progressEl) progressEl.classList.add("hidden");
+  if (doBtn) { doBtn.disabled = false; doBtn.textContent = "合并导出 PDF"; }
+
+  // Show modal
+  modal.classList.remove("hidden");
+
+  // Bind events
+  selectAllCb.onchange = () => {
+    const cbs = list.querySelectorAll(".merge-item-cb:not(:disabled)");
+    cbs.forEach(cb => { cb.checked = selectAllCb.checked; });
+    updateMergeSelectedCount();
+  };
+
+  list.querySelectorAll(".merge-item-cb").forEach(cb => {
+    cb.onchange = () => {
+      const allCbs = list.querySelectorAll(".merge-item-cb:not(:disabled)");
+      selectAllCb.checked = allCbs.length > 0 && [...allCbs].every(c => c.checked);
+      updateMergeSelectedCount();
+    };
+  });
+
+  // Bind search filter
+  const searchInput = document.getElementById("merge-search-input");
+  if (searchInput) {
+    searchInput.value = "";
+    searchInput.oninput = () => {
+      const keyword = searchInput.value.trim().toLowerCase();
+      list.querySelectorAll(".merge-export-item").forEach(item => {
+        if (!keyword) {
+          item.style.display = "";
+          return;
+        }
+        const searchText = item.dataset.searchText || "";
+        item.style.display = searchText.includes(keyword) ? "" : "none";
+      });
+    };
+  }
+}
+
+function updateMergeSelectedCount() {
+  const list = document.getElementById("merge-export-list");
+  const countEl = document.getElementById("merge-selected-count");
+  const doBtn = document.getElementById("merge-export-do-btn");
+  if (!list || !countEl) return;
+
+  const checked = list.querySelectorAll(".merge-item-cb:checked").length;
+  countEl.textContent = `已选 ${checked} 份`;
+  if (doBtn) doBtn.disabled = checked === 0;
+}
+
+async function doMergeExportWithItems(selectedIdxs, progressCallback) {
+  // Build merge items from selected document indices
+  const selectedItems = [];
+  const sortedDocs = [...selectedIdxs].sort((a, b) => {
+    const itA = kanbanState.documents.find(d => d.idx === a);
+    const itB = kanbanState.documents.find(d => d.idx === b);
+    const parseDateFn = (d) => {
+      if (!d) return 0;
+      const cleaned = d.replace(/[\/\-]/g, "-");
+      const parts = cleaned.split("-");
+      if (parts.length === 3) {
+        const [p1, p2, p3] = parts.map(Number);
+        if (p1 > 1000) return new Date(p1, p2 - 1, p3).getTime();
+        if (p3 > 1000) return new Date(p3, p1 - 1, p2).getTime();
+      }
+      return new Date(d).getTime() || 0;
+    };
+    return parseDateFn(itB ? itB.date : "") - parseDateFn(itA ? itA.date : "");
+  });
+
+  for (const idx of sortedDocs) {
+    const it = kanbanState.documents.find(d => d.idx === idx);
+    if (!it) continue;
+    const downloadUrl = buildMergeDownloadUrl(it);
+    if (!downloadUrl) continue;
+
+    const name = it.name || it.desc || it.docCode || "";
+    const hasCjk = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(name);
+    let chineseTitle = "";
+    let originalTitle = "";
+
+    if (hasCjk) {
+      const match = name.match(/^(.+?)\s*\((.+)\)$/);
+      if (match) {
+        chineseTitle = match[1];
+        originalTitle = match[2];
+      } else {
+        chineseTitle = name;
+        originalTitle = "";
+      }
+    } else {
+      chineseTitle = it.docCode || name;
+      originalTitle = name;
+    }
+
+    selectedItems.push({
+      idx,
+      downloadUrl,
+      originalTitle,
+      chineseTitle,
+      date: it.date || "",
+      docCode: it.docCode || "",
+    });
+  }
+
+  if (selectedItems.length === 0) {
+    showError("请至少选择一份可下载的文档");
+    return;
+  }
+
+  // Build patent bibliographic info for cover pages
+  const patentInfo = {};
+  if (currentData) {
+    patentInfo.patentNumber = patentInput ? patentInput.value.trim() : (currentData.applicationNumber || currentData.docNumber || "");
+    patentInfo.office = currentData.office || "";
+    patentInfo.applicationNumber = currentData.applicationNumber || "";
+    if (currentData.family) {
+      const members = extractFamilyMembers(currentData.family);
+      if (members.length > 0) {
+        const m = members.find(mem => mem.countryCode === currentData.office) || members[0];
+        const dl = m.docList || {};
+        patentInfo.title = m.title || dl.title || m.inventionTitle || "";
+        const applicantNamesArr = m.applicantNames || dl.applicantNames || [];
+        const namesStr = Array.isArray(applicantNamesArr) ? applicantNamesArr.join(", ") : (applicantNamesArr || "");
+        if (currentData.office === "US") {
+          patentInfo.inventors = namesStr || m.inventors || m.inventorName || "";
+        } else {
+          patentInfo.applicants = namesStr || m.applicants || m.applicantName || "";
+          patentInfo.inventors = m.inventors || m.inventorName || "";
+        }
+        patentInfo.filingDate = m.appDateStr || m.filingDate || m.applicationDate || "";
+      }
+    }
+  }
+
+  if (progressCallback) progressCallback("start", selectedItems.length);
+
+  try {
+    const resp = await fetch("/api/merge-pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: selectedItems, patentInfo }),
+    });
+
+    if (progressCallback) progressCallback("merging");
+
+    const contentType = resp.headers.get("Content-Type") || "";
+
+    if (contentType.includes("application/pdf")) {
+      const blob = await resp.blob();
+      if (progressCallback) progressCallback("done");
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `merged_patent_docs_${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } else {
+      const data = await resp.json();
+      throw new Error(data.error || "合并导出失败");
+    }
+  } catch (e) {
+    if (progressCallback) progressCallback("error", e.message);
+    showError("合并导出失败: " + e.message);
+  }
+}
+
+async function doMergeExport() {
+  const list = document.getElementById("merge-export-list");
+  const doBtn = document.getElementById("merge-export-do-btn");
+  const progressEl = document.getElementById("merge-export-progress");
+  const progressFill = document.getElementById("merge-progress-fill");
+  const progressText = document.getElementById("merge-progress-text");
+
+  if (!list) return;
+
+  // Collect selected item indices
+  const selectedIdxs = [];
+  list.querySelectorAll(".merge-item-cb:checked").forEach(cb => {
+    selectedIdxs.push(parseInt(cb.dataset.idx));
+  });
+
+  if (selectedIdxs.length === 0) {
+    showError("请至少选择一份文档");
+    return;
+  }
+
+  // Show progress
+  if (doBtn) { doBtn.disabled = true; doBtn.textContent = "导出中..."; }
+  if (progressEl) progressEl.classList.remove("hidden");
+  if (progressFill) progressFill.style.width = "10%";
+  if (progressText) progressText.textContent = `正在下载 ${selectedIdxs.length} 份文档...`;
+
+  await doMergeExportWithItems(selectedIdxs, (stage, detail) => {
+    if (stage === "start") {
+      if (progressText) progressText.textContent = `正在下载 ${detail} 份文档...`;
+    } else if (stage === "merging") {
+      if (progressFill) progressFill.style.width = "80%";
+      if (progressText) progressText.textContent = "正在合并 PDF...";
+    } else if (stage === "done") {
+      if (progressFill) progressFill.style.width = "100%";
+      if (progressText) progressText.textContent = "导出完成！";
+      setTimeout(() => {
+        const modal = document.getElementById("merge-export-modal");
+        if (modal) modal.classList.add("hidden");
+      }, 1500);
+    } else if (stage === "error") {
+      if (progressText) progressText.textContent = "导出失败: " + detail;
+      if (progressFill) { progressFill.style.width = "100%"; progressFill.style.background = "#e74c3c"; }
+    }
+  });
+
+  if (doBtn) { doBtn.disabled = false; doBtn.textContent = "合并导出 PDF"; }
+}
+
+// ── History sidebar toggle ──
+const historySidebar = document.getElementById("history-sidebar");
+const historySidebarToggle = document.querySelector(".history-sidebar-toggle");
+if (historySidebarToggle && historySidebar) {
+  historySidebarToggle.addEventListener("click", () => {
+    historySidebar.classList.toggle("collapsed");
+    // Refresh list when expanding
+    if (!historySidebar.classList.contains("collapsed")) {
+      refreshHistoryList();
+    }
+  });
+}
+
+// ── Cache clear button in settings ──
+const cacheClearBtn = document.getElementById("cache-clear-btn");
+if (cacheClearBtn) {
+  cacheClearBtn.addEventListener("click", () => {
+    if (confirm("确定要清除全部缓存和历史记录吗？此操作不可撤销。")) {
+      PatentCache.clearAll();
+      PatentCache.clearAllHistory();
+      refreshHistoryList();
+    }
+  });
+}
+
+// ── Initialize history list on page load ──
+refreshHistoryList();

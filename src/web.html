@@ -4,11 +4,23 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PatentLens - 专利审查文档获取与梳理</title>
-  <link rel="stylesheet" href="styles/main.css?v=20260603">
+  <link rel="stylesheet" href="styles/main.css?v=20260614b">
 </head>
 <body>
-  <div id="app">
-    <!-- 历史栏：固定定位，始终可见 -->
+  <div id="splash-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:var(--bg-primary, #0f1117);display:flex;align-items:center;justify-content:center;z-index:99999;transition:opacity 0.5s ease;">
+    <div style="background:#fff;border-radius:16px;padding:24px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 24px rgba(0,0,0,0.15);">
+      <img src="Lensgif.gif" style="max-width:560px;width:100%;aspect-ratio:16/9;object-fit:contain;border-radius:8px;" alt="Loading">
+    </div>
+  </div>
+  <div id="app" class="home-mode">
+    <header class="app-header">
+      <div class="header-logo-area">
+        <img src="PatentLens_logo.png" alt="PatentLens" class="header-logo-img">
+      </div>
+      <h1>PatentLens</h1>
+      <p class="subtitle">专利审查文档获取与梳理</p>
+    </header>
+
     <div id="history-sidebar" class="history-sidebar collapsed">
       <div class="history-sidebar-toggle" title="历史记录">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -19,31 +31,37 @@
       </div>
     </div>
 
-    <header class="app-header">
-      <h1>PatentLens</h1>
-      <p class="subtitle">专利审查文档获取与梳理</p>
-    </header>
+    <section class="search-section">
+      <div class="search-box">
+        <input type="text" id="patent-input" placeholder="输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型" autocomplete="off">
+        <button id="search-btn" class="btn-primary">查询</button>
+        <button id="theme-toggle-btn" class="btn-icon" title="切换亮色/暗色模式">
+          <svg class="svg-icon theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+          <svg class="svg-icon theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+        <button id="ai-settings-btn" class="btn-icon" title="AI 设置"><svg class="svg-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg></button>
+      </div>
+      <div class="search-hint">支持 US / EP / JP / DE / CN 专利审查信息查询，US / EP / JP 支持文档原文下载与 AI 梳理（DE 需手动查阅）</div>
+      <div id="office-badge" class="office-badge hidden"></div>
+    </section>
 
     <main class="app-main">
-      <section class="search-section">
-        <div class="search-box">
-          <input type="text" id="patent-input" placeholder="输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型" autocomplete="off">
-          <button id="search-btn" class="btn-primary">查询</button>
-          <button id="ai-settings-btn" class="btn-icon" title="AI 设置"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
-        </div>
-        <div class="search-hint">支持 US / EP / JP / DE / CN 专利审查信息查询，US / EP / JP 支持文档原文下载与 AI 梳理（DE 需手动查阅）</div>
-        <div id="office-badge" class="office-badge hidden"></div>
-      </section>
 
       <section id="result-section" class="result-section hidden">
-        <div class="tabs">
-          <button class="tab-btn active" data-tab="overview">概览</button>
-          <button class="tab-btn" data-tab="family">同族</button>
-          <button class="tab-btn" data-tab="kanban">审查看板</button>
-          <button class="tab-btn" data-tab="ai-analysis">AI 分析</button>
-          <button class="tab-btn" data-tab="timeline">时间线</button>
+        <div class="tabs-wrapper">
+          <div class="tabs">
+            <button class="tab-btn active" data-tab="overview">概览</button>
+            <button class="tab-btn" data-tab="family">同族</button>
+            <button class="tab-btn" data-tab="kanban">审查看板</button>
+            <button class="tab-btn" data-tab="ai-analysis">AI 分析</button>
+          </div>
         </div>
-
+        <div class="result-layout">
+          <div class="result-main">
         <div id="tab-overview" class="tab-content active">
           <div id="overview-content" class="card-grid">
             <div class="info-card">
@@ -53,6 +71,15 @@
             <div class="info-card">
               <div class="card-header">当前状态</div>
               <div id="app-status" class="card-body"><p class="placeholder">-</p></div>
+            </div>
+          </div>
+          <div id="timeline-content" class="overview-timeline-section">
+            <div class="timeline-header">
+              <span class="timeline-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 审查时间线</span>
+              <span id="timeline-status" class="timeline-status"></span>
+            </div>
+            <div id="timeline-board" class="timeline-board">
+              <p class="placeholder">请先查询专利，审查文档加载后可生成时间线</p>
             </div>
           </div>
         </div>
@@ -66,6 +93,7 @@
             <div class="kanban-header">
               <span class="kanban-title">审查状态看板</span>
               <span id="kanban-status" class="kanban-status"></span>
+              <button id="merge-export-btn" class="btn-secondary" style="margin-left:auto;display:none;" title="合并导出审查文档 PDF"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg> 合并导出</button>
             </div>
             <div id="kanban-filter-bar" class="doc-filter-bar"></div>
             <div id="kanban-board" class="kanban-board">
@@ -80,9 +108,8 @@
               <span class="ai-analysis-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 017 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 01-2 2h-4a2 2 0 01-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 017-7z"/><line x1="9" y1="21" x2="15" y2="21"/></svg> AI 审查意见梳理</span>
               <span id="ai-analysis-status" class="kanban-status"></span>
               <div class="ai-analysis-actions">
-                <button id="kanban-auto-btn" class="btn-primary" disabled><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 017 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 01-2 2h-4a2 2 0 01-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 017-7z"/><line x1="9" y1="21" x2="15" y2="21"/></svg> 自动梳理审查意见</button>
-                <button id="kanban-auto-abort-btn" class="btn-danger hidden"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> 中止梳理</button>
-                <button id="cited-refs-btn" class="btn-primary" disabled><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg> 引用文献梳理</button>
+                <button id="kanban-manual-select-btn" class="btn-primary" disabled><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> 梳理审查意见</button>
+                <button id="cited-refs-manual-btn" class="btn-primary" disabled><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> 梳理引用文献</button>
                 <button id="cited-refs-abort-btn" class="btn-danger hidden"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> 中止引用梳理</button>
               </div>
             </div>
@@ -93,43 +120,17 @@
                 <div class="kanban-section-actions">
                   <button id="reader-btn" class="btn-secondary" title="在阅读器中查看"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> 阅读器</button>
                   <button id="export-word-btn" class="btn-secondary" title="导出为 Word 文档"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> 导出 Word</button>
-                  <button id="analysis-chat-toggle-btn" class="btn-secondary hidden" title="继续对话"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> 继续对话</button>
                 </div>
               </div>
               <div id="kanban-analysis-content" class="markdown-body"></div>
-              <!-- 继续聊天面板 -->
-              <div id="analysis-chat-panel" class="analysis-chat-panel hidden">
-                <div class="analysis-chat-header">
-                  <span class="analysis-chat-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> 继续对话</span>
-                  <div class="analysis-chat-header-actions">
-                    <button id="analysis-chat-clear-btn" class="btn-icon-sm" title="清空对话"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
-                    <button id="analysis-chat-close-btn" class="btn-icon-sm" title="关闭对话"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-                  </div>
-                </div>
-                <div id="analysis-chat-messages" class="analysis-chat-messages"></div>
-                <div class="analysis-chat-input-area">
-                  <textarea id="analysis-chat-input" class="analysis-chat-input" rows="2" placeholder="对审查报告继续提问..."></textarea>
-                  <button id="analysis-chat-send-btn" class="btn-primary btn-small">发送</button>
-                  <button id="analysis-chat-abort-btn" class="btn-danger btn-small hidden">中止</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div id="tab-timeline" class="tab-content">
-          <div id="timeline-content">
-            <div class="timeline-header">
-              <span class="timeline-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 审查时间线</span>
-              <span id="timeline-status" class="timeline-status"></span>
-            </div>
-            <div id="timeline-board" class="timeline-board">
-              <p class="placeholder">请先查询专利，审查文档加载后可生成时间线</p>
             </div>
           </div>
         </div>
 
 
+
+          </div><!-- .result-main -->
+        </div><!-- .result-layout -->
       </section>
 
       <section id="convert-section" class="convert-section hidden">
@@ -145,54 +146,97 @@
           <div class="modal-header reader-header">
             <h2><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> 审查意见阅读器</h2>
             <div class="reader-header-actions">
-              <button id="reader-pdf-toggle" class="btn-secondary">PDF 视图</button>
-              <button id="reader-dock-btn" class="btn-secondary" title="下拉固定阅读器（半屏对照模式）"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg> 半屏</button>
-              <button id="reader-fullscreen-btn" class="btn-secondary hidden" title="恢复全屏查看"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg> 全屏</button>
               <button id="reader-export-btn" class="btn-secondary"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> 导出 Word</button>
-              <button id="reader-minimize-btn" class="btn-secondary" title="最小化为悬浮球"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg> 悬浮</button>
               <button id="reader-chat-toggle" class="btn-secondary" title="打开AI文档对话"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> AI 对话</button>
               <button id="reader-close-btn" class="btn-icon">&times;</button>
             </div>
           </div>
           <div class="reader-body">
             <div id="reader-sidebar" class="reader-sidebar">
-              <div class="reader-sidebar-title">审查文档列表</div>
+              <div class="reader-sidebar-title">
+                <span>审查文档列表</span>
+                <button id="reader-sidebar-toggle" class="btn-icon-sm" title="收起文档列表"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
+              </div>
+              <div class="reader-sidebar-search">
+                <input type="text" id="reader-doc-search" class="reader-doc-search-input" placeholder="搜索文档...">
+              </div>
               <div id="reader-doc-list" class="reader-doc-list"></div>
             </div>
             <div class="reader-main">
-              <div id="reader-content" class="reader-content markdown-body">
-                <p class="placeholder">请从左侧选择文档查看内容</p>
+              <div class="reader-main-center">
+                <div id="reader-content" class="reader-content markdown-body">
+                  <p class="placeholder">请从左侧选择文档查看内容</p>
+                </div>
+                <div id="reader-pdf-view" class="reader-pdf-view hidden">
+                  <div id="reader-pdf-toolbar" class="reader-pdf-toolbar">
+                    <button id="pdf-prev-page" class="btn-small">上一页</button>
+                    <span id="pdf-page-info">1 / 1</span>
+                    <button id="pdf-next-page" class="btn-small">下一页</button>
+                    <span class="pdf-toolbar-separator"></span>
+                    <button id="pdf-zoom-out" class="btn-small">-</button>
+                    <span id="pdf-zoom-level" class="pdf-zoom-level">100%</span>
+                    <button id="pdf-zoom-in" class="btn-small">+</button>
+                    <button id="pdf-zoom-fit" class="btn-small">适应</button>
+                    <span class="pdf-toolbar-separator"></span>
+                    <button id="pdf-ocr-btn" class="btn-small" title="手动 OCR 提取当前文档文字">OCR 提取</button>
+                    <button id="pdf-translate-btn" class="btn-small" title="翻译全文档（未OCR时自动先提取）">翻译全文档</button>
+                    <button id="pdf-translate-selection-btn" class="btn-small" style="display:none;" title="翻译已选中的文本块">翻译已选</button>
+                    <button id="pdf-clear-selection-btn" class="btn-small" style="display:none;" title="清除选中的文本块">清除选择</button>
+                    <span id="pdf-selection-info" class="pdf-selection-info hidden"></span>
+                    <input type="text" id="pdf-search-input" class="pdf-search-input" placeholder="请先OCR提取..." disabled>
+                    <button id="pdf-search-btn" class="btn-small" disabled>搜索</button>
+                    <button id="pdf-search-prev-btn" class="btn-small" disabled title="上一个匹配">▲</button>
+                    <button id="pdf-search-next-btn" class="btn-small" disabled title="下一个匹配">▼</button>
+                    <span id="pdf-search-info" class="pdf-search-info"></span>
+                  </div>
+                  <div id="reader-pdf-container" class="reader-pdf-container">
+                    <!-- PDF pages rendered here with canvas + overlay -->
+                  </div>
+                </div>
               </div>
-              <div id="reader-pdf-view" class="reader-pdf-view hidden">
-                <div id="reader-pdf-toolbar" class="reader-pdf-toolbar">
-                  <button id="pdf-prev-page" class="btn-small">上一页</button>
-                  <span id="pdf-page-info">1 / 1</span>
-                  <button id="pdf-next-page" class="btn-small">下一页</button>
-                  <span class="pdf-toolbar-separator"></span>
-                  <button id="pdf-zoom-out" class="btn-small">-</button>
-                  <span id="pdf-zoom-level" class="pdf-zoom-level">100%</span>
-                  <button id="pdf-zoom-in" class="btn-small">+</button>
-                  <button id="pdf-zoom-fit" class="btn-small">适应</button>
-                  <span class="pdf-toolbar-separator"></span>
-                  <button id="pdf-ocr-btn" class="btn-small" title="提取OCR文字内容以启用搜索">OCR 提取</button>
-                  <span class="pdf-toolbar-separator"></span>
-                  <input type="text" id="pdf-search-input" class="pdf-search-input" placeholder="请先OCR提取..." disabled>
-                  <button id="pdf-search-btn" class="btn-small" disabled>搜索</button>
-                  <span id="pdf-search-info" class="pdf-search-info"></span>
+              <!-- Right side panels (extract + translate + chat) with tab switching -->
+              <div id="reader-right-panel" class="reader-right-panel hidden">
+                <div class="reader-right-panel-tabs">
+                  <button class="right-panel-tab" data-panel="extract">提取内容</button>
+                  <button class="right-panel-tab active" data-panel="translate">对照翻译</button>
+                  <button class="right-panel-tab" data-panel="chat">AI 对话</button>
+                  <button id="right-panel-close-btn" class="btn-icon-sm" title="退出阅读模式"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
-                <div id="reader-pdf-container" class="reader-pdf-container">
-                  <!-- PDF pages rendered here with canvas + overlay -->
-                </div>
-              </div>
-              <div id="reader-chat-panel" class="reader-chat-panel hidden">
-                <div class="chat-header">
-                  <span class="chat-title">AI 文档对话</span>
-                  <button id="chat-close-btn" class="btn-icon btn-small">&times;</button>
-                </div>
-                <div id="chat-messages" class="chat-messages"></div>
-                <div class="chat-input-area">
-                  <textarea id="chat-input" class="chat-input" placeholder="输入问题，基于当前文档内容对话..." rows="2"></textarea>
-                  <button id="chat-send-btn" class="btn-primary btn-small">发送</button>
+                <div class="reader-right-panel-body">
+                  <!-- Extract Content Panel -->
+                  <div id="reader-extract-panel" class="reader-extract-panel hidden">
+                    <div class="reader-extract-header">
+                      <span class="reader-extract-title">OCR 提取内容</span>
+                      <button id="extract-copy-btn" class="btn-secondary btn-small" type="button">复制全文</button>
+                    </div>
+                    <div id="reader-extract-content" class="reader-extract-content">
+                      <p class="placeholder">该文档尚未进行 OCR 提取</p>
+                    </div>
+                  </div>
+                  <!-- PDF Translation Panel -->
+                  <div id="pdf-translate-panel" class="pdf-translate-panel hidden">
+                    <div class="pdf-translate-header">
+                      <div class="pdf-translate-header-actions">
+                        <select id="pdf-translate-lang" class="pdf-translate-lang-select">
+                          <option value="zh">中文</option>
+                          <option value="en">English</option>
+                          <option value="ja">日本語</option>
+                          <option value="ko">한국어</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div id="pdf-translate-content" class="pdf-translate-content">
+                      <p class="placeholder">点击"翻译全文档"按钮翻译当前文档</p>
+                    </div>
+                  </div>
+                  <!-- AI Chat Panel -->
+                  <div id="reader-chat-panel" class="reader-chat-panel hidden">
+                    <div id="chat-messages" class="chat-messages"></div>
+                    <div class="chat-input-area">
+                      <textarea id="chat-input" class="chat-input" placeholder="输入问题，基于当前文档内容对话..." rows="2"></textarea>
+                      <button id="chat-send-btn" class="btn-primary btn-small">发送</button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -201,88 +245,206 @@
       </div>
 
       <div id="reader-floating-ball" class="reader-floating-ball hidden" title="点击打开阅读器">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        <svg class="reader-fb-icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        <svg class="reader-fb-icon-back hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>
       </div>
 
       <div id="ai-settings-modal" class="modal hidden">
         <div class="modal-overlay"></div>
-        <div class="modal-content">
+        <div class="modal-content settings-modal-content">
           <div class="modal-header">
-            <h2>AI & OCR 服务设置</h2>
+            <h2>设置</h2>
             <button id="modal-close-btn" class="btn-icon">&times;</button>
           </div>
+          <div class="settings-tabs">
+            <button class="settings-tab-btn active" data-settings-tab="ai">AI 服务</button>
+            <button class="settings-tab-btn" data-settings-tab="ocr">OCR</button>
+            <button class="settings-tab-btn" data-settings-tab="translate">翻译</button>
+            <button class="settings-tab-btn" data-settings-tab="prompts">提示词</button>
+            <button class="settings-tab-btn" data-settings-tab="cache">缓存</button>
+          </div>
           <div class="modal-body">
-            <h3 class="settings-section-title">AI 服务</h3>
-            <div class="form-group">
-              <label>AI 服务商</label>
-              <select id="ai-provider-select">
-                <option value="zhipu">智谱 (GLM)</option>
-                <option value="deepseek">DeepSeek</option>
-                <option value="openai">OpenAI</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>API Key</label>
-              <input type="password" id="ai-api-key-input" placeholder="输入 API Key">
-            </div>
-            <div class="form-group">
-              <label>Base URL</label>
-              <input type="text" id="ai-base-url-input" placeholder="API Base URL">
-            </div>
-            <div class="form-group">
-              <label>模型</label>
-              <select id="ai-model-select"></select>
+            <!-- AI Service Tab -->
+            <div id="settings-tab-ai" class="settings-tab-content active">
+              <div class="form-group">
+                <label>AI 服务商</label>
+                <select id="ai-provider-select">
+                  <option value="zhipu">智谱 (GLM)</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>API Key</label>
+                <input type="password" id="ai-api-key-input" placeholder="输入 API Key">
+              </div>
+              <div class="form-group">
+                <label>Base URL</label>
+                <input type="text" id="ai-base-url-input" placeholder="API Base URL">
+              </div>
+              <div class="form-group">
+                <label>模型</label>
+                <select id="ai-model-select"></select>
+              </div>
+              <div class="form-actions">
+                <button id="ai-test-btn" class="btn-secondary">测试连接</button>
+                <button id="ai-save-btn" class="btn-primary">保存</button>
+              </div>
+              <div id="ai-test-result" class="test-result hidden"></div>
             </div>
 
-            <div class="form-actions">
-              <button id="ai-test-btn" class="btn-secondary">测试 AI 连接</button>
-              <button id="ai-save-btn" class="btn-primary">保存</button>
+            <!-- OCR Tab -->
+            <div id="settings-tab-ocr" class="settings-tab-content">
+              <div class="form-group">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="checkbox" id="ocr-auto-checkbox" checked>
+                  打开 PDF 时自动 OCR 提取文字
+                </label>
+                <small style="color:var(--text-secondary);margin-top:4px;display:block;margin-left:24px">关闭后可在阅读器中点击"OCR 提取"按钮手动触发</small>
+              </div>
+              <div class="form-group">
+                <label>OCR 引擎</label>
+                <select id="ocr-engine-select">
+                  <option value="paddle_ocr_vl">PaddleOCR-VL（免费，无需 Key）</option>
+                  <option value="glm_ocr">GLM OCR（需要智谱 API Key）</option>
+                </select>
+              </div>
+              <div class="form-group" id="ocr-glm-key-group" style="display:none">
+                <label>GLM OCR API Key</label>
+                <input type="password" id="ocr-glm-key-input" placeholder="智谱 API Key（用于 GLM OCR）">
+                <small style="color:var(--text-secondary);margin-top:4px;display:block">如已配置智谱 AI 服务商，可留空自动复用其 Key</small>
+              </div>
+              <div class="form-actions">
+                <button id="ocr-save-btn" class="btn-primary">保存</button>
+              </div>
             </div>
-            <div id="ai-test-result" class="test-result hidden"></div>
 
-            <hr style="border-color:var(--border);margin:20px 0 16px">
-            <h3 style="margin:0 0 12px;font-size:15px;color:var(--text-secondary)">OCR 文字识别设置</h3>
-            <div class="form-group">
-              <label>OCR 引擎</label>
-              <select id="ocr-engine-select">
-                <option value="paddle_ocr_vl">PaddleOCR-VL（免费，无需 Key）</option>
-                <option value="glm_ocr">GLM OCR（需要智谱 API Key）</option>
-              </select>
-            </div>
-            <div class="form-group" id="ocr-glm-key-group" style="display:none">
-              <label>GLM OCR API Key</label>
-              <input type="password" id="ocr-glm-key-input" placeholder="智谱 API Key（用于 GLM OCR）">
-              <small style="color:var(--text-secondary);margin-top:4px;display:block">如已配置智谱 AI 服务商，可留空自动复用其 Key</small>
+            <!-- Translate Tab -->
+            <div id="settings-tab-translate" class="settings-tab-content">
+              <div class="form-group">
+                <label>翻译模型服务商</label>
+                <select id="translate-provider-select">
+                  <option value="">跟随 AI 服务设置</option>
+                  <option value="zhipu">智谱 (GLM)</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+              </div>
+              <div class="form-group" id="translate-api-key-group" style="display:none">
+                <label>翻译 API Key</label>
+                <input type="password" id="translate-api-key-input" placeholder="留空则复用 AI 服务的 Key">
+              </div>
+              <div class="form-group">
+                <label>翻译模型</label>
+                <select id="translate-model-select"></select>
+              </div>
+              <div class="form-group">
+                <label>默认翻译目标语言</label>
+                <select id="translate-default-lang">
+                  <option value="zh">中文</option>
+                  <option value="en">English</option>
+                  <option value="ja">日本語</option>
+                  <option value="ko">한국어</option>
+                </select>
+              </div>
+              <div class="form-actions">
+                <button id="translate-save-btn" class="btn-primary">保存</button>
+              </div>
             </div>
 
-            <hr style="border-color:var(--border);margin:20px 0 16px">
-            <h3 style="margin:0 0 12px;font-size:15px;color:var(--text-secondary)">AI 提示词自定义</h3>
-            <div class="form-group">
-              <label>审查意见梳理提示词（含溯源版）</label>
-              <textarea id="prompt-kanban-analysis" class="prompt-textarea" rows="6" placeholder="审查意见梳理提示词（含 OCR 溯源信息时使用）"></textarea>
-              <div class="prompt-actions">
-                <button id="reset-prompt-kanban-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+            <!-- Prompts Tab -->
+            <div id="settings-tab-prompts" class="settings-tab-content">
+              <div class="prompts-header">
+                <p class="prompts-intro">以下是各功能使用的 AI 提示词。修改后点击"保存"即可生效，下次分析将使用新提示词。可随时点击"恢复默认"还原。</p>
+                <p class="prompts-tip">提示：溯源标记格式为 【来源: D{文档序号}_B_p{页码}_{块序号}】（如 D0_B_p1_0），修改时请保留此格式以确保溯源功能正常。</p>
+                <p class="prompts-version">提示词版本：v2（已含辩驳对话梳理、权利要求联动对照、溯源准确性修复）</p>
+              </div>
+
+              <div class="prompt-group">
+                <div class="prompt-group-header">
+                  <div class="prompt-group-title">
+                    <span class="prompt-badge prompt-badge-auto">自动触发</span>
+                    审查历史梳理（含溯源版）
+                  </div>
+                  <button class="prompt-toggle-btn" type="button">展开/收起</button>
+                </div>
+                <div class="prompt-group-desc">当文档已 OCR 提取到文本块（含溯源信息）时，看板"AI 整理"功能使用此提示词。这是最常用的提示词，生成含溯源标记的结构化审查历史报告。</div>
+                <div class="prompt-group-body collapsed">
+                  <textarea id="prompt-kanban-analysis" class="prompt-textarea" rows="12" placeholder="审查意见梳理提示词（含 OCR 溯源信息时使用）"></textarea>
+                  <div class="prompt-actions">
+                    <button id="reset-prompt-kanban-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="prompt-group">
+                <div class="prompt-group-header">
+                  <div class="prompt-group-title">
+                    <span class="prompt-badge prompt-badge-auto">自动触发</span>
+                    审查历史梳理（简化版）
+                  </div>
+                  <button class="prompt-toggle-btn" type="button">展开/收起</button>
+                </div>
+                <div class="prompt-group-desc">当文档未能提取到文本块（无溯源信息）时，看板"AI 整理"功能自动降级使用此提示词。生成简明的审查历史报告，不含溯源标记。</div>
+                <div class="prompt-group-body collapsed">
+                  <textarea id="prompt-kanban-simple" class="prompt-textarea" rows="10" placeholder="审查意见梳理提示词（无溯源信息时使用）"></textarea>
+                  <div class="prompt-actions">
+                    <button id="reset-prompt-kanban-simple" class="btn-secondary btn-small" type="button">恢复默认</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="prompt-group">
+                <div class="prompt-group-header">
+                  <div class="prompt-group-title">
+                    <span class="prompt-badge prompt-badge-manual">手动触发</span>
+                    单文档 AI 分析
+                  </div>
+                  <button class="prompt-toggle-btn" type="button">展开/收起</button>
+                </div>
+                <div class="prompt-group-desc">在看板中点击某文档的"AI 分析"按钮时使用，针对单篇文档进行详细分析（如单篇审查意见或答复的深度解读）。</div>
+                <div class="prompt-group-body collapsed">
+                  <textarea id="prompt-doc-analysis" class="prompt-textarea" rows="10" placeholder="单篇文档 AI 分析提示词"></textarea>
+                  <div class="prompt-actions">
+                    <button id="reset-prompt-doc-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="prompt-group">
+                <div class="prompt-group-header">
+                  <div class="prompt-group-title">
+                    <span class="prompt-badge prompt-badge-manual">手动触发</span>
+                    引用文献梳理
+                  </div>
+                  <button class="prompt-toggle-btn" type="button">展开/收起</button>
+                </div>
+                <div class="prompt-group-desc">点击"引用文献分析"按钮时使用，对审查员和申请人引用的对比文献进行系统梳理。</div>
+                <div class="prompt-group-body collapsed">
+                  <textarea id="prompt-cited-refs-analysis" class="prompt-textarea" rows="8" placeholder="引用文献梳理分析要求提示词"></textarea>
+                  <div class="prompt-actions">
+                    <button id="reset-prompt-cited-refs-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button id="prompts-save-btn" class="btn-primary">保存</button>
               </div>
             </div>
-            <div class="form-group">
-              <label>审查意见梳理提示词（简化版）</label>
-              <textarea id="prompt-kanban-simple" class="prompt-textarea" rows="4" placeholder="审查意见梳理提示词（无溯源信息时使用）"></textarea>
-              <div class="prompt-actions">
-                <button id="reset-prompt-kanban-simple" class="btn-secondary btn-small" type="button">恢复默认</button>
+
+            <!-- Cache Tab -->
+            <div id="settings-tab-cache" class="settings-tab-content">
+              <div class="form-group">
+                <label>缓存概览</label>
+                <div id="cache-overview" style="color:var(--text-secondary);font-size:13px;">加载中...</div>
               </div>
-            </div>
-            <div class="form-group">
-              <label>单文档分析提示词</label>
-              <textarea id="prompt-doc-analysis" class="prompt-textarea" rows="3" placeholder="单篇文档 AI 分析提示词"></textarea>
-              <div class="prompt-actions">
-                <button id="reset-prompt-doc-analysis" class="btn-secondary btn-small" type="button">恢复默认</button>
+              <div class="form-group">
+                <label>已缓存专利</label>
+                <div id="cache-patent-list" style="max-height:240px;overflow-y:auto;"></div>
               </div>
-            </div>
-            <div class="form-group">
-              <label>审查历史梳理提示词</label>
-              <textarea id="prompt-history-summary" class="prompt-textarea" rows="3" placeholder="审查历史整体梳理提示词"></textarea>
-              <div class="prompt-actions">
-                <button id="reset-prompt-history-summary" class="btn-secondary btn-small" type="button">恢复默认</button>
+              <div class="form-actions">
+                <button id="cache-clear-btn" class="btn-danger">清除全部缓存</button>
               </div>
             </div>
           </div>
@@ -295,19 +457,83 @@
       </div>
 
       <div id="error-toast" class="toast hidden"></div>
+
+      <!-- AI Analysis Chat Floating Ball -->
+      <div id="analysis-chat-float-ball" class="analysis-chat-float-ball hidden" title="AI 继续对话">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </div>
+
+      <!-- AI Analysis Chat Floating Panel (page-level) -->
+      <div id="analysis-chat-panel" class="analysis-chat-panel hidden">
+        <div class="analysis-chat-header">
+          <span class="analysis-chat-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> 继续对话</span>
+          <div class="analysis-chat-header-actions">
+            <button id="analysis-chat-clear-btn" class="btn-icon-sm" title="清空对话"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+            <button id="analysis-chat-close-btn" class="btn-icon-sm" title="关闭对话"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          </div>
+        </div>
+        <div id="analysis-chat-messages" class="analysis-chat-messages"></div>
+        <div class="analysis-chat-input-area">
+          <textarea id="analysis-chat-input" class="analysis-chat-input" rows="2" placeholder="对审查报告继续提问..."></textarea>
+          <button id="analysis-chat-send-btn" class="btn-primary btn-small">发送</button>
+          <button id="analysis-chat-abort-btn" class="btn-danger btn-small hidden">中止</button>
+        </div>
+      </div>
     </main>
+
+    <!-- Cache Confirm Dialog -->
+    <div id="cache-confirm-dialog" class="cache-confirm-dialog hidden">
+      <div class="cache-confirm-overlay"></div>
+      <div class="cache-confirm-box">
+        <div class="cache-confirm-title">保存工作进度</div>
+        <div class="cache-confirm-message">当前专利的查询结果和梳理内容尚未保存，是否保存到历史记录？</div>
+        <div class="cache-confirm-actions">
+          <button id="cache-dialog-save-btn" class="btn-primary">保存</button>
+          <button id="cache-dialog-skip-btn" class="btn-secondary">不保存</button>
+          <button id="cache-dialog-cancel-btn" class="btn-secondary">取消</button>
+        </div>
+      </div>
+    </div>
 
     <footer class="app-footer">
       Developed by Alfred Shi
     </footer>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="scripts/marked.min.js?v=20260603"></script>
-  <script src="scripts/docx.umd.js?v=20260603"></script>
-  <script src="scripts/FileSaver.min.js?v=20260603"></script>
-  <script src="scripts/web-ai.js?v=20260603"></script>
-  <script src="scripts/patent-status.js?v=20260603"></script>
-  <script src="scripts/web-app.js?v=20260603"></script>
+  <div id="merge-export-modal" class="modal hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-content merge-export-modal-content">
+        <div class="modal-header">
+          <h2>合并导出审查文档</h2>
+          <button id="merge-export-close-btn" class="btn-icon">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="merge-export-hint">选择需要合并导出的文档，按文件日期倒序排列，每个文档前将插入带标题的封面页作为分隔。</p>
+          <div class="merge-export-toolbar">
+            <input type="text" id="merge-search-input" class="merge-search-input" placeholder="搜索文档名称、代码、日期...">
+            <label class="merge-select-all"><input type="checkbox" id="merge-select-all-cb" checked> 全选</label>
+            <span id="merge-selected-count" class="merge-selected-count">已选 0 份</span>
+          </div>
+          <div id="merge-export-list" class="merge-export-list"></div>
+        </div>
+        <div class="modal-footer">
+          <button id="merge-export-cancel-btn" class="btn-secondary">取消</button>
+          <button id="merge-export-do-btn" class="btn-primary" disabled>合并导出 PDF</button>
+        </div>
+        <div id="merge-export-progress" class="merge-export-progress hidden">
+          <div class="merge-progress-bar"><div id="merge-progress-fill" class="merge-progress-fill"></div></div>
+          <span id="merge-progress-text" class="merge-progress-text">准备中...</span>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="scripts/marked.min.js?v=20260612"></script>
+  <script src="scripts/docx.umd.js?v=20260612"></script>
+  <script src="scripts/FileSaver.min.js?v=20260612"></script>
+  <script src="scripts/pdf-lib.min.js?v=20260615"></script>
+  <script src="scripts/web-ai.js?v=20260612"></script>
+  <script src="scripts/patent-status.js?v=20260612"></script>
+  <script src="scripts/web-app.js?v=20260612"></script>
 </body>
 </html>
