@@ -3428,6 +3428,9 @@ function selectReaderDoc(idx) {
   if (pdfTranslatePanel) pdfTranslatePanel.classList.add("hidden");
   if (pdfTranslateContent) pdfTranslateContent.innerHTML = '<p class="placeholder">点击"翻译全文档"按钮翻译当前文档</p>';
 
+  // Update extract panel for new document
+  updateExtractPanel();
+
   // Render PDF view if active
   if (pdfViewState.active) {
     renderPdfView(idx);
@@ -4222,6 +4225,7 @@ async function ocrPdf() {
         });
       }
       showOcrProgressOverlay("OCR 完成", 100);
+      updateExtractPanel();
       autoSaveCache();
       return true;
     } catch (e) {
@@ -4525,9 +4529,11 @@ function enterReadingMode(activePanel) {
 function exitReadingMode() {
   const readerBody = document.querySelector(".reader-body");
   const rightPanel = document.getElementById("reader-right-panel");
+  const extractPanel = document.getElementById("reader-extract-panel");
   const translatePanel = document.getElementById("pdf-translate-panel");
   const chatPanel = document.getElementById("reader-chat-panel");
-  // Hide both panels
+  // Hide all panels
+  if (extractPanel) extractPanel.classList.add("hidden");
   if (translatePanel) translatePanel.classList.add("hidden");
   if (chatPanel) chatPanel.classList.add("hidden");
   if (readerBody) readerBody.classList.remove("reading-mode");
@@ -4539,6 +4545,7 @@ function exitReadingMode() {
 }
 
 function switchRightPanelTab(panelName) {
+  const extractPanel = document.getElementById("reader-extract-panel");
   const translatePanel = document.getElementById("pdf-translate-panel");
   const chatPanel = document.getElementById("reader-chat-panel");
   const tabs = document.querySelectorAll(".right-panel-tab");
@@ -4549,13 +4556,41 @@ function switchRightPanelTab(panelName) {
   });
 
   // Show/hide panels
-  if (panelName === "translate") {
+  if (extractPanel) extractPanel.classList.add("hidden");
+  if (translatePanel) translatePanel.classList.add("hidden");
+  if (chatPanel) chatPanel.classList.add("hidden");
+
+  if (panelName === "extract") {
+    if (extractPanel) extractPanel.classList.remove("hidden");
+    updateExtractPanel();
+  } else if (panelName === "translate") {
     if (translatePanel) translatePanel.classList.remove("hidden");
-    if (chatPanel) chatPanel.classList.add("hidden");
   } else if (panelName === "chat") {
     if (chatPanel) chatPanel.classList.remove("hidden");
-    if (translatePanel) translatePanel.classList.add("hidden");
   }
+}
+
+// Update the extract panel content for the current document
+function updateExtractPanel() {
+  const contentEl = document.getElementById("reader-extract-content");
+  if (!contentEl) return;
+  const idx = pdfViewState.currentDocIdx;
+  const ext = kanbanState.extractions ? kanbanState.extractions[idx] : null;
+  if (!ext || (!ext.text && !ext.markdown)) {
+    contentEl.innerHTML = '<p class="placeholder">该文档尚未进行 OCR 提取</p>';
+    return;
+  }
+  const text = ext.markdown || ext.text || "";
+  if (!text.trim()) {
+    contentEl.innerHTML = '<p class="placeholder">该文档尚未进行 OCR 提取</p>';
+    return;
+  }
+  // Show blocks info if available
+  let blocksInfo = "";
+  if (ext.blocks && ext.blocks.length > 0) {
+    blocksInfo = `<div class="extract-blocks-info">共 ${ext.blocks.length} 个文本块</div>`;
+  }
+  contentEl.innerHTML = blocksInfo + '<pre class="extract-pre">' + escapeHtml(text) + '</pre>';
 }
 
 // ===== Open reader for specific document from kanban =====
@@ -5433,8 +5468,33 @@ document.addEventListener("DOMContentLoaded", () => {
     clearSelBtn.addEventListener("click", clearPdfBlockSelection);
   }
 
+  // Extract copy button
+  const extractCopyBtn = document.getElementById("extract-copy-btn");
+  if (extractCopyBtn) {
+    extractCopyBtn.addEventListener("click", () => {
+      const idx = pdfViewState.currentDocIdx;
+      const ext = kanbanState.extractions ? kanbanState.extractions[idx] : null;
+      if (!ext) return;
+      const text = ext.markdown || ext.text || "";
+      if (!text.trim()) return;
+      navigator.clipboard.writeText(text).then(() => {
+        extractCopyBtn.textContent = "已复制 ✓";
+        setTimeout(() => { extractCopyBtn.textContent = "复制全文"; }, 1500);
+      }).catch(() => {
+        // Fallback for older browsers
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        extractCopyBtn.textContent = "已复制 ✓";
+        setTimeout(() => { extractCopyBtn.textContent = "复制全文"; }, 1500);
+      });
+    });
+  }
+
   // Right panel close button (exits reading mode entirely)
-  const rightPanelCloseBtn = document.getElementById("right-panel-close-btn");
   if (rightPanelCloseBtn) {
     rightPanelCloseBtn.addEventListener("click", () => {
       exitReadingMode();

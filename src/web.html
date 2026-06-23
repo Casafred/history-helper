@@ -194,14 +194,25 @@
                   </div>
                 </div>
               </div>
-              <!-- Right side panels (translate + chat) with tab switching -->
+              <!-- Right side panels (extract + translate + chat) with tab switching -->
               <div id="reader-right-panel" class="reader-right-panel hidden">
                 <div class="reader-right-panel-tabs">
+                  <button class="right-panel-tab" data-panel="extract">提取内容</button>
                   <button class="right-panel-tab active" data-panel="translate">对照翻译</button>
                   <button class="right-panel-tab" data-panel="chat">AI 对话</button>
                   <button id="right-panel-close-btn" class="btn-icon-sm" title="退出阅读模式"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
                 <div class="reader-right-panel-body">
+                  <!-- Extract Content Panel -->
+                  <div id="reader-extract-panel" class="reader-extract-panel hidden">
+                    <div class="reader-extract-header">
+                      <span class="reader-extract-title">OCR 提取内容</span>
+                      <button id="extract-copy-btn" class="btn-secondary btn-small" type="button">复制全文</button>
+                    </div>
+                    <div id="reader-extract-content" class="reader-extract-content">
+                      <p class="placeholder">该文档尚未进行 OCR 提取</p>
+                    </div>
+                  </div>
                   <!-- PDF Translation Panel -->
                   <div id="pdf-translate-panel" class="pdf-translate-panel hidden">
                     <div class="pdf-translate-header">
