@@ -7,6 +7,8 @@ const GD_API_BASE = "https://d1kazzu6rbodne.cloudfront.net";
 const JPO_API_BASE = "https://ip-data.jpo.go.jp";
 const DPMA_REGISTER_BASE = "https://register.dpma.de";
 const GOOGLE_PATENTS_BASE = "https://patents.google.com";
+// 系统代理：优先取 HTTPS_PROXY / HTTP_PROXY 环境变量，否则使用默认值
+const PROXY_URL = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || "http://127.0.0.1:7897";
 const PORT = 8080;
 
 const MIME_TYPES = {
@@ -657,6 +659,7 @@ function scrapeGooglePatent(patentNumber, res) {
       const url = `${GOOGLE_PATENTS_BASE}/patent/${encodeURIComponent(tryNumber)}`;
       const args = [
         "-s", "-k", "-w", "\n__HTTP_CODE__%{http_code}",
+        "--proxy", PROXY_URL,
         "--max-time", "30",
         "-L",
         "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
