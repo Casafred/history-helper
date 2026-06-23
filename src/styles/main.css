@@ -3538,4 +3538,277 @@ body {
   justify-content: flex-end;
 }
 
+/* ===== 搜索模式切换 ===== */
+.search-mode-switch {
+  display: flex;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 2px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+.search-mode-btn {
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.search-mode-btn:hover {
+  color: var(--text-secondary);
+}
+.search-mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ===== 专利详情视图 ===== */
+.patent-detail-section {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 20px;
+}
+.patent-detail-content {
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  padding: 28px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+}
+.pd-header {
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+}
+.pd-patent-number {
+  font-size: 14px;
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.pd-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+.pd-gp-link {
+  display: inline-block;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+.pd-gp-link:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.pd-body {
+  display: flex;
+  gap: 24px;
+}
+.pd-info {
+  flex: 1;
+  min-width: 0;
+}
+.pd-section {
+  margin-bottom: 20px;
+}
+.pd-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.pd-abstract {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.pd-info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pd-info-item {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+}
+.pd-info-label {
+  color: var(--text-muted);
+  min-width: 60px;
+  flex-shrink: 0;
+}
+.pd-info-value {
+  color: var(--text-primary);
+}
+.pd-classifications {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pd-class-item {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  align-items: baseline;
+}
+.pd-class-code {
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+  font-family: monospace;
+}
+.pd-class-desc {
+  color: var(--text-secondary);
+}
+.pd-citations {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pd-citation-item {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  align-items: baseline;
+}
+.pd-patent-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pd-patent-link:hover {
+  text-decoration: underline;
+}
+.pd-citation-title {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Drawings */
+.pd-drawings {
+  width: 280px;
+  flex-shrink: 0;
+}
+.pd-drawings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.pd-drawing-item {
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: border-color 0.2s;
+  background: #fff;
+}
+.pd-drawing-item:hover {
+  border-color: var(--accent);
+}
+.pd-drawing-item img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.pd-drawing-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  min-height: 80px;
+  cursor: pointer;
+}
+
+/* Inline patent links in AI analysis */
+.pd-patent-link-inline {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 1px dashed var(--accent);
+  transition: all 0.2s;
+}
+.pd-patent-link-inline:hover {
+  color: var(--accent);
+  border-bottom-style: solid;
+}
+
+/* Patent image viewer (fullscreen overlay) */
+.patent-image-viewer {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.85);
+  z-index: 100000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.piv-image {
+  max-width: 90vw;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: 4px;
+  background: #fff;
+}
+.piv-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 16px;
+}
+.piv-btn {
+  padding: 6px 14px;
+  border: 1px solid rgba(255,255,255,0.3);
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+.piv-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.2);
+}
+.piv-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.piv-counter {
+  color: rgba(255,255,255,0.7);
+  font-size: 13px;
+  min-width: 60px;
+  text-align: center;
+}
+
+/* Responsive: stack on narrow screens */
+@media (max-width: 700px) {
+  .pd-body {
+    flex-direction: column;
+  }
+  .pd-drawings {
+    width: 100%;
+  }
+}
+
 

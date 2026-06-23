@@ -6,6 +6,7 @@ const path = require("path");
 const GD_API_BASE = "https://d1kazzu6rbodne.cloudfront.net";
 const JPO_API_BASE = "https://ip-data.jpo.go.jp";
 const DPMA_REGISTER_BASE = "https://register.dpma.de";
+const GOOGLE_PATENTS_BASE = "https://patents.google.com";
 const PORT = 8080;
 
 const MIME_TYPES = {
@@ -360,6 +361,239 @@ function proxyDpmaDownload(reqUrl, res) {
   });
 }
 
+// ── Google Patents scraper ────────────────────────────────────────────────────
+
+function normalizePatentNumber(input) {
+  const normalized = input.toUpperCase().replace(/[\s\/]/g, "");
+  const countryMatch = normalized.match(/^([A-Z]{2})(\d+[A-Z]?\d*)/);
+  if (!countryMatch) return { normalized, variants: [] };
+  const country = countryMatch[1];
+  const rest = countryMatch[2];
+  const numberMatch = rest.match(/^(\d+)([A-Z]+\d*)?$/);
+  if (!numberMatch) return { normalized, variants: [] };
+  const base = numberMatch[1];
+  const suffix = numberMatch[2] || "";
+  const variants = [];
+  const basePatent = country + base;
+  if (basePatent !== normalized) variants.push(basePatent);
+  if (suffix) {
+    const letterOnly = suffix.match(/^([A-Z]+)/);
+    if (letterOnly) {
+      const v = country + base + letterOnly[1];
+      if (v !== normalized && !variants.includes(v)) variants.push(v);
+    }
+  }
+  return { normalized, variants };
+}
+
+function extractPatentFromHtml(html, patentId) {
+  // Strategy 1: JSON-LD
+  const jsonLdMatch = html.match(/<script\s+type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/i);
+  let jsonLdResult = null;
+  if (jsonLdMatch) {
+    try {
+      const ldData = JSON.parse(jsonLdMatch[1]);
+      const graph = ldData["@graph"] || [ldData];
+      const patentEntry = graph.find(item => item["@type"] === "Patent");
+      if (patentEntry) {
+        jsonLdResult = {
+          patent_number: patentId,
+          title: patentEntry.name || patentEntry.title || "",
+          abstract: patentEntry.abstract || "",
+          url: `https://patents.google.com/patent/${patentId}`,
+          application_date: "",
+          publication_date: "",
+          inventors: [],
+          assignees: [],
+          drawings: [],
+          patent_citations: [],
+          cited_by: [],
+          classifications: [],
+        };
+        if (patentEntry.inventor) {
+          jsonLdResult.inventors = (Array.isArray(patentEntry.inventor) ? patentEntry.inventor : [patentEntry.inventor]).map(i => i.name || i).filter(n => typeof n === "string");
+        }
+        if (patentEntry.assignee) {
+          jsonLdResult.assignees = (Array.isArray(patentEntry.assignee) ? patentEntry.assignee : [patentEntry.assignee]).map(a => a.name || a).filter(n => typeof n === "string");
+        }
+        if (patentEntry.filingDate) jsonLdResult.application_date = patentEntry.filingDate;
+        if (patentEntry.publicationDate) jsonLdResult.publication_date = patentEntry.publicationDate;
+        if (patentEntry.image) {
+          const imgs = Array.isArray(patentEntry.image) ? patentEntry.image : [patentEntry.image];
+          jsonLdResult.drawings = imgs.map(i => (typeof i === "string" ? i : (i.url || i.contentUrl || ""))).filter(u => u && u.startsWith("http"));
+        }
+      }
+    } catch (e) { /* fall through to HTML parsing */ }
+  }
+
+  // Strategy 2: HTML element parsing (always run to supplement missing fields)
+  const htmlResult = {
+    patent_number: patentId,
+    title: "",
+    abstract: "",
+    url: `https://patents.google.com/patent/${patentId}`,
+    application_date: "",
+    publication_date: "",
+    inventors: [],
+    assignees: [],
+    drawings: [],
+    patent_citations: [],
+    cited_by: [],
+    classifications: [],
+  };
+
+  // Title
+  const titleMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  if (titleMatch) htmlResult.title = titleMatch[1].replace(/<[^>]+>/g, "").trim();
+
+  // Abstract
+  const abstractMatch = html.match(/<section[^>]*itemprop="abstract"[^>]*>([\s\S]*?)<\/section>/i)
+    || html.match(/<div[^>]*class="abstract"[^>]*>([\s\S]*?)<\/div>/i)
+    || html.match(/<abstract>([\s\S]*?)<\/abstract>/i);
+  if (abstractMatch) htmlResult.abstract = abstractMatch[1].replace(/<[^>]+>/g, "").trim();
+
+  // Inventors
+  const inventorMatches = html.matchAll(/<dd[^>]*itemprop="inventor"[^>]*>([\s\S]*?)<\/dd>/gi);
+  for (const m of inventorMatches) {
+    const name = m[1].replace(/<[^>]+>/g, "").trim();
+    if (name) htmlResult.inventors.push(name);
+  }
+
+  // Assignees
+  const assigneeMatches = html.matchAll(/<dd[^>]*itemprop="assignee(?:Current|Original)"[^>]*>([\s\S]*?)<\/dd>/gi);
+  for (const m of assigneeMatches) {
+    const name = m[1].replace(/<[^>]+>/g, "").trim();
+    if (name && !htmlResult.assignees.includes(name)) htmlResult.assignees.push(name);
+  }
+
+  // Dates
+  const filingMatch = html.match(/<time[^>]*itemprop="filingDate"[^>]*>([\s\S]*?)<\/time>/i);
+  if (filingMatch) htmlResult.application_date = filingMatch[1].replace(/<[^>]+>/g, "").trim();
+  const pubMatch = html.match(/<time[^>]*itemprop="publicationDate"[^>]*>([\s\S]*?)<\/time>/i);
+  if (pubMatch) htmlResult.publication_date = pubMatch[1].replace(/<[^>]+>/g, "").trim();
+
+  // Drawings - itemprop="images"
+  const imageMatches = html.matchAll(/<li[^>]*itemprop="images"[^>]*>([\s\S]*?)<\/li>/gi);
+  for (const m of imageMatches) {
+    const fullMeta = m[1].match(/<meta[^>]*itemprop="full"[^>]*content="([^"]+)"/);
+    if (fullMeta && fullMeta[1].startsWith("http")) {
+      htmlResult.drawings.push(fullMeta[1]);
+    } else {
+      const thumbImg = m[1].match(/<img[^>]*itemprop="thumbnail"[^>]*src="([^"]+)"/);
+      if (thumbImg) {
+        let url = thumbImg[1];
+        if (url.startsWith("//")) url = "https:" + url;
+        if (url.startsWith("http")) htmlResult.drawings.push(url);
+      }
+    }
+  }
+
+  // Patent citations (backward references)
+  const citationMatches = html.matchAll(/<tr[^>]*itemprop="backwardReferencesOrig"[^>]*>([\s\S]*?)<\/tr>/gi);
+  for (const m of citationMatches) {
+    const row = m[1];
+    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
+    const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    if (numMatch) {
+      htmlResult.patent_citations.push({
+        patent_number: numMatch[1].replace(/<[^>]+>/g, "").trim(),
+        title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
+      });
+    }
+  }
+
+  // CPC Classifications
+  const classMatches = html.matchAll(/<li[^>]*itemprop="classifications"[^>]*>([\s\S]*?)<\/li>/gi);
+  for (const m of classMatches) {
+    const row = m[1];
+    const codeMatch = row.match(/<span[^>]*class="classification-code[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
+    const descMatch = row.match(/<span[^>]*class="classification-desc[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
+    if (codeMatch) {
+      htmlResult.classifications.push({
+        code: codeMatch[1].replace(/<[^>]+>/g, "").trim(),
+        description: descMatch ? descMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+      });
+    }
+  }
+
+  // Merge: JSON-LD takes priority for core fields, HTML supplements missing fields
+  if (jsonLdResult) {
+    // Use JSON-LD for core fields (title, abstract, inventors, assignees, dates, drawings)
+    // but supplement with HTML-parsed classifications and citations
+    if (htmlResult.classifications.length > 0) jsonLdResult.classifications = htmlResult.classifications;
+    if (htmlResult.patent_citations.length > 0) jsonLdResult.patent_citations = htmlResult.patent_citations;
+    // Supplement any missing core fields from HTML
+    if (!jsonLdResult.title && htmlResult.title) jsonLdResult.title = htmlResult.title;
+    if (!jsonLdResult.abstract && htmlResult.abstract) jsonLdResult.abstract = htmlResult.abstract;
+    if (!jsonLdResult.application_date && htmlResult.application_date) jsonLdResult.application_date = htmlResult.application_date;
+    if (!jsonLdResult.publication_date && htmlResult.publication_date) jsonLdResult.publication_date = htmlResult.publication_date;
+    if (jsonLdResult.inventors.length === 0 && htmlResult.inventors.length > 0) jsonLdResult.inventors = htmlResult.inventors;
+    if (jsonLdResult.assignees.length === 0 && htmlResult.assignees.length > 0) jsonLdResult.assignees = htmlResult.assignees;
+    if (jsonLdResult.drawings.length === 0 && htmlResult.drawings.length > 0) jsonLdResult.drawings = htmlResult.drawings;
+    return jsonLdResult;
+  }
+
+  return htmlResult;
+}
+
+function scrapeGooglePatent(patentNumber, res) {
+  const { normalized, variants } = normalizePatentNumber(patentNumber);
+  const allToTry = [normalized, ...variants];
+
+  (async () => {
+    for (const tryNumber of allToTry) {
+      const url = `${GOOGLE_PATENTS_BASE}/patent/${encodeURIComponent(tryNumber)}`;
+      const args = [
+        "-s", "-w", "\n__HTTP_CODE__%{http_code}",
+        "--max-time", "30",
+        "-L",
+        "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "-H", "Accept-Language: en-US,en;q=0.9",
+        "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        url,
+      ];
+
+      const result = await new Promise((resolve) => {
+        execFile("curl", args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+          if (err) { resolve(null); return; }
+          const marker = "\n__HTTP_CODE__";
+          const idx = stdout.lastIndexOf(marker);
+          let httpCode = 200;
+          let body = stdout;
+          if (idx !== -1) {
+            httpCode = parseInt(stdout.substring(idx + marker.length), 10);
+            body = stdout.substring(0, idx);
+          }
+          resolve({ httpCode, body });
+        });
+      });
+
+      if (!result) {
+        // curl error (network issue), try next variant
+        continue;
+      }
+
+      if (result.httpCode === 429) {
+        res.writeHead(429, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+        res.end(JSON.stringify({ error: "Google Patents 请求过于频繁，请稍后重试" }));
+        return;
+      }
+
+      if (result.httpCode === 200 && result.body && result.body.length > 1000) {
+        const data = extractPatentFromHtml(result.body, tryNumber);
+        if (data.title || data.abstract) {
+          res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+          res.end(JSON.stringify({ success: true, data, patent_number: tryNumber }));
+          return;
+        }
+      }
+    }
+
+    res.writeHead(404, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({ success: false, error: `未找到专利: ${patentNumber}`, patent_number: normalized }));
+  })();
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
@@ -392,6 +626,12 @@ const server = http.createServer((req, res) => {
   if (req.url.startsWith("/api/de/register-info/")) {
     const number = req.url.replace("/api/de/register-info/", "");
     proxyDpmaRegisterInfo(number, res);
+    return;
+  }
+
+  if (req.url.startsWith("/api/gp/")) {
+    const patentNumber = req.url.replace("/api/gp/", "").replace(/[?#].*$/, "");
+    scrapeGooglePatent(decodeURIComponent(patentNumber), res);
     return;
   }
 
