@@ -3,6 +3,7 @@ const http = require("http");
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
+const { execFile } = require("child_process");
 
 const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
 const fontkit = require("@pdf-lib/fontkit");
@@ -532,25 +533,26 @@ async function scrapeGooglePatent(patentNumber, res) {
   const allToTry = [normalized, ...variants];
   const corsHeaders = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
 
-  const gpHeaders = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  };
-
   for (const tryNumber of allToTry) {
     const url = `${GOOGLE_PATENTS_BASE}/patent/${encodeURIComponent(tryNumber)}`;
+    const curlArgs = [
+      "-s", "-L",
+      "--max-time", "30",
+      "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "-H", "Accept-Language: en-US,en;q=0.9",
+      "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      url
+    ];
+
     try {
-      const result = await httpsGetWithRedirect(url, gpHeaders, 30000);
+      const html = await new Promise((resolve, reject) => {
+        execFile("curl", curlArgs, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+          if (err) { reject(err); return; }
+          resolve(stdout);
+        });
+      });
 
-      if (result.statusCode === 429) {
-        res.writeHead(429, corsHeaders);
-        res.end(JSON.stringify({ error: "Google Patents 请求过于频繁，请稍后重试" }));
-        return;
-      }
-
-      if (result.statusCode === 200 && result.body && result.body.length > 1000) {
-        const html = result.body.toString("utf-8");
+      if (html && html.length > 1000) {
         const data = extractPatentFromHtml(html, tryNumber);
         if (data.title || data.abstract) {
           res.writeHead(200, corsHeaders);
