@@ -301,6 +301,11 @@ function extractPatentFromHtml(html, patentId) {
           patent_citations: [],
           cited_by: [],
           classifications: [],
+          claims: [],
+          description: "",
+          pdf_link: "",
+          events_timeline: [],
+          legal_events: [],
         };
         if (patentEntry.inventor) {
           jsonLdResult.inventors = (Array.isArray(patentEntry.inventor) ? patentEntry.inventor : [patentEntry.inventor]).map(i => i.name || i).filter(n => typeof n === "string");
@@ -331,6 +336,11 @@ function extractPatentFromHtml(html, patentId) {
     patent_citations: [],
     cited_by: [],
     classifications: [],
+    claims: [],
+    description: "",
+    pdf_link: "",
+    events_timeline: [],
+    legal_events: [],
   };
 
   const titleMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
@@ -399,6 +409,103 @@ function extractPatentFromHtml(html, patentId) {
     }
   }
 
+  // Claims - extract from section itemprop="claims"
+  const claimsSection = html.match(/<section[^>]*itemprop="claims"[^>]*>([\s\S]*?)<\/section>/i)
+    || html.match(/<div[^>]*class="claims"[^>]*>([\s\S]*?)<\/div>/i);
+  if (claimsSection) {
+    const claimsHtml = claimsSection[1];
+    // Extract claim items from <li class="claim"> or <li class="claim-dependent">
+    const claimMatches = claimsHtml.matchAll(/<li[^>]*class="claim(?:-dependent)?[^"]*"[^>]*>([\s\S]*?)<\/li>/gi);
+    for (const cm of claimMatches) {
+      const claimBody = cm[1];
+      const isDependent = cm[0].includes('claim-dependent');
+      // Extract claim text, remove HTML tags
+      let claimText = claimBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      // Try to extract claim number from num attribute
+      const numMatch = cm[0].match(/<div[^>]*num="(\d+)"[^>]*class="claim"/);
+      const claimNum = numMatch ? numMatch[1] : "";
+      if (claimText && claimText.length > 10) {
+        htmlResult.claims.push({
+          num: claimNum,
+          text: claimText,
+          type: isDependent ? "dependent" : "independent"
+        });
+      }
+    }
+    // Fallback: extract from div[num] elements
+    if (htmlResult.claims.length === 0) {
+      const divClaimMatches = claimsHtml.matchAll(/<div[^>]*num="(\d+)"[^>]*class="claim"[^>]*>([\s\S]*?)<\/div>/gi);
+      for (const dm of divClaimMatches) {
+        let text = dm[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        if (text && text.length > 10) {
+          const isDep = /claim\s*\d+/i.test(text) || text.includes('根据权利要求');
+          htmlResult.claims.push({ num: dm[1], text, type: isDep ? "dependent" : "independent" });
+        }
+      }
+    }
+  }
+
+  // Description
+  const descSection = html.match(/<section[^>]*itemprop="description"[^>]*>([\s\S]*?)<\/section>/i)
+    || html.match(/<div[^>]*class="description"[^>]*>([\s\S]*?)<\/div>/i);
+  if (descSection) {
+    let descHtml = descSection[1];
+    // Try to extract from ul.description structure (Google Patents format)
+    const ulDesc = descHtml.match(/<ul[^>]*class="description"[^>]*>([\s\S]*?)<\/ul>/i);
+    if (ulDesc) {
+      // Process headings and list items
+      let parts = ulDesc[1].replace(/<heading[^>]*>([\s\S]*?)<\/heading>/gi, '\n\n## $1\n');
+      parts = parts.replace(/<\/li>/gi, '\n');
+      parts = parts.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      htmlResult.description = parts;
+    } else {
+      // Try description-paragraph divs
+      const paraMatches = descHtml.matchAll(/<div[^>]*class="description-paragraph"[^>]*>([\s\S]*?)<\/div>/gi);
+      const paragraphs = [];
+      for (const pm of paraMatches) {
+        const pText = pm[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        if (pText) paragraphs.push(pText);
+      }
+      if (paragraphs.length > 0) {
+        htmlResult.description = paragraphs.join('\n\n');
+      } else {
+        htmlResult.description = descHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      }
+    }
+  }
+
+  // PDF link
+  const pdfMatch = html.match(/<a[^>]*itemprop="pdfLink"[^>]*href="([^"]+)"[^>]*>/i);
+  if (pdfMatch) htmlResult.pdf_link = pdfMatch[1];
+
+  // Events timeline - extract from application events
+  const eventRows = html.matchAll(/<tr[^>]*itemprop="applicationEvents"[^>]*>([\s\S]*?)<\/tr>/gi);
+  for (const er of eventRows) {
+    const row = er[1];
+    const dateMatch = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
+    const titleMatch = row.match(/<td[^>]*class="event-desc[^"]*"[^>]*>([\s\S]*?)<\/td>/i)
+      || row.match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
+    if (dateMatch) {
+      htmlResult.events_timeline.push({
+        date: dateMatch[1].replace(/<[^>]+>/g, "").trim(),
+        title: titleMatch ? titleMatch[1].replace(/<[^>]+>/g, "").trim() : ""
+      });
+    }
+  }
+  // Also try legal events from table
+  const legalRows = html.matchAll(/<tr[^>]*itemprop="legalEvents"[^>]*>([\s\S]*?)<\/tr>/gi);
+  for (const lr of legalRows) {
+    const row = lr[1];
+    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
+    if (cells.length >= 2) {
+      htmlResult.legal_events.push({
+        date: cells[0][1].replace(/<[^>]+>/g, "").trim(),
+        code: cells.length >= 3 ? cells[1][1].replace(/<[^>]+>/g, "").trim() : "",
+        description: cells[cells.length >= 3 ? 2 : 1][1].replace(/<[^>]+>/g, "").trim()
+      });
+    }
+  }
+
   if (jsonLdResult) {
     if (htmlResult.classifications.length > 0) jsonLdResult.classifications = htmlResult.classifications;
     if (htmlResult.patent_citations.length > 0) jsonLdResult.patent_citations = htmlResult.patent_citations;
@@ -409,6 +516,11 @@ function extractPatentFromHtml(html, patentId) {
     if (jsonLdResult.inventors.length === 0 && htmlResult.inventors.length > 0) jsonLdResult.inventors = htmlResult.inventors;
     if (jsonLdResult.assignees.length === 0 && htmlResult.assignees.length > 0) jsonLdResult.assignees = htmlResult.assignees;
     if (jsonLdResult.drawings.length === 0 && htmlResult.drawings.length > 0) jsonLdResult.drawings = htmlResult.drawings;
+    if (htmlResult.claims.length > 0) jsonLdResult.claims = htmlResult.claims;
+    if (htmlResult.description) jsonLdResult.description = htmlResult.description;
+    if (htmlResult.pdf_link) jsonLdResult.pdf_link = htmlResult.pdf_link;
+    if (htmlResult.events_timeline.length > 0) jsonLdResult.events_timeline = htmlResult.events_timeline;
+    if (htmlResult.legal_events.length > 0) jsonLdResult.legal_events = htmlResult.legal_events;
     return jsonLdResult;
   }
 

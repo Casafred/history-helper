@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PatentLens - 专利审查文档获取与梳理</title>
-  <link rel="stylesheet" href="styles/main.css?v=20260623b">
+  <link rel="stylesheet" href="styles/main.css?v=20260623c">
 </head>
 <body>
   <div id="splash-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:var(--bg-primary, #0f1117);display:flex;align-items:center;justify-content:center;z-index:99999;transition:opacity 0.5s ease;">
@@ -258,6 +258,31 @@
       <div id="reader-floating-ball" class="reader-floating-ball hidden" title="点击打开阅读器">
         <svg class="reader-fb-icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
         <svg class="reader-fb-icon-back hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>
+      </div>
+
+      <!-- 专利原文弹出阅读器 -->
+      <div id="patent-popup-viewer" class="patent-popup-viewer hidden">
+        <div class="ppv-header">
+          <div class="ppv-title-bar">
+            <span id="ppv-patent-number" class="ppv-patent-number"></span>
+            <span id="ppv-patent-title" class="ppv-patent-title"></span>
+          </div>
+          <div class="ppv-actions">
+            <a id="ppv-gp-link" href="#" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:12px;">Google Patents</a>
+            <a id="ppv-pdf-link" href="#" target="_blank" rel="noopener" class="pd-pdf-link hidden">PDF原文</a>
+            <button id="ppv-close-btn" class="ppv-close-btn" title="关闭">&times;</button>
+          </div>
+        </div>
+        <div id="ppv-content" class="ppv-content"></div>
+        <div id="ppv-loading" class="ppv-loading hidden">
+          <div class="ppv-spinner"></div>
+          <span>正在获取专利信息...</span>
+        </div>
+      </div>
+
+      <!-- 专利原文悬浮球 -->
+      <div id="patent-popup-ball" class="patent-popup-ball hidden" title="点击查看专利原文">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </div>
 
       <div id="ai-settings-modal" class="modal hidden">
@@ -539,12 +564,12 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="scripts/marked.min.js?v=20260623b"></script>
-  <script src="scripts/docx.umd.js?v=20260623b"></script>
-  <script src="scripts/FileSaver.min.js?v=20260623b"></script>
-  <script src="scripts/pdf-lib.min.js?v=20260623b"></script>
-  <script src="scripts/web-ai.js?v=20260623b"></script>
-  <script src="scripts/patent-status.js?v=20260623b"></script>
-  <script src="scripts/web-app.js?v=20260623b"></script>
+  <script src="scripts/marked.min.js?v=20260623c"></script>
+  <script src="scripts/docx.umd.js?v=20260623c"></script>
+  <script src="scripts/FileSaver.min.js?v=20260623c"></script>
+  <script src="scripts/pdf-lib.min.js?v=20260623c"></script>
+  <script src="scripts/web-ai.js?v=20260623c"></script>
+  <script src="scripts/patent-status.js?v=20260623c"></script>
+  <script src="scripts/web-app.js?v=20260623c"></script>
 </body>
 </html>
