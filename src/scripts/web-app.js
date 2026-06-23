@@ -5794,6 +5794,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Right panel close button (exits reading mode entirely)
+  const rightPanelCloseBtn = document.getElementById("right-panel-close-btn");
   if (rightPanelCloseBtn) {
     rightPanelCloseBtn.addEventListener("click", () => {
       exitReadingMode();
