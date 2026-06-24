@@ -409,6 +409,7 @@ function extractPatentFromHtml(html, patentId) {
   }
 
   // Patent citations (backward references)
+  // backwardReferencesOrig = examiner citations (marked with * in Google Patents)
   const citationMatches = html.matchAll(/<tr[^>]*itemprop="backwardReferencesOrig"[^>]*>([\s\S]*?)<\/tr>/gi);
   for (const m of citationMatches) {
     const row = m[1];
@@ -416,6 +417,8 @@ function extractPatentFromHtml(html, patentId) {
     const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
     const pubDateMatch = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
     const assigneeMatch = row.match(/<td[^>]*class="patent-assignee[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    // Check for * marker in the row (examiner citation indicator)
+    const hasStar = /\*/.test(row.replace(/<[^>]+>/g, ""));
     if (numMatch) {
       htmlResult.patent_citations.push({
         patent_number: numMatch[1].replace(/<[^>]+>/g, "").trim(),
@@ -423,10 +426,11 @@ function extractPatentFromHtml(html, patentId) {
         publication_date: pubDateMatch ? pubDateMatch[1].replace(/<[^>]+>/g, "").trim() : "",
         assignee: assigneeMatch ? assigneeMatch[1].replace(/<[^>]+>/g, "").trim() : "",
         link: "https://patents.google.com/patent/" + numMatch[1].replace(/<[^>]+>/g, "").trim(),
+        citation_type: hasStar ? "examiner" : "applicant",
       });
     }
   }
-  // Also try backwardReferencesFamily
+  // backwardReferencesFamily = family-level citations (typically applicant)
   const citationFamilyMatches = html.matchAll(/<tr[^>]*itemprop="backwardReferencesFamily"[^>]*>([\s\S]*?)<\/tr>/gi);
   for (const m of citationFamilyMatches) {
     const row = m[1];
@@ -439,6 +443,7 @@ function extractPatentFromHtml(html, patentId) {
           patent_number: pn,
           title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
           link: "https://patents.google.com/patent/" + pn,
+          citation_type: "applicant",
         });
       }
     }

@@ -3606,7 +3606,7 @@ body {
 
 /* ===== 专利详情视图 ===== */
 .patent-detail-section {
-  max-width: 960px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 24px 20px;
 }
@@ -3617,7 +3617,7 @@ body {
   box-shadow: 0 2px 12px rgba(0,0,0,0.08);
 }
 .pd-header {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   border-bottom: 1px solid var(--border);
   padding-bottom: 16px;
 }
@@ -3648,13 +3648,149 @@ body {
   background: var(--accent);
   color: #fff;
 }
-.pd-body {
+/* Tab layout */
+.pd-tab-layout {
   display: flex;
-  gap: 24px;
+  gap: 0;
+  min-height: 500px;
 }
-.pd-info {
+
+/* Bookmark tabs on left */
+.pd-bookmark-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  flex-shrink: 0;
+  width: 56px;
+}
+.pd-bookmark-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 4px 8px;
+  border-radius: 8px 0 0 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+  border-right: none;
+  font-size: 10px;
+  color: var(--text-muted);
+  gap: 3px;
+  user-select: none;
+}
+.pd-bookmark-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+.pd-bookmark-tab.active {
+  background: var(--bg-primary);
+  color: var(--accent);
+  border-color: var(--border);
+  font-weight: 600;
+  box-shadow: 2px 0 0 var(--bg-primary);
+  position: relative;
+  z-index: 1;
+}
+.pd-bm-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.pd-bm-label {
+  font-size: 9px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* Tab panels */
+.pd-tab-panels {
   flex: 1;
   min-width: 0;
+  border-left: 1px solid var(--border);
+  padding-left: 20px;
+}
+.pd-tab-panel {
+  display: none;
+}
+.pd-tab-panel.active {
+  display: block;
+}
+
+/* Overview layout: two columns */
+.pd-overview-layout {
+  display: flex;
+  gap: 20px;
+}
+.pd-overview-info {
+  flex: 1;
+  min-width: 0;
+}
+.pd-overview-drawings {
+  width: 280px;
+  flex-shrink: 0;
+}
+
+/* Panel header for claims/description */
+.pd-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.pd-panel-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.pd-panel-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Empty state */
+.pd-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px 20px;
+  font-size: 14px;
+}
+
+/* Family ID badge */
+.pd-family-id {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
+/* Citation markers */
+.pd-citation-marker {
+  font-size: 14px;
+  font-weight: 700;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+.pd-citation-marker.examiner {
+  color: #ef4444;
+}
+.pd-citation-marker.applicant {
+  color: #3b82f6;
+}
+.pd-citation-legend {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  background: var(--bg-hover);
+  border-radius: 4px;
+}
+.pd-citation-assignee {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 8px;
 }
 .pd-section {
   margin-bottom: 20px;
@@ -3739,10 +3875,6 @@ body {
 }
 
 /* Drawings */
-.pd-drawings {
-  width: 280px;
-  flex-shrink: 0;
-}
 .pd-drawings-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3838,52 +3970,7 @@ body {
   text-align: center;
 }
 
-/* Collapsible sections */
-.pd-collapsible {
-  margin-bottom: 20px;
-}
-.pd-collapsible-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  padding: 10px 12px;
-  background: var(--bg-primary);
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  transition: all 0.2s;
-  user-select: none;
-}
-.pd-collapsible-header:hover {
-  border-color: var(--accent);
-}
-.pd-collapsible-arrow {
-  transition: transform 0.2s;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.pd-collapsible.collapsed .pd-collapsible-arrow {
-  transform: rotate(-90deg);
-}
-.pd-collapsible-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-  flex: 1;
-}
-.pd-collapsible-badge {
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 10px;
-  background: var(--accent);
-  color: #fff;
-  font-weight: 500;
-}
-.pd-collapsible-actions {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
-}
+/* Translate & Copy buttons */
 .pd-translate-btn {
   font-size: 11px;
   padding: 2px 8px;
@@ -3916,16 +4003,6 @@ body {
 .pd-copy-btn:hover {
   border-color: var(--text-secondary);
   color: var(--text-primary);
-}
-.pd-collapsible-content {
-  padding: 12px 0 0 0;
-  overflow: hidden;
-  transition: max-height 0.3s ease;
-}
-.pd-collapsible.collapsed .pd-collapsible-content {
-  max-height: 0 !important;
-  padding: 0;
-  overflow: hidden;
 }
 
 /* Claims */
@@ -4297,12 +4374,32 @@ body {
 }
 
 /* Responsive: stack on narrow screens */
-@media (max-width: 700px) {
-  .pd-body {
+@media (max-width: 768px) {
+  .pd-overview-layout {
     flex-direction: column;
   }
-  .pd-drawings {
+  .pd-overview-drawings {
     width: 100%;
+  }
+  .pd-bookmark-tabs {
+    flex-direction: row;
+    width: auto;
+    overflow-x: auto;
+  }
+  .pd-bookmark-tab {
+    border-radius: 8px 8px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+    padding: 8px 12px;
+  }
+  .pd-bookmark-tab.active {
+    box-shadow: 0 2px 0 var(--bg-primary);
+  }
+  .pd-tab-panels {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    padding-left: 0;
+    padding-top: 12px;
   }
 }
 
