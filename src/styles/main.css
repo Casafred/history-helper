@@ -1503,9 +1503,9 @@ body {
 .analysis-chat-float-ball {
   position: fixed;
   bottom: 30px;
-  right: 100px;
-  width: 52px;
-  height: 52px;
+  right: 24px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
   background: linear-gradient(135deg, #a78bfa, #6366f1);
   color: white;
@@ -1524,8 +1524,8 @@ body {
 }
 
 .analysis-chat-float-ball svg {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
 }
 
 .analysis-chat-float-ball.hidden {
@@ -1641,10 +1641,10 @@ body {
 /* Floating ball for reader */
 .reader-floating-ball {
   position: fixed;
-  bottom: 30px;
-  right: 30px;
-  width: 56px;
-  height: 56px;
+  bottom: 110px;
+  right: 24px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--accent), #6366f1);
   color: white;
@@ -1663,8 +1663,8 @@ body {
 }
 
 .reader-floating-ball svg {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
 }
 
 .reader-floating-ball.hidden {
@@ -4267,12 +4267,27 @@ body {
   top: 0; right: 0; bottom: 0;
   width: 520px;
   max-width: 90vw;
+  min-width: 320px;
   background: var(--bg-secondary);
   box-shadow: -4px 0 24px rgba(0,0,0,0.15);
   z-index: 90000;
   display: flex;
   flex-direction: column;
   animation: ppv-slide-in 0.25s ease-out;
+}
+.ppv-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 1;
+}
+.ppv-resize-handle:hover,
+.ppv-resize-handle.ppv-resizing {
+  background: var(--accent);
+  opacity: 0.4;
 }
 @keyframes ppv-slide-in {
   from { transform: translateX(100%); }
@@ -4362,13 +4377,60 @@ body {
   font-size: 14px;
 }
 
+/* Patent popup multi-patent tabs */
+.ppv-patent-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.ppv-patent-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+  white-space: nowrap;
+  user-select: none;
+}
+.ppv-patent-tab:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+.ppv-patent-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.ppv-patent-tab-label {
+  font-size: 12px;
+}
+.ppv-patent-tab-close {
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 3px;
+  color: var(--text-muted);
+  transition: all 0.15s;
+}
+.ppv-patent-tab-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
 /* Patent popup floating ball */
 .patent-popup-ball {
   position: fixed;
-  right: 20px;
-  bottom: 80px;
-  width: 44px;
-  height: 44px;
+  right: 24px;
+  bottom: 70px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
   background: var(--accent);
   color: #fff;

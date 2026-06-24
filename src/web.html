@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PatentLens - 专利审查文档获取与梳理</title>
-  <link rel="stylesheet" href="styles/main.css?v=20260624e">
+  <link rel="stylesheet" href="styles/main.css?v=20260624f">
 </head>
 <body>
   <div id="splash-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:var(--bg-primary, #0f1117);display:flex;align-items:center;justify-content:center;z-index:99999;transition:opacity 0.5s ease;">
@@ -262,6 +262,7 @@
 
       <!-- 专利原文弹出阅读器 -->
       <div id="patent-popup-viewer" class="patent-popup-viewer hidden">
+        <div class="ppv-resize-handle"></div>
         <div class="ppv-header">
           <div class="ppv-title-bar">
             <span id="ppv-patent-number" class="ppv-patent-number"></span>
@@ -273,6 +274,7 @@
             <button id="ppv-close-btn" class="ppv-close-btn" title="关闭">&times;</button>
           </div>
         </div>
+        <div id="ppv-patent-tabs" class="ppv-patent-tabs"></div>
         <div id="ppv-content" class="ppv-content"></div>
         <div id="ppv-loading" class="ppv-loading hidden">
           <div class="ppv-spinner"></div>
@@ -590,6 +592,6 @@
   <script src="scripts/pdf-lib.min.js?v=20260623c"></script>
   <script src="scripts/web-ai.js?v=20260623c"></script>
   <script src="scripts/patent-status.js?v=20260623c"></script>
-  <script src="scripts/web-app.js?v=20260624e"></script>
+  <script src="scripts/web-app.js?v=20260624f"></script>
 </body>
 </html>
