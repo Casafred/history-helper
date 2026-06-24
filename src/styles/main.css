@@ -3382,48 +3382,28 @@ body {
   top: 50%;
   transform: translateY(-50%);
   z-index: 500;
-  width: 44px;
+  display: flex;
+  flex-direction: row;
+  height: 65vh;
+  max-height: 520px;
   transition: width 0.3s ease;
   overflow: hidden;
-  border-right: 1px solid var(--border);
   border-radius: 0 var(--radius) var(--radius) 0;
   background: var(--bg-secondary);
   box-shadow: 2px 0 8px rgba(0,0,0,0.15);
-  display: flex;
-  flex-direction: column;
+}
+.history-sidebar.collapsed {
+  width: 28px;
 }
 .history-sidebar:not(.collapsed) {
   width: 260px;
-  overflow-y: auto;
-}
-.history-sidebar-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: var(--bg-secondary);
-  flex-shrink: 0;
-}
-.history-sidebar-toggle:hover {
-  color: var(--accent);
-  background: var(--bg-hover);
-}
-.history-sidebar-toggle svg {
-  width: 20px;
-  height: 20px;
-}
-.history-sidebar:not(.collapsed) .history-sidebar-toggle {
-  justify-content: flex-end;
 }
 .history-sidebar-content {
+  flex: 1;
+  min-width: 0;
   padding: 8px;
   display: none;
+  overflow-y: auto;
 }
 .history-sidebar:not(.collapsed) .history-sidebar-content {
   display: block;
@@ -3436,6 +3416,31 @@ body {
   letter-spacing: 0.5px;
   margin-bottom: 8px;
   padding: 0 4px;
+}
+/* Edge toggle button: always visible on right edge, vertically centered */
+.history-sidebar-edge-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  border-left: 1px solid var(--border);
+  transition: color 0.2s, background 0.2s;
+}
+.history-sidebar-edge-toggle:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+.history-sidebar-edge-toggle svg {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.3s ease;
+}
+/* When collapsed, arrow points right (expand); when expanded, points left (collapse) */
+.history-sidebar.collapsed .history-sidebar-edge-toggle svg {
+  transform: rotate(180deg);
 }
 .history-list {
   display: flex;
@@ -3694,8 +3699,15 @@ body {
   z-index: 1;
 }
 .pd-bm-icon {
-  font-size: 16px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+.pd-bm-icon svg {
+  width: 20px;
+  height: 20px;
 }
 .pd-bm-label {
   font-size: 9px;

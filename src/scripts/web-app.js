@@ -476,12 +476,12 @@ function renderPatentDetail(data) {
   // Tab layout container
   html += '<div class="pd-tab-layout">';
 
-  // Left: bookmark tabs
+  // Left: bookmark tabs (SVG icons)
   html += '<div class="pd-bookmark-tabs">';
-  html += '<div class="pd-bookmark-tab active" data-tab="overview" onclick="switchPatentTab(\'overview\')" title="概要"><span class="pd-bm-icon">📋</span><span class="pd-bm-label">概要</span></div>';
-  html += '<div class="pd-bookmark-tab" data-tab="claims" onclick="switchPatentTab(\'claims\')" title="权利要求"><span class="pd-bm-icon">⚖</span><span class="pd-bm-label">权利要求</span></div>';
-  html += '<div class="pd-bookmark-tab" data-tab="description" onclick="switchPatentTab(\'description\')" title="说明书"><span class="pd-bm-icon">📖</span><span class="pd-bm-label">说明书</span></div>';
-  html += '<div class="pd-bookmark-tab" data-tab="references" onclick="switchPatentTab(\'references\')" title="引用文献"><span class="pd-bm-icon">🔗</span><span class="pd-bm-label">引用</span></div>';
+  html += '<div class="pd-bookmark-tab active" data-tab="overview" onclick="switchPatentTab(\'overview\')" title="概要"><span class="pd-bm-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span><span class="pd-bm-label">概要</span></div>';
+  html += '<div class="pd-bookmark-tab" data-tab="claims" onclick="switchPatentTab(\'claims\')" title="权利要求"><span class="pd-bm-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span><span class="pd-bm-label">权利要求</span></div>';
+  html += '<div class="pd-bookmark-tab" data-tab="description" onclick="switchPatentTab(\'description\')" title="说明书"><span class="pd-bm-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg></span><span class="pd-bm-label">说明书</span></div>';
+  html += '<div class="pd-bookmark-tab" data-tab="references" onclick="switchPatentTab(\'references\')" title="引用文献"><span class="pd-bm-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span><span class="pd-bm-label">引用</span></div>';
   html += '</div>';
 
   // Right: tab content panels
@@ -7317,9 +7317,9 @@ async function doMergeExport() {
 
 // ── History sidebar toggle ──
 const historySidebar = document.getElementById("history-sidebar");
-const historySidebarToggle = document.querySelector(".history-sidebar-toggle");
-if (historySidebarToggle && historySidebar) {
-  historySidebarToggle.addEventListener("click", () => {
+const historySidebarEdgeToggle = document.querySelector(".history-sidebar-edge-toggle");
+if (historySidebarEdgeToggle && historySidebar) {
+  historySidebarEdgeToggle.addEventListener("click", () => {
     historySidebar.classList.toggle("collapsed");
     // Refresh list when expanding
     if (!historySidebar.classList.contains("collapsed")) {
