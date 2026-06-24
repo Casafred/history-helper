@@ -778,16 +778,36 @@ async function translatePatentSection(sectionType) {
   const translateBtn = sectionEl.querySelector('.pd-translate-btn');
   if (!translateBtn) return;
 
-  // Check if translation already exists
+  // Check if translation already exists - toggle: restore original text and remove
   const existingResult = sectionEl.querySelector('.pd-translation-result');
   if (existingResult) {
     existingResult.remove();
     translateBtn.textContent = '翻译';
+    // Restore original text
+    if (sectionType === 'claims') {
+      sectionEl.querySelectorAll('.pd-claim-text[data-original-text]').forEach(el => {
+        el.textContent = el.dataset.originalText;
+        delete el.dataset.translated;
+      });
+    } else if (sectionType === 'description') {
+      const descEl = sectionEl.querySelector('.pd-description-text[data-original-text]');
+      if (descEl) {
+        descEl.textContent = descEl.dataset.originalText;
+        delete descEl.dataset.translated;
+      }
+    }
     return;
   }
 
   translateBtn.textContent = '翻译中...';
   translateBtn.disabled = true;
+
+  // Show loading spinner in the section
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'pd-translation-result';
+  loadingEl.id = 'pd-translation-loading-' + sectionType;
+  loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译中...</span></div><div class="pd-translation-body" style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;"></div><span>正在翻译' + (sectionType === 'claims' ? '权利要求' : '说明书') + '...</span></div>';
+  sectionEl.appendChild(loadingEl);
 
   try {
     // Use the configured translation provider from settings
@@ -837,6 +857,10 @@ async function translatePatentSection(sectionType) {
     const json = await resp.json();
     const translated = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content || "翻译失败";
 
+    // Remove loading spinner
+    const loadingEl = document.getElementById('pd-translation-loading-' + sectionType);
+    if (loadingEl) loadingEl.remove();
+
     // Show translation result
     const resultDiv = document.createElement('div');
     resultDiv.className = 'pd-translation-result';
@@ -845,12 +869,155 @@ async function translatePatentSection(sectionType) {
     // Append to the section element (works for both tab and collapsible layouts)
     sectionEl.appendChild(resultDiv);
 
+    // Replace original text with translated version in-place
+    if (sectionType === 'claims') {
+      const claimItems = sectionEl.querySelectorAll('.pd-claim-item');
+      if (claimItems.length > 0) {
+        // Parse translated claims and replace each claim text
+        const translatedLines = translated.split('\n').filter(l => l.trim());
+        let claimIdx = 0;
+        claimItems.forEach(item => {
+          const claimTextEl = item.querySelector('.pd-claim-text');
+          if (claimTextEl && claimIdx < translatedLines.length) {
+            // Store original text for restoration
+            if (!claimTextEl.dataset.originalText) {
+              claimTextEl.dataset.originalText = claimTextEl.textContent;
+            }
+            claimTextEl.textContent = translatedLines[claimIdx].replace(/^Claim\s*\d+\s*[:：]\s*/i, '');
+            claimTextEl.dataset.translated = 'true';
+            claimIdx++;
+          }
+        });
+      }
+    } else if (sectionType === 'description') {
+      const descEl = sectionEl.querySelector('.pd-description-text');
+      if (descEl) {
+        if (!descEl.dataset.originalText) {
+          descEl.dataset.originalText = descEl.textContent;
+        }
+        descEl.textContent = translated;
+        descEl.dataset.translated = 'true';
+      }
+    }
+
     translateBtn.textContent = '隐藏翻译';
   } catch (e) {
     showError("翻译失败: " + e.message);
     translateBtn.textContent = '翻译';
+    const loadingEl = document.getElementById('pd-translation-loading-' + sectionType);
+    if (loadingEl) loadingEl.remove();
   } finally {
     translateBtn.disabled = false;
+  }
+}
+
+// ── Patent Detail Right-Click Context Menu ──
+let _patentDetailCtxMenu = null;
+
+function showPatentDetailContextMenu(clientX, clientY, targetSection) {
+  hidePatentDetailContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "pdf-block-context-menu";
+  menu.style.left = clientX + "px";
+  menu.style.top = clientY + "px";
+
+  const sel = window.getSelection();
+  const selectedText = sel ? sel.toString().trim() : "";
+
+  if (selectedText) {
+    const translateSelItem = document.createElement("div");
+    translateSelItem.className = "pdf-ctx-menu-item";
+    translateSelItem.textContent = "翻译选中文本";
+    translateSelItem.addEventListener("click", () => {
+      hidePatentDetailContextMenu();
+      translateSelectedPatentText(selectedText, targetSection);
+    });
+    menu.appendChild(translateSelItem);
+  }
+
+  if (targetSection === "claims" || targetSection === "description") {
+    const translateSectionItem = document.createElement("div");
+    translateSectionItem.className = "pdf-ctx-menu-item";
+    translateSectionItem.textContent = targetSection === "claims" ? "翻译全部权利要求" : "翻译全部说明书";
+    translateSectionItem.addEventListener("click", () => {
+      hidePatentDetailContextMenu();
+      translatePatentSection(targetSection);
+    });
+    menu.appendChild(translateSectionItem);
+  }
+
+  const googleTranslateItem = document.createElement("div");
+  googleTranslateItem.className = "pdf-ctx-menu-item";
+  googleTranslateItem.textContent = "Google 翻译此页面";
+  googleTranslateItem.addEventListener("click", () => {
+    hidePatentDetailContextMenu();
+    toggleGoogleTranslate();
+  });
+  menu.appendChild(googleTranslateItem);
+
+  document.body.appendChild(menu);
+  _patentDetailCtxMenu = menu;
+
+  // Adjust position if menu overflows viewport
+  const r = menu.getBoundingClientRect();
+  const maxX = window.innerWidth - 16;
+  const maxY = window.innerHeight - 16;
+  if (r.right > maxX) menu.style.left = (maxX - r.width) + "px";
+  if (r.bottom > maxY) menu.style.top = (maxY - r.height) + "px";
+}
+
+function hidePatentDetailContextMenu() {
+  if (_patentDetailCtxMenu && _patentDetailCtxMenu.parentNode) {
+    _patentDetailCtxMenu.parentNode.removeChild(_patentDetailCtxMenu);
+  }
+  _patentDetailCtxMenu = null;
+}
+
+async function translateSelectedPatentText(text, targetSection) {
+  const config = window.AI.loadAIConfig();
+  const translateProvider = window.AI.getTranslateProvider(config);
+  if (!translateProvider || !translateProvider.apiKey) {
+    showError("请先在 AI 设置中配置 API Key");
+    return;
+  }
+
+  // Find the section element and show loading
+  const sectionEl = document.querySelector('[data-section-type="' + targetSection + '"]') || document.querySelector("#patent-detail-content");
+  if (!sectionEl) return;
+
+  // Show inline loading indicator
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'pd-translation-result';
+  loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译中...</span></div><div class="pd-translation-body" style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;"></div><span>正在翻译选中文本...</span></div>';
+  sectionEl.appendChild(loadingEl);
+
+  try {
+    const resp = await fetch(translateProvider.baseUrl + "/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + translateProvider.apiKey,
+      },
+      body: JSON.stringify({
+        model: translateProvider.model,
+        messages: [
+          { role: "system", content: "你是一位专业的专利文献翻译专家。请将以下文本翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。" },
+          { role: "user", content: text }
+        ],
+        temperature: 0.3,
+        max_tokens: 4096,
+      }),
+    });
+
+    if (!resp.ok) throw new Error("API 请求失败: " + resp.status);
+    const json = await resp.json();
+    const translated = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content || "翻译失败";
+
+    // Replace the loading indicator with the translation result
+    loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译结果（选中文本）</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove();">&times;</button></div><div class="pd-translation-body">' + escapeHtml(translated).replace(/\n/g, '<br>') + '</div>';
+  } catch (e) {
+    showError("翻译失败: " + e.message);
+    loadingEl.remove();
   }
 }
 
@@ -3562,7 +3729,7 @@ async function runCitedRefsAnalysis(selectedIdxs) {
       return;
     }
     analysisSection.classList.remove("hidden");
-    analysisContent.innerHTML = '<p class="extracting">正在提取引用文献内容并分析...</p>';
+    analysisContent.innerHTML = renderAiProgressUI("extract", "正在提取引用文献内容...", -1);
 
     // 先提取引用文献文档内容（如果尚未提取）— 断点续OCR
     const ocrConfig = window.AI.getOCRConfig(config);
@@ -3581,7 +3748,8 @@ async function runCitedRefsAnalysis(selectedIdxs) {
       if (kanbanState.extractions[doc.idx] && (kanbanState.extractions[doc.idx].text || kanbanState.extractions[doc.idx].markdown)) continue;
       if (citedRefsAbortController && citedRefsAbortController.signal.aborted) break;
 
-      analysisContent.innerHTML = `<p class="extracting">正在提取引用文献 (${i + 1}/${citedMissing.length}): ${doc.docCode} - ${doc.name}...</p>`;
+      const citedExtractProgress = Math.round(((i + 1) / citedMissing.length) * 60);
+      analysisContent.innerHTML = renderAiProgressUI("extract", "提取引用文献 (" + (i + 1) + "/" + citedMissing.length + "): " + doc.docCode + " - " + doc.name, citedExtractProgress);
 
       // Retry loop with exponential backoff
       let extracted = false;
@@ -3893,6 +4061,42 @@ if (citedRefsManualBtn) {
   });
 }
 
+// ── AI Analysis Progress Bar UI ──
+function renderAiProgressUI(step, detail, progress) {
+  // step: "extract" | "analyzing" | "done"
+  // detail: string detail text
+  // progress: 0-100 or -1 for indeterminate
+  const steps = [
+    { id: "extract", label: "提取文档内容" },
+    { id: "analyzing", label: "AI 梳理中" },
+  ];
+
+  let html = '<div class="ai-progress-container">';
+  html += '<div class="ai-progress-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>';
+
+  html += '<div class="ai-progress-steps">';
+  steps.forEach((s, i) => {
+    const isActive = s.id === step;
+    const isDone = steps.findIndex(st => st.id === step) > i;
+    const cls = isDone ? 'done' : (isActive ? 'active' : '');
+    const icon = isDone ? '✓' : (isActive ? '⟳' : (i + 1));
+    html += '<div class="ai-progress-step ' + cls + '">';
+    html += '<span class="ai-progress-step-icon">' + icon + '</span>';
+    html += '<span>' + s.label + '</span>';
+    html += '</div>';
+  });
+  html += '</div>';
+
+  html += '<div class="ai-progress-bar-track"><div class="ai-progress-bar-fill' + (progress < 0 ? ' indeterminate' : '') + '" style="width:' + (progress < 0 ? '' : progress + '%') + '"></div></div>';
+
+  if (detail) {
+    html += '<div class="ai-progress-detail">' + escapeHtml(detail) + '</div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
 // ── Build review manual selection panel ──
 function buildReviewManualSelectPanel() {
   const items = kanbanState.documents;
@@ -4059,7 +4263,7 @@ function buildReviewManualSelectPanel() {
     const analysisSection = document.getElementById("kanban-analysis");
     const analysisContent = document.getElementById("kanban-analysis-content");
     analysisSection.classList.remove("hidden");
-    analysisContent.innerHTML = '<p class="extracting">正在准备手动选择的文档提取内容...</p>';
+    analysisContent.innerHTML = renderAiProgressUI("extract", "正在准备文档提取...", -1);
 
     const selectedItems = items.filter(it => selectedIdxs.includes(it.idx));
     const CLAIMS_CODES_MANUAL = ["CLM", "FWCLM"];
@@ -4180,6 +4384,9 @@ function buildReviewManualSelectPanel() {
         // Double-check: another parallel flow may have filled it
         if (kanbanState.extractions[it.idx] && (kanbanState.extractions[it.idx].text || kanbanState.extractions[it.idx].markdown)) continue;
         if (statusEl) statusEl.textContent = "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
+        // Update progress bar
+        const extractProgress = Math.round(((i + 1) / missing.length) * 60);
+        analysisContent.innerHTML = renderAiProgressUI("extract", "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name, extractProgress);
         await extractWithRetry(it, primaryEngine, MAX_RETRIES);
         if (kanbanAutoAbortController && kanbanAutoAbortController.signal.aborted) break;
       }
@@ -4202,10 +4409,12 @@ function buildReviewManualSelectPanel() {
     if (failedCount > 0) {
       const failedNames = [...extractReport.failed, ...extractReport.empty].map(f => f.docCode || f.name).join(", ");
       if (statusEl) statusEl.textContent = `${successCount} 个文档提取成功，${failedCount} 个失败（${failedNames}），正在用 AI 整理...`;
+      analysisContent.innerHTML = renderAiProgressUI("analyzing", successCount + " 个文档提取成功，" + failedCount + " 个失败，AI 梳理中...", -1);
     } else {
       if (statusEl) statusEl.textContent = "全部文档提取完成，正在用 AI 整理审查历史...";
+      analysisContent.innerHTML = renderAiProgressUI("analyzing", "全部文档提取完成，AI 梳理中...", -1);
     }
-    analysisContent.innerHTML = '<p class="extracting">AI 正在整理选中的文档...</p>';
+    analysisContent.innerHTML = renderAiProgressUI("analyzing", "AI 正在梳理审查历史...", -1);
 
     const hasBlocks = oaItems.some(it => {
       const ext = kanbanState.extractions[it.idx];
@@ -5349,6 +5558,35 @@ document.addEventListener("mousedown", (ev) => {
 });
 document.addEventListener("scroll", () => hidePdfBlockContextMenu(), true);
 window.addEventListener("resize", () => hidePdfBlockContextMenu());
+
+// Right-click context menu for patent detail view
+if (patentDetailContent) {
+  patentDetailContent.addEventListener("contextmenu", (ev) => {
+    // Determine which section was right-clicked
+    let targetSection = "";
+    const claimsEl = ev.target.closest('[data-section-type="claims"]');
+    const descEl = ev.target.closest('[data-section-type="description"]');
+    if (claimsEl) {
+      targetSection = "claims";
+    } else if (descEl) {
+      targetSection = "description";
+    }
+
+    // Only show context menu if we're in a translatable area
+    if (targetSection || window.getSelection().toString().trim()) {
+      ev.preventDefault();
+      showPatentDetailContextMenu(ev.clientX, ev.clientY, targetSection);
+    }
+  });
+}
+
+// Close patent detail context menu on click outside or scroll
+document.addEventListener("mousedown", (ev) => {
+  if (_patentDetailCtxMenu && !_patentDetailCtxMenu.contains(ev.target)) {
+    hidePatentDetailContextMenu();
+  }
+});
+document.addEventListener("scroll", () => hidePatentDetailContextMenu(), true);
 
 // ===== PDF keyword search =====
 
