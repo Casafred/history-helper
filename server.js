@@ -602,24 +602,28 @@ function extractPatentFromHtml(html, patentId) {
 
     // Strategy 1: Extract from <div class="claim..." num="N"> or <div num="N" class="claim...">
     function extractDivClaims(html) {
-      const claims = [];
-      // Match any div with both class="claim..." and num="N" in any order
+      // First pass: collect all claim fragments, grouped by num
+      const claimMap = new Map(); // num -> { texts: [], isDependentByClass: false }
       const claimStartRegex = /<div([^>]*?)>/gi;
       let m;
       while ((m = claimStartRegex.exec(html)) !== null) {
         const attrs = m[1];
-        const classMatch = attrs.match(/class="([^"]*claim[^"]*)"/i);
+        const classMatch = attrs.match(/class="([^"]*)"/i);
         const numMatch = attrs.match(/num="(\d+)"/i);
         if (!classMatch || !numMatch) continue;
-        // Must have "claim" in class (not e.g. "claim-text" as a top-level)
-        if (!/\bclaim\b/.test(classMatch[1])) continue;
+        const className = classMatch[1];
+        // Only match top-level claim divs: class contains "claim" or "claim-dependent" as standalone words
+        // Exclude sub-element classes: claim-text, claim-line, claim-ref, etc.
+        const hasClaimClass = /(?:^|\s)claim(?:\s|$)/.test(className);
+        const hasDependentClass = /(?:^|\s)claim-dependent(?:\s|$)/.test(className);
+        if (!hasClaimClass && !hasDependentClass) continue;
         const claimNum = numMatch[1];
-        const isDependentByClass = /claim-dependent/.test(classMatch[1]);
+        const isDependentByClass = hasDependentClass;
         const openTagEnd = m.index + m[0].length;
         const closeIdx = findMatchingCloseDiv(html, m.index);
         if (closeIdx === -1) continue;
         const claimBody = html.substring(openTagEnd, closeIdx);
-        // Clean HTML: replace <br> and </div> with space first to preserve word boundaries
+        // Clean HTML
         let claimText = claimBody
           .replace(/<br\s*\/?>/gi, " ")
           .replace(/<\/div>/gi, " ")
@@ -631,22 +635,35 @@ function extractPatentFromHtml(html, patentId) {
           .replace(/&gt;/gi, ">")
           .replace(/\s+/g, " ")
           .trim();
-        // Determine dependent/independent
-        const isDependent = isDependentByClass
-          || /claim\s*\d+/i.test(claimText.substring(0, 150))
-          || claimText.includes('根据权利要求')
-          || claimText.includes('根據權利要求')
-          || /所述的/.test(claimText.substring(0, 50));
-        if (claimText && claimText.length > 3) {
-          claims.push({ num: claimNum, text: claimText, type: isDependent ? "dependent" : "independent" });
+        if (claimText.length < 1) continue;
+        if (!claimMap.has(claimNum)) {
+          claimMap.set(claimNum, { texts: [], isDependentByClass: false });
         }
+        const entry = claimMap.get(claimNum);
+        entry.texts.push(claimText);
+        if (isDependentByClass) entry.isDependentByClass = true;
       }
+      // Second pass: merge fragments of the same claim number
+      const claims = [];
+      for (const [num, entry] of claimMap) {
+        const fullText = entry.texts.join(" ").replace(/\s+/g, " ").trim();
+        if (fullText.length < 3) continue;
+        // Determine dependent/independent from full text
+        const isDependent = entry.isDependentByClass
+          || /claim\s*\d+/i.test(fullText.substring(0, 200))
+          || fullText.includes('根据权利要求')
+          || fullText.includes('根據權利要求')
+          || /所述的/.test(fullText.substring(0, 80));
+        claims.push({ num, text: fullText, type: isDependent ? "dependent" : "independent" });
+      }
+      // Sort by claim number
+      claims.sort((a, b) => parseInt(a.num) - parseInt(b.num));
       return claims;
     }
 
     // Strategy 2: Extract from <li class="claim"> / <li class="claim-dependent">
     function extractLiClaims(html) {
-      const claims = [];
+      const claimMap = new Map();
       const claimMatches = html.matchAll(/<li[^>]*class="claim(?:-dependent)?[^"]*"[^>]*>([\s\S]*?)<\/li>/gi);
       for (const cm of claimMatches) {
         const claimBody = cm[1];
@@ -664,17 +681,28 @@ function extractPatentFromHtml(html, patentId) {
           .trim();
         const numMatch = cm[0].match(/num="(\d+)"/);
         const claimNum = numMatch ? numMatch[1] : "";
-        if (claimText && claimText.length > 3) {
-          const isDep = isDependent || /claim\s*\d+/i.test(claimText.substring(0, 150)) || claimText.includes('根据权利要求');
-          claims.push({ num: claimNum, text: claimText, type: isDep ? "dependent" : "independent" });
+        if (claimText.length < 1) continue;
+        if (!claimMap.has(claimNum)) {
+          claimMap.set(claimNum, { texts: [], isDependentByClass: false });
         }
+        const entry = claimMap.get(claimNum);
+        entry.texts.push(claimText);
+        if (isDependent) entry.isDependentByClass = true;
       }
+      const claims = [];
+      for (const [num, entry] of claimMap) {
+        const fullText = entry.texts.join(" ").replace(/\s+/g, " ").trim();
+        if (fullText.length < 3) continue;
+        const isDep = entry.isDependentByClass || /claim\s*\d+/i.test(fullText.substring(0, 200)) || fullText.includes('根据权利要求');
+        claims.push({ num, text: fullText, type: isDep ? "dependent" : "independent" });
+      }
+      claims.sort((a, b) => parseInt(a.num) - parseInt(b.num));
       return claims;
     }
 
     // Strategy 3: Extract from claim-text divs (some pages use <div class="claim-text">)
     function extractClaimTextDivs(html) {
-      const claims = [];
+      const claimMap = new Map();
       const claimTextMatches = html.matchAll(/<div[^>]*class="claim-text"[^>]*>([\s\S]*?)<\/div>/gi);
       for (const cm of claimTextMatches) {
         let claimText = cm[1]
@@ -687,27 +715,81 @@ function extractPatentFromHtml(html, patentId) {
         const parentContext = html.substring(Math.max(0, cm.index - 200), cm.index);
         const numMatch = parentContext.match(/num="(\d+)"/);
         const claimNum = numMatch ? numMatch[1] : "";
-        if (claimText && claimText.length > 3) {
-          const isDep = /claim\s*\d+/i.test(claimText.substring(0, 150)) || claimText.includes('根据权利要求');
-          claims.push({ num: claimNum, text: claimText, type: isDep ? "dependent" : "independent" });
+        if (claimText.length < 1) continue;
+        if (!claimMap.has(claimNum)) {
+          claimMap.set(claimNum, { texts: [] });
         }
+        claimMap.get(claimNum).texts.push(claimText);
       }
+      const claims = [];
+      for (const [num, entry] of claimMap) {
+        const fullText = entry.texts.join(" ").replace(/\s+/g, " ").trim();
+        if (fullText.length < 3) continue;
+        const isDep = /claim\s*\d+/i.test(fullText.substring(0, 200)) || fullText.includes('根据权利要求');
+        claims.push({ num, text: fullText, type: isDep ? "dependent" : "independent" });
+      }
+      claims.sort((a, b) => parseInt(a.num) - parseInt(b.num));
       return claims;
     }
 
-    // Try all strategies, pick the one with most claims
+    // Try all strategies, pick the best one
+    // Prefer the strategy with the most reasonable claim count (not too many fragments)
+    // After merging by num, the strategy with fewer but longer claims is better
     const divClaims = extractDivClaims(claimsHtml);
     const liClaims = extractLiClaims(claimsHtml);
     const claimTextDivs = extractClaimTextDivs(claimsHtml);
+
+    function avgTextLength(claims) {
+      if (claims.length === 0) return 0;
+      return claims.reduce((sum, c) => sum + c.text.length, 0) / claims.length;
+    }
 
     const candidates = [
       { claims: divClaims, name: 'divClaims' },
       { claims: liClaims, name: 'liClaims' },
       { claims: claimTextDivs, name: 'claimTextDivs' },
-    ].sort((a, b) => b.claims.length - a.claims.length);
+    ].filter(c => c.claims.length > 0);
 
-    if (candidates[0].claims.length > 0) {
+    if (candidates.length > 0) {
+      // Pick the candidate with highest average text length (most complete claims)
+      candidates.sort((a, b) => avgTextLength(b.claims) - avgTextLength(a.claims));
       htmlResult.claims = candidates[0].claims;
+    }
+
+    // Post-processing: merge fragmented claims
+    // Google Patents sometimes uses flat divs where each line is a separate <div class="claim" num="N">
+    // with sequential line numbers (not claim numbers). In this case, claims whose text doesn't start
+    // with a claim number prefix (e.g., "9.") are continuations of the preceding claim.
+    if (htmlResult.claims.length > 1) {
+      const merged = [];
+      let current = null;
+      for (const claim of htmlResult.claims) {
+        // Check if this claim starts with a claim number prefix like "9." or "10."
+        const prefixMatch = claim.text.match(/^(\d+)\.\s/);
+        if (prefixMatch) {
+          // Start of a new claim - use the text prefix as the actual claim number
+          if (current) merged.push(current);
+          current = { ...claim, num: prefixMatch[1] };
+        } else if (current) {
+          // Continuation of the current claim (no number prefix)
+          current.text = (current.text + " " + claim.text).replace(/\s+/g, " ").trim();
+          // If continuation comes from a dependent class, mark the whole claim as dependent
+          if (claim.type === "dependent") current.type = "dependent";
+        } else {
+          // No preceding claim to merge with, keep as standalone
+          current = { ...claim };
+        }
+      }
+      if (current) merged.push(current);
+      // Deduplicate by claim number: if same num appears multiple times, keep the longest text
+      const dedupMap = new Map();
+      for (const claim of merged) {
+        if (!dedupMap.has(claim.num) || dedupMap.get(claim.num).text.length < claim.text.length) {
+          dedupMap.set(claim.num, claim);
+        }
+      }
+      htmlResult.claims = Array.from(dedupMap.values());
+      htmlResult.claims.sort((a, b) => parseInt(a.num) - parseInt(b.num));
     }
 
     // Last resort: extract claims by number pattern in plain text
