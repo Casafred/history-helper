@@ -117,6 +117,25 @@ const errorToast = document.getElementById("error-toast");
 
 let searchMode = "dossier"; // "dossier" | "patent"
 
+// ── Google Patents 代理设置 ──
+function getGpProxySettings() {
+  try {
+    return JSON.parse(localStorage.getItem("patentlens_gp_proxy") || "{}");
+  } catch { return {}; }
+}
+function saveGpProxySettings(enabled, proxyUrl) {
+  localStorage.setItem("patentlens_gp_proxy", JSON.stringify({ enabled: !!enabled, proxyUrl: proxyUrl || "" }));
+}
+function gpApiUrl(patentNumber) {
+  const s = getGpProxySettings();
+  let url = "/api/gp/" + encodeURIComponent(patentNumber);
+  if (s.enabled) {
+    url += "?proxy=1";
+    if (s.proxyUrl) url += "&proxyUrl=" + encodeURIComponent(s.proxyUrl);
+  }
+  return url;
+}
+
 const aiSettingsBtn = document.getElementById("ai-settings-btn");
 const aiSettingsModal = document.getElementById("ai-settings-modal");
 const modalCloseBtn = document.getElementById("modal-close-btn");
@@ -395,7 +414,7 @@ async function searchPatentDetail(input) {
   hideError();
 
   try {
-    const resp = await fetch(`/api/gp/${encodeURIComponent(raw)}`);
+    const resp = await fetch(gpApiUrl(raw));
     const json = await resp.json();
 
     if (!json.success) {
@@ -850,7 +869,7 @@ function prefetchPatentLinks() {
     if (!pn || _prefetchCache[pn]) return;
 
     fetched++;
-    fetch("/api/gp/" + encodeURIComponent(pn))
+    fetch(gpApiUrl(pn))
       .then(r => r.json())
       .then(json => {
         if (json.success) {
@@ -1066,7 +1085,7 @@ async function openPatentPopup(patentNumber) {
   }
 
   try {
-    const resp = await fetch("/api/gp/" + encodeURIComponent(raw));
+    const resp = await fetch(gpApiUrl(raw));
     const json = await resp.json();
 
     if (!json.success) {
@@ -7221,6 +7240,34 @@ if (cacheClearBtn) {
       PatentCache.clearAllHistory();
       refreshHistoryList();
     }
+  });
+}
+
+// ── Network settings (Google Patents proxy) ──
+const gpProxyCheckbox = document.getElementById("gp-proxy-checkbox");
+const gpProxyUrlGroup = document.getElementById("gp-proxy-url-group");
+const gpProxyUrlInput = document.getElementById("gp-proxy-url-input");
+const networkSaveBtn = document.getElementById("network-save-btn");
+
+if (gpProxyCheckbox) {
+  // Load saved settings
+  const savedProxy = getGpProxySettings();
+  gpProxyCheckbox.checked = !!savedProxy.enabled;
+  if (gpProxyUrlInput) gpProxyUrlInput.value = savedProxy.proxyUrl || "";
+  if (gpProxyUrlGroup) gpProxyUrlGroup.style.display = savedProxy.enabled ? "" : "none";
+
+  gpProxyCheckbox.addEventListener("change", () => {
+    if (gpProxyUrlGroup) gpProxyUrlGroup.style.display = gpProxyCheckbox.checked ? "" : "none";
+  });
+}
+
+if (networkSaveBtn) {
+  networkSaveBtn.addEventListener("click", () => {
+    const enabled = gpProxyCheckbox ? gpProxyCheckbox.checked : false;
+    const proxyUrl = gpProxyUrlInput ? gpProxyUrlInput.value.trim() : "";
+    saveGpProxySettings(enabled, proxyUrl);
+    networkSaveBtn.textContent = "已保存 ✓";
+    setTimeout(() => { networkSaveBtn.textContent = "保存"; }, 1500);
   });
 }
 

@@ -746,7 +746,7 @@ function extractPatentFromHtml(html, patentId) {
   return htmlResult;
 }
 
-function scrapeGooglePatent(patentNumber, res) {
+function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl) {
   const { normalized, variants } = normalizePatentNumber(patentNumber);
   const allToTry = [normalized, ...variants];
 
@@ -755,7 +755,6 @@ function scrapeGooglePatent(patentNumber, res) {
       const url = `${GOOGLE_PATENTS_BASE}/patent/${encodeURIComponent(tryNumber)}`;
       const args = [
         "-s", "-k", "-w", "\n__HTTP_CODE__%{http_code}",
-        "--proxy", PROXY_URL,
         "--max-time", "30",
         "-L",
         "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -763,6 +762,9 @@ function scrapeGooglePatent(patentNumber, res) {
         "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         url,
       ];
+      if (useProxy && proxyUrl) {
+        args.splice(2, 0, "--proxy", proxyUrl);
+      }
 
       console.log(`[GP] 尝试抓取: ${url}`);
 
@@ -848,8 +850,11 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.url.startsWith("/api/gp/")) {
-    const patentNumber = req.url.replace("/api/gp/", "").replace(/[?#].*$/, "");
-    scrapeGooglePatent(decodeURIComponent(patentNumber), res);
+    const urlObj = new URL(req.url, "http://localhost");
+    const patentNumber = urlObj.pathname.replace("/api/gp/", "");
+    const useProxy = urlObj.searchParams.get("proxy") === "1";
+    const proxyUrl = urlObj.searchParams.get("proxyUrl") || PROXY_URL;
+    scrapeGooglePatent(decodeURIComponent(patentNumber), res, useProxy, proxyUrl);
     return;
   }
 
