@@ -4042,6 +4042,69 @@ body {
   color: var(--text-secondary);
 }
 
+/* External links in header */
+.pd-external-links-sep {
+  color: var(--text-muted);
+  margin: 0 6px;
+}
+.pd-external-link {
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  margin-left: 4px;
+}
+.pd-external-link:hover {
+  background: var(--bg-hover);
+}
+
+/* Citation date */
+.pd-citation-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
+/* Subsection title */
+.pd-subsection-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 12px 0 6px 0;
+}
+
+/* Country status badges */
+.pd-country-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.pd-country-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: rgba(59,130,246,0.1);
+  color: #60a5fa;
+  font-weight: 500;
+}
+
+/* Landscape tags */
+.pd-landscapes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.pd-landscape-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: rgba(139,92,246,0.1);
+  color: #a78bfa;
+}
+
 /* Translation result */
 .pd-translation-result {
   margin-top: 12px;

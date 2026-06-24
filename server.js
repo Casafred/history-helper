@@ -416,6 +416,13 @@ function extractPatentFromHtml(html, patentId) {
           pdf_link: "",
           events_timeline: [],
           legal_events: [],
+          similar_documents: [],
+          family_id: "",
+          family_applications: [],
+          country_status: [],
+          priority_date: "",
+          external_links: {},
+          landscapes: [],
         };
         if (patentEntry.inventor) {
           jsonLdResult.inventors = (Array.isArray(patentEntry.inventor) ? patentEntry.inventor : [patentEntry.inventor]).map(i => i.name || i).filter(n => typeof n === "string");
@@ -452,6 +459,13 @@ function extractPatentFromHtml(html, patentId) {
     pdf_link: "",
     events_timeline: [],
     legal_events: [],
+    similar_documents: [],
+    family_id: "",
+    family_applications: [],
+    country_status: [],
+    priority_date: "",
+    external_links: {},
+    landscapes: [],
   };
 
   // Title
@@ -506,11 +520,33 @@ function extractPatentFromHtml(html, patentId) {
     const row = m[1];
     const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
     const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const pubDateMatch = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
+    const assigneeMatch = row.match(/<td[^>]*class="patent-assignee[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
     if (numMatch) {
       htmlResult.patent_citations.push({
         patent_number: numMatch[1].replace(/<[^>]+>/g, "").trim(),
         title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
+        publication_date: pubDateMatch ? pubDateMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+        assignee: assigneeMatch ? assigneeMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+        link: "https://patents.google.com/patent/" + numMatch[1].replace(/<[^>]+>/g, "").trim(),
       });
+    }
+  }
+  // Also try backwardReferencesFamily
+  const citationFamilyMatches = html.matchAll(/<tr[^>]*itemprop="backwardReferencesFamily"[^>]*>([\s\S]*?)<\/tr>/gi);
+  for (const m of citationFamilyMatches) {
+    const row = m[1];
+    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
+    const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    if (numMatch) {
+      const pn = numMatch[1].replace(/<[^>]+>/g, "").trim();
+      if (!htmlResult.patent_citations.find(c => c.patent_number === pn)) {
+        htmlResult.patent_citations.push({
+          patent_number: pn,
+          title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
+          link: "https://patents.google.com/patent/" + pn,
+        });
+      }
     }
   }
 
@@ -690,7 +726,9 @@ function extractPatentFromHtml(html, patentId) {
   }
 
   // PDF link
-  const pdfMatch = html.match(/<a[^>]*itemprop="pdfLink"[^>]*href="([^"]+)"[^>]*>/i);
+  const pdfMatch = html.match(/<a[^>]*itemprop="pdfLink"[^>]*href="([^"]+)"[^>]*>/i)
+    || html.match(/<a[^>]*href="([^"]*patentimages[^"]*\.pdf)"[^>]*>/i)
+    || html.match(/<a[^>]*href="([^"]*)"[^>]*>.*?PDF.*?<\/a>/i);
   if (pdfMatch) htmlResult.pdf_link = pdfMatch[1];
 
   // Events timeline - extract from application events
@@ -721,6 +759,142 @@ function extractPatentFromHtml(html, patentId) {
     }
   }
 
+  // Priority date
+  const priorityMatch = html.match(/<time[^>]*itemprop="priorityDate"[^>]*>([\s\S]*?)<\/time>/i);
+  if (priorityMatch) htmlResult.priority_date = priorityMatch[1].replace(/<[^>]+>/g, "").trim();
+  // Also try datetime attribute
+  if (!htmlResult.priority_date) {
+    const priorityDt = html.match(/<time[^>]*itemprop="priorityDate"[^>]*datetime="([^"]+)"/i);
+    if (priorityDt) htmlResult.priority_date = priorityDt[1];
+  }
+
+  // Cited by (forward references)
+  const citedByMatches = html.matchAll(/<tr[^>]*itemprop="forwardReferencesOrig"[^>]*>([\s\S]*?)<\/tr>/gi);
+  for (const m of citedByMatches) {
+    const row = m[1];
+    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
+    const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const pubDateMatch = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
+    if (numMatch) {
+      htmlResult.cited_by.push({
+        patent_number: numMatch[1].replace(/<[^>]+>/g, "").trim(),
+        title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
+        publication_date: pubDateMatch ? pubDateMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+        link: "https://patents.google.com/patent/" + numMatch[1].replace(/<[^>]+>/g, "").trim(),
+      });
+    }
+  }
+  // Also try forwardReferencesFamily
+  const citedByFamilyMatches = html.matchAll(/<tr[^>]*itemprop="forwardReferencesFamily"[^>]*>([\s\S]*?)<\/tr>/gi);
+  for (const m of citedByFamilyMatches) {
+    const row = m[1];
+    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
+    const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    if (numMatch) {
+      const pn = numMatch[1].replace(/<[^>]+>/g, "").trim();
+      // Avoid duplicates
+      if (!htmlResult.cited_by.find(c => c.patent_number === pn)) {
+        htmlResult.cited_by.push({
+          patent_number: pn,
+          title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
+          link: "https://patents.google.com/patent/" + pn,
+        });
+      }
+    }
+  }
+
+  // Similar documents
+  const similarMatches = html.matchAll(/<tr[^>]*itemprop="similarDocuments"[^>]*>([\s\S]*?)<\/tr>/gi);
+  for (const m of similarMatches) {
+    const row = m[1];
+    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
+    if (numMatch) {
+      htmlResult.similar_documents.push({
+        patent_number: numMatch[1].replace(/<[^>]+>/g, "").trim(),
+        link: "https://patents.google.com/patent/" + numMatch[1].replace(/<[^>]+>/g, "").trim(),
+      });
+    }
+  }
+
+  // Family ID
+  const familyIdMatch = html.match(/ID=(\d+)/i);
+  if (familyIdMatch) htmlResult.family_id = familyIdMatch[1];
+
+  // Family applications
+  const familyAppMatches = html.matchAll(/<tr[^>]*itemprop="applications"[^>]*>([\s\S]*?)<\/tr>/gi);
+  for (const m of familyAppMatches) {
+    const row = m[1];
+    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
+    const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const statusMatch = row.match(/<td[^>]*class="patent-status[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    if (numMatch) {
+      htmlResult.family_applications.push({
+        publication_number: numMatch[1].replace(/<[^>]+>/g, "").trim(),
+        title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
+        status: statusMatch ? statusMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+        link: "https://patents.google.com/patent/" + numMatch[1].replace(/<[^>]+>/g, "").trim(),
+      });
+    }
+  }
+  // Also try docdbFamily (Also Published As)
+  const docdbMatches = html.matchAll(/<tr[^>]*itemprop="docdbFamily"[^>]*>([\s\S]*?)<\/tr>/gi);
+  for (const m of docdbMatches) {
+    const row = m[1];
+    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
+    if (numMatch) {
+      const pn = numMatch[1].replace(/<[^>]+>/g, "").trim();
+      if (!htmlResult.family_applications.find(f => f.publication_number === pn)) {
+        htmlResult.family_applications.push({
+          publication_number: pn,
+          link: "https://patents.google.com/patent/" + pn,
+        });
+      }
+    }
+  }
+
+  // Country status
+  const countryMatches = html.matchAll(/<tr[^>]*itemprop="countryStatus"[^>]*>([\s\S]*?)<\/tr>/gi);
+  for (const m of countryMatches) {
+    const row = m[1];
+    const countryMatch = row.match(/<td[^>]*>([\s\S]*?)<\/td>/i);
+    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
+    if (countryMatch) {
+      const cc = countryMatch[1].replace(/<[^>]+>/g, "").trim();
+      htmlResult.country_status.push({
+        country_code: cc,
+        publication_number: numMatch ? numMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+        link: numMatch ? "https://patents.google.com/patent/" + numMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+      });
+    }
+  }
+
+  // External links
+  const linkMatches = html.matchAll(/<li[^>]*itemprop="links"[^>]*>([\s\S]*?)<\/li>/gi);
+  for (const m of linkMatches) {
+    const row = m[1];
+    const idMatch = row.match(/<meta[^>]*itemprop="id"[^>]*content="([^"]+)"/i);
+    const urlMatch = row.match(/<a[^>]*itemprop="url"[^>]*href="([^"]+)"/i);
+    const textMatch = row.match(/<span[^>]*itemprop="text"[^>]*>([\s\S]*?)<\/span>/i);
+    if (idMatch) {
+      htmlResult.external_links[idMatch[1]] = {
+        text: textMatch ? textMatch[1].replace(/<[^>]+>/g, "").trim() : idMatch[1],
+        url: urlMatch ? urlMatch[1] : "",
+      };
+    }
+  }
+
+  // Landscapes (technical fields)
+  const landscapeMatches = html.matchAll(/<li[^>]*itemprop="landscapes"[^>]*>([\s\S]*?)<\/li>/gi);
+  for (const m of landscapeMatches) {
+    const row = m[1];
+    const nameMatch = row.match(/<span[^>]*itemprop="name"[^>]*>([\s\S]*?)<\/span>/i);
+    if (nameMatch) {
+      htmlResult.landscapes.push({
+        name: nameMatch[1].replace(/<[^>]+>/g, "").trim(),
+      });
+    }
+  }
+
   // Merge: JSON-LD takes priority for core fields, HTML supplements missing fields
   if (jsonLdResult) {
     // Use JSON-LD for core fields (title, abstract, inventors, assignees, dates, drawings)
@@ -740,6 +914,14 @@ function extractPatentFromHtml(html, patentId) {
     if (htmlResult.pdf_link) jsonLdResult.pdf_link = htmlResult.pdf_link;
     if (htmlResult.events_timeline.length > 0) jsonLdResult.events_timeline = htmlResult.events_timeline;
     if (htmlResult.legal_events.length > 0) jsonLdResult.legal_events = htmlResult.legal_events;
+    if (htmlResult.priority_date) jsonLdResult.priority_date = htmlResult.priority_date;
+    if (htmlResult.cited_by.length > 0) jsonLdResult.cited_by = htmlResult.cited_by;
+    if (htmlResult.similar_documents.length > 0) jsonLdResult.similar_documents = htmlResult.similar_documents;
+    if (htmlResult.family_id) jsonLdResult.family_id = htmlResult.family_id;
+    if (htmlResult.family_applications.length > 0) jsonLdResult.family_applications = htmlResult.family_applications;
+    if (htmlResult.country_status.length > 0) jsonLdResult.country_status = htmlResult.country_status;
+    if (Object.keys(htmlResult.external_links).length > 0) jsonLdResult.external_links = htmlResult.external_links;
+    if (htmlResult.landscapes.length > 0) jsonLdResult.landscapes = htmlResult.landscapes;
     return jsonLdResult;
   }
 

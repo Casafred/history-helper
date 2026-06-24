@@ -462,6 +462,14 @@ function renderPatentDetail(data) {
   if (data.pdf_link) {
     html += '<a href="' + escapeHtml(data.pdf_link) + '" target="_blank" rel="noopener" class="pd-pdf-link">📄 PDF</a>';
   }
+  if (data.external_links && Object.keys(data.external_links).length > 0) {
+    html += '<span class="pd-external-links-sep">|</span>';
+    for (const [key, link] of Object.entries(data.external_links)) {
+      if (link.url) {
+        html += '<a href="' + escapeHtml(link.url) + '" target="_blank" rel="noopener" class="pd-external-link">' + escapeHtml(link.text || key) + '</a>';
+      }
+    }
+  }
   html += '</div>';
   html += '</div>';
 
@@ -495,6 +503,9 @@ function renderPatentDetail(data) {
   if (data.publication_date) {
     html += '<div class="pd-info-item"><span class="pd-info-label">公开日期</span><span class="pd-info-value">' + escapeHtml(data.publication_date) + '</span></div>';
   }
+  if (data.priority_date) {
+    html += '<div class="pd-info-item"><span class="pd-info-label">优先权日期</span><span class="pd-info-value">' + escapeHtml(data.priority_date) + '</span></div>';
+  }
   html += '</div></div>';
 
   // CPC Classifications
@@ -510,6 +521,17 @@ function renderPatentDetail(data) {
     html += '</div></div>';
   }
 
+  // Landscapes (technical fields)
+  if (data.landscapes && data.landscapes.length > 0) {
+    html += '<div class="pd-section">';
+    html += '<div class="pd-section-title">技术领域</div>';
+    html += '<div class="pd-landscapes">';
+    data.landscapes.forEach(l => {
+      html += '<span class="pd-landscape-tag">' + escapeHtml(l.name) + '</span>';
+    });
+    html += '</div></div>';
+  }
+
   // Patent citations
   if (data.patent_citations && data.patent_citations.length > 0) {
     html += '<div class="pd-section">';
@@ -520,6 +542,36 @@ function renderPatentDetail(data) {
       html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
       html += '<a href="https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;" title="在 Google Patents 中打开">GP</a>';
       if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  // Cited by (forward references)
+  if (data.cited_by && data.cited_by.length > 0) {
+    html += '<div class="pd-section">';
+    html += '<div class="pd-section-title">被引用专利 (' + data.cited_by.length + ')</div>';
+    html += '<div class="pd-citations">';
+    data.cited_by.forEach(c => {
+      html += '<div class="pd-citation-item">';
+      html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
+      html += '<a href="https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;" title="在 Google Patents 中打开">GP</a>';
+      if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
+      if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  // Similar documents
+  if (data.similar_documents && data.similar_documents.length > 0) {
+    html += '<div class="pd-section">';
+    html += '<div class="pd-section-title">相似文档 (' + data.similar_documents.length + ')</div>';
+    html += '<div class="pd-citations">';
+    data.similar_documents.forEach(c => {
+      html += '<div class="pd-citation-item">';
+      html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
+      html += '<a href="' + escapeHtml(c.link) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;">GP</a>';
       html += '</div>';
     });
     html += '</div></div>';
@@ -606,6 +658,45 @@ function renderPatentDetail(data) {
       html += '</tr>';
     });
     html += '</tbody></table></div></div>';
+  }
+
+  // Family information
+  if (data.family_id || (data.family_applications && data.family_applications.length > 0) || (data.country_status && data.country_status.length > 0)) {
+    html += '<div class="pd-collapsible collapsed" id="pd-family-section" data-section-type="family">';
+    html += '<div class="pd-collapsible-header" onclick="togglePatentSection(\'pd-family-section\')">';
+    html += '<span class="pd-collapsible-arrow">▼</span>';
+    html += '<span class="pd-collapsible-title">同族信息</span>';
+    if (data.family_id) html += '<span class="pd-collapsible-badge">ID: ' + escapeHtml(data.family_id) + '</span>';
+    html += '</div>';
+    html += '<div class="pd-collapsible-content">';
+
+    // Family applications
+    if (data.family_applications && data.family_applications.length > 0) {
+      html += '<div class="pd-subsection-title">同族申请 (' + data.family_applications.length + ')</div>';
+      html += '<table class="pd-legal-table">';
+      html += '<thead><tr><th>公开号</th><th>标题</th><th>状态</th></tr></thead>';
+      html += '<tbody>';
+      data.family_applications.forEach(fa => {
+        html += '<tr>';
+        html += '<td><a class="pd-patent-link" data-patent="' + escapeHtml(fa.publication_number) + '">' + escapeHtml(fa.publication_number) + '</a></td>';
+        html += '<td>' + escapeHtml(fa.title || "") + '</td>';
+        html += '<td>' + escapeHtml(fa.status || "") + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    // Country status
+    if (data.country_status && data.country_status.length > 0) {
+      html += '<div class="pd-subsection-title">国家状态</div>';
+      html += '<div class="pd-country-status">';
+      data.country_status.forEach(cs => {
+        html += '<span class="pd-country-badge">' + escapeHtml(cs.country_code) + '</span>';
+      });
+      html += '</div>';
+    }
+
+    html += '</div></div>';
   }
 
   html += '</div>'; // pd-info
