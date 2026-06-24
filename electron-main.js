@@ -502,13 +502,17 @@ function extractPatentFromHtml(html, patentId) {
       let m;
       while ((m = claimStartRegex.exec(html)) !== null) {
         const attrs = m[1];
-        const classMatch = attrs.match(/class="([^"]*claim[^"]*)"/i);
+        const classMatch = attrs.match(/class="([^"]*)"/i);
         const numMatch = attrs.match(/num="(\d+)"/i);
         if (!classMatch || !numMatch) continue;
-        // Must have "claim" in class (not e.g. "claim-text" as a top-level)
-        if (!/\bclaim\b/.test(classMatch[1])) continue;
+        const className = classMatch[1];
+        // Only match top-level claim divs: class contains "claim" or "claim-dependent" as standalone words
+        // Exclude sub-element classes: claim-text, claim-line, claim-ref, etc.
+        const hasClaimClass = /(?:^|\s)claim(?:\s|$)/.test(className);
+        const hasDependentClass = /(?:^|\s)claim-dependent(?:\s|$)/.test(className);
+        if (!hasClaimClass && !hasDependentClass) continue;
         const claimNum = numMatch[1];
-        const isDependentByClass = /claim-dependent/.test(classMatch[1]);
+        const isDependentByClass = hasDependentClass;
         const openTagEnd = m.index + m[0].length;
         const closeIdx = findMatchingCloseDiv(html, m.index);
         if (closeIdx === -1) continue;
@@ -644,6 +648,42 @@ function extractPatentFromHtml(html, patentId) {
       // Pick the candidate with highest average text length (most complete claims)
       candidates.sort((a, b) => avgTextLength(b.claims) - avgTextLength(a.claims));
       htmlResult.claims = candidates[0].claims;
+    }
+
+    // Post-processing: merge fragmented claims
+    // Google Patents sometimes uses flat divs where each line is a separate <div class="claim" num="N">
+    // with sequential line numbers (not claim numbers). In this case, claims whose text doesn't start
+    // with a claim number prefix (e.g., "9.") are continuations of the preceding claim.
+    if (htmlResult.claims.length > 1) {
+      const merged = [];
+      let current = null;
+      for (const claim of htmlResult.claims) {
+        // Check if this claim starts with a claim number prefix like "9." or "10."
+        const prefixMatch = claim.text.match(/^(\d+)\.\s/);
+        if (prefixMatch) {
+          // Start of a new claim - use the text prefix as the actual claim number
+          if (current) merged.push(current);
+          current = { ...claim, num: prefixMatch[1] };
+        } else if (current) {
+          // Continuation of the current claim (no number prefix)
+          current.text = (current.text + " " + claim.text).replace(/\s+/g, " ").trim();
+          // If continuation comes from a dependent class, mark the whole claim as dependent
+          if (claim.type === "dependent") current.type = "dependent";
+        } else {
+          // No preceding claim to merge with, keep as standalone
+          current = { ...claim };
+        }
+      }
+      if (current) merged.push(current);
+      // Deduplicate by claim number: if same num appears multiple times, keep the longest text
+      const dedupMap = new Map();
+      for (const claim of merged) {
+        if (!dedupMap.has(claim.num) || dedupMap.get(claim.num).text.length < claim.text.length) {
+          dedupMap.set(claim.num, claim);
+        }
+      }
+      htmlResult.claims = Array.from(dedupMap.values());
+      htmlResult.claims.sort((a, b) => parseInt(a.num) - parseInt(b.num));
     }
 
     // Last resort: extract claims by number pattern in plain text
