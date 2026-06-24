@@ -3382,40 +3382,28 @@ body {
   top: 50%;
   transform: translateY(-50%);
   z-index: 500;
-  width: 44px;
+  display: flex;
+  flex-direction: row;
+  height: 65vh;
+  max-height: 520px;
   transition: width 0.3s ease;
   overflow: hidden;
-  border-right: 1px solid var(--border);
   border-radius: 0 var(--radius) var(--radius) 0;
   background: var(--bg-secondary);
   box-shadow: 2px 0 8px rgba(0,0,0,0.15);
 }
+.history-sidebar.collapsed {
+  width: 28px;
+}
 .history-sidebar:not(.collapsed) {
   width: 260px;
 }
-.history-sidebar-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--border);
-}
-.history-sidebar-toggle:hover {
-  color: var(--accent);
-  background: var(--bg-hover);
-}
-.history-sidebar-toggle svg {
-  width: 20px;
-  height: 20px;
-}
-.history-sidebar:not(.collapsed) .history-sidebar-toggle {
-  justify-content: flex-end;
-}
 .history-sidebar-content {
+  flex: 1;
+  min-width: 0;
   padding: 8px;
   display: none;
+  overflow-y: auto;
 }
 .history-sidebar:not(.collapsed) .history-sidebar-content {
   display: block;
@@ -3428,6 +3416,31 @@ body {
   letter-spacing: 0.5px;
   margin-bottom: 8px;
   padding: 0 4px;
+}
+/* Edge toggle button: always visible on right edge, vertically centered */
+.history-sidebar-edge-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  border-left: 1px solid var(--border);
+  transition: color 0.2s, background 0.2s;
+}
+.history-sidebar-edge-toggle:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+.history-sidebar-edge-toggle svg {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.3s ease;
+}
+/* When collapsed, arrow points right (expand); when expanded, points left (collapse) */
+.history-sidebar.collapsed .history-sidebar-edge-toggle svg {
+  transform: rotate(180deg);
 }
 .history-list {
   display: flex;
@@ -3569,7 +3582,7 @@ body {
 
 /* ===== 专利详情视图 ===== */
 .patent-detail-section {
-  max-width: 960px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 24px 20px;
 }
@@ -3580,7 +3593,7 @@ body {
   box-shadow: 0 2px 12px rgba(0,0,0,0.08);
 }
 .pd-header {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   border-bottom: 1px solid var(--border);
   padding-bottom: 16px;
 }
@@ -3611,14 +3624,197 @@ body {
   background: var(--accent);
   color: #fff;
 }
-.pd-body {
+
+/* ── Tab layout: left bookmark tabs + right panels ── */
+.pd-tab-layout {
+  display: flex;
+  gap: 0;
+  min-height: 400px;
+}
+.pd-bookmark-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  min-width: 72px;
+  border-right: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.pd-bookmark-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px;
+  border-right: 3px solid transparent;
+  transition: all 0.2s;
+  user-select: none;
+  white-space: nowrap;
+}
+.pd-bookmark-tab svg {
+  width: 20px;
+  height: 20px;
+}
+.pd-bookmark-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.pd-bookmark-tab.active {
+  color: var(--accent);
+  border-right-color: var(--accent);
+  background: var(--bg-hover);
+  font-weight: 600;
+}
+.pd-tab-panels {
+  flex: 1;
+  min-width: 0;
+  padding: 0 20px;
+  overflow-y: auto;
+  max-height: 70vh;
+}
+.pd-tab-panel {
+  display: none;
+}
+.pd-tab-panel.active {
+  display: block;
+}
+
+/* ── Overview tab: two-column layout ── */
+.pd-overview-layout {
   display: flex;
   gap: 24px;
 }
-.pd-info {
+.pd-overview-info {
   flex: 1;
   min-width: 0;
 }
+.pd-overview-drawings {
+  width: 260px;
+  flex-shrink: 0;
+}
+
+/* ── Panel header ── */
+.pd-panel-header {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Claims tab ── */
+.pd-claim {
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+.pd-claim-independent {
+  border-left: 4px solid var(--accent);
+  background: rgba(var(--accent-rgb, 59,130,246), 0.06);
+  font-weight: 500;
+}
+.pd-claim-dependent {
+  border-left: 4px solid #8b5cf6;
+  background: rgba(139, 92, 246, 0.06);
+  margin-left: 20px;
+}
+.pd-claim-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-right: 6px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.pd-claim-badge.indep {
+  background: rgba(var(--accent-rgb, 59,130,246), 0.15);
+  color: var(--accent);
+}
+.pd-claim-badge.dep {
+  background: rgba(139, 92, 246, 0.15);
+  color: #8b5cf6;
+}
+.pd-claim-num {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.pd-claim-text {
+  color: var(--text-secondary);
+}
+
+/* ── Description tab ── */
+.pd-description-text {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+
+/* ── Citation markers ── */
+.pd-citation-marker {
+  font-weight: 700;
+  font-size: 13px;
+  margin-right: 4px;
+}
+.pd-citation-marker.examiner {
+  color: #dc2626;
+}
+.pd-citation-marker.applicant {
+  color: #2563eb;
+}
+
+/* ── Country badges ── */
+.pd-country-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.pd-country-badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* ── External links ── */
+.pd-external-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pd-external-link {
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+.pd-external-link:hover {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb, 59,130,246), 0.06);
+}
+
+/* ── Empty state ── */
+.pd-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px 0;
+  font-size: 14px;
+}
+
+/* ── Shared section styles ── */
 .pd-section {
   margin-bottom: 20px;
 }
@@ -3702,10 +3898,6 @@ body {
 }
 
 /* Drawings */
-.pd-drawings {
-  width: 280px;
-  flex-shrink: 0;
-}
 .pd-drawings-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3802,12 +3994,35 @@ body {
 }
 
 /* Responsive: stack on narrow screens */
-@media (max-width: 700px) {
-  .pd-body {
+@media (max-width: 768px) {
+  .pd-tab-layout {
     flex-direction: column;
   }
-  .pd-drawings {
+  .pd-bookmark-tabs {
+    flex-direction: row;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    min-width: 0;
+    padding: 0 4px;
+    overflow-x: auto;
+  }
+  .pd-bookmark-tab {
+    border-right: none;
+    border-bottom: 3px solid transparent;
+    padding: 8px 12px;
+  }
+  .pd-bookmark-tab.active {
+    border-right-color: transparent;
+    border-bottom-color: var(--accent);
+  }
+  .pd-overview-layout {
+    flex-direction: column;
+  }
+  .pd-overview-drawings {
     width: 100%;
+  }
+  .pd-tab-panels {
+    max-height: none;
   }
 }
 
