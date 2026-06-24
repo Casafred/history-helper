@@ -460,6 +460,7 @@ function renderPatentDetail(data) {
   html += '<div class="pd-patent-number">' + escapeHtml(data.patent_number) + '</div>';
   html += '<div class="pd-title">' + escapeHtml(data.title || "无标题") + '</div>';
   html += '<div class="pd-links">';
+  html += '<button class="pd-gp-link" onclick="toggleGoogleTranslate()" title="使用 Google 翻译翻译整个页面" style="cursor:pointer;border:1px solid var(--accent);background:transparent;">网页翻译</button>';
   html += '<a href="' + escapeHtml(data.url) + '" target="_blank" rel="noopener" class="pd-gp-link">Google Patents</a>';
   if (data.pdf_link) {
     html += '<a href="' + escapeHtml(data.pdf_link) + '" target="_blank" rel="noopener" class="pd-pdf-link">PDF</a>';
@@ -880,6 +881,70 @@ function copyPatentSectionText(sectionType) {
   }).catch(() => {
     showError("复制失败");
   });
+}
+
+// ── Google Translate Widget Injection ──
+let _googleTranslateInjected = false;
+
+function toggleGoogleTranslate() {
+  const btn = document.getElementById("page-translate-btn");
+  if (!btn) return;
+
+  // If already showing, toggle off by reloading (simplest way to remove Google Translate)
+  const existingBar = document.querySelector(".skiptranslate iframe");
+  if (existingBar) {
+    // Remove Google Translate elements and restore original text
+    const gtEls = document.querySelectorAll(".skiptranslate, #goog-gt-tt, .goog-te-spinner-pos");
+    gtEls.forEach(el => el.remove());
+    document.body.style.top = "";
+    document.body.classList.remove("skiptranslate");
+    // Remove the script
+    const gtScript = document.getElementById("google-translate-script");
+    if (gtScript) gtScript.remove();
+    delete window.google;
+    delete window.googleTranslateElementInit;
+    _googleTranslateInjected = false;
+    btn.textContent = "网页翻译";
+    btn.title = "使用 Google 翻译翻译整个页面";
+    return;
+  }
+
+  // Inject Google Translate widget
+  if (!_googleTranslateInjected) {
+    _googleTranslateInjected = true;
+    btn.textContent = "关闭翻译";
+    btn.title = "关闭 Google 翻译";
+
+    // Create container for the translate element
+    const container = document.createElement("div");
+    container.id = "google_translate_element";
+    container.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:999999;";
+    document.body.prepend(container);
+
+    // Define init callback
+    window.googleTranslateElementInit = function() {
+      new google.translate.TranslateElement({
+        pageLanguage: "auto",
+        includedLanguages: "zh-CN,zh-TW,en,ja,ko,de,fr",
+        layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
+        autoDisplay: true
+      }, "google_translate_element");
+    };
+
+    // Load the script
+    const script = document.createElement("script");
+    script.id = "google-translate-script";
+    script.type = "text/javascript";
+    script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
+    script.onerror = function() {
+      showError("无法加载 Google 翻译组件，请检查网络连接（可能需要代理）");
+      _googleTranslateInjected = false;
+      btn.textContent = "网页翻译";
+      btn.title = "使用 Google 翻译翻译整个页面";
+      container.remove();
+    };
+    document.head.appendChild(script);
+  }
 }
 
 // Simple fullscreen image viewer for patent drawings
@@ -6719,6 +6784,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const translateSelBtn = document.getElementById("pdf-translate-selection-btn");
   if (translateSelBtn) {
     translateSelBtn.addEventListener("click", translateSelectedBlocks);
+  }
+
+  // Page translate button (Google Translate widget)
+  const pageTranslateBtn = document.getElementById("page-translate-btn");
+  if (pageTranslateBtn) {
+    pageTranslateBtn.addEventListener("click", toggleGoogleTranslate);
   }
 
   // PDF clear selection button
