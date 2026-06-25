@@ -1234,8 +1234,29 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
 
   let biblioRoot = null;
   try {
-    biblioRoot = biblioData["ops:world-patent-data"]["ops:biblio-search"]["ops:search-result"]["exchange-document"];
-    if (Array.isArray(biblioRoot)) biblioRoot = biblioRoot[0];
+    // OPS biblio 端点返回两种可能的 JSON 结构：
+    // 1. 单文档格式: ops:world-patent-data > exchange-documents > exchange-document
+    // 2. 搜索结果格式: ops:world-patent-data > ops:biblio-search > ops:search-result > exchange-document
+    const wpd = biblioData["ops:world-patent-data"];
+    if (wpd) {
+      // 先尝试单文档格式（更常见）
+      const exDocs = wpd["exchange-documents"];
+      if (exDocs && exDocs["exchange-document"]) {
+        biblioRoot = exDocs["exchange-document"];
+        if (Array.isArray(biblioRoot)) biblioRoot = biblioRoot[0];
+      }
+      // 再尝试搜索结果格式
+      if (!biblioRoot) {
+        const bibSearch = wpd["ops:biblio-search"];
+        if (bibSearch) {
+          const sr = bibSearch["ops:search-result"];
+          if (sr && sr["exchange-document"]) {
+            biblioRoot = sr["exchange-document"];
+            if (Array.isArray(biblioRoot)) biblioRoot = biblioRoot[0];
+          }
+        }
+      }
+    }
   } catch (e) { /* biblio 可能缺失 */ }
   if (!biblioRoot && biblioData) {
     biblioRoot = biblioData["exchange-document"] || biblioData;
@@ -1273,12 +1294,17 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
 
   const biblio = biblioRoot["bibliographic-data"] || {};
 
-  // 标题
+  // 标题（可能是多语言数组，优先取英文）
   try {
     const titleObj = biblio["invention-title"];
     if (titleObj) {
       if (typeof titleObj === "string") result.title = titleObj;
-      else if (titleObj.$) result.title = titleObj.$;
+      else if (Array.isArray(titleObj)) {
+        // 多语言标题，优先取 @lang="en"
+        const enTitle = titleObj.find(t => t["@lang"] === "en");
+        const firstTitle = enTitle || titleObj[0];
+        result.title = firstTitle?.$ || firstTitle?.["text"] || String(firstTitle || "");
+      } else if (titleObj.$) result.title = titleObj.$;
       else if (titleObj["text"]) result.title = titleObj["text"];
     }
   } catch (e) { /* ignore */ }
@@ -1594,8 +1620,17 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret, useProxy
   try {
     let kindForImages = parsed.kindCode || "";
     if (!kindForImages) {
-      const biblioRoot = dataMap.biblio["ops:world-patent-data"]?.["ops:biblio-search"]?.["ops:search-result"]?.["exchange-document"];
-      const bibDoc = Array.isArray(biblioRoot) ? biblioRoot[0] : biblioRoot;
+      // 从 biblio 提取 kind code（兼容两种 JSON 结构）
+      let bibDoc = null;
+      try {
+        const wpd = dataMap.biblio["ops:world-patent-data"];
+        const exDocs = wpd?.["exchange-documents"]?.["exchange-document"];
+        if (exDocs) bibDoc = Array.isArray(exDocs) ? exDocs[0] : exDocs;
+        if (!bibDoc) {
+          const sr = wpd?.["ops:biblio-search"]?.["ops:search-result"]?.["exchange-document"];
+          if (sr) bibDoc = Array.isArray(sr) ? sr[0] : sr;
+        }
+      } catch (e) {}
       const pubRef = bibDoc?.["bibliographic-data"]?.["publication-reference"]?.["document-id"];
       if (pubRef) {
         const docdb = opsExtractDocId(opsArray(pubRef), "docdb");
