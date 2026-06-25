@@ -2154,6 +2154,44 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // OPS 连接测试端点（直接测试 OPS token + 轻量查询，不走 Google Patents 路由）
+  // 前端"测试连接"按钮调用此端点
+  if (req.url.startsWith("/api/ops/test")) {
+    const urlObj = new URL(req.url, "http://localhost");
+    const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
+    const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
+    (async () => {
+      const corsHdr = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+      if (!opsKey || !opsSecret) {
+        res.writeHead(400, corsHdr);
+        res.end(JSON.stringify({ success: false, error: "缺少 OPS consumer key 或 secret" }));
+        return;
+      }
+      const tokenResult = await getOpsToken(opsKey, opsSecret);
+      if (tokenResult.error) {
+        res.writeHead(200, corsHdr);
+        res.end(JSON.stringify({ success: false, error: tokenResult.error, stage: "token" }));
+        return;
+      }
+      const testPath = "/published-data/publication/epodoc/EP1000000/biblio";
+      const biblioResult = await opsRequest(opsKey, opsSecret, testPath);
+      if (biblioResult.error) {
+        res.writeHead(200, corsHdr);
+        res.end(JSON.stringify({ success: false, error: "Token 有效但查询失败: " + biblioResult.error, stage: "query", tokenOk: true }));
+        return;
+      }
+      if (biblioResult.httpCode !== 200) {
+        res.writeHead(200, corsHdr);
+        res.end(JSON.stringify({ success: false, error: "OPS 查询返回 HTTP " + biblioResult.httpCode, stage: "query", tokenOk: true, httpCode: biblioResult.httpCode }));
+        return;
+      }
+      const quota = opsQuotaCache.get(opsKey + ":" + opsSecret);
+      res.writeHead(200, corsHdr);
+      res.end(JSON.stringify({ success: true, message: "OPS 连接成功，凭证有效", tokenOk: true, queryOk: true, quota: quota || null }));
+    })();
+    return;
+  }
+
   // OPS 附图代理端点（前端 <img> 直接引用，后端带 Bearer token 请求 OPS thumbnail）
   // URL: /api/ops/image/{patentNumber}?page={N}&country={C}&doc={D}&kind={K}&opsKey=xxx&opsSecret=yyy
   if (req.url.startsWith("/api/ops/image/")) {

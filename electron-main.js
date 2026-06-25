@@ -944,7 +944,10 @@ function extractPatentFromHtml(html, patentId) {
   return htmlResult;
 }
 
-// ── EPO OPS 模块（使用 Node.js 原生 https 替代 curl） ──
+// ── EPO OPS 模块（使用 curl 子进程：支持代理、不污染 USPTO 头） ──
+// 注意：原 httpsGet/httpsPost 会自动合并 GD_HEADERS（含 USPTO Referer/Origin），
+// EPO 会拒绝带这些头的请求；且 httpsGet 硬编码 port:443 不支持代理。
+// 因此 OPS 全部走 curlRequest —— 与 server.js 实现一致，已在打包环境验证可用。
 
 // OPS Token 缓存：key = consumerKey:consumerSecret
 const opsTokenCache = new Map();
@@ -953,8 +956,54 @@ const opsQuotaCache = new Map();
 // 配额缓存有效期 20 分钟（与前端自动刷新周期对齐）
 const OPS_QUOTA_CACHE_TTL = 20 * 60 * 1000;
 
-// 获取 OPS Token（带缓存，使用 httpsPost 替代 curl）
-async function getOpsToken(consumerKey, consumerSecret) {
+// 通用 curl 请求封装（替代 httpsGet/httpsPost 用于 OPS）
+// - 支持 --proxy（用户在中国需走代理才能访问 ops.epo.org）
+// - 用 -D 临时文件保存响应头，避免 HTTP/2 \n\n 与 HTTP/1.1 \r\n\r\n 分隔符差异
+// - 不注入 GD_HEADERS，避免 EPO 拒绝 USPTO 来源的 Referer/Origin
+function curlRequest(targetUrl, options) {
+  return new Promise((resolve) => {
+    const opts = options || {};
+    const args = ["-s", "-k", "-L", "--max-time", String(opts.timeout || 30), "--connect-timeout", "10"];
+    const tmpHeaderFile = require("os").tmpdir() + "/ops_hdr_" + Date.now() + "_" + Math.floor(Math.random() * 1e6) + ".txt";
+    args.push("-D", tmpHeaderFile);
+    if (opts.method && opts.method !== "GET") {
+      args.push("-X", opts.method);
+    }
+    if (opts.headers) {
+      for (const [k, v] of Object.entries(opts.headers)) {
+        args.push("-H", k + ": " + v);
+      }
+    }
+    if (opts.body) {
+      args.push("-d", opts.body);
+    }
+    if (opts.useProxy && opts.proxyUrl) {
+      args.splice(1, 0, "--proxy", opts.proxyUrl);
+    }
+    args.push(targetUrl);
+    execFile("curl", args, { maxBuffer: 50 * 1024 * 1024, encoding: opts.binary ? "buffer" : "utf8" }, (err, stdout) => {
+      let headerText = "";
+      try { headerText = fs.readFileSync(tmpHeaderFile, "utf8"); fs.unlinkSync(tmpHeaderFile); } catch (e) {}
+      if (err) {
+        resolve({ error: err.message, stdout: null, headerText, statusCode: 0, headers: {}, body: null });
+        return;
+      }
+      let statusCode = 0;
+      const headers = {};
+      const headerLines = headerText.split(/\r?\n/);
+      for (const line of headerLines) {
+        const sm = line.match(/^HTTP\/[\d.]+\s+(\d+)/);
+        if (sm) statusCode = parseInt(sm[1], 10);
+        const hm = line.match(/^([^:]+):\s*(.*)$/);
+        if (hm) headers[hm[1].toLowerCase()] = hm[2].trim();
+      }
+      resolve({ statusCode, headers, body: stdout, error: null });
+    });
+  });
+}
+
+// 获取 OPS Token（带缓存，使用 curl + 代理）
+async function getOpsToken(consumerKey, consumerSecret, useProxy, proxyUrl) {
   if (!consumerKey || !consumerSecret) {
     return { error: "缺少 OPS consumer key 或 secret" };
   }
@@ -967,22 +1016,27 @@ async function getOpsToken(consumerKey, consumerSecret) {
 
   const credentials = Buffer.from(consumerKey + ":" + consumerSecret).toString("base64");
   try {
-    const result = await httpsPost(
-      OPS_AUTH_URL,
-      {
+    const result = await curlRequest(OPS_AUTH_URL, {
+      method: "POST",
+      headers: {
         "Authorization": "Basic " + credentials,
         "Content-Type": "application/x-www-form-urlencoded",
       },
-      "grant_type=client_credentials",
-      15000
-    );
+      body: "grant_type=client_credentials",
+      timeout: 15,
+      useProxy: useProxy,
+      proxyUrl: proxyUrl,
+    });
 
+    if (result.error) {
+      return { error: "OPS 认证请求失败: " + result.error };
+    }
     if (result.statusCode !== 200) {
-      const bodyText = result.body.toString("utf-8");
+      const bodyText = typeof result.body === "string" ? result.body : "";
       return { error: "OPS 认证失败 HTTP " + result.statusCode, httpCode: result.statusCode, responseBody: bodyText };
     }
     let tokenData;
-    const bodyText = result.body.toString("utf-8");
+    const bodyText = typeof result.body === "string" ? result.body : "";
     try { tokenData = JSON.parse(bodyText); } catch (e) {
       return { error: "OPS Token 解析失败: " + e.message, responseBody: bodyText };
     }
@@ -999,18 +1053,28 @@ async function getOpsToken(consumerKey, consumerSecret) {
   }
 }
 
-// 通用 OPS GET 请求（JSON 格式，使用 httpsGet 替代 curl）
-async function opsRequest(consumerKey, consumerSecret, opsPath) {
-  const tokenResult = await getOpsToken(consumerKey, consumerSecret);
+// 通用 OPS GET 请求（JSON 格式，使用 curl + 代理）
+async function opsRequest(consumerKey, consumerSecret, opsPath, useProxy, proxyUrl) {
+  const tokenResult = await getOpsToken(consumerKey, consumerSecret, useProxy, proxyUrl);
   if (tokenResult.error) return tokenResult;
   const token = tokenResult.token;
   const fullUrl = OPS_API_BASE + opsPath;
 
   try {
-    const result = await httpsGet(fullUrl, {
-      "Authorization": "Bearer " + token,
-      "Accept": "application/json",
-    }, 30000);
+    const result = await curlRequest(fullUrl, {
+      method: "GET",
+      headers: {
+        "Authorization": "Bearer " + token,
+        "Accept": "application/json",
+      },
+      timeout: 30,
+      useProxy: useProxy,
+      proxyUrl: proxyUrl,
+    });
+
+    if (result.error) {
+      return { error: "OPS 请求失败: " + result.error, url: fullUrl };
+    }
 
     // 解析配额头并更新缓存
     const respHeaders = result.headers || {};
@@ -1030,7 +1094,7 @@ async function opsRequest(consumerKey, consumerSecret, opsPath) {
     return {
       httpCode: result.statusCode,
       headers: respHeaders,
-      body: result.body.toString("utf-8"),
+      body: typeof result.body === "string" ? result.body : "",
       url: fullUrl,
     };
   } catch (e) {
@@ -1481,12 +1545,12 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
 }
 
 // ── OPS 主查询入口 ──
-async function queryOpsPatent(patentInput, consumerKey, consumerSecret) {
+async function queryOpsPatent(patentInput, consumerKey, consumerSecret, useProxy, proxyUrl) {
   const parsed = parseOpsPatentNumber(patentInput);
   if (parsed.error) return { success: false, error: parsed.error };
 
   const epodocNum = parsed.epodocNum;
-  console.log("[OPS] 查询专利: " + patentInput + " → epodoc: " + epodocNum);
+  console.log("[OPS] 查询专利: " + patentInput + " → epodoc: " + epodocNum + (useProxy ? " (proxy=" + proxyUrl + ")" : " (直连)"));
 
   const endpoints = {
     biblio: "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/biblio",
@@ -1499,7 +1563,7 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret) {
   };
 
   const promises = Object.entries(endpoints).map(async ([key, opsPath]) => {
-    const result = await opsRequest(consumerKey, consumerSecret, opsPath);
+    const result = await opsRequest(consumerKey, consumerSecret, opsPath, useProxy, proxyUrl);
     if (result.error || result.httpCode !== 200) {
       console.log("[OPS] " + key + " 失败: " + (result.error || "HTTP " + result.httpCode));
       return [key, null];
@@ -1542,7 +1606,7 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret) {
 
     const docdbNum = parsed.country + "." + parsed.docNumber + "." + kindForImages;
     const imagesPath = "/published-data/publication/docdb/" + encodeURIComponent(docdbNum) + "/images";
-    const imagesResult = await opsRequest(consumerKey, consumerSecret, imagesPath);
+    const imagesResult = await opsRequest(consumerKey, consumerSecret, imagesPath, useProxy, proxyUrl);
     if (imagesResult.httpCode === 200) {
       try {
         dataMap.images = JSON.parse(imagesResult.body);
@@ -1575,15 +1639,20 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret) {
   return { success: true, data: data, patent_number: data.patent_number, data_source: "EPO OPS" };
 }
 
-// 获取 OPS 配额信息（带 20 分钟缓存）
-function getOpsQuota(consumerKey, consumerSecret) {
+// 获取 OPS 配额信息（带 20 分钟缓存；缓存过期时主动发一次轻量请求刷新）
+async function getOpsQuota(consumerKey, consumerSecret, useProxy, proxyUrl) {
   if (!consumerKey || !consumerSecret) return null;
   const cacheKey = consumerKey + ":" + consumerSecret;
   const cached = opsQuotaCache.get(cacheKey);
   if (cached && Date.now() - cached.updatedAt < OPS_QUOTA_CACHE_TTL) {
     return cached;
   }
-  return cached;
+  // 缓存过期：发起一次轻量 OPS 请求（biblio 单端点）刷新配额头
+  try {
+    const testPath = "/published-data/publication/epodoc/EP1000000/biblio";
+    await opsRequest(consumerKey, consumerSecret, testPath, useProxy, proxyUrl);
+  } catch (e) { /* ignore */ }
+  return opsQuotaCache.get(cacheKey) || cached || null;
 }
 
 // ── Google Patents scraping ──
@@ -1652,9 +1721,9 @@ async function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey,
 
   // Google Patents 所有变体均失败 —— 尝试 EPO OPS 降级查询
   if (opsKey && opsSecret) {
-    console.log("[GP→OPS] Google Patents 未找到，降级到 EPO OPS 查询: " + patentNumber);
+    console.log("[GP→OPS] Google Patents 未找到，降级到 EPO OPS 查询: " + patentNumber + (useProxy ? " (proxy=" + proxyUrl + ")" : " (直连)"));
     try {
-      const opsResult = await queryOpsPatent(patentNumber, opsKey, opsSecret);
+      const opsResult = await queryOpsPatent(patentNumber, opsKey, opsSecret, useProxy, proxyUrl);
       if (opsResult.success) {
         console.log("[GP→OPS] 降级查询成功: " + patentNumber);
         res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "X-Data-Source": "EPO-OPS" });
@@ -2585,18 +2654,69 @@ function startServer() {
         return;
       }
 
+      // OPS 连接测试端点（直接测试 OPS，不走 Google Patents 路由）
+      // 前端"测试连接"按钮应调用此端点，而非 /api/gp/EP1000000
+      if (req.url.startsWith("/api/ops/test")) {
+        const urlObj = new URL(req.url, "http://localhost");
+        const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
+        const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
+        const useProxy = urlObj.searchParams.get("proxy") === "1";
+        const proxyUrl = urlObj.searchParams.get("proxyUrl") || PROXY_URL;
+        (async () => {
+          const corsHdr = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+          if (!opsKey || !opsSecret) {
+            res.writeHead(400, corsHdr);
+            res.end(JSON.stringify({ success: false, error: "缺少 OPS consumer key 或 secret" }));
+            return;
+          }
+          console.log("[OPS-TEST] 测试连接: key=" + opsKey.substring(0, 6) + "... proxy=" + (useProxy ? proxyUrl : "直连"));
+          // 第一步：获取 token
+          const tokenResult = await getOpsToken(opsKey, opsSecret, useProxy, proxyUrl);
+          if (tokenResult.error) {
+            console.log("[OPS-TEST] Token 获取失败: " + tokenResult.error);
+            res.writeHead(200, corsHdr);
+            res.end(JSON.stringify({ success: false, error: tokenResult.error, stage: "token" }));
+            return;
+          }
+          // 第二步：用 EP1000000 做一次轻量 biblio 查询，验证 token 可用 + 刷新配额
+          const testPath = "/published-data/publication/epodoc/EP1000000/biblio";
+          const biblioResult = await opsRequest(opsKey, opsSecret, testPath, useProxy, proxyUrl);
+          if (biblioResult.error) {
+            console.log("[OPS-TEST] biblio 查询失败: " + biblioResult.error);
+            res.writeHead(200, corsHdr);
+            res.end(JSON.stringify({ success: false, error: "Token 有效但查询失败: " + biblioResult.error, stage: "query", tokenOk: true }));
+            return;
+          }
+          if (biblioResult.httpCode !== 200) {
+            console.log("[OPS-TEST] biblio 返回 HTTP " + biblioResult.httpCode);
+            res.writeHead(200, corsHdr);
+            res.end(JSON.stringify({ success: false, error: "OPS 查询返回 HTTP " + biblioResult.httpCode, stage: "query", tokenOk: true, httpCode: biblioResult.httpCode }));
+            return;
+          }
+          const quota = opsQuotaCache.get(opsKey + ":" + opsSecret);
+          console.log("[OPS-TEST] 测试成功，配额: " + (quota ? quota.throttle : "未知"));
+          res.writeHead(200, corsHdr);
+          res.end(JSON.stringify({ success: true, message: "OPS 连接成功，凭证有效", tokenOk: true, queryOk: true, quota: quota || null }));
+        })();
+        return;
+      }
+
       // OPS 配额查询端点
       if (req.url.startsWith("/api/ops/quota")) {
         const urlObj = new URL(req.url, "http://localhost");
         const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
         const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
-        const quota = getOpsQuota(opsKey, opsSecret);
-        res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-        res.end(JSON.stringify({ success: !!quota, quota, message: quota ? null : "暂无配额数据" }));
+        const useProxy = urlObj.searchParams.get("proxy") === "1";
+        const proxyUrl = urlObj.searchParams.get("proxyUrl") || PROXY_URL;
+        (async () => {
+          const quota = await getOpsQuota(opsKey, opsSecret, useProxy, proxyUrl);
+          res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+          res.end(JSON.stringify({ success: !!quota, quota, message: quota ? null : "暂无配额数据" }));
+        })();
         return;
       }
 
-      // OPS 附图代理端点
+      // OPS 附图代理端点（使用 curl + 代理，避免 GD_HEADERS 污染）
       if (req.url.startsWith("/api/ops/image/")) {
         const urlObj = new URL(req.url, "http://localhost");
         const patentNumber = decodeURIComponent(urlObj.pathname.replace("/api/ops/image/", ""));
@@ -2606,15 +2726,26 @@ function startServer() {
         const imgKind = urlObj.searchParams.get("kind") || "A1";
         const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
         const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
+        const useProxy = urlObj.searchParams.get("proxy") === "1";
+        const proxyUrl = urlObj.searchParams.get("proxyUrl") || PROXY_URL;
         (async () => {
           try {
-            const tokenResult = await getOpsToken(opsKey, opsSecret);
-            if (tokenResult.error) { res.writeHead(401, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"OPS 认证失败"})); return; }
+            const tokenResult = await getOpsToken(opsKey, opsSecret, useProxy, proxyUrl);
+            if (tokenResult.error) { res.writeHead(401, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"OPS 认证失败: " + tokenResult.error})); return; }
             const imgUrl = `${OPS_API_BASE}/published-data/images/${imgCountry}/${imgDocNum}/${imgKind}/thumbnail.png?Range=${page}`;
-            const imgResult = await httpsGet(imgUrl, { Authorization: "Bearer " + tokenResult.token, Accept: "image/png" }, 30000);
-            if (imgResult.statusCode === 200 && imgResult.body.length > 100) {
+            const imgResult = await curlRequest(imgUrl, {
+              method: "GET",
+              headers: { Authorization: "Bearer " + tokenResult.token, Accept: "image/png" },
+              timeout: 30,
+              useProxy: useProxy,
+              proxyUrl: proxyUrl,
+              binary: true,
+            });
+            if (imgResult.error) { res.writeHead(502, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error: imgResult.error})); return; }
+            const bodyBuf = Buffer.isBuffer(imgResult.body) ? imgResult.body : Buffer.from(imgResult.body || "");
+            if (imgResult.statusCode === 200 && bodyBuf.length > 100) {
               res.writeHead(200, { "Content-Type": "image/png", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" });
-              res.end(imgResult.body);
+              res.end(bodyBuf);
             } else {
               res.writeHead(404, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"});
               res.end(JSON.stringify({error:"附图不可用", httpCode: imgResult.statusCode}));
@@ -2627,25 +2758,39 @@ function startServer() {
         return;
       }
 
-      // OPS PDF 下载端点（逐页下载 fullimage.pdf 后用 pdf-lib 合并）
+      // OPS PDF 下载端点（逐页下载 fullimage.pdf 后用 pdf-lib 合并，使用 curl + 代理）
       if (req.url.startsWith("/api/ops/pdf/")) {
         const urlObj = new URL(req.url, "http://localhost");
         const patentNumber = decodeURIComponent(urlObj.pathname.replace("/api/ops/pdf/", ""));
         const kind = urlObj.searchParams.get("kind") || "A1";
         const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
         const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
+        const useProxy = urlObj.searchParams.get("proxy") === "1";
+        const proxyUrl = urlObj.searchParams.get("proxyUrl") || PROXY_URL;
         (async () => {
           try {
-            const tokenResult = await getOpsToken(opsKey, opsSecret);
-            if (tokenResult.error) { res.writeHead(401, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"OPS 认证失败"})); return; }
+            const tokenResult = await getOpsToken(opsKey, opsSecret, useProxy, proxyUrl);
+            if (tokenResult.error) { res.writeHead(401, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"OPS 认证失败: " + tokenResult.error})); return; }
             const token = tokenResult.token;
             const parsed = parseOpsPatentNumber(patentNumber);
             if (parsed.error) { res.writeHead(400, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"专利号格式错误"})); return; }
             // 先查询 images 元数据获取总页数
             const docdbNum = parsed.country + "." + parsed.docNumber + "." + (parsed.kindCode || kind);
-            const imagesResult = await httpsGet(OPS_API_BASE + "/published-data/publication/docdb/" + docdbNum + "/images", { Authorization: "Bearer " + token, Accept: "application/json" }, 15000);
-            if (imagesResult.statusCode !== 200) { res.writeHead(404, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"无法获取页面元数据", httpCode: imagesResult.statusCode})); return; }
-            const imagesData = JSON.parse(imagesResult.body.toString("utf-8"));
+            const imagesUrl = OPS_API_BASE + "/published-data/publication/docdb/" + docdbNum + "/images";
+            const imagesResult = await curlRequest(imagesUrl, {
+              method: "GET",
+              headers: { Authorization: "Bearer " + token, Accept: "application/json" },
+              timeout: 15,
+              useProxy: useProxy,
+              proxyUrl: proxyUrl,
+            });
+            if (imagesResult.error || imagesResult.statusCode !== 200) {
+              res.writeHead(404, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"});
+              res.end(JSON.stringify({error:"无法获取页面元数据", httpCode: imagesResult.statusCode, detail: imagesResult.error}));
+              return;
+            }
+            const imagesBody = typeof imagesResult.body === "string" ? imagesResult.body : (imagesResult.body ? imagesResult.body.toString("utf-8") : "");
+            const imagesData = JSON.parse(imagesBody);
             const imagesMeta = parseOpsImagesMetadata(imagesData);
             const totalPages = imagesMeta && imagesMeta.fullDoc ? imagesMeta.fullDoc.totalPages : 0;
             if (totalPages === 0) { res.writeHead(404, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"无法确定页面总数"})); return; }
@@ -2656,10 +2801,19 @@ function startServer() {
             const kindCode = parsed.kindCode || kind;
             for (let p = 1; p <= totalPages; p++) {
               const pageUrl = `${OPS_API_BASE}/published-data/images/${country}/${docNum}/${kindCode}/fullimage.pdf?Range=${p}`;
-              const pageResult = await httpsGet(pageUrl, { Authorization: "Bearer " + token, Accept: "application/pdf" }, 30000);
-              if (pageResult.statusCode === 200 && pageResult.body.length > 100 && pageResult.body[0] === 0x25 && pageResult.body[1] === 0x50) {
+              const pageResult = await curlRequest(pageUrl, {
+                method: "GET",
+                headers: { Authorization: "Bearer " + token, Accept: "application/pdf" },
+                timeout: 30,
+                useProxy: useProxy,
+                proxyUrl: proxyUrl,
+                binary: true,
+              });
+              if (pageResult.error) { console.log(`[OPS-PDF] 第 ${p} 页下载失败: ${pageResult.error}`); continue; }
+              const pageBuf = Buffer.isBuffer(pageResult.body) ? pageResult.body : Buffer.from(pageResult.body || "");
+              if (pageResult.statusCode === 200 && pageBuf.length > 100 && pageBuf[0] === 0x25 && pageBuf[1] === 0x50) {
                 try {
-                  const srcDoc = await PDFDocument.load(pageResult.body, { ignoreEncryption: true });
+                  const srcDoc = await PDFDocument.load(pageBuf, { ignoreEncryption: true });
                   const pages = await mergedPdf.copyPages(srcDoc, srcDoc.getPageIndices());
                   pages.forEach(pg => mergedPdf.addPage(pg));
                 } catch (e) { console.log(`[OPS-PDF] 第 ${p} 页合并失败: ${e.message}`); }

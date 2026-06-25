@@ -152,6 +152,16 @@ function getOpsSettings() {
   return { enabled: enabled, consumerKey: ops.consumerKey || "", consumerSecret: ops.consumerSecret || "" };
 }
 
+// OPS 请求复用 GP 代理设置（中国用户访问 ops.epo.org 需走代理）
+// 返回形如 "proxy=1&proxyUrl=http%3A%2F%2F127.0.0.1%3A7897" 的查询串（无代理时返回空串）
+function getOpsProxyParams() {
+  const s = getGpProxySettings();
+  if (!s.enabled) return "";
+  const parts = ["proxy=1"];
+  if (s.proxyUrl) parts.push("proxyUrl=" + encodeURIComponent(s.proxyUrl));
+  return parts.join("&");
+}
+
 // 为 OPS 降级数据中的附图代理 URL 和 PDF 下载链接追加凭证参数
 // 后端返回的 URL 形如 /api/ops/image/EP...?page=1&country=EP&doc=xxx&kind=A1
 // 前端需追加 &opsKey=xxx&opsSecret=yyy 才能通过后端的 Bearer token 认证
@@ -163,11 +173,14 @@ function augmentOpsUrls(data) {
   // 检查附图/PDF 开关（PDF 合并消耗大量配额，允许用户关闭）
   const drawingsEnabled = localStorage.getItem("patentlens_ops_drawings") !== "false";
   const credSuffix = "&opsKey=" + encodeURIComponent(ops.consumerKey) + "&opsSecret=" + encodeURIComponent(ops.consumerSecret);
+  // 附加代理参数（OPS 后端路由同样需要 proxy/proxyUrl 才能访问 ops.epo.org）
+  const proxyPart = getOpsProxyParams();
+  const fullSuffix = credSuffix + (proxyPart ? "&" + proxyPart : "");
 
   if (drawingsEnabled && Array.isArray(data.drawings) && data.drawings.length > 0) {
     data.drawings = data.drawings.map(url => {
       if (typeof url === "string" && url.startsWith("/api/ops/image/") && !url.includes("opsKey=")) {
-        return url + credSuffix;
+        return url + fullSuffix;
       }
       return url;
     });
@@ -178,7 +191,7 @@ function augmentOpsUrls(data) {
   // 仅对 /api/ops/pdf 路由追加凭证；data.epo.org 直链 PDF 无需认证
   if (data.pdf_link && typeof data.pdf_link === "string" &&
       data.pdf_link.startsWith("/api/ops/pdf/") && !data.pdf_link.includes("opsKey=")) {
-    data.pdf_link = data.pdf_link + credSuffix;
+    data.pdf_link = data.pdf_link + fullSuffix;
   }
 }
 
@@ -8081,7 +8094,8 @@ async function refreshOpsQuota() {
   const ops = getOpsSettings();
   if (!ops.consumerKey || !ops.consumerSecret) return;
   try {
-    const resp = await fetch("/api/ops/quota?opsKey=" + encodeURIComponent(ops.consumerKey) + "&opsSecret=" + encodeURIComponent(ops.consumerSecret));
+    const proxyPart = getOpsProxyParams();
+    const resp = await fetch("/api/ops/quota?opsKey=" + encodeURIComponent(ops.consumerKey) + "&opsSecret=" + encodeURIComponent(ops.consumerSecret) + (proxyPart ? "&" + proxyPart : ""));
     const data = await resp.json();
     if (data.success && data.quota) {
       const q = data.quota;
@@ -8123,7 +8137,7 @@ if (opsSaveBtn) {
   });
 }
 
-// OPS 测试连接按钮（通过查询一个已知存在的专利号 EP1000000 测试）
+// OPS 测试连接按钮（直接测试 OPS token + 轻量查询，不走 Google Patents 路由）
 if (opsTestBtn) {
   opsTestBtn.addEventListener("click", async () => {
     const key = opsConsumerKeyInput ? opsConsumerKeyInput.value.trim() : "";
@@ -8140,28 +8154,27 @@ if (opsTestBtn) {
     opsTestBtn.textContent = "测试中...";
     if (opsTestResult) {
       opsTestResult.classList.remove("hidden");
-      opsTestResult.textContent = "正在查询 EP1000000 验证连接...";
+      opsTestResult.textContent = "正在直连 OPS 获取 token 并查询 EP1000000...";
       opsTestResult.style.color = "var(--text-secondary)";
     }
     try {
-      // 用 EP1000000 测试（EPO 官方示例专利号）
-      const resp = await fetch("/api/gp/EP1000000?opsKey=" + encodeURIComponent(key) + "&opsSecret=" + encodeURIComponent(secret));
+      // 直接调用 OPS 测试端点（1. 获取 token  2. 用 EP1000000 做轻量 biblio 查询）
+      const proxyPart = getOpsProxyParams();
+      const resp = await fetch("/api/ops/test?opsKey=" + encodeURIComponent(key) + "&opsSecret=" + encodeURIComponent(secret) + (proxyPart ? "&" + proxyPart : ""));
       const data = await resp.json();
-      if (data.success && data.data_source === "EPO OPS") {
+      if (data.success) {
         if (opsTestResult) {
-          opsTestResult.textContent = "✓ 连接成功！OPS 降级查询可用。验证专利: " + (data.data.title || "EP1000000");
-          opsTestResult.style.color = "var(--success)";
-        }
-        refreshOpsQuota();
-      } else if (data.success) {
-        if (opsTestResult) {
-          opsTestResult.textContent = "✓ 凭证有效（Google Patents 已返回数据，未触发 OPS 降级）。可尝试查询 Google Patents 没有的专利号验证降级。";
+          const quotaTxt = data.quota && data.quota.throttle ? "（配额状态: " + data.quota.throttle + "）" : "";
+          opsTestResult.textContent = "✓ 连接成功！OPS 凭证有效，token 与查询均通过" + quotaTxt;
           opsTestResult.style.color = "var(--success)";
         }
         refreshOpsQuota();
       } else {
+        const stage = data.stage === "token" ? "（Token 获取阶段失败：请检查 key/secret 是否正确、网络/代理是否能访问 ops.epo.org）"
+                    : data.stage === "query" ? "（Token 有效但查询失败：可能是配额用尽或网络中断）"
+                    : "";
         if (opsTestResult) {
-          opsTestResult.textContent = "✗ 测试失败: " + (data.error || "未知错误") + "（注意：EP1000000 在 Google Patents 和 OPS 都应存在，若失败请检查凭证）";
+          opsTestResult.textContent = "✗ 测试失败: " + (data.error || "未知错误") + stage;
           opsTestResult.style.color = "var(--danger)";
         }
       }
