@@ -941,13 +941,29 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
   // 摘要
   try {
     if (abstractData && abstractData["ops:world-patent-data"]) {
-      const abstractNode = abstractData["ops:world-patent-data"].abstract;
+      const wpd = abstractData["ops:world-patent-data"];
+      // OPS abstract 端点返回: ops:world-patent-data > exchange-documents > exchange-document > abstract
+      let abstractNode = wpd.abstract;
+      if (!abstractNode) {
+        const exDoc = wpd["exchange-documents"]?.["exchange-document"];
+        const doc = Array.isArray(exDoc) ? exDoc[0] : exDoc;
+        if (doc && doc.abstract) abstractNode = doc.abstract;
+      }
       if (abstractNode) {
-        // abstract 下有 p 子节点
         const pNodes = opsArray(abstractNode.p);
-        result.abstract = pNodes.map(p => (typeof p === "string" ? p : (p.$ || ""))).join("\n").trim();
+        if (pNodes.length > 0) {
+          result.abstract = pNodes.map(p => (typeof p === "string" ? p : (p.$ || extractNestedText(p)))).join("\n").trim();
+        }
         if (!result.abstract && typeof abstractNode === "object" && abstractNode.$) {
           result.abstract = abstractNode.$;
+        }
+        if (!result.abstract && Array.isArray(abstractNode)) {
+          const enAbs = abstractNode.find(a => a["@lang"] === "en") || abstractNode[0];
+          if (enAbs) {
+            const pp = opsArray(enAbs.p);
+            result.abstract = pp.map(p => (typeof p === "string" ? p : (p.$ || extractNestedText(p)))).join("\n").trim();
+            if (!result.abstract && enAbs.$) result.abstract = enAbs.$;
+          }
         }
       }
     }
@@ -956,20 +972,26 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
   // 权利要求
   try {
     if (claimsData && claimsData["ops:world-patent-data"]) {
-      const claimsNode = claimsData["ops:world-patent-data"].claims;
+      const wpd = claimsData["ops:world-patent-data"];
+      let claimsNode = wpd.claims;
+      if (!claimsNode) {
+        const exDoc = wpd["exchange-documents"]?.["exchange-document"];
+        const doc = Array.isArray(exDoc) ? exDoc[0] : exDoc;
+        if (doc && doc.claims) claimsNode = doc.claims;
+      }
       if (claimsNode && claimsNode.claim) {
-        const claims = opsArray(claimsNode.claim);
-        result.claims = claims.map((c, i) => {
+        const claimArr = opsArray(claimsNode.claim);
+        result.claims = claimArr.map((c, i) => {
           const num = c["@num"] || c["@number"] || String(i + 1);
           const claimText = c["claim-text"];
-          // claim-text 可能有多层嵌套
           let text = "";
           if (typeof claimText === "string") text = claimText;
           else if (claimText) {
             const texts = opsArray(claimText);
             text = texts.map(t => typeof t === "string" ? t : (t.$ || extractNestedText(t))).join("");
           }
-          return { num: String(num), type: "independent", text: text.trim() };
+          if (!text && c.$) text = c.$;
+          return { num: String(num), type: c.dependent ? "dependent" : "independent", text: text.trim() };
         });
       }
     }
@@ -978,9 +1000,14 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
   // 说明书
   try {
     if (descriptionData && descriptionData["ops:world-patent-data"]) {
-      const descNode = descriptionData["ops:world-patent-data"].description;
+      const wpd = descriptionData["ops:world-patent-data"];
+      let descNode = wpd.description;
+      if (!descNode) {
+        const exDoc = wpd["exchange-documents"]?.["exchange-document"];
+        const doc = Array.isArray(exDoc) ? exDoc[0] : exDoc;
+        if (doc && doc.description) descNode = doc.description;
+      }
       if (descNode) {
-        // description 下有 p 子节点
         const pNodes = opsArray(descNode.p);
         result.description = pNodes.map(p => {
           if (typeof p === "string") return p;
@@ -1142,16 +1169,20 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret) {
     return { success: false, error: "OPS biblio JSON 解析失败: " + e.message };
   }
 
-  // 第 2 步：并行查询 abstract + claims（仅 2 个并发请求，不会触发限流）
-  const [abstractResult, claimsResult] = await Promise.all([
+  // 第 2 步：并行查询 abstract + claims + description（3 个并发请求，不会触发限流）
+  const [abstractResult, claimsResult, descriptionResult] = await Promise.all([
     opsRequest(consumerKey, consumerSecret, basePath + "/abstract"),
     opsRequest(consumerKey, consumerSecret, basePath + "/claims"),
+    opsRequest(consumerKey, consumerSecret, basePath + "/description"),
   ]);
   if (abstractResult.httpCode === 200) {
     try { dataMap.abstract = JSON.parse(abstractResult.body); } catch (e) { /* ignore */ }
   }
   if (claimsResult.httpCode === 200) {
     try { dataMap.claims = JSON.parse(claimsResult.body); } catch (e) { /* ignore */ }
+  }
+  if (descriptionResult.httpCode === 200) {
+    try { dataMap.description = JSON.parse(descriptionResult.body); } catch (e) { /* ignore */ }
   }
 
   // 第 3 步：查询 images 元数据（用于附图和 PDF）
@@ -1190,7 +1221,7 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret) {
     dataMap.biblio,
     dataMap.abstract || null,
     dataMap.claims || null,
-    null,   // description — 不查询，太慢
+    dataMap.description || null,
     null,   // legal — 不查询
     null,   // family — 不查询
     null,   // citing — 不查询
