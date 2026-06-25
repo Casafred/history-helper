@@ -3625,6 +3625,22 @@ body {
   margin-bottom: 20px;
   border-bottom: 1px solid var(--border);
   padding-bottom: 16px;
+  position: relative;
+}
+.pd-data-source-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.pd-data-source-badge.pd-data-source-ops {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--warning);
 }
 .pd-patent-number {
   font-size: 14px;
@@ -4032,7 +4048,6 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  flex-wrap: wrap;
   transition: background 0.15s;
 }
 .pd-claim-item:hover {
@@ -4241,63 +4256,6 @@ body {
   font-size: 13px;
   line-height: 1.7;
   color: var(--text-primary);
-}
-
-/* Translation progress bar */
-.pd-translation-progress-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.pd-translation-progress-label {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-.pd-translation-progress-bar {
-  height: 6px;
-  background: rgba(0, 0, 0, 0.08);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.pd-translation-progress-fill {
-  height: 100%;
-  width: 0%;
-  background: linear-gradient(90deg, #00bcd4, #009688);
-  border-radius: 3px;
-  transition: width 0.3s ease;
-}
-.pd-translation-progress-stream {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  max-height: 60px;
-  overflow: hidden;
-  white-space: pre-wrap;
-  word-break: break-word;
-  opacity: 0.7;
-}
-
-/* Per-claim translation (shown below original claim text) */
-.pd-claim-translation {
-  width: 100%;
-  margin-top: 6px;
-  padding: 6px 10px;
-  font-size: 12.5px;
-  line-height: 1.7;
-  color: #009688;
-  background: rgba(0, 188, 212, 0.06);
-  border-left: 2px solid #00bcd4;
-  border-radius: 4px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* Description translation (shown below original description) */
-.pd-description-translation {
-  margin-top: 12px;
-  padding: 12px;
-  background: rgba(0, 188, 212, 0.06);
-  border-radius: 8px;
-  border-left: 3px solid #00bcd4;
 }
 
 /* PDF button */

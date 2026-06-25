@@ -129,11 +129,27 @@ function saveGpProxySettings(enabled, proxyUrl) {
 function gpApiUrl(patentNumber) {
   const s = getGpProxySettings();
   let url = "/api/gp/" + encodeURIComponent(patentNumber);
+  const params = [];
   if (s.enabled) {
-    url += "?proxy=1";
-    if (s.proxyUrl) url += "&proxyUrl=" + encodeURIComponent(s.proxyUrl);
+    params.push("proxy=1");
+    if (s.proxyUrl) params.push("proxyUrl=" + encodeURIComponent(s.proxyUrl));
   }
+  // 附加 EPO OPS 降级查询凭证（当 Google Patents 查询失败时自动降级）
+  const opsConfig = getOpsSettings();
+  if (opsConfig.enabled && opsConfig.consumerKey && opsConfig.consumerSecret) {
+    params.push("opsKey=" + encodeURIComponent(opsConfig.consumerKey));
+    params.push("opsSecret=" + encodeURIComponent(opsConfig.consumerSecret));
+  }
+  if (params.length > 0) url += "?" + params.join("&");
   return url;
+}
+
+// EPO OPS 配置读取（从 AI 配置中获取 ops 字段）
+function getOpsSettings() {
+  const config = window.AI.loadAIConfig();
+  const ops = window.AI.getOpsConfig(config);
+  const enabled = localStorage.getItem("patentlens_ops_enabled") !== "false"; // 默认启用
+  return { enabled: enabled, consumerKey: ops.consumerKey || "", consumerSecret: ops.consumerSecret || "" };
 }
 
 const aiSettingsBtn = document.getElementById("ai-settings-btn");
@@ -431,6 +447,13 @@ async function searchPatentDetail(input) {
     window._currentPatentData = json.data;
     patentDetailSection.classList.remove("hidden");
 
+    // 显示数据来源标识（当数据来自 EPO OPS 降级查询时）
+    if (json.data_source === "EPO OPS" || (json.data && json.data.data_source === "EPO OPS")) {
+      showDataSourceBadge("EPO OPS", "Google Patents 未找到该专利，数据来自 EPO OPS 降级查询");
+    } else {
+      showDataSourceBadge("Google Patents", null);
+    }
+
     // Record to history
     const country = raw.match(/^[A-Z]{2}/)?.[0] || "";
     PatentCache.addHistory(raw, country, {
@@ -448,6 +471,26 @@ async function searchPatentDetail(input) {
 
   searchBtn.disabled = false;
   loading.classList.add("hidden");
+}
+
+// 显示数据来源徽章（在专利详情头部显示数据来源）
+function showDataSourceBadge(source, tooltip) {
+  // 移除旧的徽章
+  const oldBadge = document.getElementById("pd-data-source-badge");
+  if (oldBadge) oldBadge.remove();
+
+  const header = document.querySelector(".pd-header");
+  if (!header) return;
+
+  const badge = document.createElement("div");
+  badge.id = "pd-data-source-badge";
+  badge.className = "pd-data-source-badge" + (source === "EPO OPS" ? " pd-data-source-ops" : "");
+  badge.textContent = "数据来源: " + source;
+  if (tooltip) {
+    badge.title = tooltip;
+    badge.style.cursor = "help";
+  }
+  header.appendChild(badge);
 }
 
 function renderPatentDetail(data) {
@@ -783,32 +826,31 @@ async function translatePatentSection(sectionType) {
   if (existingResult) {
     existingResult.remove();
     translateBtn.textContent = '翻译';
-    // Remove per-claim translation elements
-    sectionEl.querySelectorAll('.pd-claim-translation').forEach(el => el.remove());
-    const descTrans = sectionEl.querySelector('.pd-description-translation');
-    if (descTrans) descTrans.remove();
+    // Restore original text
+    if (sectionType === 'claims') {
+      sectionEl.querySelectorAll('.pd-claim-text[data-original-text]').forEach(el => {
+        el.textContent = el.dataset.originalText;
+        delete el.dataset.translated;
+      });
+    } else if (sectionType === 'description') {
+      const descEl = sectionEl.querySelector('.pd-description-text[data-original-text]');
+      if (descEl) {
+        descEl.textContent = descEl.dataset.originalText;
+        delete descEl.dataset.translated;
+      }
+    }
     return;
   }
 
   translateBtn.textContent = '翻译中...';
   translateBtn.disabled = true;
 
-  // Show progress bar UI
-  const progressEl = document.createElement('div');
-  progressEl.className = 'pd-translation-result pd-translation-progress';
-  progressEl.innerHTML =
-    '<div class="pd-translation-header"><span>AI 翻译中...</span></div>' +
-    '<div class="pd-translation-progress-body">' +
-      '<div class="pd-translation-progress-label">正在翻译' + (sectionType === 'claims' ? '权利要求' : '说明书') + '...</div>' +
-      '<div class="pd-translation-progress-bar">' +
-        '<div class="pd-translation-progress-fill"></div>' +
-      '</div>' +
-      '<div class="pd-translation-progress-stream"></div>' +
-    '</div>';
-  sectionEl.appendChild(progressEl);
-
-  const progressFill = progressEl.querySelector('.pd-translation-progress-fill');
-  const progressStream = progressEl.querySelector('.pd-translation-progress-stream');
+  // Show loading spinner in the section
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'pd-translation-result';
+  loadingEl.id = 'pd-translation-loading-' + sectionType;
+  loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译中...</span></div><div class="pd-translation-body" style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;"></div><span>正在翻译' + (sectionType === 'claims' ? '权利要求' : '说明书') + '...</span></div>';
+  sectionEl.appendChild(loadingEl);
 
   try {
     // Use the configured translation provider from settings
@@ -819,168 +861,94 @@ async function translatePatentSection(sectionType) {
       return;
     }
 
+    let textToTranslate = "";
     if (sectionType === "claims" && window._currentPatentData && window._currentPatentData.claims) {
-      // ── Claims: translate claim-by-claim with delimiters ──
-      const claims = window._currentPatentData.claims;
-      const claimItems = sectionEl.querySelectorAll('.pd-claim-item');
-
-      // Build input text with claim markers
-      const inputText = claims.map((c, i) => {
-        const num = c.num || (i + 1);
-        return '[[CLAIM ' + num + ']] ' + c.text;
-      }).join('\n\n');
-
-      const prompt = '你是一位专业的专利文献翻译专家。请将以下英文专利权利要求翻译为中文。\n' +
-        '保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。\n' +
-        '每条权利要求的翻译必须以 [[CLAIM N]] 开头（N 为权利要求编号），然后是翻译内容。\n' +
-        '只返回翻译结果，不要添加任何其他说明。\n\n' +
-        '权利要求原文：\n' + inputText;
-
-      // Stream translation
-      let fullText = '';
-      let currentClaimNum = null;
-      let currentClaimBuffer = '';
-      const claimTranslations = {}; // num -> text
-
-      const stream = window.AI.streamChat(
-        translateProvider.type,
-        translateProvider.apiKey,
-        translateProvider.baseUrl,
-        {
-          model: translateProvider.model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.3,
-          maxTokens: 8192,
-        }
-      );
-
-      let receivedChars = 0;
-      const estimatedTotal = inputText.length * 2; // rough estimate
-
-      for await (const chunk of stream) {
-        if (chunk.content) {
-          fullText += chunk.content;
-          receivedChars += chunk.content.length;
-
-          // Update progress bar
-          const pct = Math.min(95, Math.round((receivedChars / estimatedTotal) * 100));
-          if (progressFill) progressFill.style.width = pct + '%';
-          if (progressStream) {
-            progressStream.textContent = fullText.slice(-200);
-          }
-
-          // Parse claim delimiters and backfill progressively
-          const claimRegex = /\[\[CLAIM\s+(\d+)\]\]/g;
-          let match;
-          let lastIndex = 0;
-          const segments = [];
-          while ((match = claimRegex.exec(fullText)) !== null) {
-            if (currentClaimNum !== null) {
-              segments.push({ num: currentClaimNum, text: fullText.slice(lastIndex, match.index).trim() });
-            }
-            currentClaimNum = match[1];
-            lastIndex = claimRegex.lastIndex;
-          }
-          // Remaining text after last delimiter
-          if (currentClaimNum !== null) {
-            segments.push({ num: currentClaimNum, text: fullText.slice(lastIndex).trim() });
-          }
-
-          // Backfill translations progressively
-          for (const seg of segments) {
-            if (seg.text) {
-              claimTranslations[seg.num] = seg.text;
-              // Find the claim item and update its translation
-              claimItems.forEach(item => {
-                const numEl = item.querySelector('.pd-claim-num');
-                if (numEl && numEl.textContent.replace(/\.$/, '').trim() === seg.num) {
-                  let transEl = item.querySelector('.pd-claim-translation');
-                  if (!transEl) {
-                    transEl = document.createElement('div');
-                    transEl.className = 'pd-claim-translation';
-                    item.appendChild(transEl);
-                  }
-                  transEl.textContent = seg.text;
-                }
-              });
-            }
-          }
-        }
-      }
-
-      // Final pass: ensure all claims have translations
-      for (const seg of segments || []) {
-        if (seg.text) claimTranslations[seg.num] = seg.text;
-      }
-
-      // Remove progress bar
-      progressEl.remove();
-
-      // Show summary result
-      const resultDiv = document.createElement('div');
-      resultDiv.className = 'pd-translation-result';
-      const translatedCount = Object.keys(claimTranslations).length;
-      resultDiv.innerHTML = '<div class="pd-translation-header"><span>AI 翻译完成（' + translatedCount + ' 条权利要求）</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove(); var btn=document.querySelector(\'[data-section-type=' + sectionType + '] .pd-translate-btn\'); if(btn) btn.textContent=\'翻译\';">&times;</button></div>';
-      sectionEl.appendChild(resultDiv);
-
+      textToTranslate = window._currentPatentData.claims.map((c, i) =>
+        "Claim " + (c.num || (i + 1)) + ": " + c.text
+      ).join('\n\n');
     } else if (sectionType === "description" && window._currentPatentData && window._currentPatentData.description) {
-      // ── Description: stream translation ──
-      const descText = window._currentPatentData.description.substring(0, 6000);
-      const prompt = '你是一位专业的专利文献翻译专家。请将以下英文专利说明书翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。\n\n' + descText;
+      textToTranslate = window._currentPatentData.description.substring(0, 6000);
+    }
 
-      let fullText = '';
-      const stream = window.AI.streamChat(
-        translateProvider.type,
-        translateProvider.apiKey,
-        translateProvider.baseUrl,
-        {
-          model: translateProvider.model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.3,
-          maxTokens: 8192,
-        }
-      );
-
-      let receivedChars = 0;
-      const estimatedTotal = descText.length * 2;
-
-      for await (const chunk of stream) {
-        if (chunk.content) {
-          fullText += chunk.content;
-          receivedChars += chunk.content.length;
-          const pct = Math.min(95, Math.round((receivedChars / estimatedTotal) * 100));
-          if (progressFill) progressFill.style.width = pct + '%';
-          if (progressStream) {
-            progressStream.textContent = fullText.slice(-200);
-          }
-        }
-      }
-
-      // Remove progress bar
-      progressEl.remove();
-
-      // Show translation below original description text
-      const descEl = sectionEl.querySelector('.pd-description-text');
-      if (descEl) {
-        let transEl = sectionEl.querySelector('.pd-description-translation');
-        if (!transEl) {
-          transEl = document.createElement('div');
-          transEl.className = 'pd-description-translation';
-          descEl.insertAdjacentElement('afterend', transEl);
-        }
-        transEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译结果</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove(); var btn=document.querySelector(\'[data-section-type=' + sectionType + '] .pd-translate-btn\'); if(btn) btn.textContent=\'翻译\';">&times;</button></div><div class="pd-translation-body">' + escapeHtml(fullText).replace(/\n/g, '<br>') + '</div>';
-      }
-    } else {
-      progressEl.remove();
+    if (!textToTranslate) {
       showError("没有可翻译的内容");
       return;
+    }
+
+    const prompt = sectionType === "claims"
+      ? "你是一位专业的专利文献翻译专家。请将以下英文专利权利要求翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。保持权利要求的编号。只返回翻译结果。"
+      : "你是一位专业的专利文献翻译专家。请将以下英文专利说明书翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。";
+
+    const resp = await fetch(translateProvider.baseUrl + "/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + translateProvider.apiKey,
+      },
+      body: JSON.stringify({
+        model: translateProvider.model,
+        messages: [
+          { role: "system", content: prompt },
+          { role: "user", content: textToTranslate }
+        ],
+        temperature: 0.3,
+        max_tokens: 4096,
+      }),
+    });
+
+    if (!resp.ok) throw new Error("API 请求失败: " + resp.status);
+    const json = await resp.json();
+    const translated = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content || "翻译失败";
+
+    // Remove loading spinner
+    const loadingEl = document.getElementById('pd-translation-loading-' + sectionType);
+    if (loadingEl) loadingEl.remove();
+
+    // Show translation result
+    const resultDiv = document.createElement('div');
+    resultDiv.className = 'pd-translation-result';
+    resultDiv.innerHTML = '<div class="pd-translation-header"><span>AI 翻译结果</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove(); var btn=document.querySelector(\'[data-section-type=' + sectionType + '] .pd-translate-btn\'); if(btn) btn.textContent=\'翻译\';">&times;</button></div><div class="pd-translation-body">' + escapeHtml(translated).replace(/\n/g, '<br>') + '</div>';
+
+    // Append to the section element (works for both tab and collapsible layouts)
+    sectionEl.appendChild(resultDiv);
+
+    // Replace original text with translated version in-place
+    if (sectionType === 'claims') {
+      const claimItems = sectionEl.querySelectorAll('.pd-claim-item');
+      if (claimItems.length > 0) {
+        // Parse translated claims and replace each claim text
+        const translatedLines = translated.split('\n').filter(l => l.trim());
+        let claimIdx = 0;
+        claimItems.forEach(item => {
+          const claimTextEl = item.querySelector('.pd-claim-text');
+          if (claimTextEl && claimIdx < translatedLines.length) {
+            // Store original text for restoration
+            if (!claimTextEl.dataset.originalText) {
+              claimTextEl.dataset.originalText = claimTextEl.textContent;
+            }
+            claimTextEl.textContent = translatedLines[claimIdx].replace(/^Claim\s*\d+\s*[:：]\s*/i, '');
+            claimTextEl.dataset.translated = 'true';
+            claimIdx++;
+          }
+        });
+      }
+    } else if (sectionType === 'description') {
+      const descEl = sectionEl.querySelector('.pd-description-text');
+      if (descEl) {
+        if (!descEl.dataset.originalText) {
+          descEl.dataset.originalText = descEl.textContent;
+        }
+        descEl.textContent = translated;
+        descEl.dataset.translated = 'true';
+      }
     }
 
     translateBtn.textContent = '隐藏翻译';
   } catch (e) {
     showError("翻译失败: " + e.message);
     translateBtn.textContent = '翻译';
-    progressEl.remove();
+    const loadingEl = document.getElementById('pd-translation-loading-' + sectionType);
+    if (loadingEl) loadingEl.remove();
   } finally {
     translateBtn.disabled = false;
   }
@@ -1060,54 +1028,36 @@ async function translateSelectedPatentText(text, targetSection) {
   const sectionEl = document.querySelector('[data-section-type="' + targetSection + '"]') || document.querySelector("#patent-detail-content");
   if (!sectionEl) return;
 
-  // Show inline loading indicator with progress bar
+  // Show inline loading indicator
   const loadingEl = document.createElement('div');
-  loadingEl.className = 'pd-translation-result pd-translation-progress';
-  loadingEl.innerHTML =
-    '<div class="pd-translation-header"><span>AI 翻译中...</span></div>' +
-    '<div class="pd-translation-progress-body">' +
-      '<div class="pd-translation-progress-label">正在翻译选中文本...</div>' +
-      '<div class="pd-translation-progress-bar">' +
-        '<div class="pd-translation-progress-fill"></div>' +
-      '</div>' +
-      '<div class="pd-translation-progress-stream"></div>' +
-    '</div>';
+  loadingEl.className = 'pd-translation-result';
+  loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译中...</span></div><div class="pd-translation-body" style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;"></div><span>正在翻译选中文本...</span></div>';
   sectionEl.appendChild(loadingEl);
 
-  const progressFill = loadingEl.querySelector('.pd-translation-progress-fill');
-  const progressStream = loadingEl.querySelector('.pd-translation-progress-stream');
-
   try {
-    const prompt = '你是一位专业的专利文献翻译专家。请将以下文本翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。\n\n' + text;
-
-    let fullText = '';
-    const stream = window.AI.streamChat(
-      translateProvider.type,
-      translateProvider.apiKey,
-      translateProvider.baseUrl,
-      {
+    const resp = await fetch(translateProvider.baseUrl + "/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + translateProvider.apiKey,
+      },
+      body: JSON.stringify({
         model: translateProvider.model,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          { role: "system", content: "你是一位专业的专利文献翻译专家。请将以下文本翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。" },
+          { role: "user", content: text }
+        ],
         temperature: 0.3,
-        maxTokens: 4096,
-      }
-    );
+        max_tokens: 4096,
+      }),
+    });
 
-    let receivedChars = 0;
-    const estimatedTotal = text.length * 2;
-
-    for await (const chunk of stream) {
-      if (chunk.content) {
-        fullText += chunk.content;
-        receivedChars += chunk.content.length;
-        const pct = Math.min(95, Math.round((receivedChars / estimatedTotal) * 100));
-        if (progressFill) progressFill.style.width = pct + '%';
-        if (progressStream) progressStream.textContent = fullText.slice(-200);
-      }
-    }
+    if (!resp.ok) throw new Error("API 请求失败: " + resp.status);
+    const json = await resp.json();
+    const translated = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content || "翻译失败";
 
     // Replace the loading indicator with the translation result
-    loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译结果（选中文本）</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove();">&times;</button></div><div class="pd-translation-body">' + escapeHtml(fullText).replace(/\n/g, '<br>') + '</div>';
+    loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译结果（选中文本）</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove();">&times;</button></div><div class="pd-translation-body">' + escapeHtml(translated).replace(/\n/g, '<br>') + '</div>';
   } catch (e) {
     showError("翻译失败: " + e.message);
     loadingEl.remove();
@@ -3597,6 +3547,9 @@ function loadAISettingsToForm() {
     const el = document.getElementById(p.id);
     if (el) el.value = window.AI.getCustomPrompt(config, p.key);
   });
+
+  // Load OPS settings (EPO OPS 降级查询配置)
+  if (typeof loadOpsSettingsToForm === "function") loadOpsSettingsToForm();
 }
 
 function toggleOcrGlmKeyVisibility() {
@@ -8058,6 +8011,142 @@ if (networkSaveBtn) {
     setTimeout(() => { networkSaveBtn.textContent = "保存"; }, 1500);
   });
 }
+
+// ── EPO OPS 降级查询配置 ──────────────────────────────────────────────────────
+const opsEnabledCheckbox = document.getElementById("ops-enabled-checkbox");
+const opsConsumerKeyInput = document.getElementById("ops-consumer-key-input");
+const opsConsumerSecretInput = document.getElementById("ops-consumer-secret-input");
+const opsSaveBtn = document.getElementById("ops-save-btn");
+const opsTestBtn = document.getElementById("ops-test-btn");
+const opsTestResult = document.getElementById("ops-test-result");
+const opsQuotaDisplayGroup = document.getElementById("ops-quota-display-group");
+const opsRefreshQuotaBtn = document.getElementById("ops-refresh-quota-btn");
+
+// 回填 OPS 配置到表单（由 loadAISettingsToForm 调用）
+function loadOpsSettingsToForm() {
+  const ops = getOpsSettings();
+  if (opsEnabledCheckbox) opsEnabledCheckbox.checked = ops.enabled;
+  if (opsConsumerKeyInput) opsConsumerKeyInput.value = ops.consumerKey;
+  if (opsConsumerSecretInput) opsConsumerSecretInput.value = ops.consumerSecret;
+  // 显示配额区域（如果有 key）
+  if (opsQuotaDisplayGroup && ops.consumerKey) {
+    opsQuotaDisplayGroup.style.display = "";
+    refreshOpsQuota();
+  }
+}
+
+// 刷新 OPS 配额显示
+async function refreshOpsQuota() {
+  const ops = getOpsSettings();
+  if (!ops.consumerKey || !ops.consumerSecret) return;
+  try {
+    const resp = await fetch("/api/ops/quota?opsKey=" + encodeURIComponent(ops.consumerKey) + "&opsSecret=" + encodeURIComponent(ops.consumerSecret));
+    const data = await resp.json();
+    if (data.success && data.quota) {
+      const q = data.quota;
+      const throttleEl = document.getElementById("ops-quota-throttle");
+      const hourEl = document.getElementById("ops-quota-hour");
+      const weekEl = document.getElementById("ops-quota-week");
+      const updatedEl = document.getElementById("ops-quota-updated");
+      if (throttleEl) {
+        throttleEl.textContent = "状态: " + (q.throttle || "未知");
+        // 根据 throttle 状态着色：green=绿，busy/yellow=黄，red=红
+        if (q.throttle && q.throttle.includes("green")) throttleEl.style.color = "var(--success)";
+        else if (q.throttle && q.throttle.includes("red")) throttleEl.style.color = "var(--danger)";
+        else throttleEl.style.color = "var(--warning)";
+      }
+      if (hourEl) hourEl.textContent = "每小时配额已用: " + (q.hourUsed != null ? q.hourUsed : "-");
+      if (weekEl) weekEl.textContent = "每周配额已用: " + (q.weekUsed != null ? q.weekUsed : "-");
+      if (updatedEl && q.updatedAt) updatedEl.textContent = "最后更新: " + new Date(q.updatedAt).toLocaleString();
+    }
+  } catch (e) { /* ignore */ }
+}
+
+// OPS 保存按钮
+if (opsSaveBtn) {
+  opsSaveBtn.addEventListener("click", () => {
+    const config = window.AI.loadAIConfig();
+    if (!config.ops) config.ops = { consumerKey: "", consumerSecret: "" };
+    config.ops.consumerKey = opsConsumerKeyInput ? opsConsumerKeyInput.value.trim() : "";
+    config.ops.consumerSecret = opsConsumerSecretInput ? opsConsumerSecretInput.value.trim() : "";
+    window.AI.saveAIConfig(config);
+    localStorage.setItem("patentlens_ops_enabled", opsEnabledCheckbox && opsEnabledCheckbox.checked ? "true" : "false");
+    opsSaveBtn.textContent = "已保存 ✓";
+    setTimeout(() => { opsSaveBtn.textContent = "保存"; }, 1500);
+    // 保存后显示配额区域
+    if (opsQuotaDisplayGroup && config.ops.consumerKey) {
+      opsQuotaDisplayGroup.style.display = "";
+      refreshOpsQuota();
+    }
+  });
+}
+
+// OPS 测试连接按钮（通过查询一个已知存在的专利号 EP1000000 测试）
+if (opsTestBtn) {
+  opsTestBtn.addEventListener("click", async () => {
+    const key = opsConsumerKeyInput ? opsConsumerKeyInput.value.trim() : "";
+    const secret = opsConsumerSecretInput ? opsConsumerSecretInput.value.trim() : "";
+    if (!key || !secret) {
+      if (opsTestResult) {
+        opsTestResult.classList.remove("hidden");
+        opsTestResult.textContent = "请先填写 Consumer Key 和 Secret";
+        opsTestResult.style.color = "var(--danger)";
+      }
+      return;
+    }
+    opsTestBtn.disabled = true;
+    opsTestBtn.textContent = "测试中...";
+    if (opsTestResult) {
+      opsTestResult.classList.remove("hidden");
+      opsTestResult.textContent = "正在查询 EP1000000 验证连接...";
+      opsTestResult.style.color = "var(--text-secondary)";
+    }
+    try {
+      // 用 EP1000000 测试（EPO 官方示例专利号）
+      const resp = await fetch("/api/gp/EP1000000?opsKey=" + encodeURIComponent(key) + "&opsSecret=" + encodeURIComponent(secret));
+      const data = await resp.json();
+      if (data.success && data.data_source === "EPO OPS") {
+        if (opsTestResult) {
+          opsTestResult.textContent = "✓ 连接成功！OPS 降级查询可用。验证专利: " + (data.data.title || "EP1000000");
+          opsTestResult.style.color = "var(--success)";
+        }
+        refreshOpsQuota();
+      } else if (data.success) {
+        if (opsTestResult) {
+          opsTestResult.textContent = "✓ 凭证有效（Google Patents 已返回数据，未触发 OPS 降级）。可尝试查询 Google Patents 没有的专利号验证降级。";
+          opsTestResult.style.color = "var(--success)";
+        }
+        refreshOpsQuota();
+      } else {
+        if (opsTestResult) {
+          opsTestResult.textContent = "✗ 测试失败: " + (data.error || "未知错误") + "（注意：EP1000000 在 Google Patents 和 OPS 都应存在，若失败请检查凭证）";
+          opsTestResult.style.color = "var(--danger)";
+        }
+      }
+    } catch (e) {
+      if (opsTestResult) {
+        opsTestResult.textContent = "✗ 请求失败: " + e.message;
+        opsTestResult.style.color = "var(--danger)";
+      }
+    } finally {
+      opsTestBtn.disabled = false;
+      opsTestBtn.textContent = "测试连接";
+    }
+  });
+}
+
+// OPS 刷新配额按钮
+if (opsRefreshQuotaBtn) {
+  opsRefreshQuotaBtn.addEventListener("click", refreshOpsQuota);
+}
+
+// OPS 配额 20 分钟自动刷新（与后端配额缓存 TTL 对齐）
+setInterval(() => {
+  const ops = getOpsSettings();
+  if (ops.consumerKey && ops.consumerSecret) {
+    refreshOpsQuota();
+  }
+}, 20 * 60 * 1000);
 
 // ── Initialize history list on page load ──
 refreshHistoryList();
