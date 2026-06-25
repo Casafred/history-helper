@@ -1136,8 +1136,13 @@ function getEpoDirectPdfUrlFromPatent(patentInput) {
 function opsExtractDocId(docIdList, idType) {
   if (!Array.isArray(docIdList)) docIdList = [docIdList];
   for (const d of docIdList) {
-    if (d && d["@id-type"] === idType) {
-      return { country: d.country, docNumber: d["doc-number"], kind: d.kind };
+    if (d && (d["@id-type"] === idType || d["@document-id-type"] === idType)) {
+      return {
+        country: typeof d.country === "object" ? d.country.$ : d.country,
+        docNumber: typeof d["doc-number"] === "object" ? d["doc-number"].$ : d["doc-number"],
+        kind: typeof d.kind === "object" ? d.kind.$ : d.kind,
+        date: typeof d.date === "object" ? d.date.$ : (d.date || ""),
+      };
     }
   }
   return null;
@@ -1314,13 +1319,12 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
     const pubRef = biblio["publication-reference"];
     if (pubRef && pubRef["document-id"]) {
       const docIds = opsArray(pubRef["document-id"]);
-      const epodoc = opsExtractDocId(docIds, "epodoc");
       const docdb = opsExtractDocId(docIds, "docdb");
-      if (epodoc) {
-        result.publication_date = opsFormatDate(epodoc.date ? epodoc.date["date"] : "");
-      }
+      const epodoc = opsExtractDocId(docIds, "epodoc");
       if (docdb && docdb.date) {
-        if (!result.publication_date) result.publication_date = opsFormatDate(docdb.date);
+        result.publication_date = opsFormatDate(docdb.date);
+      } else if (epodoc && epodoc.date) {
+        result.publication_date = opsFormatDate(epodoc.date);
       }
       if (docdb && docdb.kind && !kindForImages) {
         kindForImages = docdb.kind;
@@ -1334,7 +1338,9 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
     if (appRef && appRef["document-id"]) {
       const docIds = opsArray(appRef["document-id"]);
       const epodoc = opsExtractDocId(docIds, "epodoc");
+      const docdb = opsExtractDocId(docIds, "docdb");
       if (epodoc && epodoc.date) result.application_date = opsFormatDate(epodoc.date);
+      else if (docdb && docdb.date) result.application_date = opsFormatDate(docdb.date);
     }
   } catch (e) { /* ignore */ }
 
@@ -1342,11 +1348,13 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
   try {
     const priorityClaims = biblio["priority-claims"];
     if (priorityClaims && priorityClaims["priority-claim"]) {
-      const claims = opsArray(priorityClaims["priority-claim"]);
-      if (claims.length > 0 && claims[0]["document-id"]) {
-        const docIds = opsArray(claims[0]["document-id"]);
+      const pClaims = opsArray(priorityClaims["priority-claim"]);
+      if (pClaims.length > 0 && pClaims[0]["document-id"]) {
+        const docIds = opsArray(pClaims[0]["document-id"]);
         const epodoc = opsExtractDocId(docIds, "epodoc");
+        const docdb = opsExtractDocId(docIds, "docdb");
         if (epodoc && epodoc.date) result.priority_date = opsFormatDate(epodoc.date);
+        else if (docdb && docdb.date) result.priority_date = opsFormatDate(docdb.date);
       }
     }
   } catch (e) { /* ignore */ }
@@ -1358,42 +1366,66 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
       if (parties.inventors && parties.inventors.inventor) {
         const inventors = opsArray(parties.inventors.inventor);
         result.inventors = inventors.map(inv => {
-          const name = inv["inventor-name"];
-          if (name && name.name) {
-            return [name.name["last-name"], name.name["first-name"]].filter(Boolean).join(" ");
+          const nameObj = inv["inventor-name"];
+          if (!nameObj) return "";
+          // OPS JSON: inventor-name.name.$ 或 inventor-name.name.{last-name, first-name}
+          if (nameObj.name) {
+            if (nameObj.name.$) return nameObj.name.$.replace(/\s*\[.*?\]\s*$/, "").trim();
+            const parts = [nameObj.name["last-name"], nameObj.name["first-name"]].filter(Boolean);
+            if (parts.length > 0) return parts.join(", ");
           }
+          if (typeof nameObj === "string") return nameObj;
+          if (nameObj.$) return nameObj.$.replace(/\s*\[.*?\]\s*$/, "").trim();
           return "";
         }).filter(Boolean);
       }
       if (parties.applicants && parties.applicants.applicant) {
         const applicants = opsArray(parties.applicants.applicant);
         result.assignees = applicants.map(app => {
-          const name = app["applicant-name"];
-          if (name && name.name) return name.name["organisation-name"] || name.name["last-name"] || "";
+          const nameObj = app["applicant-name"];
+          if (!nameObj) return "";
+          if (nameObj.name) {
+            if (nameObj.name.$) return nameObj.name.$.replace(/\s*\[.*?\]\s*$/, "").trim();
+            return nameObj.name["organisation-name"] || nameObj.name["last-name"] || "";
+          }
+          if (typeof nameObj === "string") return nameObj;
+          if (nameObj.$) return nameObj.$.replace(/\s*\[.*?\]\s*$/, "").trim();
           return "";
         }).filter(Boolean);
       }
     }
   } catch (e) { /* ignore */ }
 
-  // CPC 分类
+  // 分类号
   try {
+    // CPC 分类
     const cpc = biblio["classification-cpc"];
     if (cpc) {
       const symbols = opsArray(cpc["cpc-classification-symbol"] || cpc["classification-symbol"]);
       result.classifications = symbols.map(sym => {
         if (typeof sym === "string") return { code: sym, description: "" };
-        if (sym.$) return { code: sym.$, description: "" };
+        if (sym && sym.$) return { code: sym.$, description: "" };
         return null;
       }).filter(Boolean);
     }
-    const ipcr = biblio["classification-ipcr"];
-    if (ipcr && ipcr["classification-ipcr"]) {
-      const ipcrItems = opsArray(ipcr["classification-ipcr"]);
+    // IPCR 分类 — OPS JSON: classifications-ipcr.classification-ipcr[].text.$
+    const ipcr = biblio["classifications-ipcr"] || biblio["classification-ipcr"];
+    if (ipcr) {
+      const ipcrItems = opsArray(ipcr["classification-ipcr"] || ipcr);
       for (const item of ipcrItems) {
-        const sym = item["ipc-classification-symbol"];
-        if (sym && !result.classifications.find(c => c.code === sym)) {
-          result.classifications.push({ code: sym, description: "" });
+        let code = "";
+        // 优先取 text.$ （OPS 实际返回格式）
+        if (item.text) {
+          code = typeof item.text === "object" ? (item.text.$ || "") : String(item.text);
+        } else if (item["ipc-classification-symbol"]) {
+          code = typeof item["ipc-classification-symbol"] === "object"
+            ? (item["ipc-classification-symbol"].$ || "")
+            : String(item["ipc-classification-symbol"]);
+        }
+        // 清理分类号格式（去除多余空格，保留有效的 IPC/CPC 格式）
+        code = code.replace(/\s+/g, " ").trim();
+        if (code && !result.classifications.find(c => c.code === code)) {
+          result.classifications.push({ code: code, description: "" });
         }
       }
     }
@@ -1578,49 +1610,38 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret, useProxy
   const epodocNum = parsed.epodocNum;
   console.log("[OPS] 查询专利: " + patentInput + " → epodoc: " + epodocNum + (useProxy ? " (proxy=" + proxyUrl + ")" : " (直连)"));
 
-  const endpoints = {
-    biblio: "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/biblio",
-    abstract: "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/abstract",
-    claims: "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/claims",
-    description: "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/description",
-    legal: "/legal/publication/epodoc/" + encodeURIComponent(epodocNum),
-    family: "/family/publication/epodoc/" + encodeURIComponent(epodocNum),
-    citing: "/published-data/search/?q=" + encodeURIComponent("ct=" + epodocNum) + "&Range=1-25",
-  };
-
-  // 串行请求避免并发触发 EPO 限流（7 个并发请求会导致全部 403/限流）
-  // 参考 MCP 实现（talenlin/epo-ops-mcp）：单工具单请求，不并发
+  const basePath = "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum);
   const dataMap = {};
-  for (const [key, opsPath] of Object.entries(endpoints)) {
-    const result = await opsRequest(consumerKey, consumerSecret, opsPath, useProxy, proxyUrl);
-    if (result.error || result.httpCode !== 200) {
-      console.log("[OPS] " + key + " 失败: " + (result.error || "HTTP " + result.httpCode));
-      dataMap[key] = null;
-    } else {
-      try {
-        dataMap[key] = JSON.parse(result.body);
-      } catch (e) {
-        console.log("[OPS] " + key + " JSON 解析失败: " + e.message);
-        dataMap[key] = null;
-      }
-    }
-    // biblio 是核心数据，如果它失败就直接返回，不再继续其他请求
-    if (key === "biblio" && !dataMap.biblio) {
-      const errMsg = result.error || ("HTTP " + result.httpCode);
-      const bodyPreview = result.body ? result.body.substring(0, 300) : "";
-      return { success: false, error: "OPS 查询失败：无法获取著录数据 (" + errMsg + ")。专利可能不存在或号码格式错误。" + (bodyPreview ? "\n响应预览: " + bodyPreview : "") };
-    }
+
+  // 第 1 步：查询 biblio（核心数据：标题、发明人、日期、分类号）
+  const biblioResult = await opsRequest(consumerKey, consumerSecret, basePath + "/biblio", useProxy, proxyUrl);
+  if (biblioResult.error || biblioResult.httpCode !== 200) {
+    const errMsg = biblioResult.error || ("HTTP " + biblioResult.httpCode);
+    const bodyPreview = biblioResult.body ? biblioResult.body.substring(0, 300) : "";
+    return { success: false, error: "OPS 查询失败：无法获取著录数据 (" + errMsg + ")。专利可能不存在或号码格式错误。" + (bodyPreview ? "\n响应预览: " + bodyPreview : "") };
+  }
+  try {
+    dataMap.biblio = JSON.parse(biblioResult.body);
+  } catch (e) {
+    return { success: false, error: "OPS biblio JSON 解析失败: " + e.message };
   }
 
-  if (!dataMap.biblio) {
-    return { success: false, error: "OPS 查询失败：无法获取著录数据（专利可能不存在或号码格式错误）" };
+  // 第 2 步：并行查询 abstract + claims（仅 2 个并发请求，不会触发限流）
+  const [abstractResult, claimsResult] = await Promise.all([
+    opsRequest(consumerKey, consumerSecret, basePath + "/abstract", useProxy, proxyUrl),
+    opsRequest(consumerKey, consumerSecret, basePath + "/claims", useProxy, proxyUrl),
+  ]);
+  if (abstractResult.httpCode === 200) {
+    try { dataMap.abstract = JSON.parse(abstractResult.body); } catch (e) { /* ignore */ }
+  }
+  if (claimsResult.httpCode === 200) {
+    try { dataMap.claims = JSON.parse(claimsResult.body); } catch (e) { /* ignore */ }
   }
 
-  // 查询 images 端点
+  // 第 3 步：查询 images 元数据（用于附图和 PDF）
   try {
     let kindForImages = parsed.kindCode || "";
-    if (!kindForImages) {
-      // 从 biblio 提取 kind code（兼容两种 JSON 结构）
+    if (!kindForImages && dataMap.biblio) {
       let bibDoc = null;
       try {
         const wpd = dataMap.biblio["ops:world-patent-data"];
@@ -1638,17 +1659,11 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret, useProxy
       }
     }
     if (!kindForImages) kindForImages = "A1";
-
     const docdbNum = parsed.country + "." + parsed.docNumber + "." + kindForImages;
     const imagesPath = "/published-data/publication/docdb/" + encodeURIComponent(docdbNum) + "/images";
     const imagesResult = await opsRequest(consumerKey, consumerSecret, imagesPath, useProxy, proxyUrl);
     if (imagesResult.httpCode === 200) {
-      try {
-        dataMap.images = JSON.parse(imagesResult.body);
-        console.log("[OPS] images 元数据获取成功");
-      } catch (e) { /* ignore */ }
-    } else {
-      console.log("[OPS] images 端点返回 HTTP " + imagesResult.httpCode + "（附图/PDF 不可用）");
+      try { dataMap.images = JSON.parse(imagesResult.body); } catch (e) { /* ignore */ }
     }
   } catch (e) {
     console.log("[OPS] images 查询异常: " + e.message);
@@ -1657,20 +1672,20 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret, useProxy
   const data = convertOpsToGpStructure(
     patentInput,
     dataMap.biblio,
-    dataMap.abstract,
-    dataMap.claims,
-    dataMap.description,
-    dataMap.legal,
-    dataMap.family,
-    dataMap.citing,
-    dataMap.images
+    dataMap.abstract || null,
+    dataMap.claims || null,
+    null,   // description — 不查询，太慢
+    null,   // legal — 不查询
+    null,   // family — 不查询
+    null,   // citing — 不查询
+    dataMap.images || null
   );
 
   if (!data.title && !data.abstract) {
     return { success: false, error: "OPS 查询返回空数据（无标题无摘要）" };
   }
 
-  console.log("[OPS] 查询成功: " + data.title + " | 权利要求: " + data.claims.length + " | 引用: " + data.patent_citations.length + " | 附图: " + data.drawings.length);
+  console.log("[OPS] 查询成功: " + data.title + " | 权利要求: " + data.claims.length + " | 分类号: " + data.classifications.length + " | 附图: " + data.drawings.length);
   return { success: true, data: data, patent_number: data.patent_number, data_source: "EPO OPS" };
 }
 
