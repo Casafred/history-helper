@@ -11,17 +11,35 @@ const http = require("http");
 const { execFile } = require("child_process");
 const url = require("url");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const OPS_API_BASE = "https://ops.epo.org/3.2/rest-services";
 const OPS_AUTH_URL = "https://ops.epo.org/3.2/auth/accesstoken";
 const PORT = 9099;
 
-// ── Token 缓存（按 key:secret 缓存）──
+// ── Token 缓存 ──
 const tokenCache = new Map();
 
 function getCredsKey(consumerKey, consumerSecret) {
   return consumerKey + ":" + consumerSecret;
+}
+
+// 创建临时文件路径（用于存放 curl 响应头）
+function tmpHeaderPath() {
+  return path.join(os.tmpdir(), "ops_headers_" + process.pid + "_" + Date.now() + ".txt");
+}
+
+// 从临时头文件读取并解析头部字符串
+function readHeaderFile(filePath) {
+  try {
+    const content = fs.readFileSync(filePath, "utf8");
+    return content;
+  } catch (e) {
+    return "";
+  } finally {
+    try { fs.unlinkSync(filePath); } catch (e) { /* ignore */ }
+  }
 }
 
 async function getOpsToken(consumerKey, consumerSecret) {
@@ -36,10 +54,12 @@ async function getOpsToken(consumerKey, consumerSecret) {
 
   const credentials = Buffer.from(consumerKey + ":" + consumerSecret).toString("base64");
   const body = "grant_type=client_credentials";
+  const headerFile = tmpHeaderPath();
 
   const result = await new Promise((resolve) => {
     execFile("curl", [
-      "-s", "-i",
+      "-s",
+      "-D", headerFile,
       "-w", "\n__HTTP_CODE__%{http_code}",
       "--max-time", "15",
       "-X", "POST",
@@ -48,24 +68,16 @@ async function getOpsToken(consumerKey, consumerSecret) {
       "-d", body,
       OPS_AUTH_URL,
     ], { maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
+      const headers = readHeaderFile(headerFile);
       if (err) { resolve({ error: "curl 错误: " + err.message }); return; }
 
-      // 兼容 HTTP/2（\n\n）和 HTTP/1.1（\r\n\r\n）的头部/正文分隔
-      const headerEndMatch = stdout.match(/\r?\n\r?\n/);
-      let headers = "";
-      let rest = stdout;
-      if (headerEndMatch) {
-        headers = stdout.substring(0, headerEndMatch.index);
-        rest = stdout.substring(headerEndMatch.index + headerEndMatch[0].length);
-      }
-
       const marker = "\n__HTTP_CODE__";
-      const idx = rest.lastIndexOf(marker);
+      const idx = stdout.lastIndexOf(marker);
       let httpCode = 200;
-      let jsonBody = rest;
+      let jsonBody = stdout;
       if (idx !== -1) {
-        httpCode = parseInt(rest.substring(idx + marker.length), 10);
-        jsonBody = rest.substring(0, idx);
+        httpCode = parseInt(stdout.substring(idx + marker.length), 10);
+        jsonBody = stdout.substring(0, idx);
       }
 
       resolve({ httpCode, headers, body: jsonBody });
@@ -95,7 +107,7 @@ async function getOpsToken(consumerKey, consumerSecret) {
 
   tokenCache.set(cacheKey, {
     token: tokenData.access_token,
-    expiresAt: Date.now() + ((tokenData.expires_in || 3600) - 300) * 1000,
+    expiresAt: Date.now() + ((parseInt(tokenData.expires_in, 10) || 3600) - 300) * 1000,
     quota: null,
   });
 
@@ -110,33 +122,28 @@ async function opsRequest(consumerKey, consumerSecret, opsPath, accept) {
   const token = tokenResult.token;
 
   const fullUrl = OPS_API_BASE + opsPath;
+  const headerFile = tmpHeaderPath();
+
   const result = await new Promise((resolve) => {
     execFile("curl", [
-      "-s", "-i",
+      "-s",
+      "-D", headerFile,
       "-w", "\n__HTTP_CODE__%{http_code}",
       "--max-time", "30",
       "-H", "Authorization: Bearer " + token,
       "-H", "Accept: " + accept,
       fullUrl,
     ], { maxBuffer: 20 * 1024 * 1024 }, (err, stdout) => {
+      const headers = readHeaderFile(headerFile);
       if (err) { resolve({ error: "curl 错误: " + err.message }); return; }
 
-      // 兼容 HTTP/2（\n\n）和 HTTP/1.1（\r\n\r\n）的头部/正文分隔
-      const headerEndMatch = stdout.match(/\r?\n\r?\n/);
-      let headers = "";
-      let rest = stdout;
-      if (headerEndMatch) {
-        headers = stdout.substring(0, headerEndMatch.index);
-        rest = stdout.substring(headerEndMatch.index + headerEndMatch[0].length);
-      }
-
       const marker = "\n__HTTP_CODE__";
-      const idx = rest.lastIndexOf(marker);
+      const idx = stdout.lastIndexOf(marker);
       let httpCode = 200;
-      let body = rest;
+      let body = stdout;
       if (idx !== -1) {
-        httpCode = parseInt(rest.substring(idx + marker.length), 10);
-        body = rest.substring(0, idx);
+        httpCode = parseInt(stdout.substring(idx + marker.length), 10);
+        body = stdout.substring(0, idx);
       }
 
       resolve({ httpCode, headers, body: body, url: fullUrl });
@@ -166,40 +173,33 @@ async function opsDownloadBinary(consumerKey, consumerSecret, opsPath) {
   const token = tokenResult.token;
 
   const fullUrl = OPS_API_BASE + opsPath;
+  const headerFile = tmpHeaderPath();
+
   return new Promise((resolve) => {
     execFile("curl", [
-      "-s", "-i",
+      "-s",
+      "-D", headerFile,
       "-w", "\n__HTTP_CODE__%{http_code}",
       "--max-time", "30",
       "-H", "Authorization: Bearer " + token,
       "-H", "Accept: application/pdf",
       fullUrl,
     ], { maxBuffer: 30 * 1024 * 1024, encoding: "buffer" }, (err, stdoutBuffer) => {
+      const headers = readHeaderFile(headerFile);
       if (err) { resolve({ error: "curl 错误: " + err.message }); return; }
-
-      const str = stdoutBuffer.toString("latin1");
-      // 兼容 HTTP/2（\n\n）和 HTTP/1.1（\r\n\r\n）的头部/正文分隔
-      const headerEndMatch = str.match(/\r?\n\r?\n/);
-      let headers = "";
-      let bodyBuffer = stdoutBuffer;
-      if (headerEndMatch) {
-        const headerEndByte = Buffer.from(headerEndMatch[0], "latin1").length;
-        headers = str.substring(0, headerEndMatch.index);
-        bodyBuffer = stdoutBuffer.subarray(headerEndMatch.index + headerEndByte);
-      }
 
       const marker = Buffer.from("\n__HTTP_CODE__");
       let idx = -1;
-      for (let i = Math.max(0, bodyBuffer.length - 20); i < bodyBuffer.length; i++) {
-        if (bodyBuffer.subarray(i, i + marker.length).equals(marker)) {
+      for (let i = Math.max(0, stdoutBuffer.length - 20); i < stdoutBuffer.length; i++) {
+        if (stdoutBuffer.subarray(i, i + marker.length).equals(marker)) {
           idx = i; break;
         }
       }
       let httpCode = 200;
-      let finalBody = bodyBuffer;
+      let finalBody = stdoutBuffer;
       if (idx !== -1) {
-        httpCode = parseInt(bodyBuffer.subarray(idx + marker.length).toString().trim(), 10);
-        finalBody = bodyBuffer.subarray(0, idx);
+        httpCode = parseInt(stdoutBuffer.subarray(idx + marker.length).toString().trim(), 10);
+        finalBody = stdoutBuffer.subarray(0, idx);
       }
 
       resolve({ httpCode, headers: headers, body: finalBody, url: fullUrl });
