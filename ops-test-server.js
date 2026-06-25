@@ -115,8 +115,11 @@ async function getOpsToken(consumerKey, consumerSecret) {
 }
 
 // ── 通用 OPS 请求 ──
+// 参考 https://github.com/talenlin/epo-ops-mcp：
+//   1. Accept 使用 application/json（OPS 返回 JSON，便于解析）
+//   2. EPODOC 格式的 doc-number 不包含 kind code，需自动分离
 async function opsRequest(consumerKey, consumerSecret, opsPath, accept) {
-  accept = accept || "application/xml";
+  accept = accept || "application/json";
   const tokenResult = await getOpsToken(consumerKey, consumerSecret);
   if (tokenResult.error) return tokenResult;
   const token = tokenResult.token;
@@ -281,13 +284,17 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ error: "缺少 path 参数" }));
       return;
     }
-    const result = await opsRequest(consumerKey, consumerSecret, opsPath, accept || "application/xml");
+    const result = await opsRequest(consumerKey, consumerSecret, opsPath, accept || "application/json");
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(result, null, 2));
     return;
   }
 
   // API: 预设端点快捷调用
+  // 关键修复（参考 epo-ops-mcp 项目）：
+  //   1. EPODOC 格式的 doc-number 不包含 kind code，需自动分离
+  //      例如 EP3787843B1 → epodoc 号码为 EP3787843，kind code 为 B1
+  //   2. 若带 kind code 查询返回 404，自动去除 kind code 重试
   if (urlObj.pathname === "/api/preset") {
     const { consumerKey, consumerSecret, endpoint, patentNumber } = urlObj.query;
     const num = (patentNumber || "").toUpperCase().replace(/[\s\/]/g, "");
@@ -297,51 +304,63 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // 分离 country / docNumber / kindCode
+    // EP3787843B1 → country=EP, docNumber=3787843, kindCode=B1
+    // EP1000000   → country=EP, docNumber=1000000, kindCode=""
+    const numMatch = num.match(/^([A-Z]{2})(\d+)([A-Z]\d*)?$/);
+    if (!numMatch) {
+      res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "无法解析专利号: " + num }));
+      return;
+    }
+    const country = numMatch[1];
+    const docNumber = numMatch[2];
+    const kindCode = numMatch[3] || "";
+    // epodoc 格式：country + docNumber（不含 kind code）
+    const epodocNum = country + docNumber;
+
     let opsPath;
     let desc;
+    let useDocdb = false;
     switch (endpoint) {
       case "biblio":
-        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(num) + "/biblio";
-        desc = "著录项目（标题、申请人、发明人、日期、分类号、向后引用）";
+        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/biblio";
+        desc = "著录项目（epodoc: " + epodocNum + (kindCode ? ", 原始kind=" + kindCode : "") + "）";
         break;
       case "abstract":
-        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(num) + "/abstract";
-        desc = "摘要";
+        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/abstract";
+        desc = "摘要（epodoc: " + epodocNum + "）";
         break;
       case "claims":
-        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(num) + "/claims";
-        desc = "权利要求";
+        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/claims";
+        desc = "权利要求（epodoc: " + epodocNum + "）";
         break;
       case "description":
-        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(num) + "/description";
-        desc = "说明书";
+        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/description";
+        desc = "说明书（epodoc: " + epodocNum + "）";
         break;
       case "images":
-        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(num) + "/images";
-        desc = "附图/文档信息";
+        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/images";
+        desc = "附图信息（epodoc: " + epodocNum + "）";
         break;
       case "equivalent":
-        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(num) + "/equivalent";
-        desc = "同族等效文献";
+        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/equivalent";
+        desc = "同族等效文献（epodoc: " + epodocNum + "）";
         break;
       case "legal":
-        opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(num) + "/legal";
-        desc = "法律状态";
+        opsPath = "/legal/publication/epodoc/" + encodeURIComponent(epodocNum);
+        desc = "法律状态（epodoc: " + epodocNum + "）";
         break;
       case "citing":
-        opsPath = "/published-data/search/?q=" + encodeURIComponent("ct=" + num) + "&Range=1-25";
-        desc = "向前引用（谁引用了本专利）";
+        opsPath = "/published-data/search/?q=" + encodeURIComponent("ct=" + epodocNum) + "&Range=1-25";
+        desc = "向前引用（ct=" + epodocNum + "）";
         break;
       case "images-docdb": {
-        const m = num.match(/^([A-Z]{2})(\d+)([A-Z]\d*)?$/);
-        if (!m) {
-          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ error: "号码格式无法转为 docdb" }));
-          return;
-        }
-        const docdb = m[1] + "." + m[2] + "." + (m[3] || "A1");
+        // docdb 格式需要 country.docNumber.kind
+        const docdb = country + "." + docNumber + "." + (kindCode || "A1");
         opsPath = "/published-data/publication/docdb/" + docdb + "/images";
-        desc = "文档可用性（docdb 格式 " + docdb + "，含总页数）";
+        desc = "文档可用性（docdb: " + docdb + "）";
+        useDocdb = true;
         break;
       }
       default:
@@ -351,8 +370,26 @@ const server = http.createServer(async (req, res) => {
     }
 
     console.log("[OPS] " + endpoint + " → " + opsPath);
-    const result = await opsRequest(consumerKey, consumerSecret, opsPath);
-    const enriched = Object.assign({}, result, { desc: desc, endpoint: endpoint, patentNumber: num });
+    let result = await opsRequest(consumerKey, consumerSecret, opsPath);
+
+    // 智能重试：如果带原始号码（含kind）查询404，尝试用纯epodoc号码重试
+    // 反之如果epodoc号码404且原始号码含kind，尝试带kind查询
+    if (result.httpCode === 404 && !useDocdb) {
+      console.log("[OPS] 404, 尝试带 kind code 重试...");
+      const retryPath = "/published-data/publication/epodoc/" + encodeURIComponent(num) + "/" + endpoint;
+      const retryResult = await opsRequest(consumerKey, consumerSecret, retryPath);
+      if (retryResult.httpCode === 200) {
+        result = retryResult;
+        result.retriedWithKind = true;
+      }
+    }
+
+    const enriched = Object.assign({}, result, {
+      desc: desc,
+      endpoint: endpoint,
+      patentNumber: num,
+      parsedNumber: { country: country, docNumber: docNumber, kindCode: kindCode, epodocNum: epodocNum },
+    });
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(enriched, null, 2));
     return;
