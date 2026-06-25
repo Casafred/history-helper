@@ -500,6 +500,152 @@ async function opsRequest(consumerKey, consumerSecret, opsPath) {
   return result;
 }
 
+// 下载 OPS 二进制资源（PDF / 图片），用于附图代理与 PDF 合并
+async function opsDownloadBinary(consumerKey, consumerSecret, opsPath, acceptType) {
+  const tokenResult = await getOpsToken(consumerKey, consumerSecret);
+  if (tokenResult.error) return tokenResult;
+  const token = tokenResult.token;
+  const fullUrl = OPS_API_BASE + opsPath;
+  const headerFile = opsTmpHeaderPath();
+  const accept = acceptType || "application/pdf";
+
+  return new Promise((resolve) => {
+    execFile("curl", [
+      "-s", "-D", headerFile, "-w", "\n__HTTP_CODE__%{http_code}",
+      "--max-time", "60",
+      "-H", "Authorization: Bearer " + token,
+      "-H", "Accept: " + accept,
+      fullUrl,
+    ], { maxBuffer: 30 * 1024 * 1024, encoding: "buffer" }, (err, stdoutBuffer) => {
+      const headers = opsReadHeaderFile(headerFile);
+      if (err) { resolve({ error: "curl 错误: " + err.message }); return; }
+
+      const marker = Buffer.from("\n__HTTP_CODE__");
+      let idx = -1;
+      for (let i = Math.max(0, stdoutBuffer.length - 20); i < stdoutBuffer.length; i++) {
+        if (stdoutBuffer.subarray(i, i + marker.length).equals(marker)) {
+          idx = i; break;
+        }
+      }
+      let httpCode = 200;
+      let body = stdoutBuffer;
+      if (idx !== -1) {
+        httpCode = parseInt(stdoutBuffer.subarray(idx + marker.length).toString().trim(), 10);
+        body = stdoutBuffer.subarray(0, idx);
+      }
+      // 同步配额缓存
+      if (headers) {
+        const cacheKey = consumerKey + ":" + consumerSecret;
+        const throttleMatch = headers.match(/x-throttling-control:\s*([^\r\n]+)/i);
+        const hourMatch = headers.match(/x-individualquotaperhour-used:\s*(\d+)/i);
+        const weekMatch = headers.match(/x-registeredquotaperweek-used:\s*(\d+)/i);
+        if (throttleMatch || hourMatch || weekMatch) {
+          opsQuotaCache.set(cacheKey, {
+            throttle: throttleMatch ? throttleMatch[1].trim() : null,
+            hourUsed: hourMatch ? parseInt(hourMatch[1], 10) : null,
+            weekUsed: weekMatch ? parseInt(weekMatch[1], 10) : null,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+      resolve({ httpCode, headers: headers, body: body, url: fullUrl });
+    });
+  });
+}
+
+// 解析 OPS images JSON 元数据，提取附图与全文 PDF 的页数信息
+// 返回: { drawings: { totalPages, link } | null, fullDoc: { totalPages, link, sections } | null }
+function parseOpsImagesMetadata(imagesData) {
+  if (!imagesData) return null;
+  try {
+    const root = imagesData["ops:world-patent-data"];
+    const inquiry = root["ops:document-inquiry"];
+    const inquiryResult = inquiry["ops:inquiry-result"];
+    let instances = inquiryResult["document-instance"];
+    if (!instances) return null;
+    if (!Array.isArray(instances)) instances = [instances];
+
+    let drawingInstance = null;
+    let fullDocInstance = null;
+    for (const inst of instances) {
+      const desc = inst["@desc"] || inst["@_desc"] || "";
+      if (desc === "Drawing") drawingInstance = inst;
+      else if (desc === "FullDocument") fullDocInstance = inst;
+    }
+    // 若无 Drawing 实例但存在 FullDocument，回退使用 FullDocument 的页数
+    if (!drawingInstance && fullDocInstance) drawingInstance = fullDocInstance;
+    if (!fullDocInstance && instances.length > 0) fullDocInstance = instances[0];
+
+    const extract = (inst) => {
+      if (!inst) return null;
+      const totalPages = parseInt(inst["@number-of-pages"] || inst["@_number-of-pages"] || "0", 10);
+      const link = inst.link || "";
+      const sections = opsArray(inst["document-section"]).map(s => ({
+        name: s.name || "",
+        startPage: parseInt(s["start-page"] || "0", 10),
+        endPage: parseInt(s["end-page"] || "0", 10),
+      }));
+      return { totalPages: totalPages, link: link, sections: sections };
+    };
+
+    return {
+      drawings: extract(drawingInstance),
+      fullDoc: extract(fullDocInstance),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// 从 link URL（形如 published-data/images/EP/1000000/A1/fullimage）提取 country/docNumber/kind
+function parseOpsImageLink(link) {
+  if (!link) return null;
+  const m = link.match(/images\/([^\/]+)\/([^\/]+)\/([^\/]+)\/(fullimage|thumbnail)/);
+  if (!m) return null;
+  return { country: m[1], docNumber: m[2], kind: m[3] };
+}
+
+// 懒加载 pdf-lib（使用项目内 src/scripts/pdf-lib.min.js，无需 npm 安装）
+let _pdfLibCache = null;
+function loadPdfLib() {
+  if (_pdfLibCache) return _pdfLibCache;
+  try {
+    const libPath = path.join(__dirname, "src", "scripts", "pdf-lib.min.js");
+    const code = fs.readFileSync(libPath, "utf8");
+    const fakeWindow = {};
+    const fakeModule = { exports: {} };
+    // pdf-lib.min.js 是浏览器打包，挂载到 window.PDFLib
+    const fn = new Function("module", "exports", "window", "self", code + "\n; module.exports = (window && window.PDFLib) || self.PDFLib || exports;");
+    fn(fakeModule, fakeModule.exports, fakeWindow, fakeWindow);
+    _pdfLibCache = fakeWindow.PDFLib || fakeModule.exports;
+    if (!_pdfLibCache) throw new Error("pdf-lib 加载后未找到 PDFLib 对象");
+    console.log("[OPS-PDF] pdf-lib 加载成功");
+    return _pdfLibCache;
+  } catch (e) {
+    console.error("[OPS-PDF] pdf-lib 加载失败: " + e.message);
+    return null;
+  }
+}
+
+// 使用 pdf-lib 合并多个单页 PDF Buffer 为一个完整 PDF
+async function mergePdfBuffers(pdfBuffers) {
+  const PDFLib = loadPdfLib();
+  if (!PDFLib) throw new Error("pdf-lib 不可用，无法合并 PDF");
+  const merged = await PDFLib.PDFDocument.create();
+  for (const buf of pdfBuffers) {
+    if (!buf || buf.length === 0) continue;
+    try {
+      const doc = await PDFLib.PDFDocument.load(buf);
+      const pages = await merged.copyPages(doc, doc.getPageIndices());
+      for (const p of pages) merged.addPage(p);
+    } catch (e) {
+      console.log("[OPS-PDF] 跳过无效页: " + e.message);
+    }
+  }
+  const mergedBytes = await merged.save();
+  return Buffer.from(mergedBytes);
+}
+
 // 解析专利号：分离 country / docNumber / kindCode
 // EP3787843B1 → { country: "EP", docNumber: "3787843", kindCode: "B1", epodocNum: "EP3787843" }
 function parseOpsPatentNumber(input) {
@@ -544,9 +690,11 @@ function opsFormatDate(dateStr) {
 // ── OPS JSON → Google Patents 数据结构转换 ──
 // 输出结构必须与 server.js extractPatentFromHtml 输出一致
 // 参见 web-app.js renderPatentDetail 期望的字段
-function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsData, descriptionData, legalData, familyData, citingData) {
+function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsData, descriptionData, legalData, familyData, citingData, imagesData) {
   const parsed = parseOpsPatentNumber(patentInput);
   const patentNumber = parsed.original || patentInput;
+  // 用于附图/PDF 代理路由的 kind code（优先使用用户输入的 kind，其次从 biblio 提取）
+  let kindForImages = parsed.kindCode || "";
 
   // biblio 数据根节点：ops:world-patent-data > ops:biblio-search > ops:search-result > exchange-document
   let biblioRoot = null;
@@ -614,6 +762,10 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
       }
       if (docdb && docdb.date) {
         if (!result.publication_date) result.publication_date = opsFormatDate(docdb.date);
+      }
+      // 提取 docdb kind code 用于 images 端点（docdb 格式需要 kind）
+      if (docdb && docdb.kind && !kindForImages) {
+        kindForImages = docdb.kind;
       }
     }
   } catch (e) { /* ignore */ }
@@ -832,6 +984,40 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
     }
   } catch (e) { /* ignore */ }
 
+  // ── 附图与 PDF 下载链接（来自 OPS images 端点元数据） ──
+  // 前端 <img> 直接使用 drawings 数组中的 URL，需通过 /api/ops/image 代理（带 Bearer token）
+  // pdf_link 指向 /api/ops/pdf 路由，后端逐页下载 fullimage.pdf 并用 pdf-lib 合并
+  try {
+    const imagesMeta = parseOpsImagesMetadata(imagesData);
+    if (imagesMeta && imagesMeta.drawings && imagesMeta.drawings.totalPages > 0) {
+      // 从 link 中提取 country/docNumber/kind（OPS 返回的 link 最权威）
+      const linkInfo = parseOpsImageLink(imagesMeta.drawings.link);
+      const imgCountry = linkInfo ? linkInfo.country : parsed.country;
+      const imgDocNum = linkInfo ? linkInfo.docNumber : parsed.docNumber;
+      const imgKind = linkInfo ? linkInfo.kind : (kindForImages || "A1");
+      const totalPages = Math.min(imagesMeta.drawings.totalPages, 50); // 限制最多 50 页附图
+      const drawings = [];
+      for (let i = 1; i <= totalPages; i++) {
+        // 前端会自动追加 opsKey/opsSecret 参数（searchPatentDetail 中的 augmentOpsUrls）
+        drawings.push("/api/ops/image/" + encodeURIComponent(patentNumber) +
+          "?page=" + i + "&country=" + imgCountry + "&doc=" + imgDocNum + "&kind=" + imgKind);
+      }
+      result.drawings = drawings;
+      // 同时记录 images 元信息供 PDF 路由使用（前端不直接使用）
+      result._ops_images_meta = {
+        totalPages: totalPages,
+        country: imgCountry,
+        docNumber: imgDocNum,
+        kind: imgKind,
+        fullDocPages: imagesMeta.fullDoc ? imagesMeta.fullDoc.totalPages : 0,
+      };
+    }
+    // PDF 下载链接（前端会自动追加 opsKey/opsSecret）
+    if (kindForImages || (imagesMeta && imagesMeta.drawings)) {
+      result.pdf_link = "/api/ops/pdf/" + encodeURIComponent(patentNumber) + "?kind=" + (kindForImages || "A1");
+    }
+  } catch (e) { /* ignore */ }
+
   return result;
 }
 
@@ -897,6 +1083,37 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret) {
     return { success: false, error: "OPS 查询失败：无法获取著录数据（专利可能不存在或号码格式错误）" };
   }
 
+  // ── 查询 images 端点获取附图/PDF 页数信息 ──
+  // images 端点需要 docdb 格式（country.docNumber.kind），需先从 biblio 提取 kind code
+  try {
+    let kindForImages = parsed.kindCode || "";
+    if (!kindForImages) {
+      // 从 biblio publication-reference 的 docdb document-id 提取 kind
+      const biblioRoot = dataMap.biblio["ops:world-patent-data"]?.["ops:biblio-search"]?.["ops:search-result"]?.["exchange-document"];
+      const bibDoc = Array.isArray(biblioRoot) ? biblioRoot[0] : biblioRoot;
+      const pubRef = bibDoc?.["bibliographic-data"]?.["publication-reference"]?.["document-id"];
+      if (pubRef) {
+        const docdb = opsExtractDocId(opsArray(pubRef), "docdb");
+        if (docdb && docdb.kind) kindForImages = docdb.kind;
+      }
+    }
+    if (!kindForImages) kindForImages = "A1"; // 最终回退
+
+    const docdbNum = parsed.country + "." + parsed.docNumber + "." + kindForImages;
+    const imagesPath = "/published-data/publication/docdb/" + encodeURIComponent(docdbNum) + "/images";
+    const imagesResult = await opsRequest(consumerKey, consumerSecret, imagesPath);
+    if (imagesResult.httpCode === 200) {
+      try {
+        dataMap.images = JSON.parse(imagesResult.body);
+        console.log("[OPS] images 元数据获取成功");
+      } catch (e) { /* ignore */ }
+    } else {
+      console.log("[OPS] images 端点返回 HTTP " + imagesResult.httpCode + "（附图/PDF 不可用）");
+    }
+  } catch (e) {
+    console.log("[OPS] images 查询异常: " + e.message);
+  }
+
   const data = convertOpsToGpStructure(
     patentInput,
     dataMap.biblio,
@@ -905,7 +1122,8 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret) {
     dataMap.description,
     dataMap.legal,
     dataMap.family,
-    dataMap.citing
+    dataMap.citing,
+    dataMap.images
   );
 
   // 至少要有标题或摘要才算有效数据
@@ -913,7 +1131,7 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret) {
     return { success: false, error: "OPS 查询返回空数据（无标题无摘要）" };
   }
 
-  console.log("[OPS] 查询成功: " + data.title + " | 权利要求: " + data.claims.length + " | 引用: " + data.patent_citations.length);
+  console.log("[OPS] 查询成功: " + data.title + " | 权利要求: " + data.claims.length + " | 引用: " + data.patent_citations.length + " | 附图: " + data.drawings.length);
   return { success: true, data: data, patent_number: data.patent_number, data_source: "EPO OPS" };
 }
 
@@ -926,6 +1144,132 @@ function getOpsQuota(consumerKey, consumerSecret) {
     return cached;
   }
   return cached; // 即使过期也返回旧数据（下一次请求会刷新）
+}
+
+// ── OPS 附图代理：请求 OPS thumbnail 并返回图片二进制 ──
+function proxyOpsImage(country, docNumber, kind, page, consumerKey, consumerSecret, res) {
+  const opsPath = "/published-data/images/" + country + "/" + docNumber + "/" + kind +
+    "/thumbnail.png?Range=" + page;
+  console.log("[OPS-IMG] 代理附图: " + country + "/" + docNumber + "/" + kind + " page=" + page);
+  (async () => {
+    const result = await opsDownloadBinary(consumerKey, consumerSecret, opsPath, "image/png");
+    if (result.error) {
+      res.writeHead(502, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ error: result.error }));
+      return;
+    }
+    if (result.httpCode !== 200 || !result.body || result.body.length === 0) {
+      res.writeHead(result.httpCode || 404, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ error: "OPS 附图获取失败 HTTP " + result.httpCode }));
+      return;
+    }
+    // OPS thumbnail 返回 PNG
+    const isPng = result.body.length > 4 && result.body[0] === 0x89 && result.body[1] === 0x50;
+    res.writeHead(200, {
+      "Content-Type": isPng ? "image/png" : "application/octet-stream",
+      "Cache-Control": "public, max-age=86400",
+      "Access-Control-Allow-Origin": "*",
+    });
+    res.end(result.body);
+  })();
+}
+
+// ── OPS PDF 下载：逐页请求 fullimage.pdf 后用 pdf-lib 合并为完整 PDF ──
+async function downloadOpsPdf(patentInput, kindHint, consumerKey, consumerSecret, maxPages, res) {
+  const parsed = parseOpsPatentNumber(patentInput);
+  if (parsed.error) {
+    res.writeHead(400, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({ error: parsed.error }));
+    return;
+  }
+
+  console.log("[OPS-PDF] 开始下载: " + patentInput + " (maxPages=" + maxPages + ")");
+
+  // Step 1: 查询 images 端点获取总页数
+  let kindForImages = kindHint || parsed.kindCode || "";
+  // 若无 kind，先从 biblio 查询提取
+  if (!kindForImages) {
+    try {
+      const biblioPath = "/published-data/publication/epodoc/" + encodeURIComponent(parsed.epodocNum) + "/biblio";
+      const biblioResult = await opsRequest(consumerKey, consumerSecret, biblioPath);
+      if (biblioResult.httpCode === 200) {
+        const biblioJson = JSON.parse(biblioResult.body);
+        const bibDoc = biblioJson?.["ops:world-patent-data"]?.["ops:biblio-search"]?.["ops:search-result"]?.["exchange-document"];
+        const bibDocSingle = Array.isArray(bibDoc) ? bibDoc[0] : bibDoc;
+        const pubRef = bibDocSingle?.["bibliographic-data"]?.["publication-reference"]?.["document-id"];
+        if (pubRef) {
+          const docdb = opsExtractDocId(opsArray(pubRef), "docdb");
+          if (docdb && docdb.kind) kindForImages = docdb.kind;
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+  if (!kindForImages) kindForImages = "A1";
+
+  const docdbNum = parsed.country + "." + parsed.docNumber + "." + kindForImages;
+  const imagesPath = "/published-data/publication/docdb/" + encodeURIComponent(docdbNum) + "/images";
+  const imagesResult = await opsRequest(consumerKey, consumerSecret, imagesPath);
+  if (imagesResult.httpCode !== 200) {
+    res.writeHead(404, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({ error: "OPS images 元数据不可用 (HTTP " + imagesResult.httpCode + ")" }));
+    return;
+  }
+
+  let imagesMeta;
+  try { imagesMeta = JSON.parse(imagesResult.body); } catch (e) {
+    res.writeHead(500, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({ error: "OPS images JSON 解析失败" }));
+    return;
+  }
+
+  const meta = parseOpsImagesMetadata(imagesMeta);
+  if (!meta || !meta.fullDoc || meta.fullDoc.totalPages === 0) {
+    res.writeHead(404, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({ error: "OPS 未返回可用页数信息" }));
+    return;
+  }
+
+  const totalPages = Math.min(meta.fullDoc.totalPages, maxPages);
+  console.log("[OPS-PDF] 总页数: " + meta.fullDoc.totalPages + "，下载: " + totalPages + " 页");
+
+  // Step 2: 逐页下载 fullimage.pdf（串行避免触发限流）
+  const pdfBuffers = [];
+  for (let i = 1; i <= totalPages; i++) {
+    const pagePath = "/published-data/images/" + parsed.country + "/" + parsed.docNumber + "/" +
+      kindForImages + "/fullimage.pdf?Range=" + i;
+    const pageResult = await opsDownloadBinary(consumerKey, consumerSecret, pagePath, "application/pdf");
+    if (pageResult.httpCode === 200 && pageResult.body && pageResult.body.length > 0) {
+      pdfBuffers.push(pageResult.body);
+      if (i % 5 === 0) console.log("[OPS-PDF] 已下载 " + i + "/" + totalPages + " 页");
+    } else {
+      console.log("[OPS-PDF] 第 " + i + " 页下载失败: HTTP " + pageResult.httpCode);
+    }
+  }
+
+  if (pdfBuffers.length === 0) {
+    res.writeHead(500, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({ error: "所有页面下载失败" }));
+    return;
+  }
+
+  // Step 3: 使用 pdf-lib 合并
+  try {
+    console.log("[OPS-PDF] 合并 " + pdfBuffers.length + " 个 PDF...");
+    const mergedPdf = await mergePdfBuffers(pdfBuffers);
+    const filename = parsed.country + parsed.docNumber + kindForImages + ".pdf";
+    res.writeHead(200, {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": 'attachment; filename="' + filename + '"',
+      "Content-Length": mergedPdf.length,
+      "Access-Control-Allow-Origin": "*",
+    });
+    res.end(mergedPdf);
+    console.log("[OPS-PDF] 合并完成: " + mergedPdf.length + " bytes");
+  } catch (e) {
+    console.error("[OPS-PDF] 合并失败: " + e.message);
+    res.writeHead(500, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({ error: "PDF 合并失败: " + e.message }));
+  }
 }
 
 // ── Google Patents scraper ────────────────────────────────────────────────────
@@ -1759,6 +2103,58 @@ const server = http.createServer((req, res) => {
       quota: quota,
       message: quota ? null : "暂无配额数据，请先查询一次专利以触发配额采集",
     }));
+    return;
+  }
+
+  // OPS 附图代理端点（前端 <img> 直接引用，后端带 Bearer token 请求 OPS thumbnail）
+  // URL: /api/ops/image/{patentNumber}?page={N}&country={C}&doc={D}&kind={K}&opsKey=xxx&opsSecret=yyy
+  if (req.url.startsWith("/api/ops/image/")) {
+    const urlObj = new URL(req.url, "http://localhost");
+    const patentNumber = decodeURIComponent(urlObj.pathname.replace("/api/ops/image/", ""));
+    const page = urlObj.searchParams.get("page") || "1";
+    const country = urlObj.searchParams.get("country") || "";
+    const doc = urlObj.searchParams.get("doc") || "";
+    const kind = urlObj.searchParams.get("kind") || "A1";
+    const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
+    const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
+
+    if (!opsKey || !opsSecret) {
+      res.writeHead(401, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ error: "缺少 OPS 凭证" }));
+      return;
+    }
+    if (!country || !doc) {
+      // 从专利号解析
+      const parsed = parseOpsPatentNumber(patentNumber);
+      if (parsed.error) {
+        res.writeHead(400, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+        res.end(JSON.stringify({ error: parsed.error }));
+        return;
+      }
+      const c = parsed.country, d = parsed.docNumber, k = parsed.kindCode || kind;
+      proxyOpsImage(c, d, k, page, opsKey, opsSecret, res);
+    } else {
+      proxyOpsImage(country, doc, kind, page, opsKey, opsSecret, res);
+    }
+    return;
+  }
+
+  // OPS PDF 下载端点（逐页下载 fullimage.pdf 后用 pdf-lib 合并为完整 PDF）
+  // URL: /api/ops/pdf/{patentNumber}?kind={K}&opsKey=xxx&opsSecret=yyy
+  if (req.url.startsWith("/api/ops/pdf/")) {
+    const urlObj = new URL(req.url, "http://localhost");
+    const patentNumber = decodeURIComponent(urlObj.pathname.replace("/api/ops/pdf/", ""));
+    const kind = urlObj.searchParams.get("kind") || "";
+    const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
+    const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
+    const maxPages = parseInt(urlObj.searchParams.get("maxPages") || "100", 10);
+
+    if (!opsKey || !opsSecret) {
+      res.writeHead(401, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ error: "缺少 OPS 凭证" }));
+      return;
+    }
+    downloadOpsPdf(patentNumber, kind, opsKey, opsSecret, maxPages, res);
     return;
   }
 

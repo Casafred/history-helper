@@ -152,6 +152,33 @@ function getOpsSettings() {
   return { enabled: enabled, consumerKey: ops.consumerKey || "", consumerSecret: ops.consumerSecret || "" };
 }
 
+// 为 OPS 降级数据中的附图代理 URL 和 PDF 下载链接追加凭证参数
+// 后端返回的 URL 形如 /api/ops/image/EP...?page=1&country=EP&doc=xxx&kind=A1
+// 前端需追加 &opsKey=xxx&opsSecret=yyy 才能通过后端的 Bearer token 认证
+function augmentOpsUrls(data) {
+  if (!data) return;
+  const ops = getOpsSettings();
+  if (!ops.consumerKey || !ops.consumerSecret) return;
+  // 检查附图/PDF 开关（PDF 合并消耗大量配额，允许用户关闭）
+  const drawingsEnabled = localStorage.getItem("patentlens_ops_drawings") !== "false";
+  const credSuffix = "&opsKey=" + encodeURIComponent(ops.consumerKey) + "&opsSecret=" + encodeURIComponent(ops.consumerSecret);
+
+  if (drawingsEnabled && Array.isArray(data.drawings) && data.drawings.length > 0) {
+    data.drawings = data.drawings.map(url => {
+      if (typeof url === "string" && url.startsWith("/api/ops/image/") && !url.includes("opsKey=")) {
+        return url + credSuffix;
+      }
+      return url;
+    });
+  } else if (!drawingsEnabled) {
+    data.drawings = []; // 用户关闭了附图功能
+  }
+
+  if (data.pdf_link && typeof data.pdf_link === "string" && data.pdf_link.startsWith("/api/ops/pdf/") && !data.pdf_link.includes("opsKey=")) {
+    data.pdf_link = data.pdf_link + credSuffix;
+  }
+}
+
 const aiSettingsBtn = document.getElementById("ai-settings-btn");
 const aiSettingsModal = document.getElementById("ai-settings-modal");
 const modalCloseBtn = document.getElementById("modal-close-btn");
@@ -441,6 +468,11 @@ async function searchPatentDetail(input) {
       searchBtn.disabled = false;
       loading.classList.add("hidden");
       return;
+    }
+
+    // 当数据来自 EPO OPS 时，为附图代理 URL 和 PDF 下载链接追加 OPS 凭证
+    if (json.data_source === "EPO OPS" || (json.data && json.data.data_source === "EPO OPS")) {
+      augmentOpsUrls(json.data);
     }
 
     renderPatentDetail(json.data);
@@ -8014,6 +8046,7 @@ if (networkSaveBtn) {
 
 // ── EPO OPS 降级查询配置 ──────────────────────────────────────────────────────
 const opsEnabledCheckbox = document.getElementById("ops-enabled-checkbox");
+const opsDrawingsCheckbox = document.getElementById("ops-drawings-checkbox");
 const opsConsumerKeyInput = document.getElementById("ops-consumer-key-input");
 const opsConsumerSecretInput = document.getElementById("ops-consumer-secret-input");
 const opsSaveBtn = document.getElementById("ops-save-btn");
@@ -8028,6 +8061,7 @@ function loadOpsSettingsToForm() {
   if (opsEnabledCheckbox) opsEnabledCheckbox.checked = ops.enabled;
   if (opsConsumerKeyInput) opsConsumerKeyInput.value = ops.consumerKey;
   if (opsConsumerSecretInput) opsConsumerSecretInput.value = ops.consumerSecret;
+  if (opsDrawingsCheckbox) opsDrawingsCheckbox.checked = localStorage.getItem("patentlens_ops_drawings") !== "false";
   // 显示配额区域（如果有 key）
   if (opsQuotaDisplayGroup && ops.consumerKey) {
     opsQuotaDisplayGroup.style.display = "";
@@ -8071,6 +8105,7 @@ if (opsSaveBtn) {
     config.ops.consumerSecret = opsConsumerSecretInput ? opsConsumerSecretInput.value.trim() : "";
     window.AI.saveAIConfig(config);
     localStorage.setItem("patentlens_ops_enabled", opsEnabledCheckbox && opsEnabledCheckbox.checked ? "true" : "false");
+    localStorage.setItem("patentlens_ops_drawings", opsDrawingsCheckbox && opsDrawingsCheckbox.checked ? "true" : "false");
     opsSaveBtn.textContent = "已保存 ✓";
     setTimeout(() => { opsSaveBtn.textContent = "保存"; }, 1500);
     // 保存后显示配额区域
