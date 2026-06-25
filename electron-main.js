@@ -10,6 +10,11 @@ const fontkit = require("@pdf-lib/fontkit");
 
 const GD_API_BASE = "https://d1kazzu6rbodne.cloudfront.net";
 const GOOGLE_PATENTS_BASE = "https://patents.google.com";
+// EPO OPS（Open Patent Services）API v3.2 —— 作为 Google Patents 的降级数据源
+const OPS_API_BASE = "https://ops.epo.org/3.2/rest-services";
+const OPS_AUTH_URL = "https://ops.epo.org/3.2/auth/accesstoken";
+// EPO publication-server —— EP 专利全文 PDF 直链（零认证）
+const EPO_PDF_DIRECT_BASE = "https://data.epo.org/publication-server/rest/v1.2/patents";
 // 系统代理：优先取 HTTPS_PROXY / HTTP_PROXY 环境变量，否则使用默认值
 const PROXY_URL = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || "http://127.0.0.1:7897";
 const PADDLE_OCR_V2_URL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs";
@@ -939,7 +944,651 @@ function extractPatentFromHtml(html, patentId) {
   return htmlResult;
 }
 
-async function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl) {
+// ── EPO OPS 模块（使用 Node.js 原生 https 替代 curl） ──
+
+// OPS Token 缓存：key = consumerKey:consumerSecret
+const opsTokenCache = new Map();
+// OPS 配额缓存：key = consumerKey:consumerSecret
+const opsQuotaCache = new Map();
+// 配额缓存有效期 20 分钟（与前端自动刷新周期对齐）
+const OPS_QUOTA_CACHE_TTL = 20 * 60 * 1000;
+
+// 获取 OPS Token（带缓存，使用 httpsPost 替代 curl）
+async function getOpsToken(consumerKey, consumerSecret) {
+  if (!consumerKey || !consumerSecret) {
+    return { error: "缺少 OPS consumer key 或 secret" };
+  }
+  const cacheKey = consumerKey + ":" + consumerSecret;
+  const cached = opsTokenCache.get(cacheKey);
+  // 提前 5 分钟刷新 token（EPO token 通常 20 分钟有效）
+  if (cached && Date.now() < cached.expiresAt - 5 * 60 * 1000) {
+    return { token: cached.token, fromCache: true };
+  }
+
+  const credentials = Buffer.from(consumerKey + ":" + consumerSecret).toString("base64");
+  try {
+    const result = await httpsPost(
+      OPS_AUTH_URL,
+      {
+        "Authorization": "Basic " + credentials,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      "grant_type=client_credentials",
+      15000
+    );
+
+    if (result.statusCode !== 200) {
+      const bodyText = result.body.toString("utf-8");
+      return { error: "OPS 认证失败 HTTP " + result.statusCode, httpCode: result.statusCode, responseBody: bodyText };
+    }
+    let tokenData;
+    const bodyText = result.body.toString("utf-8");
+    try { tokenData = JSON.parse(bodyText); } catch (e) {
+      return { error: "OPS Token 解析失败: " + e.message, responseBody: bodyText };
+    }
+    if (!tokenData.access_token) {
+      return { error: "OPS 响应无 access_token", responseBody: bodyText };
+    }
+    opsTokenCache.set(cacheKey, {
+      token: tokenData.access_token,
+      expiresAt: Date.now() + ((parseInt(tokenData.expires_in, 10) || 1200) - 60) * 1000,
+    });
+    return { token: tokenData.access_token };
+  } catch (e) {
+    return { error: "OPS 认证请求失败: " + e.message };
+  }
+}
+
+// 通用 OPS GET 请求（JSON 格式，使用 httpsGet 替代 curl）
+async function opsRequest(consumerKey, consumerSecret, opsPath) {
+  const tokenResult = await getOpsToken(consumerKey, consumerSecret);
+  if (tokenResult.error) return tokenResult;
+  const token = tokenResult.token;
+  const fullUrl = OPS_API_BASE + opsPath;
+
+  try {
+    const result = await httpsGet(fullUrl, {
+      "Authorization": "Bearer " + token,
+      "Accept": "application/json",
+    }, 30000);
+
+    // 解析配额头并更新缓存
+    const respHeaders = result.headers || {};
+    const cacheKey = consumerKey + ":" + consumerSecret;
+    const throttleHeader = respHeaders["x-throttling-control"];
+    const hourHeader = respHeaders["x-individualquotaperhour-used"];
+    const weekHeader = respHeaders["x-registeredquotaperweek-used"];
+    if (throttleHeader || hourHeader || weekHeader) {
+      opsQuotaCache.set(cacheKey, {
+        throttle: throttleHeader || null,
+        hourUsed: hourHeader ? parseInt(hourHeader, 10) : null,
+        weekUsed: weekHeader ? parseInt(weekHeader, 10) : null,
+        updatedAt: Date.now(),
+      });
+    }
+
+    return {
+      httpCode: result.statusCode,
+      headers: respHeaders,
+      body: result.body.toString("utf-8"),
+      url: fullUrl,
+    };
+  } catch (e) {
+    return { error: "OPS 请求失败: " + e.message, url: fullUrl };
+  }
+}
+
+// 解析专利号：分离 country / docNumber / kindCode
+// EP3787843B1 → { country: "EP", docNumber: "3787843", kindCode: "B1", epodocNum: "EP3787843" }
+function parseOpsPatentNumber(input) {
+  const num = input.toUpperCase().replace(/[\s\/]/g, "");
+  const m = num.match(/^([A-Z]{2})(\d+)([A-Z]\d*)?$/);
+  if (!m) return { error: "无法解析专利号: " + input };
+  const country = m[1];
+  const docNumber = m[2];
+  const kindCode = m[3] || "";
+  return { country, docNumber, kindCode, epodocNum: country + docNumber, original: num };
+}
+
+// ── EPO publication-server 直链 PDF（仅 EP 专利，零认证） ──
+function getEpoDirectPdfUrl(country, docNumber, kind) {
+  if (!country || !docNumber) return null;
+  if (String(country).toUpperCase() !== "EP") return null;
+  const ki = (kind || "A1").toUpperCase();
+  const docId = "EP" + docNumber + "NW" + ki;
+  return EPO_PDF_DIRECT_BASE + "/" + encodeURIComponent(docId) + "/document.pdf";
+}
+
+// 从完整专利号中提取 EP 直链所需的 country/docNumber/kind
+function getEpoDirectPdfUrlFromPatent(patentInput) {
+  const parsed = parseOpsPatentNumber(patentInput);
+  if (parsed.error || String(parsed.country).toUpperCase() !== "EP") return null;
+  return getEpoDirectPdfUrl(parsed.country, parsed.docNumber, parsed.kindCode || "A1");
+}
+
+// ── OPS JSON 数据解析辅助函数 ──
+
+// 从 OPS document-id 数组中提取指定类型的号码
+function opsExtractDocId(docIdList, idType) {
+  if (!Array.isArray(docIdList)) docIdList = [docIdList];
+  for (const d of docIdList) {
+    if (d && d["@id-type"] === idType) {
+      return { country: d.country, docNumber: d["doc-number"], kind: d.kind };
+    }
+  }
+  return null;
+}
+
+// 安全提取数组（OPS JSON 单值时不是数组）
+function opsArray(val) {
+  if (val == null) return [];
+  return Array.isArray(val) ? val : [val];
+}
+
+// 提取日期 YYYY-MM-DD（从 date 字段）
+function opsFormatDate(dateStr) {
+  if (!dateStr || typeof dateStr !== "string") return "";
+  if (/^\d{8}$/.test(dateStr)) {
+    return dateStr.substring(0, 4) + "-" + dateStr.substring(4, 6) + "-" + dateStr.substring(6, 8);
+  }
+  return dateStr;
+}
+
+// 解析 OPS images JSON 元数据，提取附图与全文 PDF 的页数信息
+function parseOpsImagesMetadata(imagesData) {
+  if (!imagesData) return null;
+  try {
+    const root = imagesData["ops:world-patent-data"];
+    const inquiry = root["ops:document-inquiry"];
+    const inquiryResult = inquiry["ops:inquiry-result"];
+    let instances = inquiryResult["document-instance"];
+    if (!instances) return null;
+    if (!Array.isArray(instances)) instances = [instances];
+
+    let drawingInstance = null;
+    let fullDocInstance = null;
+    for (const inst of instances) {
+      const desc = inst["@desc"] || inst["@_desc"] || "";
+      if (desc === "Drawing") drawingInstance = inst;
+      else if (desc === "FullDocument") fullDocInstance = inst;
+    }
+    if (!drawingInstance && fullDocInstance) drawingInstance = fullDocInstance;
+    if (!fullDocInstance && instances.length > 0) fullDocInstance = instances[0];
+
+    const extract = (inst) => {
+      if (!inst) return null;
+      const totalPages = parseInt(inst["@number-of-pages"] || inst["@_number-of-pages"] || "0", 10);
+      const link = inst.link || "";
+      const sections = opsArray(inst["document-section"]).map(s => ({
+        name: s.name || "",
+        startPage: parseInt(s["start-page"] || "0", 10),
+        endPage: parseInt(s["end-page"] || "0", 10),
+      }));
+      return { totalPages: totalPages, link: link, sections: sections };
+    };
+
+    return {
+      drawings: extract(drawingInstance),
+      fullDoc: extract(fullDocInstance),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// 从 link URL 提取 country/docNumber/kind
+function parseOpsImageLink(link) {
+  if (!link) return null;
+  const m = link.match(/images\/([^\/]+)\/([^\/]+)\/([^\/]+)\/(fullimage|thumbnail)/);
+  if (!m) return null;
+  return { country: m[1], docNumber: m[2], kind: m[3] };
+}
+
+// 递归提取嵌套文本
+function extractNestedText(node) {
+  if (node == null) return "";
+  if (typeof node === "string") return node;
+  if (node.$) return node.$;
+  let text = "";
+  for (const key of Object.keys(node)) {
+    if (key.startsWith("@") || key === "$") continue;
+    const val = node[key];
+    if (Array.isArray(val)) {
+      for (const v of val) text += extractNestedText(v);
+    } else {
+      text += extractNestedText(val);
+    }
+  }
+  return text;
+}
+
+// ── OPS JSON → Google Patents 数据结构转换 ──
+function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsData, descriptionData, legalData, familyData, citingData, imagesData) {
+  const parsed = parseOpsPatentNumber(patentInput);
+  const patentNumber = parsed.original || patentInput;
+  let kindForImages = parsed.kindCode || "";
+
+  let biblioRoot = null;
+  try {
+    biblioRoot = biblioData["ops:world-patent-data"]["ops:biblio-search"]["ops:search-result"]["exchange-document"];
+    if (Array.isArray(biblioRoot)) biblioRoot = biblioRoot[0];
+  } catch (e) { /* biblio 可能缺失 */ }
+  if (!biblioRoot && biblioData) {
+    biblioRoot = biblioData["exchange-document"] || biblioData;
+  }
+
+  const result = {
+    patent_number: patentNumber,
+    title: "",
+    url: GOOGLE_PATENTS_BASE + "/patent/" + encodeURIComponent(patentNumber),
+    pdf_link: "",
+    external_links: {},
+    abstract: "",
+    inventors: [],
+    assignees: [],
+    application_date: "",
+    publication_date: "",
+    priority_date: "",
+    classifications: [],
+    landscapes: [],
+    family_id: "",
+    family_applications: [],
+    country_status: [],
+    legal_events: [],
+    events_timeline: [],
+    drawings: [],
+    claims: [],
+    description: "",
+    patent_citations: [],
+    cited_by: [],
+    similar_documents: [],
+    data_source: "EPO OPS",
+  };
+
+  if (!biblioRoot) return result;
+
+  const biblio = biblioRoot["bibliographic-data"] || {};
+
+  // 标题
+  try {
+    const titleObj = biblio["invention-title"];
+    if (titleObj) {
+      if (typeof titleObj === "string") result.title = titleObj;
+      else if (titleObj.$) result.title = titleObj.$;
+      else if (titleObj["text"]) result.title = titleObj["text"];
+    }
+  } catch (e) { /* ignore */ }
+
+  // 出版引用
+  try {
+    const pubRef = biblio["publication-reference"];
+    if (pubRef && pubRef["document-id"]) {
+      const docIds = opsArray(pubRef["document-id"]);
+      const epodoc = opsExtractDocId(docIds, "epodoc");
+      const docdb = opsExtractDocId(docIds, "docdb");
+      if (epodoc) {
+        result.publication_date = opsFormatDate(epodoc.date ? epodoc.date["date"] : "");
+      }
+      if (docdb && docdb.date) {
+        if (!result.publication_date) result.publication_date = opsFormatDate(docdb.date);
+      }
+      if (docdb && docdb.kind && !kindForImages) {
+        kindForImages = docdb.kind;
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  // 申请引用
+  try {
+    const appRef = biblio["application-reference"];
+    if (appRef && appRef["document-id"]) {
+      const docIds = opsArray(appRef["document-id"]);
+      const epodoc = opsExtractDocId(docIds, "epodoc");
+      if (epodoc && epodoc.date) result.application_date = opsFormatDate(epodoc.date);
+    }
+  } catch (e) { /* ignore */ }
+
+  // 优先权日期
+  try {
+    const priorityClaims = biblio["priority-claims"];
+    if (priorityClaims && priorityClaims["priority-claim"]) {
+      const claims = opsArray(priorityClaims["priority-claim"]);
+      if (claims.length > 0 && claims[0]["document-id"]) {
+        const docIds = opsArray(claims[0]["document-id"]);
+        const epodoc = opsExtractDocId(docIds, "epodoc");
+        if (epodoc && epodoc.date) result.priority_date = opsFormatDate(epodoc.date);
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  // 当事人
+  try {
+    const parties = biblio.parties;
+    if (parties) {
+      if (parties.inventors && parties.inventors.inventor) {
+        const inventors = opsArray(parties.inventors.inventor);
+        result.inventors = inventors.map(inv => {
+          const name = inv["inventor-name"];
+          if (name && name.name) {
+            return [name.name["last-name"], name.name["first-name"]].filter(Boolean).join(" ");
+          }
+          return "";
+        }).filter(Boolean);
+      }
+      if (parties.applicants && parties.applicants.applicant) {
+        const applicants = opsArray(parties.applicants.applicant);
+        result.assignees = applicants.map(app => {
+          const name = app["applicant-name"];
+          if (name && name.name) return name.name["organisation-name"] || name.name["last-name"] || "";
+          return "";
+        }).filter(Boolean);
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  // CPC 分类
+  try {
+    const cpc = biblio["classification-cpc"];
+    if (cpc) {
+      const symbols = opsArray(cpc["cpc-classification-symbol"] || cpc["classification-symbol"]);
+      result.classifications = symbols.map(sym => {
+        if (typeof sym === "string") return { code: sym, description: "" };
+        if (sym.$) return { code: sym.$, description: "" };
+        return null;
+      }).filter(Boolean);
+    }
+    const ipcr = biblio["classification-ipcr"];
+    if (ipcr && ipcr["classification-ipcr"]) {
+      const ipcrItems = opsArray(ipcr["classification-ipcr"]);
+      for (const item of ipcrItems) {
+        const sym = item["ipc-classification-symbol"];
+        if (sym && !result.classifications.find(c => c.code === sym)) {
+          result.classifications.push({ code: sym, description: "" });
+        }
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  // 向后引用
+  try {
+    const refsCited = biblio["references-cited"];
+    if (refsCited && refsCited.citation) {
+      const citations = opsArray(refsCited.citation);
+      result.patent_citations = citations.map(cit => {
+        const patCite = cit["patcit"];
+        if (patCite && patCite["document-id"]) {
+          const docIds = opsArray(patCite["document-id"]);
+          const docdb = opsExtractDocId(docIds, "docdb");
+          if (docdb) {
+            return {
+              patent_number: docdb.country + docdb.docNumber + (docdb.kind || ""),
+              country: docdb.country,
+            };
+          }
+        }
+        return null;
+      }).filter(Boolean);
+    }
+  } catch (e) { /* ignore */ }
+
+  // 摘要
+  try {
+    if (abstractData && abstractData["ops:world-patent-data"]) {
+      const abstractNode = abstractData["ops:world-patent-data"].abstract;
+      if (abstractNode) {
+        const pNodes = opsArray(abstractNode.p);
+        result.abstract = pNodes.map(p => (typeof p === "string" ? p : (p.$ || ""))).join("\n").trim();
+        if (!result.abstract && typeof abstractNode === "object" && abstractNode.$) {
+          result.abstract = abstractNode.$;
+        }
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  // 权利要求
+  try {
+    if (claimsData && claimsData["ops:world-patent-data"]) {
+      const claimsNode = claimsData["ops:world-patent-data"].claims;
+      if (claimsNode && claimsNode.claim) {
+        const claims = opsArray(claimsNode.claim);
+        result.claims = claims.map((c, i) => {
+          const num = c["@num"] || c["@number"] || String(i + 1);
+          const claimText = c["claim-text"];
+          let text = "";
+          if (typeof claimText === "string") text = claimText;
+          else if (claimText) {
+            const texts = opsArray(claimText);
+            text = texts.map(t => typeof t === "string" ? t : (t.$ || extractNestedText(t))).join("");
+          }
+          return { num: String(num), type: "independent", text: text.trim() };
+        });
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  // 说明书
+  try {
+    if (descriptionData && descriptionData["ops:world-patent-data"]) {
+      const descNode = descriptionData["ops:world-patent-data"].description;
+      if (descNode) {
+        const pNodes = opsArray(descNode.p);
+        result.description = pNodes.map(p => {
+          if (typeof p === "string") return p;
+          if (p.$) return p.$;
+          return extractNestedText(p);
+        }).join("\n").trim();
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  // 法律事件
+  try {
+    if (legalData && legalData["ops:world-patent-data"]) {
+      const legalNode = legalData["ops:world-patent-data"]["ops:legal"];
+      if (legalNode) {
+        const events = opsArray(legalNode["legal-event"]);
+        result.legal_events = events.map(ev => ({
+          date: opsFormatDate(ev.date),
+          code: ev["event-code"] || ev.code || "",
+          description: ev.description || (ev.attributor ? ev.attributor : ""),
+        }));
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  // 同族
+  try {
+    if (familyData && familyData["ops:world-patent-data"]) {
+      const familyNode = familyData["ops:world-patent-data"]["ops:patent-family"];
+      if (familyNode) {
+        const members = opsArray(familyNode["family-member"]);
+        result.family_applications = members.map(mem => {
+          const pubRef = mem["publication-reference"];
+          if (pubRef && pubRef["document-id"]) {
+            const docIds = opsArray(pubRef["document-id"]);
+            const docdb = opsExtractDocId(docIds, "docdb");
+            if (docdb) {
+              return {
+                publication_number: docdb.country + docdb.docNumber + (docdb.kind || ""),
+                title: "",
+                status: "",
+              };
+            }
+          }
+          return null;
+        }).filter(Boolean);
+        if (result.family_applications.length > 0) {
+          result.family_id = parsed.epodocNum;
+        }
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  // 向前引用
+  try {
+    if (citingData && citingData["ops:world-patent-data"]) {
+      const searchResult = citingData["ops:world-patent-data"]["ops:biblio-search"];
+      if (searchResult && searchResult["ops:search-result"]) {
+        const exDocs = opsArray(searchResult["ops:search-result"]["exchange-document"]);
+        result.cited_by = exDocs.map(doc => {
+          const docId = doc["@id"] || doc["bibliographic-data"];
+          if (typeof docId === "string") return { patent_number: docId };
+          try {
+            const pubRef = doc["bibliographic-data"]["publication-reference"]["document-id"];
+            const epodoc = opsExtractDocId(opsArray(pubRef), "epodoc");
+            if (epodoc) return { patent_number: epodoc.country + epodoc.docNumber };
+          } catch (e) { /* ignore */ }
+          return null;
+        }).filter(Boolean);
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  // 附图与 PDF 下载链接
+  try {
+    const imagesMeta = parseOpsImagesMetadata(imagesData);
+    if (imagesMeta && imagesMeta.drawings && imagesMeta.drawings.totalPages > 0) {
+      const linkInfo = parseOpsImageLink(imagesMeta.drawings.link);
+      const imgCountry = linkInfo ? linkInfo.country : parsed.country;
+      const imgDocNum = linkInfo ? linkInfo.docNumber : parsed.docNumber;
+      const imgKind = linkInfo ? linkInfo.kind : (kindForImages || "A1");
+      const totalPages = Math.min(imagesMeta.drawings.totalPages, 50);
+      const drawings = [];
+      for (let i = 1; i <= totalPages; i++) {
+        drawings.push("/api/ops/image/" + encodeURIComponent(patentNumber) +
+          "?page=" + i + "&country=" + imgCountry + "&doc=" + imgDocNum + "&kind=" + imgKind);
+      }
+      result.drawings = drawings;
+      result._ops_images_meta = {
+        totalPages: totalPages,
+        country: imgCountry,
+        docNumber: imgDocNum,
+        kind: imgKind,
+        fullDocPages: imagesMeta.fullDoc ? imagesMeta.fullDoc.totalPages : 0,
+      };
+    }
+    const epoDirectPdf = getEpoDirectPdfUrl(parsed.country, parsed.docNumber, kindForImages || parsed.kindCode || "A1");
+    if (epoDirectPdf) {
+      result.pdf_link = epoDirectPdf;
+      result.pdf_source = "EPO publication-server (direct)";
+    } else if (kindForImages || (imagesMeta && imagesMeta.drawings)) {
+      result.pdf_link = "/api/ops/pdf/" + encodeURIComponent(patentNumber) + "?kind=" + (kindForImages || "A1");
+      result.pdf_source = "EPO OPS (page-merge)";
+    }
+  } catch (e) { /* ignore */ }
+
+  return result;
+}
+
+// ── OPS 主查询入口 ──
+async function queryOpsPatent(patentInput, consumerKey, consumerSecret) {
+  const parsed = parseOpsPatentNumber(patentInput);
+  if (parsed.error) return { success: false, error: parsed.error };
+
+  const epodocNum = parsed.epodocNum;
+  console.log("[OPS] 查询专利: " + patentInput + " → epodoc: " + epodocNum);
+
+  const endpoints = {
+    biblio: "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/biblio",
+    abstract: "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/abstract",
+    claims: "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/claims",
+    description: "/published-data/publication/epodoc/" + encodeURIComponent(epodocNum) + "/description",
+    legal: "/legal/publication/epodoc/" + encodeURIComponent(epodocNum),
+    family: "/family/publication/epodoc/" + encodeURIComponent(epodocNum),
+    citing: "/published-data/search/?q=" + encodeURIComponent("ct=" + epodocNum) + "&Range=1-25",
+  };
+
+  const promises = Object.entries(endpoints).map(async ([key, opsPath]) => {
+    const result = await opsRequest(consumerKey, consumerSecret, opsPath);
+    if (result.error || result.httpCode !== 200) {
+      console.log("[OPS] " + key + " 失败: " + (result.error || "HTTP " + result.httpCode));
+      return [key, null];
+    }
+    try {
+      const json = JSON.parse(result.body);
+      return [key, json];
+    } catch (e) {
+      console.log("[OPS] " + key + " JSON 解析失败: " + e.message);
+      return [key, null];
+    }
+  });
+
+  const results = await Promise.allSettled(promises);
+  const dataMap = {};
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value) {
+      const [key, val] = r.value;
+      dataMap[key] = val;
+    }
+  }
+
+  if (!dataMap.biblio) {
+    return { success: false, error: "OPS 查询失败：无法获取著录数据（专利可能不存在或号码格式错误）" };
+  }
+
+  // 查询 images 端点
+  try {
+    let kindForImages = parsed.kindCode || "";
+    if (!kindForImages) {
+      const biblioRoot = dataMap.biblio["ops:world-patent-data"]?.["ops:biblio-search"]?.["ops:search-result"]?.["exchange-document"];
+      const bibDoc = Array.isArray(biblioRoot) ? biblioRoot[0] : biblioRoot;
+      const pubRef = bibDoc?.["bibliographic-data"]?.["publication-reference"]?.["document-id"];
+      if (pubRef) {
+        const docdb = opsExtractDocId(opsArray(pubRef), "docdb");
+        if (docdb && docdb.kind) kindForImages = docdb.kind;
+      }
+    }
+    if (!kindForImages) kindForImages = "A1";
+
+    const docdbNum = parsed.country + "." + parsed.docNumber + "." + kindForImages;
+    const imagesPath = "/published-data/publication/docdb/" + encodeURIComponent(docdbNum) + "/images";
+    const imagesResult = await opsRequest(consumerKey, consumerSecret, imagesPath);
+    if (imagesResult.httpCode === 200) {
+      try {
+        dataMap.images = JSON.parse(imagesResult.body);
+        console.log("[OPS] images 元数据获取成功");
+      } catch (e) { /* ignore */ }
+    } else {
+      console.log("[OPS] images 端点返回 HTTP " + imagesResult.httpCode + "（附图/PDF 不可用）");
+    }
+  } catch (e) {
+    console.log("[OPS] images 查询异常: " + e.message);
+  }
+
+  const data = convertOpsToGpStructure(
+    patentInput,
+    dataMap.biblio,
+    dataMap.abstract,
+    dataMap.claims,
+    dataMap.description,
+    dataMap.legal,
+    dataMap.family,
+    dataMap.citing,
+    dataMap.images
+  );
+
+  if (!data.title && !data.abstract) {
+    return { success: false, error: "OPS 查询返回空数据（无标题无摘要）" };
+  }
+
+  console.log("[OPS] 查询成功: " + data.title + " | 权利要求: " + data.claims.length + " | 引用: " + data.patent_citations.length + " | 附图: " + data.drawings.length);
+  return { success: true, data: data, patent_number: data.patent_number, data_source: "EPO OPS" };
+}
+
+// 获取 OPS 配额信息（带 20 分钟缓存）
+function getOpsQuota(consumerKey, consumerSecret) {
+  if (!consumerKey || !consumerSecret) return null;
+  const cacheKey = consumerKey + ":" + consumerSecret;
+  const cached = opsQuotaCache.get(cacheKey);
+  if (cached && Date.now() - cached.updatedAt < OPS_QUOTA_CACHE_TTL) {
+    return cached;
+  }
+  return cached;
+}
+
+// ── Google Patents scraping ──
+
+async function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey, opsSecret) {
   const { normalized, variants } = normalizePatentNumber(patentNumber);
   const allToTry = [normalized, ...variants];
   const corsHeaders = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
@@ -949,7 +1598,8 @@ async function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl) {
     const curlArgs = [
       "-s", "-k", "-L",
       "-w", "\n__HTTP_CODE__%{http_code}",
-      "--max-time", "30",
+      "--max-time", "5",
+      "--connect-timeout", "5",
       "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "-H", "Accept-Language: en-US,en;q=0.9",
       "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -980,6 +1630,15 @@ async function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl) {
       if (httpCode === 200 && html && html.length > 1000) {
         const data = extractPatentFromHtml(html, tryNumber);
         if (data.title || data.abstract) {
+          // Google Patents 抓取成功但无 PDF 链接时，对 EP 专利自动补全 EPO 直链 PDF
+          if (!data.pdf_link) {
+            const epoPdfUrl = getEpoDirectPdfUrlFromPatent(tryNumber);
+            if (epoPdfUrl) {
+              data.pdf_link = epoPdfUrl;
+              data.pdf_source = "EPO publication-server (direct)";
+              console.log("[GP] 补全 EPO 直链 PDF: " + epoPdfUrl);
+            }
+          }
           res.writeHead(200, corsHeaders);
           res.end(JSON.stringify({ success: true, data, patent_number: tryNumber }));
           return;
@@ -988,6 +1647,24 @@ async function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl) {
     } catch (e) {
       console.log(`[GP] curl 错误: ${e.message}`);
       continue;
+    }
+  }
+
+  // Google Patents 所有变体均失败 —— 尝试 EPO OPS 降级查询
+  if (opsKey && opsSecret) {
+    console.log("[GP→OPS] Google Patents 未找到，降级到 EPO OPS 查询: " + patentNumber);
+    try {
+      const opsResult = await queryOpsPatent(patentNumber, opsKey, opsSecret);
+      if (opsResult.success) {
+        console.log("[GP→OPS] 降级查询成功: " + patentNumber);
+        res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "X-Data-Source": "EPO-OPS" });
+        res.end(JSON.stringify({ success: true, data: opsResult.data, patent_number: opsResult.patent_number, data_source: "EPO OPS" }));
+        return;
+      } else {
+        console.log("[GP→OPS] 降级查询也失败: " + (opsResult.error || "未知错误"));
+      }
+    } catch (e) {
+      console.log("[GP→OPS] 降级查询异常: " + e.message);
     }
   }
 
@@ -1896,13 +2573,106 @@ function startServer() {
         const patentNumber = urlObj.pathname.replace("/api/gp/", "");
         const useProxy = urlObj.searchParams.get("proxy") === "1";
         const proxyUrl = urlObj.searchParams.get("proxyUrl") || PROXY_URL;
-        scrapeGooglePatent(decodeURIComponent(patentNumber), res, useProxy, proxyUrl);
+        const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
+        const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
+        scrapeGooglePatent(decodeURIComponent(patentNumber), res, useProxy, proxyUrl, opsKey, opsSecret);
         return;
       }
 
       if (req.url.startsWith("/api/gd/")) {
         const gdPath = req.url.replace("/api/gd", "");
         proxyGdApi(gdPath, res);
+        return;
+      }
+
+      // OPS 配额查询端点
+      if (req.url.startsWith("/api/ops/quota")) {
+        const urlObj = new URL(req.url, "http://localhost");
+        const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
+        const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
+        const quota = getOpsQuota(opsKey, opsSecret);
+        res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+        res.end(JSON.stringify({ success: !!quota, quota, message: quota ? null : "暂无配额数据" }));
+        return;
+      }
+
+      // OPS 附图代理端点
+      if (req.url.startsWith("/api/ops/image/")) {
+        const urlObj = new URL(req.url, "http://localhost");
+        const patentNumber = decodeURIComponent(urlObj.pathname.replace("/api/ops/image/", ""));
+        const page = parseInt(urlObj.searchParams.get("page") || "1", 10);
+        const imgCountry = urlObj.searchParams.get("country") || "";
+        const imgDocNum = urlObj.searchParams.get("doc") || "";
+        const imgKind = urlObj.searchParams.get("kind") || "A1";
+        const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
+        const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
+        (async () => {
+          try {
+            const tokenResult = await getOpsToken(opsKey, opsSecret);
+            if (tokenResult.error) { res.writeHead(401, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"OPS 认证失败"})); return; }
+            const imgUrl = `${OPS_API_BASE}/published-data/images/${imgCountry}/${imgDocNum}/${imgKind}/thumbnail.png?Range=${page}`;
+            const imgResult = await httpsGet(imgUrl, { Authorization: "Bearer " + tokenResult.token, Accept: "image/png" }, 30000);
+            if (imgResult.statusCode === 200 && imgResult.body.length > 100) {
+              res.writeHead(200, { "Content-Type": "image/png", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" });
+              res.end(imgResult.body);
+            } else {
+              res.writeHead(404, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"});
+              res.end(JSON.stringify({error:"附图不可用", httpCode: imgResult.statusCode}));
+            }
+          } catch (e) {
+            res.writeHead(500, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"});
+            res.end(JSON.stringify({error: e.message}));
+          }
+        })();
+        return;
+      }
+
+      // OPS PDF 下载端点（逐页下载 fullimage.pdf 后用 pdf-lib 合并）
+      if (req.url.startsWith("/api/ops/pdf/")) {
+        const urlObj = new URL(req.url, "http://localhost");
+        const patentNumber = decodeURIComponent(urlObj.pathname.replace("/api/ops/pdf/", ""));
+        const kind = urlObj.searchParams.get("kind") || "A1";
+        const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
+        const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
+        (async () => {
+          try {
+            const tokenResult = await getOpsToken(opsKey, opsSecret);
+            if (tokenResult.error) { res.writeHead(401, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"OPS 认证失败"})); return; }
+            const token = tokenResult.token;
+            const parsed = parseOpsPatentNumber(patentNumber);
+            if (parsed.error) { res.writeHead(400, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"专利号格式错误"})); return; }
+            // 先查询 images 元数据获取总页数
+            const docdbNum = parsed.country + "." + parsed.docNumber + "." + (parsed.kindCode || kind);
+            const imagesResult = await httpsGet(OPS_API_BASE + "/published-data/publication/docdb/" + docdbNum + "/images", { Authorization: "Bearer " + token, Accept: "application/json" }, 15000);
+            if (imagesResult.statusCode !== 200) { res.writeHead(404, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"无法获取页面元数据", httpCode: imagesResult.statusCode})); return; }
+            const imagesData = JSON.parse(imagesResult.body.toString("utf-8"));
+            const imagesMeta = parseOpsImagesMetadata(imagesData);
+            const totalPages = imagesMeta && imagesMeta.fullDoc ? imagesMeta.fullDoc.totalPages : 0;
+            if (totalPages === 0) { res.writeHead(404, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"无法确定页面总数"})); return; }
+            // 逐页下载并合并
+            const mergedPdf = await PDFDocument.create();
+            const country = parsed.country;
+            const docNum = parsed.docNumber;
+            const kindCode = parsed.kindCode || kind;
+            for (let p = 1; p <= totalPages; p++) {
+              const pageUrl = `${OPS_API_BASE}/published-data/images/${country}/${docNum}/${kindCode}/fullimage.pdf?Range=${p}`;
+              const pageResult = await httpsGet(pageUrl, { Authorization: "Bearer " + token, Accept: "application/pdf" }, 30000);
+              if (pageResult.statusCode === 200 && pageResult.body.length > 100 && pageResult.body[0] === 0x25 && pageResult.body[1] === 0x50) {
+                try {
+                  const srcDoc = await PDFDocument.load(pageResult.body, { ignoreEncryption: true });
+                  const pages = await mergedPdf.copyPages(srcDoc, srcDoc.getPageIndices());
+                  pages.forEach(pg => mergedPdf.addPage(pg));
+                } catch (e) { console.log(`[OPS-PDF] 第 ${p} 页合并失败: ${e.message}`); }
+              }
+            }
+            const mergedBytes = await mergedPdf.save();
+            res.writeHead(200, { "Content-Type": "application/pdf", "Access-Control-Allow-Origin": "*", "Content-Disposition": 'attachment; filename="' + patentNumber + '.pdf"' });
+            res.end(Buffer.from(mergedBytes));
+          } catch (e) {
+            res.writeHead(500, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"});
+            res.end(JSON.stringify({error: e.message}));
+          }
+        })();
         return;
       }
 
