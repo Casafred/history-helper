@@ -459,7 +459,11 @@ async function searchPatentDetail(input) {
   hideError();
 
   try {
-    const resp = await fetch(gpApiUrl(raw));
+    // 后端 Google Patents 已设置 5 秒超时自动降级 OPS，前端 60 秒兜底（防止异常卡死）
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const resp = await fetch(gpApiUrl(raw), { signal: controller.signal });
+    clearTimeout(timeoutId);
     const json = await resp.json();
 
     if (!json.success) {

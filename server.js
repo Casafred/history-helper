@@ -10,6 +10,9 @@ const GOOGLE_PATENTS_BASE = "https://patents.google.com";
 // EPO OPS（Open Patent Services）API v3.2 —— 作为 Google Patents 的降级数据源
 const OPS_API_BASE = "https://ops.epo.org/3.2/rest-services";
 const OPS_AUTH_URL = "https://ops.epo.org/3.2/auth/accesstoken";
+// EPO publication-server —— EP 专利全文 PDF 直链（零认证，一次拿到含附图的完整 PDF）
+// 参考：https://www.epo.org/searching-for-patents/technical/publication-server/help.html
+const EPO_PDF_DIRECT_BASE = "https://data.epo.org/publication-server/pdf-document";
 // 系统代理：优先取 HTTPS_PROXY / HTTP_PROXY 环境变量，否则使用默认值
 const PROXY_URL = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || "http://127.0.0.1:7897";
 const PORT = 8080;
@@ -644,6 +647,25 @@ async function mergePdfBuffers(pdfBuffers) {
   }
   const mergedBytes = await merged.save();
   return Buffer.from(mergedBytes);
+}
+
+// ── EPO publication-server 直链 PDF（仅 EP 专利，零认证） ──
+// URL 形如 https://data.epo.org/publication-server/pdf-document?cc=EP&pn=1502502&ki=A1
+// 返回完整 PDF（含说明书、权利要求、附图），一次请求即可，无需 OAuth、无需逐页合并
+// 参数: country 两位国家代码（仅 EP）、docNumber 纯数字公开号、kind 公开类型（A1/B1 等）
+function getEpoDirectPdfUrl(country, docNumber, kind) {
+  if (!country || !docNumber) return null;
+  if (String(country).toUpperCase() !== "EP") return null; // 仅 EP 专利支持
+  const ki = (kind || "A1").toUpperCase();
+  return EPO_PDF_DIRECT_BASE + "?cc=EP&pn=" + encodeURIComponent(docNumber) + "&ki=" + encodeURIComponent(ki);
+}
+
+// 从完整专利号中提取 EP 直链所需的 country/docNumber/kind
+// 输入 "EP4741101A1" → "https://data.epo.org/publication-server/pdf-document?cc=EP&pn=4741101&ki=A1"
+function getEpoDirectPdfUrlFromPatent(patentInput) {
+  const parsed = parseOpsPatentNumber(patentInput);
+  if (parsed.error || String(parsed.country).toUpperCase() !== "EP") return null;
+  return getEpoDirectPdfUrl(parsed.country, parsed.docNumber, parsed.kindCode || "A1");
 }
 
 // 解析专利号：分离 country / docNumber / kindCode
@@ -2013,6 +2035,16 @@ function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey, opsSe
       if (result.httpCode === 200 && result.body && result.body.length > 1000) {
         const data = extractPatentFromHtml(result.body, tryNumber);
         if (data.title || data.abstract) {
+          // Google Patents 抓取成功但无 PDF 链接时，对 EP 专利自动补全 EPO 直链 PDF
+          // data.epo.org/publication-server 提供 EP 专利完整 PDF（含附图），零认证
+          if (!data.pdf_link) {
+            const epoPdfUrl = getEpoDirectPdfUrlFromPatent(tryNumber);
+            if (epoPdfUrl) {
+              data.pdf_link = epoPdfUrl;
+              data.pdf_source = "EPO publication-server (direct)";
+              console.log("[GP] 补全 EPO 直链 PDF: " + epoPdfUrl);
+            }
+          }
           res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
           res.end(JSON.stringify({ success: true, data, patent_number: tryNumber }));
           return;
