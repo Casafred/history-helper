@@ -490,10 +490,10 @@ async function searchPatentDetail(input) {
   patentDetailSection.classList.add("hidden");
   hideError();
 
-  // 5 秒后提示"可能正在尝试 EPO OPS 降级"（后端 GP 超时 5 秒后自动降级）
+  // 5 秒后提示"可能正在尝试降级"（后端 GP 超时 5 秒后自动降级）
   const fallbackHintId = setTimeout(() => {
     if (!loading.classList.contains("hidden")) {
-      loadingText.textContent = "Google Patents 未响应，正在尝试 EPO OPS 降级查询...";
+      loadingText.textContent = "Google Patents 未响应，正在尝试降级查询...";
     }
   }, 5500);
 
@@ -507,17 +507,45 @@ async function searchPatentDetail(input) {
     const json = await resp.json();
 
     if (!json.success) {
-      // 根据 404 诊断信息给出更有用的提示
-      let errMsg = json.error || "未找到该专利";
-      if (json.ops_attempted === false && json.ops_key_provided === false) {
-        errMsg = "Google Patents 未找到该专利，且未配置 EPO OPS 凭证。\n请在「设置 → EPO OPS」中填写 Consumer Key/Secret 并保存，系统将自动降级到 EPO OPS 查询。";
-      } else if (json.ops_attempted === true && json.ops_error) {
-        errMsg = "Google Patents 与 EPO OPS 均未找到该专利。\nEPO OPS 降级查询失败原因: " + json.ops_error + "\n\n可在「设置 → EPO OPS」中点击「测试连接」验证凭证是否有效。";
-      }
-      showError(errMsg);
+      showError(json.error || "未找到该专利");
       patentDetailSection.classList.add("hidden");
       searchBtn.disabled = false;
       loading.classList.add("hidden");
+      return;
+    }
+
+    // Espacenet 降级：Google Patents 未找到，自动打开 Espacenet 页面
+    if (json.data_source === "Espacenet" || (json.data && json.data.data_source === "Espacenet")) {
+      const espacenetUrl = json.espacenet_url || (json.data && json.data.espacenet_url) || "";
+      if (espacenetUrl) {
+        // 在 Electron 中通过 shell.openExternal 打开系统浏览器
+        if (window.electronAPI && window.electronAPI.openExternal) {
+          window.electronAPI.openExternal(espacenetUrl);
+        } else {
+          window.open(espacenetUrl, "_blank");
+        }
+      }
+      // 显示提示卡片而不是空白详情
+      patentDetailContent.innerHTML = `
+        <div class="pd-header">
+          <div class="pd-patent-number">${escapeHtml(raw)}</div>
+          <div class="pd-title">Google Patents 未找到该专利</div>
+        </div>
+        <div class="pd-espacenet-fallback" style="padding:24px;text-align:center;">
+          <div style="font-size:15px;margin-bottom:12px;">已为你打开 <strong>Espacenet</strong> 查询该专利</div>
+          <div style="margin-bottom:16px;">
+            <a href="${escapeHtml(espacenetUrl)}" target="_blank" rel="noopener"
+               style="display:inline-block;padding:10px 24px;background:#c62828;color:#fff;border-radius:6px;text-decoration:none;font-size:14px;">
+              在 Espacenet 中查看
+            </a>
+          </div>
+          <div style="color:#888;font-size:12px;">Espacenet 提供 PDF 下载、附图、权利要求等完整信息</div>
+        </div>
+      `;
+      patentDetailSection.classList.remove("hidden");
+      searchBtn.disabled = false;
+      loading.classList.add("hidden");
+      showDataSourceBadge("Espacenet", "Google Patents 未找到，已跳转 Espacenet");
       return;
     }
 
