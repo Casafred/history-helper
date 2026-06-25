@@ -50,12 +50,13 @@ async function getOpsToken(consumerKey, consumerSecret) {
     ], { maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
       if (err) { resolve({ error: "curl 错误: " + err.message }); return; }
 
-      const headerEndIdx = stdout.indexOf("\r\n\r\n");
+      // 兼容 HTTP/2（\n\n）和 HTTP/1.1（\r\n\r\n）的头部/正文分隔
+      const headerEndMatch = stdout.match(/\r?\n\r?\n/);
       let headers = "";
       let rest = stdout;
-      if (headerEndIdx !== -1) {
-        headers = stdout.substring(0, headerEndIdx);
-        rest = stdout.substring(headerEndIdx + 4);
+      if (headerEndMatch) {
+        headers = stdout.substring(0, headerEndMatch.index);
+        rest = stdout.substring(headerEndMatch.index + headerEndMatch[0].length);
       }
 
       const marker = "\n__HTTP_CODE__";
@@ -120,12 +121,13 @@ async function opsRequest(consumerKey, consumerSecret, opsPath, accept) {
     ], { maxBuffer: 20 * 1024 * 1024 }, (err, stdout) => {
       if (err) { resolve({ error: "curl 错误: " + err.message }); return; }
 
-      const headerEndIdx = stdout.indexOf("\r\n\r\n");
+      // 兼容 HTTP/2（\n\n）和 HTTP/1.1（\r\n\r\n）的头部/正文分隔
+      const headerEndMatch = stdout.match(/\r?\n\r?\n/);
       let headers = "";
       let rest = stdout;
-      if (headerEndIdx !== -1) {
-        headers = stdout.substring(0, headerEndIdx);
-        rest = stdout.substring(headerEndIdx + 4);
+      if (headerEndMatch) {
+        headers = stdout.substring(0, headerEndMatch.index);
+        rest = stdout.substring(headerEndMatch.index + headerEndMatch[0].length);
       }
 
       const marker = "\n__HTTP_CODE__";
@@ -176,12 +178,14 @@ async function opsDownloadBinary(consumerKey, consumerSecret, opsPath) {
       if (err) { resolve({ error: "curl 错误: " + err.message }); return; }
 
       const str = stdoutBuffer.toString("latin1");
-      const headerEndIdx = str.indexOf("\r\n\r\n");
+      // 兼容 HTTP/2（\n\n）和 HTTP/1.1（\r\n\r\n）的头部/正文分隔
+      const headerEndMatch = str.match(/\r?\n\r?\n/);
       let headers = "";
       let bodyBuffer = stdoutBuffer;
-      if (headerEndIdx !== -1) {
-        headers = str.substring(0, headerEndIdx);
-        bodyBuffer = stdoutBuffer.subarray(headerEndIdx + 4);
+      if (headerEndMatch) {
+        const headerEndByte = Buffer.from(headerEndMatch[0], "latin1").length;
+        headers = str.substring(0, headerEndMatch.index);
+        bodyBuffer = stdoutBuffer.subarray(headerEndMatch.index + headerEndByte);
       }
 
       const marker = Buffer.from("\n__HTTP_CODE__");
