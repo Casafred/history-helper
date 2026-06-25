@@ -155,6 +155,7 @@ function getOpsSettings() {
 // 为 OPS 降级数据中的附图代理 URL 和 PDF 下载链接追加凭证参数
 // 后端返回的 URL 形如 /api/ops/image/EP...?page=1&country=EP&doc=xxx&kind=A1
 // 前端需追加 &opsKey=xxx&opsSecret=yyy 才能通过后端的 Bearer token 认证
+// 注意：data.epo.org 直链 PDF 零认证，无需追加凭证
 function augmentOpsUrls(data) {
   if (!data) return;
   const ops = getOpsSettings();
@@ -174,7 +175,9 @@ function augmentOpsUrls(data) {
     data.drawings = []; // 用户关闭了附图功能
   }
 
-  if (data.pdf_link && typeof data.pdf_link === "string" && data.pdf_link.startsWith("/api/ops/pdf/") && !data.pdf_link.includes("opsKey=")) {
+  // 仅对 /api/ops/pdf 路由追加凭证；data.epo.org 直链 PDF 无需认证
+  if (data.pdf_link && typeof data.pdf_link === "string" &&
+      data.pdf_link.startsWith("/api/ops/pdf/") && !data.pdf_link.includes("opsKey=")) {
     data.pdf_link = data.pdf_link + credSuffix;
   }
 }

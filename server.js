@@ -11,8 +11,11 @@ const GOOGLE_PATENTS_BASE = "https://patents.google.com";
 const OPS_API_BASE = "https://ops.epo.org/3.2/rest-services";
 const OPS_AUTH_URL = "https://ops.epo.org/3.2/auth/accesstoken";
 // EPO publication-server —— EP 专利全文 PDF 直链（零认证，一次拿到含附图的完整 PDF）
+// 实测：旧端点 pdf-document?cc=EP&pn=...&ki=... 已废弃（返回 SPA HTML）
+// 正确端点：rest/v1.2/patents/EP{number}NW{kind}/document.pdf（docId 必带 NW 中缀）
 // 参考：https://www.epo.org/searching-for-patents/technical/publication-server/help.html
-const EPO_PDF_DIRECT_BASE = "https://data.epo.org/publication-server/pdf-document";
+// 限制：仅支持 EP 专利（EPO 只发布自己的文献，US/WO/CN/DE 等需走 OPS images 逐页合并）
+const EPO_PDF_DIRECT_BASE = "https://data.epo.org/publication-server/rest/v1.2/patents";
 // 系统代理：优先取 HTTPS_PROXY / HTTP_PROXY 环境变量，否则使用默认值
 const PROXY_URL = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || "http://127.0.0.1:7897";
 const PORT = 8080;
@@ -650,18 +653,20 @@ async function mergePdfBuffers(pdfBuffers) {
 }
 
 // ── EPO publication-server 直链 PDF（仅 EP 专利，零认证） ──
-// URL 形如 https://data.epo.org/publication-server/pdf-document?cc=EP&pn=1502502&ki=A1
+// URL 形如 https://data.epo.org/publication-server/rest/v1.2/patents/EP4741101NWA1/document.pdf
+// docId 格式：EP{number}NW{kind}（必带 NW 中缀，实测无 NW 会返回 500）
 // 返回完整 PDF（含说明书、权利要求、附图），一次请求即可，无需 OAuth、无需逐页合并
 // 参数: country 两位国家代码（仅 EP）、docNumber 纯数字公开号、kind 公开类型（A1/B1 等）
 function getEpoDirectPdfUrl(country, docNumber, kind) {
   if (!country || !docNumber) return null;
-  if (String(country).toUpperCase() !== "EP") return null; // 仅 EP 专利支持
+  if (String(country).toUpperCase() !== "EP") return null; // 仅 EP 专利支持（EPO 只发布自己的文献）
   const ki = (kind || "A1").toUpperCase();
-  return EPO_PDF_DIRECT_BASE + "?cc=EP&pn=" + encodeURIComponent(docNumber) + "&ki=" + encodeURIComponent(ki);
+  const docId = "EP" + docNumber + "NW" + ki;
+  return EPO_PDF_DIRECT_BASE + "/" + encodeURIComponent(docId) + "/document.pdf";
 }
 
 // 从完整专利号中提取 EP 直链所需的 country/docNumber/kind
-// 输入 "EP4741101A1" → "https://data.epo.org/publication-server/pdf-document?cc=EP&pn=4741101&ki=A1"
+// 输入 "EP4741101A1" → "https://data.epo.org/publication-server/rest/v1.2/patents/EP4741101NWA1/document.pdf"
 function getEpoDirectPdfUrlFromPatent(patentInput) {
   const parsed = parseOpsPatentNumber(patentInput);
   if (parsed.error || String(parsed.country).toUpperCase() !== "EP") return null;
@@ -1008,7 +1013,9 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
 
   // ── 附图与 PDF 下载链接（来自 OPS images 端点元数据） ──
   // 前端 <img> 直接使用 drawings 数组中的 URL，需通过 /api/ops/image 代理（带 Bearer token）
-  // pdf_link 指向 /api/ops/pdf 路由，后端逐页下载 fullimage.pdf 并用 pdf-lib 合并
+  // pdf_link 策略（优先级）：
+  //   1. EP 专利 → data.epo.org 直链 PDF（零认证，一次拿完整含附图 PDF，最优）
+  //   2. 其他专利 → /api/ops/pdf 路由（后端逐页下载 fullimage.pdf 并用 pdf-lib 合并）
   try {
     const imagesMeta = parseOpsImagesMetadata(imagesData);
     if (imagesMeta && imagesMeta.drawings && imagesMeta.drawings.totalPages > 0) {
@@ -1034,9 +1041,15 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
         fullDocPages: imagesMeta.fullDoc ? imagesMeta.fullDoc.totalPages : 0,
       };
     }
-    // PDF 下载链接（前端会自动追加 opsKey/opsSecret）
-    if (kindForImages || (imagesMeta && imagesMeta.drawings)) {
+    // PDF 下载链接：EP 专利优先用 data.epo.org 直链（零认证、完整 PDF、配额友好）
+    const epoDirectPdf = getEpoDirectPdfUrl(parsed.country, parsed.docNumber, kindForImages || parsed.kindCode || "A1");
+    if (epoDirectPdf) {
+      result.pdf_link = epoDirectPdf;
+      result.pdf_source = "EPO publication-server (direct)";
+    } else if (kindForImages || (imagesMeta && imagesMeta.drawings)) {
+      // 非 EP 专利：走 OPS images 逐页合并路由（前端会自动追加 opsKey/opsSecret）
       result.pdf_link = "/api/ops/pdf/" + encodeURIComponent(patentNumber) + "?kind=" + (kindForImages || "A1");
+      result.pdf_source = "EPO OPS (page-merge)";
     }
   } catch (e) { /* ignore */ }
 
@@ -2176,6 +2189,8 @@ const server = http.createServer((req, res) => {
 
   // OPS PDF 下载端点（逐页下载 fullimage.pdf 后用 pdf-lib 合并为完整 PDF）
   // URL: /api/ops/pdf/{patentNumber}?kind={K}&opsKey=xxx&opsSecret=yyy
+  // 注意：EP 专利的 pdf_link 已优先指向 data.epo.org 直链，不会走此路由；
+  //       此路由仅服务非 EP 专利（US/WO/CN/DE 等）的 PDF 合并下载
   if (req.url.startsWith("/api/ops/pdf/")) {
     const urlObj = new URL(req.url, "http://localhost");
     const patentNumber = decodeURIComponent(urlObj.pathname.replace("/api/ops/pdf/", ""));
