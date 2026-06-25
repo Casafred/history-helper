@@ -1094,24 +1094,29 @@ async function queryOpsPatent(patentInput, consumerKey, consumerSecret) {
     citing: "/published-data/search/?q=" + encodeURIComponent("ct=" + epodocNum) + "&Range=1-25",
   };
 
-  const promises = Object.entries(endpoints).map(async ([key, opsPath]) => {
+  // 串行请求避免并发触发 EPO 限流（7 个并发请求会导致全部 403/限流）
+  // 参考 MCP 实现（talenlin/epo-ops-mcp）：单工具单请求，不并发
+  const dataMap = {};
+  for (const [key, opsPath] of Object.entries(endpoints)) {
     const result = await opsRequest(consumerKey, consumerSecret, opsPath);
     if (result.error || result.httpCode !== 200) {
       console.log("[OPS] " + key + " 失败: " + (result.error || "HTTP " + result.httpCode));
-      return [key, null];
+      dataMap[key] = null;
+    } else {
+      try {
+        dataMap[key] = JSON.parse(result.body);
+      } catch (e) {
+        console.log("[OPS] " + key + " JSON 解析失败: " + e.message);
+        dataMap[key] = null;
+      }
     }
-    try {
-      const json = JSON.parse(result.body);
-      return [key, json];
-    } catch (e) {
-      console.log("[OPS] " + key + " JSON 解析失败: " + e.message);
-      return [key, null];
+    // biblio 是核心数据，如果它失败就直接返回，不再继续其他请求
+    if (key === "biblio" && !dataMap.biblio) {
+      const errMsg = result.error || ("HTTP " + result.httpCode);
+      const bodyPreview = result.body ? result.body.substring(0, 300) : "";
+      return { success: false, error: "OPS 查询失败：无法获取著录数据 (" + errMsg + ")。专利可能不存在或号码格式错误。" + (bodyPreview ? "\n响应预览: " + bodyPreview : "") };
     }
-  });
-
-  const results = await Promise.all(promises);
-  const dataMap = {};
-  for (const [key, val] of results) dataMap[key] = val;
+  }
 
   // 至少需要 biblio 数据才算成功
   if (!dataMap.biblio) {
@@ -2172,6 +2177,31 @@ const server = http.createServer((req, res) => {
       quota: quota,
       message: quota ? null : "暂无配额数据，请先查询一次专利以触发配额采集",
     }));
+    return;
+  }
+
+  // OPS 原始端点代理（调试用）：/api/ops/raw?path=/published-data/...&opsKey=...&opsSecret=...
+  if (req.url.startsWith("/api/ops/raw")) {
+    const urlObj = new URL(req.url, "http://localhost");
+    const opsPath = urlObj.searchParams.get("path") || "";
+    const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
+    const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
+    (async () => {
+      const corsHdr = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+      if (!opsPath || !opsKey || !opsSecret) {
+        res.writeHead(400, corsHdr);
+        res.end(JSON.stringify({ error: "缺少 path/opsKey/opsSecret 参数" }));
+        return;
+      }
+      const result = await opsRequest(opsKey, opsSecret, opsPath);
+      if (result.error) {
+        res.writeHead(200, corsHdr);
+        res.end(JSON.stringify({ httpCode: 0, error: result.error, body: null }));
+        return;
+      }
+      res.writeHead(200, corsHdr);
+      res.end(JSON.stringify({ httpCode: result.httpCode, body: result.body, headers: result.headers }));
+    })();
     return;
   }
 
