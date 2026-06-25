@@ -2032,7 +2032,7 @@ function extractPatentFromHtml(html, patentId) {
   return htmlResult;
 }
 
-function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey, opsSecret) {
+function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey, opsSecret, opsUseProxy, opsProxyUrl) {
   const { normalized, variants } = normalizePatentNumber(patentNumber);
   const allToTry = [normalized, ...variants];
   // Google Patents 每个变体的超时时间：5 秒（用户要求：5 秒未获取到信息即自动转 EPO OPS）
@@ -2115,7 +2115,7 @@ function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey, opsSe
       opsAttempted = true;
       console.log("[GP→OPS] Google Patents 未找到，降级到 EPO OPS 查询: " + patentNumber);
       try {
-        const opsResult = await queryOpsPatent(patentNumber, opsKey, opsSecret);
+        const opsResult = await queryOpsPatent(patentNumber, opsKey, opsSecret, opsUseProxy, opsProxyUrl);
         if (opsResult.success) {
           console.log("[GP→OPS] 降级查询成功: " + patentNumber);
           res.writeHead(200, {
@@ -2199,7 +2199,10 @@ const server = http.createServer((req, res) => {
     // OPS 降级查询凭证（前端从设置中读取并透传）
     const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
     const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
-    scrapeGooglePatent(decodeURIComponent(patentNumber), res, useProxy, proxyUrl, opsKey, opsSecret);
+    // OPS 代理独立于 GP 代理（OPS 国内通常可直连，默认不走代理）
+    const opsUseProxy = urlObj.searchParams.get("opsProxy") === "1";
+    const opsProxyUrl = urlObj.searchParams.get("opsProxyUrl") || PROXY_URL;
+    scrapeGooglePatent(decodeURIComponent(patentNumber), res, useProxy, proxyUrl, opsKey, opsSecret, opsUseProxy, opsProxyUrl);
     return;
   }
 

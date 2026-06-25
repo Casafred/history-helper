@@ -130,6 +130,7 @@ function gpApiUrl(patentNumber) {
   const s = getGpProxySettings();
   let url = "/api/gp/" + encodeURIComponent(patentNumber);
   const params = [];
+  // GP 代理（仅用于访问 Google Patents）
   if (s.enabled) {
     params.push("proxy=1");
     if (s.proxyUrl) params.push("proxyUrl=" + encodeURIComponent(s.proxyUrl));
@@ -139,6 +140,12 @@ function gpApiUrl(patentNumber) {
   if (opsConfig.enabled && opsConfig.consumerKey && opsConfig.consumerSecret) {
     params.push("opsKey=" + encodeURIComponent(opsConfig.consumerKey));
     params.push("opsSecret=" + encodeURIComponent(opsConfig.consumerSecret));
+    // OPS 代理独立于 GP 代理（OPS 国内通常可直连，默认不走代理）
+    const opsProxy = getOpsProxySettings();
+    if (opsProxy.enabled) {
+      params.push("opsProxy=1");
+      if (opsProxy.proxyUrl) params.push("opsProxyUrl=" + encodeURIComponent(opsProxy.proxyUrl));
+    }
   }
   if (params.length > 0) url += "?" + params.join("&");
   return url;

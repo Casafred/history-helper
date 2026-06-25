@@ -1692,7 +1692,7 @@ async function getOpsQuota(consumerKey, consumerSecret, useProxy, proxyUrl) {
 
 // ── Google Patents scraping ──
 
-async function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey, opsSecret) {
+async function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey, opsSecret, opsUseProxy, opsProxyUrl) {
   const { normalized, variants } = normalizePatentNumber(patentNumber);
   const allToTry = [normalized, ...variants];
   const corsHeaders = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
@@ -1762,11 +1762,12 @@ async function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey,
   }
 
   // Google Patents 所有变体均失败 —— 尝试 EPO OPS 降级查询
+  // 注意：OPS 代理设置独立于 GP 代理（OPS 国内通常可直连，默认不走代理）
   if (opsKey && opsSecret) {
     opsAttempted = true;
-    console.log("[GP→OPS] Google Patents 未找到，降级到 EPO OPS 查询: " + patentNumber + (useProxy ? " (proxy=" + proxyUrl + ")" : " (直连)"));
+    console.log("[GP→OPS] Google Patents 未找到，降级到 EPO OPS 查询: " + patentNumber + (opsUseProxy ? " (OPS proxy=" + opsProxyUrl + ")" : " (OPS 直连)"));
     try {
-      const opsResult = await queryOpsPatent(patentNumber, opsKey, opsSecret, useProxy, proxyUrl);
+      const opsResult = await queryOpsPatent(patentNumber, opsKey, opsSecret, opsUseProxy, opsProxyUrl);
       if (opsResult.success) {
         console.log("[GP→OPS] 降级查询成功: " + patentNumber);
         res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "X-Data-Source": "EPO-OPS" });
@@ -2706,7 +2707,10 @@ function startServer() {
         const proxyUrl = urlObj.searchParams.get("proxyUrl") || PROXY_URL;
         const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
         const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
-        scrapeGooglePatent(decodeURIComponent(patentNumber), res, useProxy, proxyUrl, opsKey, opsSecret);
+        // OPS 代理独立于 GP 代理（默认不走代理，OPS 国内可直连）
+        const opsUseProxy = urlObj.searchParams.get("opsProxy") === "1";
+        const opsProxyUrl = urlObj.searchParams.get("opsProxyUrl") || PROXY_URL;
+        scrapeGooglePatent(decodeURIComponent(patentNumber), res, useProxy, proxyUrl, opsKey, opsSecret, opsUseProxy, opsProxyUrl);
         return;
       }
 
