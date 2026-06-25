@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, shell, ipcMain } = require("electron");
 const http = require("http");
 const https = require("https");
 const fs = require("fs");
@@ -3030,6 +3030,13 @@ function createWindow(port) {
 }
 
 app.whenReady().then(async () => {
+  // IPC: 渲染进程请求在系统浏览器中打开外部链接
+  ipcMain.on("open-external", (_event, url) => {
+    if (typeof url === "string" && (url.startsWith("http://") || url.startsWith("https://"))) {
+      shell.openExternal(url);
+    }
+  });
+
   const port = await startServer();
   createWindow(port);
 
