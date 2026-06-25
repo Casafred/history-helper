@@ -1957,13 +1957,16 @@ function extractPatentFromHtml(html, patentId) {
 function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey, opsSecret) {
   const { normalized, variants } = normalizePatentNumber(patentNumber);
   const allToTry = [normalized, ...variants];
+  // Google Patents 每个变体的超时时间：5 秒（用户要求：5 秒未获取到信息即自动转 EPO OPS）
+  const GP_TIMEOUT_SECONDS = 5;
 
   (async () => {
     for (const tryNumber of allToTry) {
       const url = `${GOOGLE_PATENTS_BASE}/patent/${encodeURIComponent(tryNumber)}`;
       const args = [
         "-s", "-k", "-w", "\n__HTTP_CODE__%{http_code}",
-        "--max-time", "30",
+        "--max-time", String(GP_TIMEOUT_SECONDS),
+        "--connect-timeout", "5",
         "-L",
         "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "-H", "Accept-Language: en-US,en;q=0.9",
