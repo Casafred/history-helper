@@ -152,10 +152,19 @@ function getOpsSettings() {
   return { enabled: enabled, consumerKey: ops.consumerKey || "", consumerSecret: ops.consumerSecret || "" };
 }
 
-// OPS 请求复用 GP 代理设置（中国用户访问 ops.epo.org 需走代理）
-// 返回形如 "proxy=1&proxyUrl=http%3A%2F%2F127.0.0.1%3A7897" 的查询串（无代理时返回空串）
+// OPS 代理设置（独立于 Google Patents 代理；EPO OPS 在国内通常可直连，默认关闭）
+function getOpsProxySettings() {
+  try {
+    return JSON.parse(localStorage.getItem("patentlens_ops_proxy") || "{}");
+  } catch { return {}; }
+}
+function saveOpsProxySettings(enabled, proxyUrl) {
+  localStorage.setItem("patentlens_ops_proxy", JSON.stringify({ enabled: !!enabled, proxyUrl: proxyUrl || "" }));
+}
+
+// 返回 OPS 请求所需的代理查询串（形如 "proxy=1&proxyUrl=..."），无代理时返回空串
 function getOpsProxyParams() {
-  const s = getGpProxySettings();
+  const s = getOpsProxySettings();
   if (!s.enabled) return "";
   const parts = ["proxy=1"];
   if (s.proxyUrl) parts.push("proxyUrl=" + encodeURIComponent(s.proxyUrl));
@@ -8069,11 +8078,25 @@ const opsEnabledCheckbox = document.getElementById("ops-enabled-checkbox");
 const opsDrawingsCheckbox = document.getElementById("ops-drawings-checkbox");
 const opsConsumerKeyInput = document.getElementById("ops-consumer-key-input");
 const opsConsumerSecretInput = document.getElementById("ops-consumer-secret-input");
+const opsProxyCheckbox = document.getElementById("ops-proxy-checkbox");
+const opsProxyUrlGroup = document.getElementById("ops-proxy-url-group");
+const opsProxyUrlInput = document.getElementById("ops-proxy-url-input");
 const opsSaveBtn = document.getElementById("ops-save-btn");
 const opsTestBtn = document.getElementById("ops-test-btn");
 const opsTestResult = document.getElementById("ops-test-result");
 const opsQuotaDisplayGroup = document.getElementById("ops-quota-display-group");
 const opsRefreshQuotaBtn = document.getElementById("ops-refresh-quota-btn");
+
+// OPS 代理开关联动：勾选时显示代理地址输入框
+if (opsProxyCheckbox) {
+  const savedOpsProxy = getOpsProxySettings();
+  opsProxyCheckbox.checked = !!savedOpsProxy.enabled;
+  if (opsProxyUrlInput) opsProxyUrlInput.value = savedOpsProxy.proxyUrl || "";
+  if (opsProxyUrlGroup) opsProxyUrlGroup.style.display = savedOpsProxy.enabled ? "" : "none";
+  opsProxyCheckbox.addEventListener("change", () => {
+    if (opsProxyUrlGroup) opsProxyUrlGroup.style.display = opsProxyCheckbox.checked ? "" : "none";
+  });
+}
 
 // 回填 OPS 配置到表单（由 loadAISettingsToForm 调用）
 function loadOpsSettingsToForm() {
@@ -8082,6 +8105,11 @@ function loadOpsSettingsToForm() {
   if (opsConsumerKeyInput) opsConsumerKeyInput.value = ops.consumerKey;
   if (opsConsumerSecretInput) opsConsumerSecretInput.value = ops.consumerSecret;
   if (opsDrawingsCheckbox) opsDrawingsCheckbox.checked = localStorage.getItem("patentlens_ops_drawings") !== "false";
+  // 回填 OPS 代理设置（独立于 GP 代理）
+  const opsProxy = getOpsProxySettings();
+  if (opsProxyCheckbox) opsProxyCheckbox.checked = !!opsProxy.enabled;
+  if (opsProxyUrlInput) opsProxyUrlInput.value = opsProxy.proxyUrl || "";
+  if (opsProxyUrlGroup) opsProxyUrlGroup.style.display = opsProxy.enabled ? "" : "none";
   // 显示配额区域（如果有 key）
   if (opsQuotaDisplayGroup && ops.consumerKey) {
     opsQuotaDisplayGroup.style.display = "";
@@ -8127,6 +8155,11 @@ if (opsSaveBtn) {
     window.AI.saveAIConfig(config);
     localStorage.setItem("patentlens_ops_enabled", opsEnabledCheckbox && opsEnabledCheckbox.checked ? "true" : "false");
     localStorage.setItem("patentlens_ops_drawings", opsDrawingsCheckbox && opsDrawingsCheckbox.checked ? "true" : "false");
+    // 保存 OPS 代理设置（独立于 GP 代理）
+    saveOpsProxySettings(
+      opsProxyCheckbox ? opsProxyCheckbox.checked : false,
+      opsProxyUrlInput ? opsProxyUrlInput.value.trim() : ""
+    );
     opsSaveBtn.textContent = "已保存 ✓";
     setTimeout(() => { opsSaveBtn.textContent = "保存"; }, 1500);
     // 保存后显示配额区域
@@ -8159,7 +8192,12 @@ if (opsTestBtn) {
     }
     try {
       // 直接调用 OPS 测试端点（1. 获取 token  2. 用 EP1000000 做轻量 biblio 查询）
-      const proxyPart = getOpsProxyParams();
+      // 代理参数优先取表单当前值（用户可能还没点"保存"）
+      let proxyPart = "";
+      if (opsProxyCheckbox && opsProxyCheckbox.checked) {
+        const pUrl = opsProxyUrlInput ? opsProxyUrlInput.value.trim() : "";
+        proxyPart = "proxy=1" + (pUrl ? "&proxyUrl=" + encodeURIComponent(pUrl) : "");
+      }
       const resp = await fetch("/api/ops/test?opsKey=" + encodeURIComponent(key) + "&opsSecret=" + encodeURIComponent(secret) + (proxyPart ? "&" + proxyPart : ""));
       const data = await resp.json();
       if (data.success) {
