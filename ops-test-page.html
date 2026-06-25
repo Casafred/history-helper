@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>EPO OPS 测试工具</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f1117; color: #e4e6f0; line-height: 1.6; padding: 20px;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 8px; color: #4f8ff7; }
+  .subtitle { color: #9498ad; font-size: 13px; margin-bottom: 24px; }
+  .card {
+    background: #1a1d27; border: 1px solid #2e3348; border-radius: 8px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  .card-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #e4e6f0; }
+  .form-row { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .form-group { flex: 1; min-width: 200px; }
+  label { display: block; font-size: 12px; color: #9498ad; margin-bottom: 4px; }
+  input, select {
+    width: 100%; padding: 8px 12px; background: #0f1117; border: 1px solid #2e3348;
+    border-radius: 4px; color: #e4e6f0; font-size: 13px; outline: none;
+  }
+  input:focus, select:focus { border-color: #4f8ff7; }
+  button {
+    padding: 8px 16px; background: #4f8ff7; color: #fff; border: none;
+    border-radius: 4px; cursor: pointer; font-size: 13px; transition: background 0.2s;
+  }
+  button:hover { background: #6ba1ff; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: #2a2e42; }
+  button.secondary:hover { background: #353a52; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .preset-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px; margin-top: 8px;
+  }
+  .preset-btn {
+    padding: 10px 8px; background: #2a2e42; border: 1px solid #2e3348;
+    border-radius: 4px; color: #e4e6f0; cursor: pointer; font-size: 12px;
+    text-align: center; transition: all 0.2s;
+  }
+  .preset-btn:hover { background: #353a52; border-color: #4f8ff7; }
+  .preset-btn .desc { display: block; color: #6b7094; font-size: 10px; margin-top: 2px; }
+  .result {
+    background: #0f1117; border: 1px solid #2e3348; border-radius: 4px;
+    padding: 12px; margin-top: 12px; font-family: "SF Mono", Consolas, monospace;
+    font-size: 12px; max-height: 500px; overflow: auto; white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .result-meta {
+    display: flex; gap: 16px; font-size: 12px; color: #9498ad;
+    margin-bottom: 8px; flex-wrap: wrap;
+  }
+  .meta-item { display: flex; gap: 4px; }
+  .meta-label { color: #6b7094; }
+  .meta-value { color: #e4e6f0; font-weight: 500; }
+  .meta-value.success { color: #34d399; }
+  .meta-value.error { color: #f87171; }
+  .meta-value.warning { color: #fbbf24; }
+  .hint { font-size: 11px; color: #6b7094; margin-top: 4px; }
+  .loading { color: #fbbf24; font-size: 12px; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: #4f8ff7; font-size: 12px; }
+  .xml-viewer { color: #9498ad; }
+  .xml-tag { color: #4f8ff7; }
+  .xml-attr { color: #fbbf24; }
+  .xml-text { color: #e4e6f0; }
+  code { background: #2a2e42; padding: 1px 6px; border-radius: 3px; font-size: 12px; color: #fbbf24; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>EPO OPS 测试工具</h1>
+  <p class="subtitle">填入 Consumer Key 和 Secret，测试 EPO OPS API 各端点调用效果。Token 在服务端缓存，配额从响应头 X-Throttling-Control 解析。</p>
+
+  <!-- 凭证配置 -->
+  <div class="card">
+    <div class="card-title">1. OPS 凭证配置</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Consumer Key</label>
+        <input type="text" id="consumerKey" placeholder="在 developers.epo.org 注册应用获取">
+      </div>
+      <div class="form-group">
+        <label>Consumer Secret</label>
+        <input type="password" id="consumerSecret" placeholder="Consumer Secret">
+      </div>
+    </div>
+    <div class="btn-row">
+      <button onclick="testToken()">测试 Token 获取</button>
+      <button class="secondary" onclick="loadSaved()">读取本地保存</button>
+      <button class="secondary" onclick="saveLocal()">保存到本地</button>
+      <button class="secondary" onclick="refreshQuota()">刷新配额</button>
+    </div>
+    <div id="tokenResult" class="result" style="display:none"></div>
+    <div id="quotaDisplay" style="margin-top:8px;display:none">
+      <div class="result-meta">
+        <div class="meta-item"><span class="meta-label">配额状态:</span><span class="meta-value" id="quotaStatus">-</span></div>
+        <div class="meta-item"><span class="meta-label">原始:</span><span class="meta-value" id="quotaRaw">-</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 预设端点测试 -->
+  <div class="card">
+    <div class="card-title">2. 预设端点测试（推荐先测这个）</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>专利号（epodoc 格式，如 EP1000000A1、US12345678B2）</label>
+        <input type="text" id="patentNumber" placeholder="EP1000000A1" value="EP1000000A1">
+      </div>
+    </div>
+    <div class="preset-grid">
+      <div class="preset-btn" onclick="callPreset('biblio')">biblio<span class="desc">著录项目</span></div>
+      <div class="preset-btn" onclick="callPreset('abstract')">abstract<span class="desc">摘要</span></div>
+      <div class="preset-btn" onclick="callPreset('claims')">claims<span class="desc">权利要求</span></div>
+      <div class="preset-btn" onclick="callPreset('description')">description<span class="desc">说明书</span></div>
+      <div class="preset-btn" onclick="callPreset('images')">images<span class="desc">附图信息</span></div>
+      <div class="preset-btn" onclick="callPreset('images-docdb')">images-docdb<span class="desc">PDF页数</span></div>
+      <div class="preset-btn" onclick="callPreset('equivalent')">equivalent<span class="desc">同族</span></div>
+      <div class="preset-btn" onclick="callPreset('legal')">legal<span class="desc">法律状态</span></div>
+      <div class="preset-btn" onclick="callPreset('citing')">citing<span class="desc">向前引用</span></div>
+    </div>
+    <div id="presetResult" class="result" style="display:none"></div>
+  </div>
+
+  <!-- 自定义端点 -->
+  <div class="card">
+    <div class="card-title">3. 自定义端点调用</div>
+    <div class="form-row">
+      <div class="form-group" style="flex:3">
+        <label>OPS 路径（不含 base url，以 / 开头）</label>
+        <input type="text" id="customPath" placeholder="/published-data/publication/epodoc/EP1000000A1/biblio">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>Accept</label>
+        <select id="customAccept">
+          <option value="application/xml">application/xml</option>
+          <option value="application/json">application/json</option>
+        </select>
+      </div>
+    </div>
+    <button onclick="callCustom()">调用</button>
+    <div id="customResult" class="result" style="display:none"></div>
+  </div>
+
+  <!-- PDF 下载测试 -->
+  <div class="card">
+    <div class="card-title">4. PDF 单页下载测试</div>
+    <p class="hint">先调用 images-docdb 获取总页数和 link 前缀，再填入下方参数下载单页 PDF。</p>
+    <div class="form-row">
+      <div class="form-group"><label>Country (如 EP)</label><input type="text" id="pdfCountry" placeholder="EP" value="EP"></div>
+      <div class="form-group"><label>Doc Number (如 1000000)</label><input type="text" id="pdfDocNumber" placeholder="1000000" value="1000000"></div>
+      <div class="form-group"><label>Kind (如 A1)</label><input type="text" id="pdfKind" placeholder="A1" value="A1"></div>
+      <div class="form-group"><label>页码 (如 1)</label><input type="text" id="pdfPage" placeholder="1" value="1"></div>
+    </div>
+    <button onclick="downloadPdfPage()">下载单页 PDF</button>
+    <div id="pdfResult" style="margin-top:8px"></div>
+  </div>
+
+  <!-- 使用说明 -->
+  <div class="card">
+    <div class="card-title">使用说明</div>
+    <details>
+      <summary>端点说明与号码格式</summary>
+      <div style="font-size:12px;color:#9498ad;margin-top:8px;line-height:1.8">
+        <p><b>epodoc 格式</b>（biblio/abstract/claims/description 等用）：连写，如 <code>EP1000000A1</code>、<code>US12345678B2</code>、<code>WO2024123456A1</code></p>
+        <p><b>docdb 格式</b>（images 端点用）：点分隔，如 <code>EP.1000000.A1</code></p>
+        <p><b>向前引用</b>：用 CQL 搜索 <code>q=ct=EP1000000A1</code>，返回引用了该专利的所有文献</p>
+        <p><b>PDF 下载</b>：先查 images-docdb 获取总页数，再逐页下载 fullimage.pdf?Range=N</p>
+        <p><b>配额</b>：免费用户 4GB/周，每次请求响应头 X-Throttling-Control 会返回剩余配额</p>
+      </div>
+    </details>
+    <details>
+      <summary>常见问题</summary>
+      <div style="font-size:12px;color:#9498ad;margin-top:8px;line-height:1.8">
+        <p><b>403 Forbidden</b>：配额超限或 key/secret 错误。检查响应头 X-Rejection-Reason。</p>
+        <p><b>404 Not Found</b>：专利号不存在或格式错误。EP 专利号注意补零（如 EP1000000 不是 EP1）。</p>
+        <p><b>claims/description 返回 404 但 biblio 正常</b>：OPS 全文数据覆盖不全，部分国家（如 CN）无全文。</p>
+        <p><b>Token 获取失败</b>：确认 key 末尾是否需要加版本号（部分 key 形如 <code>abc123@v1</code>）。</p>
+      </div>
+    </details>
+  </div>
+</div>
+
+<script>
+function getCreds() {
+  return {
+    consumerKey: document.getElementById('consumerKey').value.trim(),
+    consumerSecret: document.getElementById('consumerSecret').value.trim(),
+  };
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function highlightXml(xml) {
+  var escaped = escapeHtml(xml);
+  return escaped
+    .replace(/(&lt;\/?[\w:-]+)/g, '<span class="xml-tag">$1</span>')
+    .replace(/([\w:-]+)=(&quot;[^&]*&quot;)/g, '<span class="xml-attr">$1</span>=<span class="xml-text">$2</span>');
+}
+
+function showResult(elId, data) {
+  var el = document.getElementById(elId);
+  el.style.display = 'block';
+  if (typeof data === 'string') {
+    el.textContent = data;
+  } else {
+    el.textContent = JSON.stringify(data, null, 2);
+  }
+}
+
+function showResultWithMeta(elId, data) {
+  var el = document.getElementById(elId);
+  el.style.display = 'block';
+  var html = '';
+
+  if (data.url) {
+    html += '<div class="result-meta"><div class="meta-item"><span class="meta-label">URL:</span><span class="meta-value">' + escapeHtml(data.url) + '</span></div></div>';
+  }
+  if (data.httpCode) {
+    var cls = data.httpCode === 200 ? 'success' : (data.httpCode >= 400 ? 'error' : 'warning');
+    html += '<div class="result-meta"><div class="meta-item"><span class="meta-label">HTTP:</span><span class="meta-value ' + cls + '">' + data.httpCode + '</span></div></div>';
+  }
+  if (data.desc) {
+    html += '<div class="result-meta"><div class="meta-item"><span class="meta-label">端点:</span><span class="meta-value">' + escapeHtml(data.desc) + '</span></div></div>';
+  }
+
+  if (data.headers) {
+    var throttleMatch = data.headers.match(/X-Throttling-Control:\s*([^\r\n]+)/i);
+    if (throttleMatch) {
+      html += '<div class="result-meta"><div class="meta-item"><span class="meta-label">配额:</span><span class="meta-value">' + escapeHtml(throttleMatch[1].trim()) + '</span></div></div>';
+      updateQuotaDisplay(throttleMatch[1].trim());
+    }
+  }
+
+  if (data.error) {
+    html += '<div class="result-meta"><div class="meta-item"><span class="meta-label">错误:</span><span class="meta-value error">' + escapeHtml(data.error) + '</span></div></div>';
+  }
+
+  if (data.headers) {
+    html += '<details><summary>响应头</summary><div class="result" style="margin-top:4px">' + escapeHtml(data.headers) + '</div></details>';
+  }
+
+  if (data.body) {
+    var isXml = data.body.trim().startsWith('<');
+    if (isXml) {
+      html += '<details open><summary>响应体 (XML, ' + data.body.length + ' 字符)</summary><div class="result xml-viewer" style="margin-top:4px">' + highlightXml(data.body) + '</div></details>';
+    } else {
+      html += '<details open><summary>响应体 (' + data.body.length + ' 字符)</summary><div class="result" style="margin-top:4px">' + escapeHtml(data.body) + '</div></details>';
+    }
+  }
+
+  el.innerHTML = html;
+}
+
+function updateQuotaDisplay(quotaStr) {
+  var display = document.getElementById('quotaDisplay');
+  display.style.display = 'block';
+  document.getElementById('quotaStatus').textContent = quotaStr;
+  document.getElementById('quotaRaw').textContent = quotaStr;
+}
+
+async function testToken() {
+  var c = getCreds();
+  if (!c.consumerKey || !c.consumerSecret) { alert('请填写 Key 和 Secret'); return; }
+  var el = document.getElementById('tokenResult');
+  el.style.display = 'block';
+  el.innerHTML = '<span class="loading">测试中...</span>';
+  try {
+    var resp = await fetch('/api/token?consumerKey=' + encodeURIComponent(c.consumerKey) + '&consumerSecret=' + encodeURIComponent(c.consumerSecret));
+    var data = await resp.json();
+    if (data.token) {
+      el.innerHTML = '<div class="result-meta"><div class="meta-item"><span class="meta-label">状态:</span><span class="meta-value success">Token 获取成功</span></div><div class="meta-item"><span class="meta-label">过期:</span><span class="meta-value">' + (data.expiresIn || 3600) + 's</span></div></div><details><summary>原始响应</summary><div class="result">' + escapeHtml(JSON.stringify(data, null, 2)) + '</div></details>';
+    } else {
+      showResult('tokenResult', data);
+    }
+  } catch (e) {
+    showResult('tokenResult', { error: e.message });
+  }
+}
+
+async function callPreset(endpoint) {
+  var c = getCreds();
+  var pn = document.getElementById('patentNumber').value.trim();
+  if (!c.consumerKey || !c.consumerSecret) { alert('请填写 Key 和 Secret'); return; }
+  if (!pn) { alert('请填写专利号'); return; }
+  var el = document.getElementById('presetResult');
+  el.style.display = 'block';
+  el.innerHTML = '<span class="loading">调用 ' + endpoint + ' 中...</span>';
+  try {
+    var resp = await fetch('/api/preset?consumerKey=' + encodeURIComponent(c.consumerKey) + '&consumerSecret=' + encodeURIComponent(c.consumerSecret) + '&endpoint=' + endpoint + '&patentNumber=' + encodeURIComponent(pn));
+    var data = await resp.json();
+    showResultWithMeta('presetResult', data);
+  } catch (e) {
+    showResult('presetResult', { error: e.message });
+  }
+}
+
+async function callCustom() {
+  var c = getCreds();
+  var p = document.getElementById('customPath').value.trim();
+  var accept = document.getElementById('customAccept').value;
+  if (!c.consumerKey || !c.consumerSecret) { alert('请填写 Key 和 Secret'); return; }
+  if (!p) { alert('请填写路径'); return; }
+  var el = document.getElementById('customResult');
+  el.style.display = 'block';
+  el.innerHTML = '<span class="loading">调用中...</span>';
+  try {
+    var resp = await fetch('/api/ops?consumerKey=' + encodeURIComponent(c.consumerKey) + '&consumerSecret=' + encodeURIComponent(c.consumerSecret) + '&path=' + encodeURIComponent(p) + '&accept=' + accept);
+    var data = await resp.json();
+    showResultWithMeta('customResult', data);
+  } catch (e) {
+    showResult('customResult', { error: e.message });
+  }
+}
+
+async function downloadPdfPage() {
+  var c = getCreds();
+  var country = document.getElementById('pdfCountry').value.trim();
+  var docNumber = document.getElementById('pdfDocNumber').value.trim();
+  var kind = document.getElementById('pdfKind').value.trim();
+  var page = document.getElementById('pdfPage').value.trim();
+  if (!c.consumerKey || !c.consumerSecret) { alert('请填写 Key 和 Secret'); return; }
+  var el = document.getElementById('pdfResult');
+  el.innerHTML = '<span class="loading">下载中...</span>';
+  try {
+    var resp = await fetch('/api/pdf-page?consumerKey=' + encodeURIComponent(c.consumerKey) + '&consumerSecret=' + encodeURIComponent(c.consumerSecret) + '&country=' + country + '&docNumber=' + docNumber + '&kind=' + kind + '&page=' + page);
+    var ct = resp.headers.get('Content-Type') || '';
+    if (ct.includes('application/pdf')) {
+      var blob = await resp.blob();
+      var u = URL.createObjectURL(blob);
+      el.innerHTML = '<div class="result-meta"><div class="meta-item"><span class="meta-label">状态:</span><span class="meta-value success">下载成功 (' + blob.size + ' bytes)</span></div></div><iframe src="' + u + '" style="width:100%;height:500px;border:1px solid #2e3348;border-radius:4px;margin-top:8px"></iframe><div style="margin-top:8px"><a href="' + u + '" download="page_' + page + '.pdf" style="color:#4f8ff7">下载 PDF 文件</a></div>';
+    } else {
+      var data = await resp.json();
+      el.innerHTML = '<div class="result">' + escapeHtml(JSON.stringify(data, null, 2)) + '</div>';
+    }
+  } catch (e) {
+    el.innerHTML = '<span class="meta-value error">' + escapeHtml(e.message) + '</span>';
+  }
+}
+
+async function refreshQuota() {
+  var c = getCreds();
+  if (!c.consumerKey) { alert('请填写 Key'); return; }
+  try {
+    var resp = await fetch('/api/quota?consumerKey=' + encodeURIComponent(c.consumerKey) + '&consumerSecret=' + encodeURIComponent(c.consumerSecret));
+    var data = await resp.json();
+    var display = document.getElementById('quotaDisplay');
+    display.style.display = 'block';
+    if (data.quota) {
+      document.getElementById('quotaStatus').textContent = data.quota;
+      document.getElementById('quotaRaw').textContent = data.quota;
+    } else {
+      document.getElementById('quotaStatus').textContent = '暂无（需先发起一次 OPS 请求）';
+      document.getElementById('quotaRaw').textContent = '-';
+    }
+  } catch (e) { alert(e.message); }
+}
+
+function saveLocal() {
+  var c = getCreds();
+  localStorage.setItem('ops-test-creds', JSON.stringify(c));
+  alert('已保存到浏览器 localStorage');
+}
+
+function loadSaved() {
+  var raw = localStorage.getItem('ops-test-creds');
+  if (!raw) { alert('未找到保存的凭证'); return; }
+  var c = JSON.parse(raw);
+  document.getElementById('consumerKey').value = c.consumerKey || '';
+  document.getElementById('consumerSecret').value = c.consumerSecret || '';
+  alert('已读取');
+}
+
+// 自动加载保存的凭证
+loadSaved();
+</script>
+</body>
+</html>
