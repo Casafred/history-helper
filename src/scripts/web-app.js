@@ -483,16 +483,31 @@ async function searchPatentDetail(input) {
   patentDetailSection.classList.add("hidden");
   hideError();
 
+  // 5 秒后提示"可能正在尝试 EPO OPS 降级"（后端 GP 超时 5 秒后自动降级）
+  const fallbackHintId = setTimeout(() => {
+    if (!loading.classList.contains("hidden")) {
+      loadingText.textContent = "Google Patents 未响应，正在尝试 EPO OPS 降级查询...";
+    }
+  }, 5500);
+
   try {
     // 后端 Google Patents 已设置 5 秒超时自动降级 OPS，前端 60 秒兜底（防止异常卡死）
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
     const resp = await fetch(gpApiUrl(raw), { signal: controller.signal });
     clearTimeout(timeoutId);
+    clearTimeout(fallbackHintId);
     const json = await resp.json();
 
     if (!json.success) {
-      showError(json.error || "未找到该专利");
+      // 根据 404 诊断信息给出更有用的提示
+      let errMsg = json.error || "未找到该专利";
+      if (json.ops_attempted === false && json.ops_key_provided === false) {
+        errMsg = "Google Patents 未找到该专利，且未配置 EPO OPS 凭证。\n请在「设置 → EPO OPS」中填写 Consumer Key/Secret 并保存，系统将自动降级到 EPO OPS 查询。";
+      } else if (json.ops_attempted === true && json.ops_error) {
+        errMsg = "Google Patents 与 EPO OPS 均未找到该专利。\nEPO OPS 降级查询失败原因: " + json.ops_error + "\n\n可在「设置 → EPO OPS」中点击「测试连接」验证凭证是否有效。";
+      }
+      showError(errMsg);
       patentDetailSection.classList.add("hidden");
       searchBtn.disabled = false;
       loading.classList.add("hidden");
@@ -527,6 +542,7 @@ async function searchPatentDetail(input) {
     });
     refreshHistoryList();
   } catch (e) {
+    clearTimeout(fallbackHintId);
     showError("查询失败: " + e.message);
   }
 

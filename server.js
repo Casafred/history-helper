@@ -2066,7 +2066,10 @@ function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey, opsSe
     }
 
     // Google Patents 所有变体均失败 —— 尝试 EPO OPS 降级查询
+    let opsAttempted = false;
+    let opsError = null;
     if (opsKey && opsSecret) {
+      opsAttempted = true;
       console.log("[GP→OPS] Google Patents 未找到，降级到 EPO OPS 查询: " + patentNumber);
       try {
         const opsResult = await queryOpsPatent(patentNumber, opsKey, opsSecret);
@@ -2080,15 +2083,33 @@ function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey, opsSe
           res.end(JSON.stringify({ success: true, data: opsResult.data, patent_number: opsResult.patent_number, data_source: "EPO OPS" }));
           return;
         } else {
-          console.log("[GP→OPS] 降级查询也失败: " + (opsResult.error || "未知错误"));
+          opsError = opsResult.error || "未知错误";
+          console.log("[GP→OPS] 降级查询也失败: " + opsError);
         }
       } catch (e) {
+        opsError = e.message;
         console.log("[GP→OPS] 降级查询异常: " + e.message);
       }
+    } else {
+      console.log("[GP→OPS] 跳过降级：未提供 OPS 凭证 (opsKey=" + (opsKey ? "有" : "空") + ", opsSecret=" + (opsSecret ? "有" : "空") + ")");
     }
 
+    // 返回 404 并附带降级诊断信息
+    let errorMsg = `未找到专利: ${patentNumber}`;
+    if (!opsKey || !opsSecret) {
+      errorMsg += "（Google Patents 未找到，且未配置 EPO OPS 凭证，无法降级查询）";
+    } else if (opsAttempted && opsError) {
+      errorMsg += `（已尝试 EPO OPS 降级但失败: ${opsError}）`;
+    }
     res.writeHead(404, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-    res.end(JSON.stringify({ success: false, error: `未找到专利: ${patentNumber}`, patent_number: normalized }));
+    res.end(JSON.stringify({
+      success: false,
+      error: errorMsg,
+      patent_number: normalized,
+      ops_attempted: opsAttempted,
+      ops_error: opsError,
+      ops_key_provided: !!opsKey,
+    }));
   })();
 }
 
