@@ -129,11 +129,27 @@ function saveGpProxySettings(enabled, proxyUrl) {
 function gpApiUrl(patentNumber) {
   const s = getGpProxySettings();
   let url = "/api/gp/" + encodeURIComponent(patentNumber);
+  const params = [];
   if (s.enabled) {
-    url += "?proxy=1";
-    if (s.proxyUrl) url += "&proxyUrl=" + encodeURIComponent(s.proxyUrl);
+    params.push("proxy=1");
+    if (s.proxyUrl) params.push("proxyUrl=" + encodeURIComponent(s.proxyUrl));
   }
+  // 附加 EPO OPS 降级查询凭证（当 Google Patents 查询失败时自动降级）
+  const opsConfig = getOpsSettings();
+  if (opsConfig.enabled && opsConfig.consumerKey && opsConfig.consumerSecret) {
+    params.push("opsKey=" + encodeURIComponent(opsConfig.consumerKey));
+    params.push("opsSecret=" + encodeURIComponent(opsConfig.consumerSecret));
+  }
+  if (params.length > 0) url += "?" + params.join("&");
   return url;
+}
+
+// EPO OPS 配置读取（从 AI 配置中获取 ops 字段）
+function getOpsSettings() {
+  const config = window.AI.loadAIConfig();
+  const ops = window.AI.getOpsConfig(config);
+  const enabled = localStorage.getItem("patentlens_ops_enabled") !== "false"; // 默认启用
+  return { enabled: enabled, consumerKey: ops.consumerKey || "", consumerSecret: ops.consumerSecret || "" };
 }
 
 const aiSettingsBtn = document.getElementById("ai-settings-btn");
@@ -431,6 +447,13 @@ async function searchPatentDetail(input) {
     window._currentPatentData = json.data;
     patentDetailSection.classList.remove("hidden");
 
+    // 显示数据来源标识（当数据来自 EPO OPS 降级查询时）
+    if (json.data_source === "EPO OPS" || (json.data && json.data.data_source === "EPO OPS")) {
+      showDataSourceBadge("EPO OPS", "Google Patents 未找到该专利，数据来自 EPO OPS 降级查询");
+    } else {
+      showDataSourceBadge("Google Patents", null);
+    }
+
     // Record to history
     const country = raw.match(/^[A-Z]{2}/)?.[0] || "";
     PatentCache.addHistory(raw, country, {
@@ -448,6 +471,26 @@ async function searchPatentDetail(input) {
 
   searchBtn.disabled = false;
   loading.classList.add("hidden");
+}
+
+// 显示数据来源徽章（在专利详情头部显示数据来源）
+function showDataSourceBadge(source, tooltip) {
+  // 移除旧的徽章
+  const oldBadge = document.getElementById("pd-data-source-badge");
+  if (oldBadge) oldBadge.remove();
+
+  const header = document.querySelector(".pd-header");
+  if (!header) return;
+
+  const badge = document.createElement("div");
+  badge.id = "pd-data-source-badge";
+  badge.className = "pd-data-source-badge" + (source === "EPO OPS" ? " pd-data-source-ops" : "");
+  badge.textContent = "数据来源: " + source;
+  if (tooltip) {
+    badge.title = tooltip;
+    badge.style.cursor = "help";
+  }
+  header.appendChild(badge);
 }
 
 function renderPatentDetail(data) {
@@ -3504,6 +3547,9 @@ function loadAISettingsToForm() {
     const el = document.getElementById(p.id);
     if (el) el.value = window.AI.getCustomPrompt(config, p.key);
   });
+
+  // Load OPS settings (EPO OPS 降级查询配置)
+  if (typeof loadOpsSettingsToForm === "function") loadOpsSettingsToForm();
 }
 
 function toggleOcrGlmKeyVisibility() {
@@ -7965,6 +8011,142 @@ if (networkSaveBtn) {
     setTimeout(() => { networkSaveBtn.textContent = "保存"; }, 1500);
   });
 }
+
+// ── EPO OPS 降级查询配置 ──────────────────────────────────────────────────────
+const opsEnabledCheckbox = document.getElementById("ops-enabled-checkbox");
+const opsConsumerKeyInput = document.getElementById("ops-consumer-key-input");
+const opsConsumerSecretInput = document.getElementById("ops-consumer-secret-input");
+const opsSaveBtn = document.getElementById("ops-save-btn");
+const opsTestBtn = document.getElementById("ops-test-btn");
+const opsTestResult = document.getElementById("ops-test-result");
+const opsQuotaDisplayGroup = document.getElementById("ops-quota-display-group");
+const opsRefreshQuotaBtn = document.getElementById("ops-refresh-quota-btn");
+
+// 回填 OPS 配置到表单（由 loadAISettingsToForm 调用）
+function loadOpsSettingsToForm() {
+  const ops = getOpsSettings();
+  if (opsEnabledCheckbox) opsEnabledCheckbox.checked = ops.enabled;
+  if (opsConsumerKeyInput) opsConsumerKeyInput.value = ops.consumerKey;
+  if (opsConsumerSecretInput) opsConsumerSecretInput.value = ops.consumerSecret;
+  // 显示配额区域（如果有 key）
+  if (opsQuotaDisplayGroup && ops.consumerKey) {
+    opsQuotaDisplayGroup.style.display = "";
+    refreshOpsQuota();
+  }
+}
+
+// 刷新 OPS 配额显示
+async function refreshOpsQuota() {
+  const ops = getOpsSettings();
+  if (!ops.consumerKey || !ops.consumerSecret) return;
+  try {
+    const resp = await fetch("/api/ops/quota?opsKey=" + encodeURIComponent(ops.consumerKey) + "&opsSecret=" + encodeURIComponent(ops.consumerSecret));
+    const data = await resp.json();
+    if (data.success && data.quota) {
+      const q = data.quota;
+      const throttleEl = document.getElementById("ops-quota-throttle");
+      const hourEl = document.getElementById("ops-quota-hour");
+      const weekEl = document.getElementById("ops-quota-week");
+      const updatedEl = document.getElementById("ops-quota-updated");
+      if (throttleEl) {
+        throttleEl.textContent = "状态: " + (q.throttle || "未知");
+        // 根据 throttle 状态着色：green=绿，busy/yellow=黄，red=红
+        if (q.throttle && q.throttle.includes("green")) throttleEl.style.color = "var(--success)";
+        else if (q.throttle && q.throttle.includes("red")) throttleEl.style.color = "var(--danger)";
+        else throttleEl.style.color = "var(--warning)";
+      }
+      if (hourEl) hourEl.textContent = "每小时配额已用: " + (q.hourUsed != null ? q.hourUsed : "-");
+      if (weekEl) weekEl.textContent = "每周配额已用: " + (q.weekUsed != null ? q.weekUsed : "-");
+      if (updatedEl && q.updatedAt) updatedEl.textContent = "最后更新: " + new Date(q.updatedAt).toLocaleString();
+    }
+  } catch (e) { /* ignore */ }
+}
+
+// OPS 保存按钮
+if (opsSaveBtn) {
+  opsSaveBtn.addEventListener("click", () => {
+    const config = window.AI.loadAIConfig();
+    if (!config.ops) config.ops = { consumerKey: "", consumerSecret: "" };
+    config.ops.consumerKey = opsConsumerKeyInput ? opsConsumerKeyInput.value.trim() : "";
+    config.ops.consumerSecret = opsConsumerSecretInput ? opsConsumerSecretInput.value.trim() : "";
+    window.AI.saveAIConfig(config);
+    localStorage.setItem("patentlens_ops_enabled", opsEnabledCheckbox && opsEnabledCheckbox.checked ? "true" : "false");
+    opsSaveBtn.textContent = "已保存 ✓";
+    setTimeout(() => { opsSaveBtn.textContent = "保存"; }, 1500);
+    // 保存后显示配额区域
+    if (opsQuotaDisplayGroup && config.ops.consumerKey) {
+      opsQuotaDisplayGroup.style.display = "";
+      refreshOpsQuota();
+    }
+  });
+}
+
+// OPS 测试连接按钮（通过查询一个已知存在的专利号 EP1000000 测试）
+if (opsTestBtn) {
+  opsTestBtn.addEventListener("click", async () => {
+    const key = opsConsumerKeyInput ? opsConsumerKeyInput.value.trim() : "";
+    const secret = opsConsumerSecretInput ? opsConsumerSecretInput.value.trim() : "";
+    if (!key || !secret) {
+      if (opsTestResult) {
+        opsTestResult.classList.remove("hidden");
+        opsTestResult.textContent = "请先填写 Consumer Key 和 Secret";
+        opsTestResult.style.color = "var(--danger)";
+      }
+      return;
+    }
+    opsTestBtn.disabled = true;
+    opsTestBtn.textContent = "测试中...";
+    if (opsTestResult) {
+      opsTestResult.classList.remove("hidden");
+      opsTestResult.textContent = "正在查询 EP1000000 验证连接...";
+      opsTestResult.style.color = "var(--text-secondary)";
+    }
+    try {
+      // 用 EP1000000 测试（EPO 官方示例专利号）
+      const resp = await fetch("/api/gp/EP1000000?opsKey=" + encodeURIComponent(key) + "&opsSecret=" + encodeURIComponent(secret));
+      const data = await resp.json();
+      if (data.success && data.data_source === "EPO OPS") {
+        if (opsTestResult) {
+          opsTestResult.textContent = "✓ 连接成功！OPS 降级查询可用。验证专利: " + (data.data.title || "EP1000000");
+          opsTestResult.style.color = "var(--success)";
+        }
+        refreshOpsQuota();
+      } else if (data.success) {
+        if (opsTestResult) {
+          opsTestResult.textContent = "✓ 凭证有效（Google Patents 已返回数据，未触发 OPS 降级）。可尝试查询 Google Patents 没有的专利号验证降级。";
+          opsTestResult.style.color = "var(--success)";
+        }
+        refreshOpsQuota();
+      } else {
+        if (opsTestResult) {
+          opsTestResult.textContent = "✗ 测试失败: " + (data.error || "未知错误") + "（注意：EP1000000 在 Google Patents 和 OPS 都应存在，若失败请检查凭证）";
+          opsTestResult.style.color = "var(--danger)";
+        }
+      }
+    } catch (e) {
+      if (opsTestResult) {
+        opsTestResult.textContent = "✗ 请求失败: " + e.message;
+        opsTestResult.style.color = "var(--danger)";
+      }
+    } finally {
+      opsTestBtn.disabled = false;
+      opsTestBtn.textContent = "测试连接";
+    }
+  });
+}
+
+// OPS 刷新配额按钮
+if (opsRefreshQuotaBtn) {
+  opsRefreshQuotaBtn.addEventListener("click", refreshOpsQuota);
+}
+
+// OPS 配额 20 分钟自动刷新（与后端配额缓存 TTL 对齐）
+setInterval(() => {
+  const ops = getOpsSettings();
+  if (ops.consumerKey && ops.consumerSecret) {
+    refreshOpsQuota();
+  }
+}, 20 * 60 * 1000);
 
 // ── Initialize history list on page load ──
 refreshHistoryList();

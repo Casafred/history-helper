@@ -84,6 +84,7 @@ var AI = (function () {
         zhipu: createDefaultConfig("zhipu"),
         deepseek: createDefaultConfig("deepseek"),
         ocr: { engine: "paddle_ocr_vl" },
+        ops: { consumerKey: "", consumerSecret: "" },
       };
     }
     // Invalidate cached custom prompts if prompts version is outdated
@@ -98,6 +99,7 @@ var AI = (function () {
 
   function saveAIConfig(config) {
     if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl" };
+    if (!config.ops) config.ops = { consumerKey: "", consumerSecret: "" };
     config.promptsVersion = PROMPTS_VERSION;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
   }
@@ -105,6 +107,11 @@ var AI = (function () {
   function getOCRConfig(config) {
     if (!config.ocr) config.ocr = { engine: "paddle_ocr_vl" };
     return config.ocr;
+  }
+
+  function getOpsConfig(config) {
+    if (!config.ops) config.ops = { consumerKey: "", consumerSecret: "" };
+    return config.ops;
   }
 
   function getGlmOcrApiKey(config) {
@@ -271,6 +278,7 @@ var AI = (function () {
     saveAIConfig: saveAIConfig,
     getCurrentProvider: getCurrentProvider,
     getOCRConfig: getOCRConfig,
+    getOpsConfig: getOpsConfig,
     getGlmOcrApiKey: getGlmOcrApiKey,
     getDefaultPrompt: getDefaultPrompt,
     getCustomPrompt: getCustomPrompt,
