@@ -783,31 +783,32 @@ async function translatePatentSection(sectionType) {
   if (existingResult) {
     existingResult.remove();
     translateBtn.textContent = '翻译';
-    // Restore original text
-    if (sectionType === 'claims') {
-      sectionEl.querySelectorAll('.pd-claim-text[data-original-text]').forEach(el => {
-        el.textContent = el.dataset.originalText;
-        delete el.dataset.translated;
-      });
-    } else if (sectionType === 'description') {
-      const descEl = sectionEl.querySelector('.pd-description-text[data-original-text]');
-      if (descEl) {
-        descEl.textContent = descEl.dataset.originalText;
-        delete descEl.dataset.translated;
-      }
-    }
+    // Remove per-claim translation elements
+    sectionEl.querySelectorAll('.pd-claim-translation').forEach(el => el.remove());
+    const descTrans = sectionEl.querySelector('.pd-description-translation');
+    if (descTrans) descTrans.remove();
     return;
   }
 
   translateBtn.textContent = '翻译中...';
   translateBtn.disabled = true;
 
-  // Show loading spinner in the section
-  const loadingEl = document.createElement('div');
-  loadingEl.className = 'pd-translation-result';
-  loadingEl.id = 'pd-translation-loading-' + sectionType;
-  loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译中...</span></div><div class="pd-translation-body" style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;"></div><span>正在翻译' + (sectionType === 'claims' ? '权利要求' : '说明书') + '...</span></div>';
-  sectionEl.appendChild(loadingEl);
+  // Show progress bar UI
+  const progressEl = document.createElement('div');
+  progressEl.className = 'pd-translation-result pd-translation-progress';
+  progressEl.innerHTML =
+    '<div class="pd-translation-header"><span>AI 翻译中...</span></div>' +
+    '<div class="pd-translation-progress-body">' +
+      '<div class="pd-translation-progress-label">正在翻译' + (sectionType === 'claims' ? '权利要求' : '说明书') + '...</div>' +
+      '<div class="pd-translation-progress-bar">' +
+        '<div class="pd-translation-progress-fill"></div>' +
+      '</div>' +
+      '<div class="pd-translation-progress-stream"></div>' +
+    '</div>';
+  sectionEl.appendChild(progressEl);
+
+  const progressFill = progressEl.querySelector('.pd-translation-progress-fill');
+  const progressStream = progressEl.querySelector('.pd-translation-progress-stream');
 
   try {
     // Use the configured translation provider from settings
@@ -818,94 +819,168 @@ async function translatePatentSection(sectionType) {
       return;
     }
 
-    let textToTranslate = "";
     if (sectionType === "claims" && window._currentPatentData && window._currentPatentData.claims) {
-      textToTranslate = window._currentPatentData.claims.map((c, i) =>
-        "Claim " + (c.num || (i + 1)) + ": " + c.text
-      ).join('\n\n');
-    } else if (sectionType === "description" && window._currentPatentData && window._currentPatentData.description) {
-      textToTranslate = window._currentPatentData.description.substring(0, 6000);
-    }
-
-    if (!textToTranslate) {
-      showError("没有可翻译的内容");
-      return;
-    }
-
-    const prompt = sectionType === "claims"
-      ? "你是一位专业的专利文献翻译专家。请将以下英文专利权利要求翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。保持权利要求的编号。只返回翻译结果。"
-      : "你是一位专业的专利文献翻译专家。请将以下英文专利说明书翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。";
-
-    const resp = await fetch(translateProvider.baseUrl + "/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + translateProvider.apiKey,
-      },
-      body: JSON.stringify({
-        model: translateProvider.model,
-        messages: [
-          { role: "system", content: prompt },
-          { role: "user", content: textToTranslate }
-        ],
-        temperature: 0.3,
-        max_tokens: 4096,
-      }),
-    });
-
-    if (!resp.ok) throw new Error("API 请求失败: " + resp.status);
-    const json = await resp.json();
-    const translated = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content || "翻译失败";
-
-    // Remove loading spinner
-    const loadingEl = document.getElementById('pd-translation-loading-' + sectionType);
-    if (loadingEl) loadingEl.remove();
-
-    // Show translation result
-    const resultDiv = document.createElement('div');
-    resultDiv.className = 'pd-translation-result';
-    resultDiv.innerHTML = '<div class="pd-translation-header"><span>AI 翻译结果</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove(); var btn=document.querySelector(\'[data-section-type=' + sectionType + '] .pd-translate-btn\'); if(btn) btn.textContent=\'翻译\';">&times;</button></div><div class="pd-translation-body">' + escapeHtml(translated).replace(/\n/g, '<br>') + '</div>';
-
-    // Append to the section element (works for both tab and collapsible layouts)
-    sectionEl.appendChild(resultDiv);
-
-    // Replace original text with translated version in-place
-    if (sectionType === 'claims') {
+      // ── Claims: translate claim-by-claim with delimiters ──
+      const claims = window._currentPatentData.claims;
       const claimItems = sectionEl.querySelectorAll('.pd-claim-item');
-      if (claimItems.length > 0) {
-        // Parse translated claims and replace each claim text
-        const translatedLines = translated.split('\n').filter(l => l.trim());
-        let claimIdx = 0;
-        claimItems.forEach(item => {
-          const claimTextEl = item.querySelector('.pd-claim-text');
-          if (claimTextEl && claimIdx < translatedLines.length) {
-            // Store original text for restoration
-            if (!claimTextEl.dataset.originalText) {
-              claimTextEl.dataset.originalText = claimTextEl.textContent;
-            }
-            claimTextEl.textContent = translatedLines[claimIdx].replace(/^Claim\s*\d+\s*[:：]\s*/i, '');
-            claimTextEl.dataset.translated = 'true';
-            claimIdx++;
+
+      // Build input text with claim markers
+      const inputText = claims.map((c, i) => {
+        const num = c.num || (i + 1);
+        return '[[CLAIM ' + num + ']] ' + c.text;
+      }).join('\n\n');
+
+      const prompt = '你是一位专业的专利文献翻译专家。请将以下英文专利权利要求翻译为中文。\n' +
+        '保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。\n' +
+        '每条权利要求的翻译必须以 [[CLAIM N]] 开头（N 为权利要求编号），然后是翻译内容。\n' +
+        '只返回翻译结果，不要添加任何其他说明。\n\n' +
+        '权利要求原文：\n' + inputText;
+
+      // Stream translation
+      let fullText = '';
+      let currentClaimNum = null;
+      let currentClaimBuffer = '';
+      const claimTranslations = {}; // num -> text
+
+      const stream = window.AI.streamChat(
+        translateProvider.type,
+        translateProvider.apiKey,
+        translateProvider.baseUrl,
+        {
+          model: translateProvider.model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.3,
+          maxTokens: 8192,
+        }
+      );
+
+      let receivedChars = 0;
+      const estimatedTotal = inputText.length * 2; // rough estimate
+
+      for await (const chunk of stream) {
+        if (chunk.content) {
+          fullText += chunk.content;
+          receivedChars += chunk.content.length;
+
+          // Update progress bar
+          const pct = Math.min(95, Math.round((receivedChars / estimatedTotal) * 100));
+          if (progressFill) progressFill.style.width = pct + '%';
+          if (progressStream) {
+            progressStream.textContent = fullText.slice(-200);
           }
-        });
+
+          // Parse claim delimiters and backfill progressively
+          const claimRegex = /\[\[CLAIM\s+(\d+)\]\]/g;
+          let match;
+          let lastIndex = 0;
+          const segments = [];
+          while ((match = claimRegex.exec(fullText)) !== null) {
+            if (currentClaimNum !== null) {
+              segments.push({ num: currentClaimNum, text: fullText.slice(lastIndex, match.index).trim() });
+            }
+            currentClaimNum = match[1];
+            lastIndex = claimRegex.lastIndex;
+          }
+          // Remaining text after last delimiter
+          if (currentClaimNum !== null) {
+            segments.push({ num: currentClaimNum, text: fullText.slice(lastIndex).trim() });
+          }
+
+          // Backfill translations progressively
+          for (const seg of segments) {
+            if (seg.text) {
+              claimTranslations[seg.num] = seg.text;
+              // Find the claim item and update its translation
+              claimItems.forEach(item => {
+                const numEl = item.querySelector('.pd-claim-num');
+                if (numEl && numEl.textContent.replace(/\.$/, '').trim() === seg.num) {
+                  let transEl = item.querySelector('.pd-claim-translation');
+                  if (!transEl) {
+                    transEl = document.createElement('div');
+                    transEl.className = 'pd-claim-translation';
+                    item.appendChild(transEl);
+                  }
+                  transEl.textContent = seg.text;
+                }
+              });
+            }
+          }
+        }
       }
-    } else if (sectionType === 'description') {
+
+      // Final pass: ensure all claims have translations
+      for (const seg of segments || []) {
+        if (seg.text) claimTranslations[seg.num] = seg.text;
+      }
+
+      // Remove progress bar
+      progressEl.remove();
+
+      // Show summary result
+      const resultDiv = document.createElement('div');
+      resultDiv.className = 'pd-translation-result';
+      const translatedCount = Object.keys(claimTranslations).length;
+      resultDiv.innerHTML = '<div class="pd-translation-header"><span>AI 翻译完成（' + translatedCount + ' 条权利要求）</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove(); var btn=document.querySelector(\'[data-section-type=' + sectionType + '] .pd-translate-btn\'); if(btn) btn.textContent=\'翻译\';">&times;</button></div>';
+      sectionEl.appendChild(resultDiv);
+
+    } else if (sectionType === "description" && window._currentPatentData && window._currentPatentData.description) {
+      // ── Description: stream translation ──
+      const descText = window._currentPatentData.description.substring(0, 6000);
+      const prompt = '你是一位专业的专利文献翻译专家。请将以下英文专利说明书翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。\n\n' + descText;
+
+      let fullText = '';
+      const stream = window.AI.streamChat(
+        translateProvider.type,
+        translateProvider.apiKey,
+        translateProvider.baseUrl,
+        {
+          model: translateProvider.model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.3,
+          maxTokens: 8192,
+        }
+      );
+
+      let receivedChars = 0;
+      const estimatedTotal = descText.length * 2;
+
+      for await (const chunk of stream) {
+        if (chunk.content) {
+          fullText += chunk.content;
+          receivedChars += chunk.content.length;
+          const pct = Math.min(95, Math.round((receivedChars / estimatedTotal) * 100));
+          if (progressFill) progressFill.style.width = pct + '%';
+          if (progressStream) {
+            progressStream.textContent = fullText.slice(-200);
+          }
+        }
+      }
+
+      // Remove progress bar
+      progressEl.remove();
+
+      // Show translation below original description text
       const descEl = sectionEl.querySelector('.pd-description-text');
       if (descEl) {
-        if (!descEl.dataset.originalText) {
-          descEl.dataset.originalText = descEl.textContent;
+        let transEl = sectionEl.querySelector('.pd-description-translation');
+        if (!transEl) {
+          transEl = document.createElement('div');
+          transEl.className = 'pd-description-translation';
+          descEl.insertAdjacentElement('afterend', transEl);
         }
-        descEl.textContent = translated;
-        descEl.dataset.translated = 'true';
+        transEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译结果</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove(); var btn=document.querySelector(\'[data-section-type=' + sectionType + '] .pd-translate-btn\'); if(btn) btn.textContent=\'翻译\';">&times;</button></div><div class="pd-translation-body">' + escapeHtml(fullText).replace(/\n/g, '<br>') + '</div>';
       }
+    } else {
+      progressEl.remove();
+      showError("没有可翻译的内容");
+      return;
     }
 
     translateBtn.textContent = '隐藏翻译';
   } catch (e) {
     showError("翻译失败: " + e.message);
     translateBtn.textContent = '翻译';
-    const loadingEl = document.getElementById('pd-translation-loading-' + sectionType);
-    if (loadingEl) loadingEl.remove();
+    progressEl.remove();
   } finally {
     translateBtn.disabled = false;
   }
@@ -985,36 +1060,54 @@ async function translateSelectedPatentText(text, targetSection) {
   const sectionEl = document.querySelector('[data-section-type="' + targetSection + '"]') || document.querySelector("#patent-detail-content");
   if (!sectionEl) return;
 
-  // Show inline loading indicator
+  // Show inline loading indicator with progress bar
   const loadingEl = document.createElement('div');
-  loadingEl.className = 'pd-translation-result';
-  loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译中...</span></div><div class="pd-translation-body" style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;"></div><span>正在翻译选中文本...</span></div>';
+  loadingEl.className = 'pd-translation-result pd-translation-progress';
+  loadingEl.innerHTML =
+    '<div class="pd-translation-header"><span>AI 翻译中...</span></div>' +
+    '<div class="pd-translation-progress-body">' +
+      '<div class="pd-translation-progress-label">正在翻译选中文本...</div>' +
+      '<div class="pd-translation-progress-bar">' +
+        '<div class="pd-translation-progress-fill"></div>' +
+      '</div>' +
+      '<div class="pd-translation-progress-stream"></div>' +
+    '</div>';
   sectionEl.appendChild(loadingEl);
 
-  try {
-    const resp = await fetch(translateProvider.baseUrl + "/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + translateProvider.apiKey,
-      },
-      body: JSON.stringify({
-        model: translateProvider.model,
-        messages: [
-          { role: "system", content: "你是一位专业的专利文献翻译专家。请将以下文本翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。" },
-          { role: "user", content: text }
-        ],
-        temperature: 0.3,
-        max_tokens: 4096,
-      }),
-    });
+  const progressFill = loadingEl.querySelector('.pd-translation-progress-fill');
+  const progressStream = loadingEl.querySelector('.pd-translation-progress-stream');
 
-    if (!resp.ok) throw new Error("API 请求失败: " + resp.status);
-    const json = await resp.json();
-    const translated = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content || "翻译失败";
+  try {
+    const prompt = '你是一位专业的专利文献翻译专家。请将以下文本翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。\n\n' + text;
+
+    let fullText = '';
+    const stream = window.AI.streamChat(
+      translateProvider.type,
+      translateProvider.apiKey,
+      translateProvider.baseUrl,
+      {
+        model: translateProvider.model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3,
+        maxTokens: 4096,
+      }
+    );
+
+    let receivedChars = 0;
+    const estimatedTotal = text.length * 2;
+
+    for await (const chunk of stream) {
+      if (chunk.content) {
+        fullText += chunk.content;
+        receivedChars += chunk.content.length;
+        const pct = Math.min(95, Math.round((receivedChars / estimatedTotal) * 100));
+        if (progressFill) progressFill.style.width = pct + '%';
+        if (progressStream) progressStream.textContent = fullText.slice(-200);
+      }
+    }
 
     // Replace the loading indicator with the translation result
-    loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译结果（选中文本）</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove();">&times;</button></div><div class="pd-translation-body">' + escapeHtml(translated).replace(/\n/g, '<br>') + '</div>';
+    loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译结果（选中文本）</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove();">&times;</button></div><div class="pd-translation-body">' + escapeHtml(fullText).replace(/\n/g, '<br>') + '</div>';
   } catch (e) {
     showError("翻译失败: " + e.message);
     loadingEl.remove();
