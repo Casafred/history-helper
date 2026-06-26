@@ -1419,35 +1419,30 @@ function copyPatentSectionText(sectionType) {
 
 // ── Google Translate Widget Injection ──
 let _googleTranslateInjected = false;
+let _googleTranslateActive = false;
 
 function toggleGoogleTranslate() {
-  // Check if Google Translate bar already exists
-  const existingBar = document.querySelector(".skiptranslate iframe");
-
-  // If translation is already applied (body has skiptranslate class), toggle off
-  if (existingBar && document.body.classList.contains("skiptranslate")) {
-    // Remove Google Translate elements and restore original text
-    const gtEls = document.querySelectorAll(".skiptranslate, #goog-gt-tt, .goog-te-spinner-pos");
+  // If translation is already active, toggle off
+  if (_googleTranslateActive) {
+    const gtEls = document.querySelectorAll("#goog-gt-tt, .goog-te-spinner-pos");
     gtEls.forEach(el => el.remove());
     document.body.style.top = "";
-    document.body.classList.remove("skiptranslate");
-    const gtScript = document.getElementById("google-translate-script");
-    if (gtScript) gtScript.remove();
-    const gtContainer = document.getElementById("google_translate_element");
-    if (gtContainer) gtContainer.remove();
-    delete window.google;
-    delete window.googleTranslateElementInit;
-    _googleTranslateInjected = false;
+    // Reset the Google Translate combo to original language
+    const combo = document.querySelector(".goog-te-combo");
+    if (combo) {
+      combo.value = "";
+      combo.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    _googleTranslateActive = false;
     return;
   }
 
-  // If bar exists but translation hasn't been applied yet, auto-select Chinese
-  if (existingBar) {
-    const combo = document.querySelector(".goog-te-combo");
-    if (combo) {
-      combo.value = "zh-CN";
-      combo.dispatchEvent(new Event("change", { bubbles: true }));
-    }
+  // If the Google Translate widget is already injected, auto-select Chinese
+  const combo = document.querySelector(".goog-te-combo");
+  if (combo) {
+    combo.value = "zh-CN";
+    combo.dispatchEvent(new Event("change", { bubbles: true }));
+    _googleTranslateActive = true;
     return;
   }
 
@@ -1455,7 +1450,6 @@ function toggleGoogleTranslate() {
   _googleTranslateInjected = true;
   const container = document.createElement("div");
   container.id = "google_translate_element";
-  // 不设 right:0，避免容器横跨整个顶部遮挡其他元素
   container.style.cssText = "position:fixed;top:0;left:0;z-index:999999;";
   document.body.prepend(container);
 
@@ -1472,6 +1466,7 @@ function toggleGoogleTranslate() {
       if (combo) {
         combo.value = "zh-CN";
         combo.dispatchEvent(new Event("change", { bubbles: true }));
+        _googleTranslateActive = true;
       }
     }, 1500);
   };
