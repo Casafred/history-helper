@@ -894,7 +894,6 @@ function renderPatentDetail(data) {
     html += '<div class="pd-panel-header">';
     html += '<span class="pd-panel-title">权利要求 (' + data.claims.length + ')</span>';
     html += '<div class="pd-panel-actions">';
-    html += '<button class="pd-translate-btn" onclick="translatePatentSection(\'claims\')">翻译</button>';
     html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'claims\')">复制</button>';
     html += '</div></div>';
     html += '<div class="pd-claims-list" data-section-type="claims">';
@@ -919,7 +918,6 @@ function renderPatentDetail(data) {
     html += '<div class="pd-panel-header">';
     html += '<span class="pd-panel-title">说明书</span>';
     html += '<div class="pd-panel-actions">';
-    html += '<button class="pd-translate-btn" onclick="translatePatentSection(\'description\')">翻译</button>';
     html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'description\')">复制</button>';
     html += '</div></div>';
     html += '<div class="pd-description-text" data-section-type="description">' + escapeHtml(data.description) + '</div>';
@@ -1101,7 +1099,8 @@ async function translatePatentSection(sectionType) {
       ? "你是一位专业的专利文献翻译专家。请将以下英文专利权利要求翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。保持权利要求的编号。只返回翻译结果。"
       : "你是一位专业的专利文献翻译专家。请将以下英文专利说明书翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。";
 
-    const resp = await fetch(translateProvider.baseUrl + "/chat/completions", {
+    const apiBase = window.AI.buildUrl(translateProvider.type, translateProvider.baseUrl);
+    const resp = await fetch(apiBase + "/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1257,7 +1256,8 @@ async function translateSelectedPatentText(text, targetSection) {
   sectionEl.appendChild(loadingEl);
 
   try {
-    const resp = await fetch(translateProvider.baseUrl + "/chat/completions", {
+    const apiBase = window.AI.buildUrl(translateProvider.type, translateProvider.baseUrl);
+    const resp = await fetch(apiBase + "/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1291,9 +1291,7 @@ function copyPatentSectionText(sectionType) {
   let text = "";
   const patentData = window._currentPatentData || window._patentPopupData;
   if (sectionType === "claims" && patentData && patentData.claims) {
-    text = patentData.claims.map((c, i) =>
-      (c.num || (i + 1)) + ". " + c.text
-    ).join('\n\n');
+    text = patentData.claims.map((c, i) => c.text).join('\n\n');
   } else if (sectionType === "description" && patentData && patentData.description) {
     text = patentData.description;
   }
@@ -1633,7 +1631,6 @@ function renderPatentPopupContent(data) {
     html += '<div class="pd-panel-header">';
     html += '<span class="pd-panel-title">权利要求 (' + data.claims.length + ')</span>';
     html += '<div class="pd-panel-actions">';
-    html += '<button class="pd-translate-btn" onclick="translatePatentSection(\'claims\')">翻译</button>';
     html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'claims\')">复制</button>';
     html += '</div></div>';
     html += '<div class="pd-claims-list" data-section-type="claims">';
@@ -1658,7 +1655,6 @@ function renderPatentPopupContent(data) {
     html += '<div class="pd-panel-header">';
     html += '<span class="pd-panel-title">说明书</span>';
     html += '<div class="pd-panel-actions">';
-    html += '<button class="pd-translate-btn" onclick="translatePatentSection(\'description\')">翻译</button>';
     html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'description\')">复制</button>';
     html += '</div></div>';
     html += '<div class="pd-description-text" data-section-type="description">' + escapeHtml(data.description) + '</div>';

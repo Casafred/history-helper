@@ -285,6 +285,7 @@ var AI = (function () {
     saveCustomPrompt: saveCustomPrompt,
     resetPrompt: resetPrompt,
     streamChat: streamChat,
+    buildUrl: buildUrl,
     testConnection: testConnection,
   };
 })();
