@@ -8517,34 +8517,6 @@ setInterval(() => {
 // ── Initialize history list on page load ──
 refreshHistoryList();
 
-// ── Auto-inject Google Translate widget on page load ──
-(function autoInitGoogleTranslate() {
-  if (_googleTranslateInjected) return;
-  _googleTranslateInjected = true;
-  const container = document.createElement("div");
-  container.id = "google_translate_element";
-  // 不设 right:0，避免容器横跨整个顶部遮挡其他元素
-  container.style.cssText = "position:fixed;top:0;left:0;z-index:999999;";
-  document.body.prepend(container);
-  window.googleTranslateElementInit = function() {
-    new google.translate.TranslateElement({
-      pageLanguage: "auto",
-      includedLanguages: "zh-CN,zh-TW,en,ja,ko,de,fr",
-      layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
-      autoDisplay: true
-    }, "google_translate_element");
-  };
-  const script = document.createElement("script");
-  script.id = "google-translate-script";
-  script.type = "text/javascript";
-  script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
-  script.onerror = function() {
-    _googleTranslateInjected = false;
-    container.remove();
-  };
-  document.head.appendChild(script);
-})();
-
 // ── Fallback splash-screen removal (in case DOMContentLoaded handler fails) ──
 setTimeout(() => {
   const splash = document.getElementById("splash-screen");
