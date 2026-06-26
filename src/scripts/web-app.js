@@ -723,9 +723,9 @@ function renderPatentDetail(data) {
   html += '<div class="pd-patent-number">' + escapeHtml(data.patent_number) + '</div>';
   html += '<div class="pd-title">' + escapeHtml(data.title || "无标题") + '</div>';
   html += '<div class="pd-links">';
-  html += '<button class="pd-gp-link" onclick="toggleGoogleTranslate()" title="使用 Google 翻译翻译整个页面" style="cursor:pointer;border:1px solid var(--accent);background:transparent;">网页翻译</button>';
-  html += '<button class="pd-gp-link" onclick="openInAppWebview(\'' + escapeHtml(data.url) + '\', \'Google Patents: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Google Patents 页面">Google Patents</button>';
-  html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(data.patent_number) + '\', \'Espacenet: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Espacenet 页面">Espacenet</button>';
+  html += '<button class="pd-gp-link" onclick="toggleGoogleTranslate()" title="使用 Google 翻译翻译整个页面" style="cursor:pointer;border:1px solid var(--accent);background:#fff;">网页翻译</button>';
+  html += '<button class="pd-gp-link" onclick="openInAppWebview(\'' + escapeHtml(data.url) + '\', \'Google Patents: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);background:#fff;" title="在应用内打开 Google Patents 页面">Google Patents</button>';
+  html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(data.patent_number) + '\', \'Espacenet: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);background:#fff;" title="在应用内打开 Espacenet 页面">Espacenet</button>';
   if (data.pdf_link) {
     html += '<a href="' + escapeHtml(data.pdf_link) + '" target="_blank" rel="noopener" class="pd-pdf-link">PDF</a>';
   }
@@ -900,10 +900,14 @@ function renderPatentDetail(data) {
     data.claims.forEach((c, i) => {
       const claimType = c.type === 'independent' ? 'independent' : 'dependent';
       const claimClass = c.type === 'independent' ? 'claim-independent' : 'claim-dependent';
-      html += '<div class="pd-claim-item ' + claimClass + '">';
+      html += '<div class="pd-claim-item ' + claimClass + '" data-claim-index="' + i + '">';
+      html += '<div class="pd-claim-main" style="display:flex;align-items:flex-start;gap:4px;">';
       html += '<span class="pd-claim-num">' + escapeHtml(String(c.num || (i + 1))) + '.</span>';
       html += '<span class="pd-claim-type ' + claimType + '">' + (c.type === 'independent' ? '独立' : '从属') + '</span>';
       html += '<span class="pd-claim-text">' + escapeHtml(c.text) + '</span>';
+      html += '<button class="pd-claim-translate-btn" data-claim-index="' + i + '" title="AI 翻译此条权利要求" style="flex-shrink:0;cursor:pointer;border:1px solid var(--accent);background:#fff;color:var(--accent);font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;line-height:1.2;">译</button>';
+      html += '</div>';
+      html += '<div class="pd-claim-translation" data-claim-translation="' + i + '" style="display:none;margin-top:4px;padding:4px 8px;background:#f0f7ff;border-radius:4px;font-size:13px;color:#333;border-left:3px solid var(--accent);"></div>';
       html += '</div>';
     });
     html += '</div>';
@@ -940,7 +944,7 @@ function renderPatentDetail(data) {
         html += '<span class="pd-citation-marker ' + escapeHtml(c.citation_type) + '" title="' + (c.citation_type === 'examiner' ? '审查员引用' : '申请人引用') + '">' + (c.citation_type === 'examiner' ? '*' : '†') + '</span>';
       }
       html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Google Patents">GP</button>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);background:#fff;" title="在应用内打开 Google Patents">GP</button>';
       if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
       if (c.assignee) html += '<span class="pd-citation-assignee">' + escapeHtml(c.assignee) + '</span>';
       if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
@@ -959,7 +963,7 @@ function renderPatentDetail(data) {
     data.cited_by.forEach(c => {
       html += '<div class="pd-citation-item">';
       html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Google Patents">GP</button>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);background:#fff;" title="在应用内打开 Google Patents">GP</button>';
       if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
       if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
       html += '</div>';
@@ -1009,6 +1013,14 @@ function renderPatentDetail(data) {
     item.addEventListener("click", () => {
       const idx = parseInt(item.dataset.index);
       openPatentImageViewer(data.drawings, idx);
+    });
+  });
+
+  // Bind claim translate buttons
+  patentDetailContent.querySelectorAll(".pd-claim-translate-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.claimIndex);
+      if (!isNaN(idx)) translateClaimByIndex(idx);
     });
   });
 }
@@ -1245,15 +1257,37 @@ async function translateSelectedPatentText(text, targetSection) {
     return;
   }
 
-  // Find the section element and show loading
+  // Find the section element
   const sectionEl = document.querySelector('[data-section-type="' + targetSection + '"]') || document.querySelector("#patent-detail-content");
   if (!sectionEl) return;
 
-  // Show inline loading indicator
+  // Find the anchor element near the selection to insert after it
+  let insertAfter = null;
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0);
+    // Find the closest claim-item or a block-level parent within the section
+    let node = range.endContainer;
+    while (node && node !== sectionEl) {
+      if (node.nodeType === 1 && (node.classList.contains('pd-claim-item') || node.tagName === 'P' || node.tagName === 'DIV')) {
+        insertAfter = node;
+        break;
+      }
+      node = node.parentNode;
+    }
+  }
+
+  // Show inline loading indicator near the selection
   const loadingEl = document.createElement('div');
   loadingEl.className = 'pd-translation-result';
-  loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译中...</span></div><div class="pd-translation-body" style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;"></div><span>正在翻译选中文本...</span></div>';
-  sectionEl.appendChild(loadingEl);
+  loadingEl.style.cssText = 'margin:4px 0;padding:6px 10px;background:#f0f7ff;border-radius:4px;border-left:3px solid var(--accent);';
+  loadingEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;border-width:2px;margin:0;"></div><span style="font-size:12px;color:#888;">翻译中...</span></div>';
+
+  if (insertAfter && insertAfter.parentNode === sectionEl) {
+    insertAfter.after(loadingEl);
+  } else {
+    sectionEl.appendChild(loadingEl);
+  }
 
   try {
     const apiBase = window.AI.buildUrl(translateProvider.type, translateProvider.baseUrl);
@@ -1279,10 +1313,75 @@ async function translateSelectedPatentText(text, targetSection) {
     const translated = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content || "翻译失败";
 
     // Replace the loading indicator with the translation result
-    loadingEl.innerHTML = '<div class="pd-translation-header"><span>AI 翻译结果（选中文本）</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove();">&times;</button></div><div class="pd-translation-body">' + escapeHtml(translated).replace(/\n/g, '<br>') + '</div>';
+    loadingEl.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><span style="font-size:11px;color:#888;">AI 翻译</span><button onclick="this.parentElement.parentElement.remove();" style="border:none;background:transparent;cursor:pointer;font-size:14px;color:#999;padding:0 4px;">&times;</button></div><div style="font-size:13px;color:#333;">' + escapeHtml(translated).replace(/\n/g, '<br>') + '</div>';
   } catch (e) {
     showError("翻译失败: " + e.message);
     loadingEl.remove();
+  }
+}
+
+// Translate a single claim by index
+async function translateClaimByIndex(claimIndex) {
+  const patentData = window._currentPatentData || window._patentPopupData;
+  if (!patentData || !patentData.claims || !patentData.claims[claimIndex]) return;
+
+  const claim = patentData.claims[claimIndex];
+  const translationEl = document.querySelector('[data-claim-translation="' + claimIndex + '"]');
+  const btn = document.querySelector('.pd-claim-translate-btn[data-claim-index="' + claimIndex + '"]');
+  if (!translationEl) return;
+
+  // If already showing translation, toggle off
+  if (translationEl.style.display !== 'none' && translationEl.dataset.translated === '1') {
+    translationEl.style.display = 'none';
+    translationEl.dataset.translated = '0';
+    if (btn) btn.textContent = '译';
+    return;
+  }
+
+  // Show loading
+  translationEl.style.display = 'block';
+  translationEl.dataset.translated = '0';
+  translationEl.innerHTML = '<span style="color:#888;">翻译中...</span>';
+  if (btn) { btn.textContent = '...'; btn.disabled = true; }
+
+  try {
+    const config = window.AI.loadAIConfig();
+    const translateProvider = window.AI.getTranslateProvider(config);
+    if (!translateProvider || !translateProvider.apiKey) {
+      translationEl.innerHTML = '<span style="color:var(--danger);">请先配置 AI API Key</span>';
+      if (btn) { btn.textContent = '译'; btn.disabled = false; }
+      return;
+    }
+
+    const textToTranslate = (claim.num ? 'Claim ' + claim.num + ': ' : '') + claim.text;
+    const apiBase = window.AI.buildUrl(translateProvider.type, translateProvider.baseUrl);
+    const resp = await fetch(apiBase + "/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + translateProvider.apiKey,
+      },
+      body: JSON.stringify({
+        model: translateProvider.model,
+        messages: [
+          { role: "system", content: "你是一位专业的专利文献翻译专家。请将以下英文专利权利要求翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果，不要添加解释。" },
+          { role: "user", content: textToTranslate }
+        ],
+        temperature: 0.3,
+        max_tokens: 2048,
+      }),
+    });
+
+    if (!resp.ok) throw new Error("API 请求失败: " + resp.status);
+    const json = await resp.json();
+    const translated = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content || "翻译失败";
+
+    translationEl.innerHTML = escapeHtml(translated).replace(/\n/g, '<br>');
+    translationEl.dataset.translated = '1';
+    if (btn) { btn.textContent = '✓'; btn.disabled = false; }
+  } catch (e) {
+    translationEl.innerHTML = '<span style="color:var(--danger);">翻译失败: ' + escapeHtml(e.message) + '</span>';
+    if (btn) { btn.textContent = '译'; btn.disabled = false; }
   }
 }
 
@@ -1318,15 +1417,16 @@ function copyPatentSectionText(sectionType) {
 let _googleTranslateInjected = false;
 
 function toggleGoogleTranslate() {
-  // If Google Translate is already active (translation applied), toggle off
+  // Check if Google Translate bar already exists
   const existingBar = document.querySelector(".skiptranslate iframe");
-  if (existingBar) {
+
+  // If translation is already applied (body has skiptranslate class), toggle off
+  if (existingBar && document.body.classList.contains("skiptranslate")) {
     // Remove Google Translate elements and restore original text
     const gtEls = document.querySelectorAll(".skiptranslate, #goog-gt-tt, .goog-te-spinner-pos");
     gtEls.forEach(el => el.remove());
     document.body.style.top = "";
     document.body.classList.remove("skiptranslate");
-    // Remove the script and container so it can be re-injected
     const gtScript = document.getElementById("google-translate-script");
     if (gtScript) gtScript.remove();
     const gtContainer = document.getElementById("google_translate_element");
@@ -1337,7 +1437,17 @@ function toggleGoogleTranslate() {
     return;
   }
 
-  // Inject or re-inject Google Translate widget
+  // If bar exists but translation hasn't been applied yet, auto-select Chinese
+  if (existingBar) {
+    const combo = document.querySelector(".goog-te-combo");
+    if (combo) {
+      combo.value = "zh-CN";
+      combo.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    return;
+  }
+
+  // Inject Google Translate widget
   _googleTranslateInjected = true;
   const container = document.createElement("div");
   container.id = "google_translate_element";
@@ -1352,6 +1462,14 @@ function toggleGoogleTranslate() {
       layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
       autoDisplay: true
     }, "google_translate_element");
+    // 自动选择中文翻译
+    setTimeout(() => {
+      const combo = document.querySelector(".goog-te-combo");
+      if (combo) {
+        combo.value = "zh-CN";
+        combo.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }, 1500);
   };
 
   const script = document.createElement("script");
@@ -1518,6 +1636,13 @@ function _bindPpvContentEvents(content, data) {
       if (pn) openPatentPopup(pn);
     });
   });
+  // Bind claim translate buttons
+  content.querySelectorAll(".pd-claim-translate-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.claimIndex);
+      if (!isNaN(idx)) translateClaimByIndex(idx);
+    });
+  });
 }
 
 function _renderPpvPatentTabs() {
@@ -1637,10 +1762,14 @@ function renderPatentPopupContent(data) {
     data.claims.forEach((c, i) => {
       const claimType = c.type === 'independent' ? 'independent' : 'dependent';
       const claimClass = c.type === 'independent' ? 'claim-independent' : 'claim-dependent';
-      html += '<div class="pd-claim-item ' + claimClass + '">';
+      html += '<div class="pd-claim-item ' + claimClass + '" data-claim-index="' + i + '">';
+      html += '<div class="pd-claim-main" style="display:flex;align-items:flex-start;gap:4px;">';
       html += '<span class="pd-claim-num">' + escapeHtml(String(c.num || (i + 1))) + '.</span>';
       html += '<span class="pd-claim-type ' + claimType + '">' + (c.type === 'independent' ? '独立' : '从属') + '</span>';
       html += '<span class="pd-claim-text">' + escapeHtml(c.text) + '</span>';
+      html += '<button class="pd-claim-translate-btn" data-claim-index="' + i + '" title="AI 翻译此条权利要求" style="flex-shrink:0;cursor:pointer;border:1px solid var(--accent);background:#fff;color:var(--accent);font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;line-height:1.2;">译</button>';
+      html += '</div>';
+      html += '<div class="pd-claim-translation" data-claim-translation="' + i + '" style="display:none;margin-top:4px;padding:4px 8px;background:#f0f7ff;border-radius:4px;font-size:13px;color:#333;border-left:3px solid var(--accent);"></div>';
       html += '</div>';
     });
     html += '</div>';
@@ -1677,7 +1806,7 @@ function renderPatentPopupContent(data) {
         html += '<span class="pd-citation-marker ' + escapeHtml(c.citation_type) + '" title="' + (c.citation_type === 'examiner' ? '审查员引用' : '申请人引用') + '">' + (c.citation_type === 'examiner' ? '*' : '†') + '</span>';
       }
       html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Google Patents">GP</button>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);background:#fff;" title="在应用内打开 Google Patents">GP</button>';
       if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
       if (c.assignee) html += '<span class="pd-citation-assignee">' + escapeHtml(c.assignee) + '</span>';
       if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
@@ -1696,7 +1825,7 @@ function renderPatentPopupContent(data) {
     data.cited_by.forEach(c => {
       html += '<div class="pd-citation-item">';
       html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Google Patents">GP</button>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);background:#fff;" title="在应用内打开 Google Patents">GP</button>';
       if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
       if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
       html += '</div>';
