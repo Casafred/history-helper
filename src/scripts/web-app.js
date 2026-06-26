@@ -613,6 +613,11 @@ function openInAppWebview(url, title) {
   overlay.innerHTML = webviewHtml;
   overlay.style.display = "block";
 
+  // 隐藏主应用的 Google Translate 悬浮栏及相关元素
+  const gtBar = document.getElementById("google_translate_element");
+  if (gtBar) gtBar.style.display = "none";
+  document.querySelectorAll(".skiptranslate").forEach(el => { el.dataset.wasVisible = el.style.display; el.style.display = "none"; });
+
   // 绑定按钮事件
   const closeBtn = document.getElementById("pd-wv-close-btn");
   const translateBtn = document.getElementById("pd-wv-translate-btn");
@@ -691,6 +696,11 @@ function openInAppWebview(url, title) {
 function closeInAppWebview() {
   const overlay = document.getElementById("pd-inapp-webview-overlay");
   if (overlay) overlay.style.display = "none";
+
+  // 恢复主应用的 Google Translate 悬浮栏及相关元素
+  const gtBar = document.getElementById("google_translate_element");
+  if (gtBar) gtBar.style.display = "";
+  document.querySelectorAll(".skiptranslate").forEach(el => { el.style.display = el.dataset.wasVisible || ""; delete el.dataset.wasVisible; });
 }
 
 // 显示数据来源徽章（在专利详情头部显示数据来源）
