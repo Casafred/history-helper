@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, shell, ipcMain } = require("electron");
 const http = require("http");
 const https = require("https");
 const fs = require("fs");
@@ -991,8 +991,17 @@ async function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl) {
     }
   }
 
-  res.writeHead(404, corsHeaders);
-  res.end(JSON.stringify({ success: false, error: `未找到专利: ${patentNumber}`, patent_number: normalized }));
+  // Google Patents 未找到 —— 降级到 Espacenet（在应用内 webview 中打开）
+  const espacenetUrl = "https://worldwide.espacenet.com/patent/search?q=" + encodeURIComponent(patentNumber);
+  console.log("[GP→Espacenet] Google Patents 未找到，降级到 Espacenet: " + espacenetUrl);
+  res.writeHead(200, corsHeaders);
+  res.end(JSON.stringify({
+    success: true,
+    data_source: "Espacenet",
+    espacenet_url: espacenetUrl,
+    patent_number: normalized,
+    data: { patent_number: normalized, data_source: "Espacenet", espacenet_url: espacenetUrl },
+  }));
 }
 
 // ── PaddleOCR V2 (async Job API) ──
@@ -1952,14 +1961,29 @@ function createWindow(port) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
+      webviewTag: true,
     },
   });
 
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
+  // 外部链接在系统浏览器中打开
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) return { action: "allow" };
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
   mainWindow.on("closed", () => { mainWindow = null; });
 }
 
 app.whenReady().then(async () => {
+  // IPC: 渲染进程请求在系统浏览器中打开外部链接
+  ipcMain.on("open-external", (_event, url) => {
+    if (typeof url === "string" && (url.startsWith("http://") || url.startsWith("https://"))) {
+      shell.openExternal(url);
+    }
+  });
+
   const port = await startServer();
   createWindow(port);
 

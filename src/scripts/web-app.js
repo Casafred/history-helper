@@ -443,11 +443,48 @@ async function searchPatentDetail(input) {
       return;
     }
 
+    // Espacenet 降级：在应用内嵌入 webview/iframe 显示 Espacenet 页面
+    if (json.data_source === "Espacenet" || (json.data && json.data.data_source === "Espacenet")) {
+      const espacenetUrl = json.espacenet_url || (json.data && json.data.espacenet_url) || "";
+      const pn = json.patent_number || raw;
+      const isElectron = !!(window.electronAPI);
+      let webviewHtml = `
+        <div class="pd-header">
+          <div class="pd-patent-number">${escapeHtml(pn)}</div>
+          <div class="pd-title">Google Patents 未找到 — 已在 Espacenet 中打开</div>
+          <div class="pd-links">
+            <a href="${escapeHtml(espacenetUrl)}" target="_blank" rel="noopener" class="pd-gp-link">在外部浏览器打开</a>
+          </div>
+        </div>
+        <div class="pd-espacenet-frame" style="width:100%;height:calc(100vh - 200px);border:none;position:relative;">
+      `;
+      if (isElectron) {
+        // Electron: 使用 <webview> 标签（独立进程，不受 X-Frame-Options 限制）
+        webviewHtml += `<webview src="${escapeHtml(espacenetUrl)}" style="width:100%;height:100%;border:1px solid #ddd;border-radius:8px;" allowpopups></webview>`;
+      } else {
+        // 浏览器: 尝试 iframe（可能被 X-Frame-Options 阻止，fallback 到新窗口）
+        webviewHtml += `<iframe src="${escapeHtml(espacenetUrl)}" style="width:100%;height:100%;border:1px solid #ddd;border-radius:8px;"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                  allow="clipboard-read; clipboard-write"
+                  referrerpolicy="no-referrer"
+                  onload="this.parentElement.querySelector('.espacenet-loading')?.remove()"
+                  onerror="window.open('${escapeHtml(espacenetUrl)}','_blank');this.parentElement.innerHTML='<div style=padding:40px;text-align:center;color:#888>iframe 加载失败，已在外部浏览器打开</div>'">
+          </iframe>
+          <div class="espacenet-loading" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#888;">正在加载 Espacenet...</div>`;
+      }
+      webviewHtml += `</div>`;
+      patentDetailContent.innerHTML = webviewHtml;
+      patentDetailSection.classList.remove("hidden");
+      searchBtn.disabled = false;
+      loading.classList.add("hidden");
+      return;
+    }
+
     renderPatentDetail(json.data);
     window._currentPatentData = json.data;
     patentDetailSection.classList.remove("hidden");
 
-    // 显示数据来源标识（当数据来自 EPO OPS 降级查询时）
+    // 显示数据来源标识
     if (json.data_source === "EPO OPS" || (json.data && json.data.data_source === "EPO OPS")) {
       showDataSourceBadge("EPO OPS", "Google Patents 未找到该专利，数据来自 EPO OPS 降级查询");
     } else {
