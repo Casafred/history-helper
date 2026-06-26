@@ -493,19 +493,62 @@ function openInAppWebview(url, title) {
   let _currentWebviewUrl = url;
   let _isTranslated = false;
 
-  // 翻译 webview 内容：通过 Google Translate URL 代理
+  // 翻译 webview 内容：在 webview 内注入 Google Translate 脚本
   function translateWebview() {
     const container = document.getElementById("pd-inapp-webview-container");
     if (!container) return;
+
     if (_isTranslated) {
-      // 已经翻译了，切换回原文
+      // 已翻译，切换回原文：重新加载原始 URL
       _isTranslated = false;
       loadUrl(_currentWebviewUrl);
       return;
     }
-    const translateUrl = "https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(_currentWebviewUrl);
+
     _isTranslated = true;
-    loadUrl(translateUrl);
+
+    if (isElectron) {
+      // Electron: 在 webview 内执行 JS 注入 Google Translate
+      const wv = container.querySelector("webview");
+      if (!wv) return;
+      const injectCode = `
+        (function() {
+          if (document.getElementById('google_translate_element_injected')) {
+            // 已注入过，切换语言即可
+            var sel = document.querySelector('.goog-te-combo');
+            if (sel) { sel.value = 'zh-CN'; sel.dispatchEvent(new Event('change')); }
+            return;
+          }
+          var container = document.createElement('div');
+          container.id = 'google_translate_element_injected';
+          container.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;';
+          document.body.prepend(container);
+          window.googleTranslateElementInitInner = function() {
+            new google.translate.TranslateElement({
+              pageLanguage: 'auto',
+              includedLanguages: 'zh-CN,zh-TW,en,ja,ko,de,fr',
+              layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
+              autoDisplay: true
+            }, 'google_translate_element_injected');
+          };
+          var script = document.createElement('script');
+          script.type = 'text/javascript';
+          script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInitInner';
+          document.head.appendChild(script);
+        })();
+      `;
+      try {
+        wv.executeJavaScript(injectCode);
+      } catch (e) {
+        // executeJavaScript 失败（如 webview 还未加载完），回退到 URL 代理
+        const translateUrl = "https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(_currentWebviewUrl);
+        loadUrl(translateUrl);
+      }
+    } else {
+      // 浏览器 iframe：无法跨域注入脚本，使用 Google Translate URL 代理
+      const translateUrl = "https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(_currentWebviewUrl);
+      loadUrl(translateUrl);
+    }
   }
 
   function loadUrl(targetUrl) {
@@ -1277,7 +1320,7 @@ function copyPatentSectionText(sectionType) {
 let _googleTranslateInjected = false;
 
 function toggleGoogleTranslate() {
-  // If Google Translate is already active (bar visible), toggle off
+  // If Google Translate is already active (translation applied), toggle off
   const existingBar = document.querySelector(".skiptranslate iframe");
   if (existingBar) {
     // Remove Google Translate elements and restore original text
@@ -1297,45 +1340,32 @@ function toggleGoogleTranslate() {
   }
 
   // Inject or re-inject Google Translate widget
-  if (!_googleTranslateInjected) {
-    _googleTranslateInjected = true;
-    const container = document.createElement("div");
-    container.id = "google_translate_element";
-    container.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:999999;pointer-events:none;";
-    document.body.prepend(container);
+  _googleTranslateInjected = true;
+  const container = document.createElement("div");
+  container.id = "google_translate_element";
+  // 不设 right:0，避免容器横跨整个顶部遮挡其他元素
+  container.style.cssText = "position:fixed;top:0;left:0;z-index:999999;";
+  document.body.prepend(container);
 
-    window.googleTranslateElementInit = function() {
-      new google.translate.TranslateElement({
-        pageLanguage: "auto",
-        includedLanguages: "zh-CN,zh-TW,en,ja,ko,de,fr",
-        layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
-        autoDisplay: true
-      }, "google_translate_element");
-      // 翻译栏内部元素恢复可交互
-      const gtBar = container.querySelector("iframe, .goog-te-combo, select");
-      if (gtBar) gtBar.style.pointerEvents = "auto";
-    };
+  window.googleTranslateElementInit = function() {
+    new google.translate.TranslateElement({
+      pageLanguage: "auto",
+      includedLanguages: "zh-CN,zh-TW,en,ja,ko,de,fr",
+      layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
+      autoDisplay: true
+    }, "google_translate_element");
+  };
 
-    const script = document.createElement("script");
-    script.id = "google-translate-script";
-    script.type = "text/javascript";
-    script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
-    script.onload = function() {
-      // Google Translate 渲染后，让内部可交互的元素恢复 pointer-events
-      setTimeout(() => {
-        const gtIframe = container.querySelector("iframe");
-        if (gtIframe) gtIframe.style.pointerEvents = "auto";
-        const gtCombo = container.querySelector(".goog-te-combo, select");
-        if (gtCombo) gtCombo.style.pointerEvents = "auto";
-      }, 2000);
-    };
-    script.onerror = function() {
-      showError("无法加载 Google 翻译组件，请检查网络连接（可能需要代理）");
-      _googleTranslateInjected = false;
-      container.remove();
-    };
-    document.head.appendChild(script);
-  }
+  const script = document.createElement("script");
+  script.id = "google-translate-script";
+  script.type = "text/javascript";
+  script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
+  script.onerror = function() {
+    showError("无法加载 Google 翻译组件，请检查网络连接（可能需要代理）");
+    _googleTranslateInjected = false;
+    container.remove();
+  };
+  document.head.appendChild(script);
 }
 
 // Simple fullscreen image viewer for patent drawings
@@ -8358,7 +8388,8 @@ refreshHistoryList();
   _googleTranslateInjected = true;
   const container = document.createElement("div");
   container.id = "google_translate_element";
-  container.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:999999;pointer-events:none;";
+  // 不设 right:0，避免容器横跨整个顶部遮挡其他元素
+  container.style.cssText = "position:fixed;top:0;left:0;z-index:999999;";
   document.body.prepend(container);
   window.googleTranslateElementInit = function() {
     new google.translate.TranslateElement({
@@ -8367,9 +8398,6 @@ refreshHistoryList();
       layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
       autoDisplay: true
     }, "google_translate_element");
-    // 翻译栏内部元素恢复可交互
-    const gtBar = container.querySelector("iframe, .goog-te-combo, select");
-    if (gtBar) gtBar.style.pointerEvents = "auto";
   };
   const script = document.createElement("script");
   script.id = "google-translate-script";
