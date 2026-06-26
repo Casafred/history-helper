@@ -657,19 +657,59 @@ function openInAppWebview(url, title) {
     const menu = document.createElement("div");
     menu.id = "pd-wv-ctx-menu";
     menu.style.cssText = "position:fixed;left:" + e.clientX + "px;top:" + e.clientY + "px;z-index:100001;background:#fff;border:1px solid #ddd;border-radius:6px;box-shadow:0 2px 12px rgba(0,0,0,0.15);padding:4px 0;min-width:140px;";
-    menu.innerHTML = '<div class="pd-wv-ctx-item" data-action="translate" style="padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;">🌐 ' + (_isTranslated ? '查看原文' : 'Google 翻译此页') + '</div>' +
-      '<div class="pd-wv-ctx-item" data-action="refresh" style="padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;">🔄 刷新页面</div>' +
-      '<div class="pd-wv-ctx-item" data-action="external" style="padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;">🔗 在外部浏览器打开</div>';
+
+    // Build menu items dynamically - check for selected text
+    let selectedTextForMenu = window.getSelection ? window.getSelection().toString().trim() : '';
+    let menuItems = '';
+    if (selectedTextForMenu) {
+      menuItems += '<div class="pd-wv-ctx-item" data-action="translate-selection" style="padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;">📝 翻译选中文本</div>';
+    }
+    menuItems += '<div class="pd-wv-ctx-item" data-action="translate" style="padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;">🌐 ' + (_isTranslated ? '查看原文' : 'Google 翻译此页') + '</div>';
+    menuItems += '<div class="pd-wv-ctx-item" data-action="refresh" style="padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;">🔄 刷新页面</div>';
+    menuItems += '<div class="pd-wv-ctx-item" data-action="external" style="padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;">🔗 在外部浏览器打开</div>';
+    menu.innerHTML = menuItems;
+
+    // For Electron webview, check selected text inside webview asynchronously
+    if (isElectron) {
+      const wv = document.querySelector("#pd-inapp-webview-container webview");
+      if (wv) {
+        try {
+          wv.executeJavaScript('window.getSelection().toString()').then(wvSelection => {
+            const wvSel = (wvSelection || '').trim();
+            if (wvSel && !selectedTextForMenu) {
+              selectedTextForMenu = wvSel;
+              const translateSelItem = document.createElement("div");
+              translateSelItem.className = "pd-wv-ctx-item";
+              translateSelItem.dataset.action = "translate-selection";
+              translateSelItem.style.cssText = "padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;";
+              translateSelItem.textContent = "📝 翻译选中文本";
+              menu.insertBefore(translateSelItem, menu.firstChild);
+              // Bind events for the new item
+              translateSelItem.addEventListener("mouseenter", function() { this.style.background = "#f0f4ff"; });
+              translateSelItem.addEventListener("mouseleave", function() { this.style.background = "transparent"; });
+              translateSelItem.addEventListener("click", function() {
+                menu.remove();
+                translateSelectedPatentText(wvSel, "");
+              });
+            }
+          }).catch(() => {});
+        } catch(err) {}
+      }
+    }
+
     document.body.appendChild(menu);
 
-    // 菜单项 hover
+    // 菜单项 hover and click
     menu.querySelectorAll(".pd-wv-ctx-item").forEach(item => {
       item.addEventListener("mouseenter", function() { this.style.background = "#f0f4ff"; });
       item.addEventListener("mouseleave", function() { this.style.background = "transparent"; });
       item.addEventListener("click", function() {
         const action = this.dataset.action;
+        const capturedSelText = selectedTextForMenu;
         menu.remove();
-        if (action === "translate") {
+        if (action === "translate-selection") {
+          translateSelectedPatentText(capturedSelText, "");
+        } else if (action === "translate") {
           translateWebview();
           if (translateBtn) {
             if (_isTranslated) { translateBtn.textContent = "原文"; translateBtn.title = "切换回原始页面"; }
@@ -934,7 +974,7 @@ function renderPatentDetail(data) {
     html += '<div class="pd-panel-actions">';
     html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'description\')">复制</button>';
     html += '</div></div>';
-    html += '<div class="pd-description-text" data-section-type="description">' + escapeHtml(data.description) + '</div>';
+    html += '<div class="pd-description-text" data-section-type="description">' + renderDescriptionHtml(data.description) + '</div>';
   } else {
     html += '<div class="pd-empty">暂无说明书数据</div>';
   }
@@ -1630,6 +1670,18 @@ document.addEventListener("click", (e) => {
 let _patentPopupData = null; // cached patent data for the popup
 let _ppvOpenPatents = []; // [{patentNumber, data, html}] - all opened patents in this session
 let _ppvActivePatent = ""; // currently active patent number
+let _patentPopupCache = {}; // { patentNumber: { data: ..., html: ..., timestamp: ... } }
+const PATENT_POPUP_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+// Clean expired popup cache entries every 30 minutes
+setInterval(() => {
+  const now = Date.now();
+  Object.keys(_patentPopupCache).forEach(key => {
+    if (now - _patentPopupCache[key].timestamp >= PATENT_POPUP_CACHE_TTL) {
+      delete _patentPopupCache[key];
+    }
+  });
+}, 30 * 60 * 1000);
 
 function _bindPpvContentEvents(content, data) {
   // Bind drawing clicks
@@ -1654,6 +1706,20 @@ function _bindPpvContentEvents(content, data) {
       const claimItem = btn.closest('.pd-claim-item');
       if (!isNaN(idx)) translateClaimByIndex(idx, claimItem);
     });
+  });
+
+  // Right-click context menu for popup patent content
+  content.addEventListener("contextmenu", (ev) => {
+    let targetSection = "";
+    const claimsEl = ev.target.closest('[data-section-type="claims"]');
+    const descEl = ev.target.closest('[data-section-type="description"]');
+    if (claimsEl) targetSection = "claims";
+    else if (descEl) targetSection = "description";
+
+    if (targetSection || window.getSelection().toString().trim()) {
+      ev.preventDefault();
+      showPatentDetailContextMenu(ev.clientX, ev.clientY, targetSection);
+    }
   });
 }
 
@@ -1798,7 +1864,7 @@ function renderPatentPopupContent(data) {
     html += '<div class="pd-panel-actions">';
     html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'description\')">复制</button>';
     html += '</div></div>';
-    html += '<div class="pd-description-text" data-section-type="description">' + escapeHtml(data.description) + '</div>';
+    html += '<div class="pd-description-text" data-section-type="description">' + renderDescriptionHtml(data.description) + '</div>';
   } else {
     html += '<div class="pd-empty">暂无说明书数据</div>';
   }
@@ -1973,6 +2039,28 @@ async function openPatentPopup(patentNumber) {
     _ppvOpenPatents.push({ patentNumber: raw, data, html });
     _ppvActivePatent = raw;
     _renderPpvPatentTabs();
+    _patentPopupCache[raw] = { data, html, timestamp: Date.now() };
+    return;
+  }
+
+  // Check TTL-based popup cache (1 hour)
+  const cachedEntry = _patentPopupCache[raw];
+  if (cachedEntry && Date.now() - cachedEntry.timestamp < PATENT_POPUP_CACHE_TTL) {
+    const data = cachedEntry.data;
+    const html = cachedEntry.html;
+    _patentPopupData = data;
+    window._patentPopupData = data;
+    loading.classList.add("hidden");
+    titleEl.textContent = data.title || "无标题";
+    if (data.pdf_link) {
+      pdfLink.href = data.pdf_link;
+      pdfLink.classList.remove("hidden");
+    }
+    content.innerHTML = html;
+    _bindPpvContentEvents(content, data);
+    _ppvOpenPatents.push({ patentNumber: raw, data, html });
+    _ppvActivePatent = raw;
+    _renderPpvPatentTabs();
     return;
   }
 
@@ -2005,6 +2093,7 @@ async function openPatentPopup(patentNumber) {
     _ppvOpenPatents.push({ patentNumber: raw, data, html });
     _ppvActivePatent = raw;
     _renderPpvPatentTabs();
+    _patentPopupCache[raw] = { data, html, timestamp: Date.now() };
 
   } catch (e) {
     content.innerHTML = '<div class="ppv-error">查询失败: ' + escapeHtml(e.message) + '</div>';
@@ -3295,6 +3384,40 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
+}
+
+function renderDescriptionHtml(text) {
+  if (!text) return '';
+  // Split by ## section headers
+  const sections = text.split(/\n## /);
+  let html = '';
+  sections.forEach((section, idx) => {
+    let sectionText = idx === 0 && text.startsWith('## ') ? section : (idx === 0 ? section : section);
+    // First section may start with ## if text starts with ##
+    if (idx === 0 && text.startsWith('## ')) {
+      sectionText = sections[0].substring(3); // remove leading "## "
+    } else if (idx > 0) {
+      sectionText = section; // already split after "## "
+    }
+    if (!sectionText.trim()) return;
+    const lines = sectionText.split('\n');
+    const header = lines[0].trim();
+    const body = lines.slice(1).join('\n');
+    if (header) {
+      html += '<div class="pd-desc-section-title">' + escapeHtml(header) + '</div>';
+    }
+    if (body.trim()) {
+      // Split body by empty lines into paragraphs
+      const paragraphs = body.trim().split(/\n\s*\n/);
+      paragraphs.forEach(para => {
+        const trimmed = para.trim();
+        if (trimmed) {
+          html += '<p>' + escapeHtml(trimmed).replace(/\n/g, '<br>') + '</p>';
+        }
+      });
+    }
+  });
+  return html;
 }
 
 function renderDocuments(data) {
