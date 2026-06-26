@@ -1673,30 +1673,17 @@ function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey, opsSe
       }
     }
 
-    // Google Patents 所有变体均失败 —— 尝试 EPO OPS 降级查询
-    if (opsKey && opsSecret) {
-      console.log("[GP→OPS] Google Patents 未找到，降级到 EPO OPS 查询: " + patentNumber);
-      try {
-        const opsResult = await queryOpsPatent(patentNumber, opsKey, opsSecret);
-        if (opsResult.success) {
-          console.log("[GP→OPS] 降级查询成功: " + patentNumber);
-          res.writeHead(200, {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "X-Data-Source": "EPO-OPS",
-          });
-          res.end(JSON.stringify({ success: true, data: opsResult.data, patent_number: opsResult.patent_number, data_source: "EPO OPS" }));
-          return;
-        } else {
-          console.log("[GP→OPS] 降级查询也失败: " + (opsResult.error || "未知错误"));
-        }
-      } catch (e) {
-        console.log("[GP→OPS] 降级查询异常: " + e.message);
-      }
-    }
-
-    res.writeHead(404, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-    res.end(JSON.stringify({ success: false, error: `未找到专利: ${patentNumber}`, patent_number: normalized }));
+    // Google Patents 所有变体均失败 —— 降级到 Espacenet
+    const espacenetUrl = "https://worldwide.espacenet.com/patent/search?q=" + encodeURIComponent(patentNumber);
+    console.log("[GP→Espacenet] Google Patents 未找到，降级到 Espacenet: " + espacenetUrl);
+    res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({
+      success: true,
+      data_source: "Espacenet",
+      espacenet_url: espacenetUrl,
+      patent_number: normalized,
+      data: { patent_number: normalized, data_source: "Espacenet", espacenet_url: espacenetUrl },
+    }));
   })();
 }
 

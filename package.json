@@ -29,6 +29,7 @@
     },
     "files": [
       "electron-main.js",
+      "preload.js",
       "fonts/**",
       {
         "from": "src",

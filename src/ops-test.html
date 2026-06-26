@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>EPO OPS 调试界面</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 20px; line-height: 1.6; }
+  h1 { color: #00d4ff; margin-bottom: 20px; font-size: 22px; }
+  h2 { color: #00d4ff; margin: 20px 0 10px; font-size: 16px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+  .form-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+  label { min-width: 120px; color: #aaa; font-size: 13px; }
+  input[type="text"], input[type="password"] { background: #16213e; border: 1px solid #333; color: #e0e0e0; padding: 8px 12px; border-radius: 4px; flex: 1; min-width: 200px; font-size: 13px; }
+  input[type="text"]:focus, input[type="password"]:focus { border-color: #00d4ff; outline: none; }
+  button { background: #0f3460; color: #00d4ff; border: 1px solid #00d4ff; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
+  button:hover { background: #00d4ff; color: #16213e; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.danger { border-color: #e74c3c; color: #e74c3c; }
+  button.danger:hover { background: #e74c3c; color: #fff; }
+  .result-card { background: #16213e; border: 1px solid #333; border-radius: 6px; padding: 12px; margin-bottom: 10px; font-family: "Cascadia Code", "Consolas", monospace; font-size: 12px; }
+  .endpoint-row { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
+  .endpoint-name { min-width: 100px; font-weight: bold; color: #00d4ff; }
+  .endpoint-status { min-width: 80px; font-weight: bold; }
+  .status-ok { color: #2ecc71; }
+  .status-fail { color: #e74c3c; }
+  .status-pending { color: #f39c12; }
+  .endpoint-detail { color: #aaa; flex: 1; word-break: break-all; }
+  pre { background: #0d1b2a; padding: 10px; border-radius: 4px; overflow-x: auto; max-height: 300px; overflow-y: auto; color: #8be9fd; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+  .summary { background: #0f3460; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
+  .summary.ok { border-left: 4px solid #2ecc71; }
+  .summary.fail { border-left: 4px solid #e74c3c; }
+  .hint { color: #f39c12; font-size: 12px; margin: 10px 0; padding: 8px; background: rgba(243,156,18,0.1); border-radius: 4px; }
+  a { color: #00d4ff; }
+</style>
+</head>
+<body>
+<h1>EPO OPS 调试界面</h1>
+<p style="color:#aaa;font-size:13px;margin-bottom:15px">
+  此界面用于独立测试 EPO OPS 各端点连通性，绕过 Google Patents 降级逻辑，直接诊断 OPS 查询问题。<br>
+  参考 MCP 实现：<a href="https://github.com/talenlin/epo-ops-mcp" target="_blank">talenlin/epo-ops-mcp</a>
+</p>
+
+<h2>1. 凭证与专利号</h2>
+<div class="form-row">
+  <label>Consumer Key</label>
+  <input type="text" id="ops-key" placeholder="EPO OPS Consumer Key">
+</div>
+<div class="form-row">
+  <label>Consumer Secret</label>
+  <input type="password" id="ops-secret" placeholder="EPO OPS Consumer Secret">
+</div>
+<div class="form-row">
+  <label>专利号</label>
+  <input type="text" id="patent-num" placeholder="EP1000000" value="EP1000000">
+</div>
+<div class="form-row">
+  <label>使用代理</label>
+  <input type="checkbox" id="use-proxy">
+  <label style="min-width:auto">代理地址</label>
+  <input type="text" id="proxy-url" placeholder="http://127.0.0.1:7897" style="flex:1;min-width:200px">
+</div>
+<div class="form-row">
+  <button id="btn-token">① 测试 Token 获取</button>
+  <button id="btn-debug">② 逐个测试所有端点</button>
+  <button id="btn-biblio">③ 仅测 biblio（MCP 方式）</button>
+  <button id="btn-clear" class="danger">清空</button>
+</div>
+
+<div id="token-result" class="result-card" style="display:none"></div>
+
+<h2>2. 逐端点测试结果</h2>
+<div id="endpoints-results"></div>
+
+<h2>3. 原始 JSON 响应</h2>
+<div id="raw-results"></div>
+
+<script>
+const BASE = ""; // 同源
+
+function getParams() {
+  const key = document.getElementById("ops-key").value.trim();
+  const secret = document.getElementById("ops-secret").value.trim();
+  const patent = document.getElementById("patent-num").value.trim();
+  const useProxy = document.getElementById("use-proxy").checked;
+  const proxyUrl = document.getElementById("proxy-url").value.trim();
+  if (!key || !secret) { alert("请填写 Consumer Key 和 Secret"); return null; }
+  if (!patent) { alert("请填写专利号"); return null; }
+  let qs = "opsKey=" + encodeURIComponent(key) + "&opsSecret=" + encodeURIComponent(secret);
+  if (useProxy && proxyUrl) qs += "&proxy=1&proxyUrl=" + encodeURIComponent(proxyUrl);
+  return { key, secret, patent, qs };
+}
+
+function showCard(id, html) {
+  const el = document.getElementById(id);
+  el.style.display = "";
+  el.innerHTML = html;
+}
+
+function setStatus(rowId, status, detail) {
+  const el = document.getElementById(rowId);
+  if (!el) return;
+  const statusEl = el.querySelector(".endpoint-status");
+  const detailEl = el.querySelector(".endpoint-detail");
+  statusEl.className = "endpoint-status " + (status === 200 ? "status-ok" : "status-fail");
+  statusEl.textContent = status === 200 ? "✓ 200" : (status === 0 ? "✗ 超时/错误" : "✗ " + status);
+  if (detail) detailEl.textContent = detail;
+}
+
+// ① 测试 Token
+document.getElementById("btn-token").addEventListener("click", async () => {
+  const p = getParams(); if (!p) return;
+  showCard("token-result", '<span class="status-pending">⏳ 正在获取 Token...</span>');
+  try {
+    const resp = await fetch(BASE + "/api/ops/test?" + p.qs);
+    const data = await resp.json();
+    let html = "";
+    if (data.success) {
+      html = '<span class="status-ok">✓ Token 获取成功</span><br>';
+      html += "凭证有效，OPS 连通正常<br>";
+      if (data.quota) html += "配额状态: " + (data.quota.throttle || "未知") + " | 每小时: " + data.quota.hourUsed + " | 每周: " + data.quota.weekUsed;
+    } else {
+      html = '<span class="status-fail">✗ ' + (data.error || "失败") + '</span><br>';
+      html += "阶段: " + (data.stage || "未知") + "<br>";
+      if (data.stage === "token") html += '<span class="hint">Token 获取失败：检查 key/secret 是否正确、网络是否能访问 ops.epo.org（国内通常可直连，无需代理）</span>';
+      if (data.stage === "query") html += '<span class="hint">Token 有效但 biblio 查询失败：可能是配额用尽或专利号不存在</span>';
+    }
+    showCard("token-result", html);
+  } catch (e) {
+    showCard("token-result", '<span class="status-fail">✗ 请求失败: ' + e.message + '</span>');
+  }
+});
+
+// ② 逐个测试所有端点
+document.getElementById("btn-debug").addEventListener("click", async () => {
+  const p = getParams(); if (!p) return;
+  const endpointsDiv = document.getElementById("endpoints-results");
+  const rawDiv = document.getElementById("raw-results");
+  endpointsDiv.innerHTML = "";
+  rawDiv.innerHTML = "";
+
+  const endpoints = [
+    { name: "biblio", path: "/published-data/publication/epodoc/{NUM}/biblio", desc: "著录数据（标题/申请人/分类等）" },
+    { name: "abstract", path: "/published-data/publication/epodoc/{NUM}/abstract", desc: "摘要" },
+    { name: "claims", path: "/published-data/publication/epodoc/{NUM}/claims", desc: "权利要求" },
+    { name: "description", path: "/published-data/publication/epodoc/{NUM}/description", desc: "说明书" },
+    { name: "legal", path: "/legal/publication/epodoc/{NUM}", desc: "法律状态" },
+    { name: "family", path: "/family/publication/epodoc/{NUM}", desc: "专利族" },
+    { name: "citing", path: "/published-data/search?q=ct={NUM}&Range=1-25", desc: "引用该专利的文献" },
+    { name: "images", path: "/published-data/publication/docdb/{NUM}/images", desc: "附图/PDF 元数据（需 docdb 格式）" },
+  ];
+
+  // 先渲染骨架
+  endpoints.forEach((ep, i) => {
+    const rowId = "ep-row-" + i;
+    const div = document.createElement("div");
+    div.className = "endpoint-row";
+    div.id = rowId;
+    div.innerHTML = '<span class="endpoint-name">' + ep.name + '</span>' +
+      '<span class="endpoint-status status-pending">⏳ 等待</span>' +
+      '<span class="endpoint-detail">' + ep.path.replace('{NUM}', p.patent) + ' — ' + ep.desc + '</span>';
+    endpointsDiv.appendChild(div);
+  });
+
+  // 逐个串行请求（避免并发触发限流）
+  for (let i = 0; i < endpoints.length; i++) {
+    const ep = endpoints[i];
+    const rowId = "ep-row-" + i;
+    const epUrl = ep.path.replace('{NUM}', encodeURIComponent(p.patent));
+    // images 端点用 docdb 格式，需要 country.docnumber.kind
+    let fullUrl;
+    if (ep.name === "images") {
+      // 尝试 epodoc 格式（MCP 方式）
+      fullUrl = "/api/ops/raw?path=" + encodeURIComponent("/published-data/publication/epodoc/" + encodeURIComponent(p.patent) + "/images") + "&" + p.qs;
+    } else if (ep.name === "citing") {
+      fullUrl = "/api/ops/raw?path=" + encodeURIComponent("/published-data/search?q=" + encodeURIComponent("ct=" + p.patent) + "&Range=1-25") + "&" + p.qs;
+    } else {
+      fullUrl = "/api/ops/raw?path=" + encodeURIComponent(epUrl) + "&" + p.qs;
+    }
+
+    setStatus(rowId, "pending", "请求中...");
+
+    try {
+      const resp = await fetch(BASE + fullUrl);
+      const data = await resp.json();
+      const httpCode = data.httpCode || 0;
+      const bodyLen = data.body ? data.body.length : 0;
+      const bodyPreview = data.body ? data.body.substring(0, 200) : "";
+      let detail = "HTTP " + httpCode + " | " + bodyLen + " bytes";
+      if (data.error) detail += " | " + data.error;
+      if (httpCode !== 200 && data.body) detail += " | " + bodyPreview;
+      setStatus(rowId, httpCode, detail);
+
+      // 原始 JSON
+      const rawCard = document.createElement("div");
+      rawCard.className = "result-card";
+      rawCard.innerHTML = '<b style="color:#00d4ff">' + ep.name + '</b> (HTTP ' + httpCode + ', ' + bodyLen + ' bytes)<pre>' + (data.body || data.error || "(empty)").substring(0, 2000) + '</pre>';
+      rawDiv.appendChild(rawCard);
+    } catch (e) {
+      setStatus(rowId, 0, e.message);
+    }
+
+    // 短暂间隔避免限流
+    if (i < endpoints.length - 1) await new Promise(r => setTimeout(r, 300));
+  }
+});
+
+// ③ 仅测 biblio（MCP 方式）
+document.getElementById("btn-biblio").addEventListener("click", async () => {
+  const p = getParams(); if (!p) return;
+  const endpointsDiv = document.getElementById("endpoints-results");
+  const rawDiv = document.getElementById("raw-results");
+  endpointsDiv.innerHTML = "";
+  rawDiv.innerHTML = "";
+
+  const biblioPath = "/published-data/publication/epodoc/" + encodeURIComponent(p.patent) + "/biblio";
+  const url = "/api/ops/raw?path=" + encodeURIComponent(biblioPath) + "&" + p.qs;
+
+  endpointsDiv.innerHTML = '<div class="endpoint-row"><span class="endpoint-name">biblio</span><span class="endpoint-status status-pending">⏳ 请求中...</span><span class="endpoint-detail">' + biblioPath + '</span></div>';
+
+  try {
+    const resp = await fetch(BASE + url);
+    const data = await resp.json();
+    const httpCode = data.httpCode || 0;
+    const bodyLen = data.body ? data.body.length : 0;
+    let detail = "HTTP " + httpCode + " | " + bodyLen + " bytes";
+    if (data.error) detail += " | " + data.error;
+    endpointsDiv.querySelector(".endpoint-status").className = "endpoint-status " + (httpCode === 200 ? "status-ok" : "status-fail");
+    endpointsDiv.querySelector(".endpoint-status").textContent = httpCode === 200 ? "✓ 200" : "✗ " + httpCode;
+    endpointsDiv.querySelector(".endpoint-detail").textContent = detail;
+
+    rawDiv.innerHTML = '<div class="result-card"><b style="color:#00d4ff">biblio</b> (HTTP ' + httpCode + ', ' + bodyLen + ' bytes)<pre>' + (data.body || data.error || "(empty)").substring(0, 3000) + '</pre></div>';
+  } catch (e) {
+    endpointsDiv.querySelector(".endpoint-status").className = "endpoint-status status-fail";
+    endpointsDiv.querySelector(".endpoint-status").textContent = "✗ 错误";
+    endpointsDiv.querySelector(".endpoint-detail").textContent = e.message;
+  }
+});
+
+document.getElementById("btn-clear").addEventListener("click", () => {
+  document.getElementById("endpoints-results").innerHTML = "";
+  document.getElementById("raw-results").innerHTML = "";
+  document.getElementById("token-result").style.display = "none";
+});
+</script>
+</body>
+</html>

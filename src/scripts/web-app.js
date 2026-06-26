@@ -443,11 +443,21 @@ async function searchPatentDetail(input) {
       return;
     }
 
+    // Espacenet 降级：在应用内 webview 中打开 Espacenet 页面
+    if (json.data_source === "Espacenet" || (json.data && json.data.data_source === "Espacenet")) {
+      const espacenetUrl = json.espacenet_url || (json.data && json.data.espacenet_url) || "";
+      const pn = json.patent_number || raw;
+      searchBtn.disabled = false;
+      loading.classList.add("hidden");
+      openInAppWebview(espacenetUrl, "Espacenet: " + pn);
+      return;
+    }
+
     renderPatentDetail(json.data);
     window._currentPatentData = json.data;
     patentDetailSection.classList.remove("hidden");
 
-    // 显示数据来源标识（当数据来自 EPO OPS 降级查询时）
+    // 显示数据来源标识
     if (json.data_source === "EPO OPS" || (json.data && json.data.data_source === "EPO OPS")) {
       showDataSourceBadge("EPO OPS", "Google Patents 未找到该专利，数据来自 EPO OPS 降级查询");
     } else {
@@ -471,6 +481,50 @@ async function searchPatentDetail(input) {
 
   searchBtn.disabled = false;
   loading.classList.add("hidden");
+}
+
+// ── 应用内 Webview 弹窗（Google Patents / Espacenet 等） ──
+function openInAppWebview(url, title) {
+  const isElectron = !!(window.electronAPI);
+  let webviewHtml = `
+    <div class="pd-header" style="position:relative;">
+      <div class="pd-title" style="font-size:14px;">${escapeHtml(title || url)}</div>
+      <div class="pd-links" style="position:absolute;right:0;top:50%;transform:translateY(-50%);">
+        <button class="pd-gp-link" onclick="closeInAppWebview()" style="cursor:pointer;border:1px solid #999;background:transparent;font-size:12px;padding:2px 10px;">✕ 关闭</button>
+        <a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:12px;">在外部浏览器打开</a>
+      </div>
+    </div>
+    <div id="pd-inapp-webview-container" style="width:100%;height:calc(100vh - 160px);border:none;position:relative;">
+  `;
+  if (isElectron) {
+    webviewHtml += `<webview src="${escapeHtml(url)}" style="width:100%;height:100%;border:1px solid #ddd;border-radius:8px;" allowpopups></webview>`;
+  } else {
+    webviewHtml += `<iframe src="${escapeHtml(url)}" style="width:100%;height:100%;border:1px solid #ddd;border-radius:8px;"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              allow="clipboard-read; clipboard-write"
+              referrerpolicy="no-referrer"
+              onload="this.parentElement.querySelector('.espacenet-loading')?.remove()"
+              onerror="window.open('${escapeHtml(url)}','_blank');this.parentElement.innerHTML='<div style=\\'padding:40px;text-align:center;color:#888\\'>iframe 加载失败，已在外部浏览器打开</div>'">
+      </iframe>
+      <div class="espacenet-loading" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#888;">正在加载...</div>`;
+  }
+  webviewHtml += `</div>`;
+
+  // 创建全屏覆盖层
+  let overlay = document.getElementById("pd-inapp-webview-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "pd-inapp-webview-overlay";
+    overlay.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;z-index:100000;background:#fff;overflow:auto;";
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = webviewHtml;
+  overlay.style.display = "block";
+}
+
+function closeInAppWebview() {
+  const overlay = document.getElementById("pd-inapp-webview-overlay");
+  if (overlay) overlay.style.display = "none";
 }
 
 // 显示数据来源徽章（在专利详情头部显示数据来源）
@@ -504,7 +558,7 @@ function renderPatentDetail(data) {
   html += '<div class="pd-title">' + escapeHtml(data.title || "无标题") + '</div>';
   html += '<div class="pd-links">';
   html += '<button class="pd-gp-link" onclick="toggleGoogleTranslate()" title="使用 Google 翻译翻译整个页面" style="cursor:pointer;border:1px solid var(--accent);background:transparent;">网页翻译</button>';
-  html += '<a href="' + escapeHtml(data.url) + '" target="_blank" rel="noopener" class="pd-gp-link">Google Patents</a>';
+  html += '<button class="pd-gp-link" onclick="openInAppWebview(\'' + escapeHtml(data.url) + '\', \'Google Patents: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Google Patents 页面">Google Patents</button>';
   if (data.pdf_link) {
     html += '<a href="' + escapeHtml(data.pdf_link) + '" target="_blank" rel="noopener" class="pd-pdf-link">PDF</a>';
   }
@@ -721,7 +775,7 @@ function renderPatentDetail(data) {
         html += '<span class="pd-citation-marker ' + escapeHtml(c.citation_type) + '" title="' + (c.citation_type === 'examiner' ? '审查员引用' : '申请人引用') + '">' + (c.citation_type === 'examiner' ? '*' : '†') + '</span>';
       }
       html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<a href="https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;" title="在 Google Patents 中打开">GP</a>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Google Patents">GP</button>';
       if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
       if (c.assignee) html += '<span class="pd-citation-assignee">' + escapeHtml(c.assignee) + '</span>';
       if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
@@ -740,7 +794,7 @@ function renderPatentDetail(data) {
     data.cited_by.forEach(c => {
       html += '<div class="pd-citation-item">';
       html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<a href="https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;" title="在 Google Patents 中打开">GP</a>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Google Patents">GP</button>';
       if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
       if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
       html += '</div>';
@@ -1277,9 +1331,9 @@ document.addEventListener("click", (e) => {
     e.preventDefault();
     const pn = link.dataset.patent;
     if (pn) {
-      // Ctrl/Cmd+Click: open in Google Patents directly
+      // Ctrl/Cmd+Click: open in app webview
       if (e.ctrlKey || e.metaKey) {
-        window.open("https://patents.google.com/patent/" + encodeURIComponent(pn), "_blank");
+        openInAppWebview("https://patents.google.com/patent/" + encodeURIComponent(pn), "Google Patents: " + pn);
         return;
       }
       // Normal click: open patent popup viewer
@@ -1470,7 +1524,7 @@ function renderPatentPopupContent(data) {
         html += '<span class="pd-citation-marker ' + escapeHtml(c.citation_type) + '" title="' + (c.citation_type === 'examiner' ? '审查员引用' : '申请人引用') + '">' + (c.citation_type === 'examiner' ? '*' : '†') + '</span>';
       }
       html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<a href="https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;" title="在 Google Patents 中打开">GP</a>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Google Patents">GP</button>';
       if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
       if (c.assignee) html += '<span class="pd-citation-assignee">' + escapeHtml(c.assignee) + '</span>';
       if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
@@ -1489,7 +1543,7 @@ function renderPatentPopupContent(data) {
     data.cited_by.forEach(c => {
       html += '<div class="pd-citation-item">';
       html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<a href="https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;" title="在 Google Patents 中打开">GP</a>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Google Patents">GP</button>';
       if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
       if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
       html += '</div>';
@@ -1583,6 +1637,7 @@ async function openPatentPopup(patentNumber) {
     pnEl.textContent = raw;
     titleEl.textContent = existing.data.title || "无标题";
     gpLink.href = "https://patents.google.com/patent/" + encodeURIComponent(raw);
+    gpLink.onclick = function(e) { e.preventDefault(); openInAppWebview(this.href, "Google Patents: " + encodeURIComponent(raw)); };
     if (existing.data.pdf_link) {
       pdfLink.href = existing.data.pdf_link;
       pdfLink.classList.remove("hidden");
@@ -1675,7 +1730,10 @@ function switchPpvPatent(patentNumber) {
 
   if (pnEl) pnEl.textContent = patentNumber;
   if (titleEl) titleEl.textContent = entry.data.title || "无标题";
-  if (gpLink) gpLink.href = "https://patents.google.com/patent/" + encodeURIComponent(patentNumber);
+  if (gpLink) {
+    gpLink.href = "https://patents.google.com/patent/" + encodeURIComponent(patentNumber);
+    gpLink.onclick = function(e) { e.preventDefault(); openInAppWebview(this.href, "Google Patents: " + encodeURIComponent(patentNumber)); };
+  }
   if (pdfLink) {
     if (entry.data.pdf_link) {
       pdfLink.href = entry.data.pdf_link;
