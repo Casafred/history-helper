@@ -1020,7 +1020,8 @@ function renderPatentDetail(data) {
   patentDetailContent.querySelectorAll(".pd-claim-translate-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       const idx = parseInt(btn.dataset.claimIndex);
-      if (!isNaN(idx)) translateClaimByIndex(idx);
+      const claimItem = btn.closest('.pd-claim-item');
+      if (!isNaN(idx)) translateClaimByIndex(idx, claimItem);
     });
   });
 }
@@ -1321,13 +1322,14 @@ async function translateSelectedPatentText(text, targetSection) {
 }
 
 // Translate a single claim by index
-async function translateClaimByIndex(claimIndex) {
+async function translateClaimByIndex(claimIndex, containerEl) {
   const patentData = window._currentPatentData || window._patentPopupData;
   if (!patentData || !patentData.claims || !patentData.claims[claimIndex]) return;
 
   const claim = patentData.claims[claimIndex];
-  const translationEl = document.querySelector('[data-claim-translation="' + claimIndex + '"]');
-  const btn = document.querySelector('.pd-claim-translate-btn[data-claim-index="' + claimIndex + '"]');
+  const root = containerEl || document;
+  const translationEl = root.querySelector('[data-claim-translation="' + claimIndex + '"]');
+  const btn = root.querySelector('.pd-claim-translate-btn[data-claim-index="' + claimIndex + '"]');
   if (!translationEl) return;
 
   // If already showing translation, toggle off
@@ -1640,7 +1642,8 @@ function _bindPpvContentEvents(content, data) {
   content.querySelectorAll(".pd-claim-translate-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       const idx = parseInt(btn.dataset.claimIndex);
-      if (!isNaN(idx)) translateClaimByIndex(idx);
+      const claimItem = btn.closest('.pd-claim-item');
+      if (!isNaN(idx)) translateClaimByIndex(idx, claimItem);
     });
   });
 }
