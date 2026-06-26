@@ -3663,9 +3663,26 @@ body {
   padding: 2px 8px;
   border: 1px solid var(--accent);
   border-radius: 4px;
+  background: #fff;
   transition: all 0.2s;
 }
 .pd-gp-link:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.pd-claim-translate-btn {
+  flex-shrink: 0;
+  cursor: pointer;
+  border: 1px solid var(--accent);
+  background: #fff;
+  color: var(--accent);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 4px;
+  line-height: 1.2;
+}
+.pd-claim-translate-btn:hover {
   background: var(--accent);
   color: #fff;
 }
