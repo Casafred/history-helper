@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>EPO OPS 独立测试</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:#1a1a2e;color:#e0e0e0;padding:20px;line-height:1.6}
+h1{color:#00d4ff;margin-bottom:15px;font-size:20px}
+h2{color:#00d4ff;margin:18px 0 8px;font-size:15px;border-bottom:1px solid #333;padding-bottom:4px}
+.row{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center}
+label{min-width:110px;color:#aaa;font-size:12px}
+input[type="text"],input[type="password"]{background:#16213e;border:1px solid #333;color:#e0e0e0;padding:6px 10px;border-radius:4px;flex:1;min-width:180px;font-size:12px}
+input:focus{border-color:#00d4ff;outline:none}
+button{background:#0f3460;color:#00d4ff;border:1px solid #00d4ff;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:12px}
+button:hover{background:#00d4ff;color:#16213e}
+button:disabled{opacity:.5;cursor:not-allowed}
+.ok{color:#2ecc71}.fail{color:#e74c3c}.warn{color:#f39c12}
+.card{background:#16213e;border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:8px;font-size:12px}
+pre{background:#0d1b2a;padding:8px;border-radius:4px;overflow-x:auto;max-height:250px;overflow-y:auto;color:#8be9fd;font-size:11px;white-space:pre-wrap;word-break:break-all}
+.ep{display:flex;gap:8px;align-items:center;margin-bottom:6px;padding:6px;border-radius:4px;background:#0d1b2a}
+.ep-name{min-width:90px;font-weight:bold;color:#00d4ff}
+.ep-status{min-width:70px;font-weight:bold}
+.ep-detail{color:#aaa;flex:1;word-break:break-all;font-size:11px}
+.hint{color:#f39c12;font-size:11px;margin:8px 0;padding:6px;background:rgba(243,156,18,.1);border-radius:4px}
+</style>
+</head>
+<body>
+<h1>EPO OPS 独立测试服务器</h1>
+<p style="color:#aaa;font-size:12px;margin-bottom:12px">
+  独立于 PatentLens 主程序，直接测试 OPS API 连通性。<br>
+  <b>关键对比</b>：直连 vs 代理 — EPO OPS 国内通常可直连，无需代理。
+</p>
+
+<h2>1. 凭证</h2>
+<div class="row"><label>Consumer Key</label><input type="text" id="key" placeholder="opsKey"></div>
+<div class="row"><label>Consumer Secret</label><input type="password" id="secret" placeholder="opsSecret"></div>
+<div class="row"><label>专利号</label><input type="text" id="patent" value="US12654302B2"></div>
+<div class="row">
+  <label>OPS 代理</label>
+  <input type="checkbox" id="useProxy">
+  <label style="min-width:auto">代理地址</label>
+  <input type="text" id="proxyUrl" value="http://127.0.0.1:7897" style="flex:1">
+</div>
+
+<div class="row">
+  <button id="btn1">① Token 直连（不代理）</button>
+  <button id="btn2">② Token 走代理</button>
+  <button id="btn3">③ 完整查询 直连</button>
+  <button id="btn4">④ 完整查询 走代理</button>
+  <button id="btn5">⑤ 单端点 biblio 直连</button>
+</div>
+
+<div id="output" class="card" style="display:none"></div>
+<h2>2. 逐端点结果</h2>
+<div id="endpoints"></div>
+<h2>3. 原始响应</h2>
+<div id="raw"></div>
+
+<script>
+function P() {
+  const key = document.getElementById("key").value.trim();
+  const secret = document.getElementById("secret").value.trim();
+  const patent = document.getElementById("patent").value.trim();
+  const useProxy = document.getElementById("useProxy").checked;
+  const proxyUrl = document.getElementById("proxyUrl").value.trim();
+  return { key, secret, patent, useProxy, proxyUrl };
+}
+function qs(p, extra) {
+  let s = "opsKey=" + encodeURIComponent(p.key) + "&opsSecret=" + encodeURIComponent(p.secret);
+  if (extra) s += extra;
+  return s;
+}
+function show(id, html) { const e = document.getElementById(id); e.style.display = ""; e.innerHTML = html; }
+
+// ① Token 直连
+document.getElementById("btn1").addEventListener("click", async () => {
+  const p = P(); if (!p.key || !p.secret) { alert("请填凭证"); return; }
+  show("output", '<span class="warn">⏳ Token 直连获取中...</span>');
+  try {
+    const r = await fetch("/api/ops/token?" + qs(p));
+    const d = await r.json();
+    show("output", d.token ? '<span class="ok">✓ Token 直连成功 (' + d.token.length + ' chars' + (d.fromCache ? ', 缓存' : '') + ')</span>' : '<span class="fail">✗ ' + (d.error || "失败") + '</span>');
+  } catch (e) { show("output", '<span class="fail">✗ ' + e.message + '</span>'); }
+});
+
+// ② Token 走代理
+document.getElementById("btn2").addEventListener("click", async () => {
+  const p = P(); if (!p.key || !p.secret) { alert("请填凭证"); return; }
+  show("output", '<span class="warn">⏳ Token 走代理获取中 (' + p.proxyUrl + ')...</span>');
+  try {
+    const r = await fetch("/api/ops/token?" + qs(p, "&proxy=1&proxyUrl=" + encodeURIComponent(p.proxyUrl)));
+    const d = await r.json();
+    show("output", d.token ? '<span class="ok">✓ Token 代理成功 (' + d.token.length + ' chars)</span>' : '<span class="fail">✗ ' + (d.error || "失败") + '</span>');
+  } catch (e) { show("output", '<span class="fail">✗ ' + e.message + '</span>'); }
+});
+
+// ③ 完整查询 直连
+document.getElementById("btn3").addEventListener("click", async () => {
+  const p = P(); if (!p.key || !p.secret) { alert("请填凭证"); return; }
+  show("output", '<span class="warn">⏳ 完整查询（直连）: ' + p.patent + '...</span>');
+  document.getElementById("endpoints").innerHTML = "";
+  document.getElementById("raw").innerHTML = "";
+  try {
+    const r = await fetch("/api/ops/full-query?" + qs(p, "&patent=" + encodeURIComponent(p.patent)));
+    const d = await r.json();
+    renderFullQuery(d, false);
+  } catch (e) { show("output", '<span class="fail">✗ ' + e.message + '</span>'); }
+});
+
+// ④ 完整查询 走代理
+document.getElementById("btn4").addEventListener("click", async () => {
+  const p = P(); if (!p.key || !p.secret) { alert("请填凭证"); return; }
+  show("output", '<span class="warn">⏳ 完整查询（代理 ' + p.proxyUrl + '）: ' + p.patent + '...</span>');
+  document.getElementById("endpoints").innerHTML = "";
+  document.getElementById("raw").innerHTML = "";
+  try {
+    const r = await fetch("/api/ops/full-query?" + qs(p, "&patent=" + encodeURIComponent(p.patent) + "&proxy=1&proxyUrl=" + encodeURIComponent(p.proxyUrl)));
+    const d = await r.json();
+    renderFullQuery(d, true);
+  } catch (e) { show("output", '<span class="fail">✗ ' + e.message + '</span>'); }
+});
+
+// ⑤ 单端点 biblio 直连
+document.getElementById("btn5").addEventListener("click", async () => {
+  const p = P(); if (!p.key || !p.secret) { alert("请填凭证"); return; }
+  const num = p.patent.toUpperCase().replace(/[\s\/]/g, "");
+  const m = num.match(/^([A-Z]{2})(\d+)/);
+  const epodoc = m ? m[1] + m[2] : num;
+  const opsPath = "/published-data/publication/epodoc/" + encodeURIComponent(epodoc) + "/biblio";
+  show("output", '<span class="warn">⏳ biblio 直连: ' + opsPath + '...</span>');
+  try {
+    const r = await fetch("/api/ops/raw?path=" + encodeURIComponent(opsPath) + "&" + qs(p));
+    const d = await r.json();
+    show("output", d.httpCode === 200
+      ? '<span class="ok">✓ biblio HTTP 200 (' + (d.body ? d.body.length : 0) + ' bytes)</span>'
+      : '<span class="fail">✗ biblio HTTP ' + d.httpCode + (d.error ? ' ' + d.error : '') + '</span>');
+    document.getElementById("raw").innerHTML = '<div class="card"><pre>' + (d.body || d.error || "(empty)").substring(0, 3000) + '</pre></div>';
+  } catch (e) { show("output", '<span class="fail">✗ ' + e.message + '</span>'); }
+});
+
+function renderFullQuery(d, usedProxy) {
+  const proxyLabel = usedProxy ? "代理" : "直连";
+  let summary = d.title
+    ? '<span class="ok">✓ 查询成功 (' + proxyLabel + ')</span> 标题: <b>' + d.title + '</b>'
+    : '<span class="fail">✗ 查询失败 (' + proxyLabel + ')</span> 无标题';
+  summary += '<br>epodoc: ' + d.epodocNum + ' | country: ' + d.country + ' | docNumber: ' + d.docNumber + ' | kind: ' + (d.kindCode || "(无)");
+  summary += '<br>代理: ' + d.proxyUrl;
+  show("output", summary);
+
+  const epDiv = document.getElementById("endpoints");
+  epDiv.innerHTML = "";
+  if (d.endpoints) {
+    for (const [name, info] of Object.entries(d.endpoints)) {
+      if (name.startsWith("_")) continue;
+      const cls = info.httpCode === 200 ? "ok" : "fail";
+      const status = info.httpCode === 200 ? "✓ " + info.httpCode : "✗ " + (info.httpCode || "错误");
+      epDiv.innerHTML += '<div class="ep"><span class="ep-name">' + name + '</span><span class="ep-status ' + cls + '">' + status + '</span><span class="ep-detail">' + (info.bodyLen || 0) + ' bytes' + (info.error ? ' | ' + info.error : '') + '</span></div>';
+      if (info.preview) {
+        document.getElementById("raw").innerHTML += '<div class="card"><b style="color:#00d4ff">' + name + '</b><pre>' + info.preview.substring(0, 1500) + '</pre></div>';
+      }
+    }
+  }
+}
+</script>
+</body>
+</html>
