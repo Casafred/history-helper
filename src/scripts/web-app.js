@@ -559,6 +559,7 @@ function renderPatentDetail(data) {
   html += '<div class="pd-links">';
   html += '<button class="pd-gp-link" onclick="toggleGoogleTranslate()" title="使用 Google 翻译翻译整个页面" style="cursor:pointer;border:1px solid var(--accent);background:transparent;">网页翻译</button>';
   html += '<button class="pd-gp-link" onclick="openInAppWebview(\'' + escapeHtml(data.url) + '\', \'Google Patents: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Google Patents 页面">Google Patents</button>';
+  html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(data.patent_number) + '\', \'Espacenet: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);background:transparent;" title="在应用内打开 Espacenet 页面">Espacenet</button>';
   if (data.pdf_link) {
     html += '<a href="' + escapeHtml(data.pdf_link) + '" target="_blank" rel="noopener" class="pd-pdf-link">PDF</a>';
   }
@@ -916,12 +917,13 @@ async function translatePatentSection(sectionType) {
     }
 
     let textToTranslate = "";
-    if (sectionType === "claims" && window._currentPatentData && window._currentPatentData.claims) {
-      textToTranslate = window._currentPatentData.claims.map((c, i) =>
+    const patentData = window._currentPatentData || window._patentPopupData;
+    if (sectionType === "claims" && patentData && patentData.claims) {
+      textToTranslate = patentData.claims.map((c, i) =>
         "Claim " + (c.num || (i + 1)) + ": " + c.text
       ).join('\n\n');
-    } else if (sectionType === "description" && window._currentPatentData && window._currentPatentData.description) {
-      textToTranslate = window._currentPatentData.description.substring(0, 6000);
+    } else if (sectionType === "description" && patentData && patentData.description) {
+      textToTranslate = patentData.description.substring(0, 6000);
     }
 
     if (!textToTranslate) {
@@ -1121,12 +1123,13 @@ async function translateSelectedPatentText(text, targetSection) {
 // Copy patent section text to clipboard
 function copyPatentSectionText(sectionType) {
   let text = "";
-  if (sectionType === "claims" && window._currentPatentData && window._currentPatentData.claims) {
-    text = window._currentPatentData.claims.map((c, i) =>
+  const patentData = window._currentPatentData || window._patentPopupData;
+  if (sectionType === "claims" && patentData && patentData.claims) {
+    text = patentData.claims.map((c, i) =>
       (c.num || (i + 1)) + ". " + c.text
     ).join('\n\n');
-  } else if (sectionType === "description" && window._currentPatentData && window._currentPatentData.description) {
-    text = window._currentPatentData.description;
+  } else if (sectionType === "description" && patentData && patentData.description) {
+    text = patentData.description;
   }
 
   if (!text) {
@@ -1151,10 +1154,7 @@ function copyPatentSectionText(sectionType) {
 let _googleTranslateInjected = false;
 
 function toggleGoogleTranslate() {
-  const btn = document.getElementById("page-translate-btn");
-  if (!btn) return;
-
-  // If already showing, toggle off by reloading (simplest way to remove Google Translate)
+  // If Google Translate is already active (bar visible), toggle off
   const existingBar = document.querySelector(".skiptranslate iframe");
   if (existingBar) {
     // Remove Google Translate elements and restore original text
@@ -1162,30 +1162,25 @@ function toggleGoogleTranslate() {
     gtEls.forEach(el => el.remove());
     document.body.style.top = "";
     document.body.classList.remove("skiptranslate");
-    // Remove the script
+    // Remove the script and container so it can be re-injected
     const gtScript = document.getElementById("google-translate-script");
     if (gtScript) gtScript.remove();
+    const gtContainer = document.getElementById("google_translate_element");
+    if (gtContainer) gtContainer.remove();
     delete window.google;
     delete window.googleTranslateElementInit;
     _googleTranslateInjected = false;
-    btn.textContent = "网页翻译";
-    btn.title = "使用 Google 翻译翻译整个页面";
     return;
   }
 
-  // Inject Google Translate widget
+  // Inject or re-inject Google Translate widget
   if (!_googleTranslateInjected) {
     _googleTranslateInjected = true;
-    btn.textContent = "关闭翻译";
-    btn.title = "关闭 Google 翻译";
-
-    // Create container for the translate element
     const container = document.createElement("div");
     container.id = "google_translate_element";
     container.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:999999;";
     document.body.prepend(container);
 
-    // Define init callback
     window.googleTranslateElementInit = function() {
       new google.translate.TranslateElement({
         pageLanguage: "auto",
@@ -1195,7 +1190,6 @@ function toggleGoogleTranslate() {
       }, "google_translate_element");
     };
 
-    // Load the script
     const script = document.createElement("script");
     script.id = "google-translate-script";
     script.type = "text/javascript";
@@ -1203,8 +1197,6 @@ function toggleGoogleTranslate() {
     script.onerror = function() {
       showError("无法加载 Google 翻译组件，请检查网络连接（可能需要代理）");
       _googleTranslateInjected = false;
-      btn.textContent = "网页翻译";
-      btn.title = "使用 Google 翻译翻译整个页面";
       container.remove();
     };
     document.head.appendChild(script);
@@ -1617,6 +1609,7 @@ async function openPatentPopup(patentNumber) {
   const pnEl = document.getElementById("ppv-patent-number");
   const titleEl = document.getElementById("ppv-patent-title");
   const gpLink = document.getElementById("ppv-gp-link");
+  const espacenetBtn = document.getElementById("ppv-espacenet-btn");
   const pdfLink = document.getElementById("ppv-pdf-link");
 
   if (!viewer) return;
@@ -1638,6 +1631,7 @@ async function openPatentPopup(patentNumber) {
     titleEl.textContent = existing.data.title || "无标题";
     gpLink.href = "https://patents.google.com/patent/" + encodeURIComponent(raw);
     gpLink.onclick = function(e) { e.preventDefault(); openInAppWebview(this.href, "Google Patents: " + encodeURIComponent(raw)); };
+    if (espacenetBtn) { espacenetBtn.onclick = function() { openInAppWebview("https://worldwide.espacenet.com/patent/search?q=" + encodeURIComponent(raw), "Espacenet: " + raw); }; }
     if (existing.data.pdf_link) {
       pdfLink.href = existing.data.pdf_link;
       pdfLink.classList.remove("hidden");
@@ -1655,6 +1649,8 @@ async function openPatentPopup(patentNumber) {
   pnEl.textContent = raw;
   titleEl.textContent = "加载中...";
   gpLink.href = "https://patents.google.com/patent/" + encodeURIComponent(raw);
+  gpLink.onclick = function(e) { e.preventDefault(); openInAppWebview(this.href, "Google Patents: " + encodeURIComponent(raw)); };
+  if (espacenetBtn) { espacenetBtn.onclick = function() { openInAppWebview("https://worldwide.espacenet.com/patent/search?q=" + encodeURIComponent(raw), "Espacenet: " + raw); }; }
   pdfLink.classList.add("hidden");
 
   // Check prefetch cache first
@@ -1722,6 +1718,7 @@ function switchPpvPatent(patentNumber) {
   const pnEl = document.getElementById("ppv-patent-number");
   const titleEl = document.getElementById("ppv-patent-title");
   const gpLink = document.getElementById("ppv-gp-link");
+  const espacenetBtn = document.getElementById("ppv-espacenet-btn");
   const pdfLink = document.getElementById("ppv-pdf-link");
 
   content.innerHTML = entry.html;
@@ -1733,6 +1730,9 @@ function switchPpvPatent(patentNumber) {
   if (gpLink) {
     gpLink.href = "https://patents.google.com/patent/" + encodeURIComponent(patentNumber);
     gpLink.onclick = function(e) { e.preventDefault(); openInAppWebview(this.href, "Google Patents: " + encodeURIComponent(patentNumber)); };
+  }
+  if (espacenetBtn) {
+    espacenetBtn.onclick = function() { openInAppWebview("https://worldwide.espacenet.com/patent/search?q=" + encodeURIComponent(patentNumber), "Espacenet: " + patentNumber); };
   }
   if (pdfLink) {
     if (entry.data.pdf_link) {
@@ -4571,8 +4571,13 @@ function buildReviewManualSelectPanel() {
     try {
       let fullText = "";
       // Create a stable container once to avoid full DOM replacement on each chunk
-      analysisContent.innerHTML = '<div class="kanban-analysis-content markdown-body"></div>';
-      const streamContainer = analysisContent.querySelector(".kanban-analysis-content");
+      // Keep the progress bar visible initially; it will be replaced when first content arrives
+      const progressPlaceholder = document.createElement("div");
+      progressPlaceholder.innerHTML = renderAiProgressUI("analyzing", "AI 正在梳理审查历史，等待响应...", -1);
+      analysisContent.appendChild(progressPlaceholder);
+      const streamContainer = document.createElement("div");
+      streamContainer.className = "kanban-analysis-content markdown-body";
+      analysisContent.appendChild(streamContainer);
       let _streamRafPending = false;
       let _lastRenderLen = 0;
       for await (const chunk of window.AI.streamChat(
@@ -4589,6 +4594,9 @@ function buildReviewManualSelectPanel() {
         kanbanAutoAbortController ? kanbanAutoAbortController.signal : undefined
       )) {
         if (chunk.content) {
+          if (progressPlaceholder.parentNode) {
+            progressPlaceholder.remove();
+          }
           fullText += chunk.content;
           // Throttle rendering: only render if enough new content or enough time passed
           if (!_streamRafPending && (fullText.length - _lastRenderLen > 20 || fullText.length < 200)) {
@@ -8208,6 +8216,33 @@ setInterval(() => {
 
 // ── Initialize history list on page load ──
 refreshHistoryList();
+
+// ── Auto-inject Google Translate widget on page load ──
+(function autoInitGoogleTranslate() {
+  if (_googleTranslateInjected) return;
+  _googleTranslateInjected = true;
+  const container = document.createElement("div");
+  container.id = "google_translate_element";
+  container.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:999999;";
+  document.body.prepend(container);
+  window.googleTranslateElementInit = function() {
+    new google.translate.TranslateElement({
+      pageLanguage: "auto",
+      includedLanguages: "zh-CN,zh-TW,en,ja,ko,de,fr",
+      layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
+      autoDisplay: true
+    }, "google_translate_element");
+  };
+  const script = document.createElement("script");
+  script.id = "google-translate-script";
+  script.type = "text/javascript";
+  script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
+  script.onerror = function() {
+    _googleTranslateInjected = false;
+    container.remove();
+  };
+  document.head.appendChild(script);
+})();
 
 // ── Fallback splash-screen removal (in case DOMContentLoaded handler fails) ──
 setTimeout(() => {
