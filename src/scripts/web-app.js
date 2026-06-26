@@ -1268,66 +1268,68 @@ async function translateSelectedPatentText(text, targetSection) {
     return;
   }
 
-  // Find the section element
-  const sectionEl = document.querySelector('[data-section-type="' + targetSection + '"]') || document.querySelector("#patent-detail-content");
-  if (!sectionEl) return;
-
-  // Find the anchor element near the selection to insert after it
-  let insertAfter = null;
+  // Get selection position for the floating popup
+  let posX = 100, posY = 100;
   const sel = window.getSelection();
   if (sel && sel.rangeCount > 0) {
     const range = sel.getRangeAt(0);
-    // Find the closest claim-item or a block-level parent within the section
-    let node = range.endContainer;
-    while (node && node !== sectionEl) {
-      if (node.nodeType === 1 && (node.classList.contains('pd-claim-item') || node.tagName === 'P' || node.tagName === 'DIV')) {
-        insertAfter = node;
-        break;
-      }
-      node = node.parentNode;
-    }
+    const rect = range.getBoundingClientRect();
+    posX = rect.left;
+    posY = rect.bottom + 8;
   }
 
-  // Show inline loading indicator near the selection
-  const loadingEl = document.createElement('div');
-  loadingEl.className = 'pd-translation-result';
-  loadingEl.style.cssText = 'margin:4px 0;padding:6px 10px;background:#f0f7ff;border-radius:4px;border-left:3px solid var(--accent);';
-  loadingEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;border-width:2px;margin:0;"></div><span style="font-size:12px;color:#888;">翻译中...</span></div>';
+  // Remove existing translation popup if any
+  const existingPopup = document.getElementById("pd-selected-translation-popup");
+  if (existingPopup) existingPopup.remove();
 
-  if (insertAfter && insertAfter.parentNode === sectionEl) {
-    insertAfter.after(loadingEl);
-  } else {
-    sectionEl.appendChild(loadingEl);
-  }
+  // Create floating popup
+  const popup = document.createElement('div');
+  popup.id = "pd-selected-translation-popup";
+  popup.style.cssText = 'position:fixed;left:' + posX + 'px;top:' + posY + 'px;z-index:100010;max-width:420px;min-width:180px;padding:10px 14px;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.18);border:1px solid #e0e0e0;font-size:13px;color:#333;line-height:1.6;';
+  popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:11px;color:#888;">AI 翻译</span><button id="pd-selected-translation-close" style="border:none;background:transparent;cursor:pointer;font-size:16px;color:#999;padding:0 4px;line-height:1;">&times;</button></div><div id="pd-selected-translation-body"><div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;border-width:2px;margin:0;"></div><span style="font-size:12px;color:#888;">翻译中...</span></div></div>';
+  document.body.appendChild(popup);
+
+  // Close button
+  const closeBtn = document.getElementById("pd-selected-translation-close");
+  if (closeBtn) closeBtn.addEventListener("click", () => popup.remove());
+
+  // Adjust position if popup overflows viewport
+  requestAnimationFrame(() => {
+    const r = popup.getBoundingClientRect();
+    if (r.right > window.innerWidth - 10) popup.style.left = Math.max(10, window.innerWidth - r.width - 10) + 'px';
+    if (r.bottom > window.innerHeight - 10) popup.style.top = Math.max(10, posY - r.height - 16) + 'px';
+  });
+
+  const bodyEl = document.getElementById("pd-selected-translation-body");
 
   try {
-    const apiBase = window.AI.buildUrl(translateProvider.type, translateProvider.baseUrl);
-    const resp = await fetch(apiBase + "/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + translateProvider.apiKey,
-      },
-      body: JSON.stringify({
-        model: translateProvider.model,
-        messages: [
-          { role: "system", content: "你是一位专业的专利文献翻译专家。请将以下文本翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。" },
-          { role: "user", content: text }
-        ],
-        temperature: 0.3,
-        max_tokens: 4096,
-      }),
+    let fullResponse = "";
+    let _rafPending = false;
+    const stream = window.AI.streamChat(translateProvider.type, translateProvider.apiKey, translateProvider.baseUrl, {
+      model: translateProvider.model,
+      messages: [
+        { role: "system", content: "你是一位专业的专利文献翻译专家。请将以下文本翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。" },
+        { role: "user", content: text }
+      ],
+      temperature: 0.3,
+      maxTokens: 4096,
     });
 
-    if (!resp.ok) throw new Error("API 请求失败: " + resp.status);
-    const json = await resp.json();
-    const translated = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content || "翻译失败";
-
-    // Replace the loading indicator with the translation result
-    loadingEl.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><span style="font-size:11px;color:#888;">AI 翻译</span><button onclick="this.parentElement.parentElement.remove();" style="border:none;background:transparent;cursor:pointer;font-size:14px;color:#999;padding:0 4px;">&times;</button></div><div style="font-size:13px;color:#333;">' + escapeHtml(translated).replace(/\n/g, '<br>') + '</div>';
+    for await (const chunk of stream) {
+      if (chunk.content) {
+        fullResponse += chunk.content;
+        if (!_rafPending) {
+          _rafPending = true;
+          requestAnimationFrame(() => {
+            if (bodyEl) bodyEl.innerHTML = escapeHtml(fullResponse).replace(/\n/g, '<br>');
+            _rafPending = false;
+          });
+        }
+      }
+    }
+    if (bodyEl) bodyEl.innerHTML = escapeHtml(fullResponse).replace(/\n/g, '<br>');
   } catch (e) {
-    showError("翻译失败: " + e.message);
-    loadingEl.remove();
+    if (bodyEl) bodyEl.innerHTML = '<span style="color:var(--danger);">翻译失败: ' + escapeHtml(e.message) + '</span>';
   }
 }
 
@@ -1921,6 +1923,7 @@ async function openPatentPopup(patentNumber) {
   if (existing) {
     _ppvActivePatent = raw;
     _patentPopupData = existing.data;
+    window._patentPopupData = existing.data;
     content.innerHTML = existing.html;
     _bindPpvContentEvents(content, existing.data);
     _renderPpvPatentTabs();
@@ -1957,6 +1960,7 @@ async function openPatentPopup(patentNumber) {
   if (_prefetchCache[raw]) {
     const data = _prefetchCache[raw];
     _patentPopupData = data;
+    window._patentPopupData = data;
     loading.classList.add("hidden");
     titleEl.textContent = data.title || "无标题";
     if (data.pdf_link) {
@@ -1985,6 +1989,7 @@ async function openPatentPopup(patentNumber) {
 
     const data = json.data;
     _patentPopupData = data;
+    window._patentPopupData = data;
     loading.classList.add("hidden");
     titleEl.textContent = data.title || "无标题";
 
@@ -2013,6 +2018,7 @@ function switchPpvPatent(patentNumber) {
   if (!entry) return;
   _ppvActivePatent = patentNumber;
   _patentPopupData = entry.data;
+  window._patentPopupData = entry.data;
 
   const content = document.getElementById("ppv-content");
   const pnEl = document.getElementById("ppv-patent-number");
