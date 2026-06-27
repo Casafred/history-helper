@@ -3388,16 +3388,18 @@ function escapeHtml(str) {
 
 function renderDescriptionHtml(text) {
   if (!text) return '';
+  // Normalize: ensure ## section headers are preceded by a newline
+  // The backend may collapse whitespace, so "## " could appear inline like "...text. ## TECHNICAL FIELD..."
+  const normalized = text.replace(/\s*## /g, '\n## ');
   // Split by ## section headers
-  const sections = text.split(/\n## /);
+  const sections = normalized.split(/\n## /);
   let html = '';
   sections.forEach((section, idx) => {
-    let sectionText = idx === 0 && text.startsWith('## ') ? section : (idx === 0 ? section : section);
-    // First section may start with ## if text starts with ##
-    if (idx === 0 && text.startsWith('## ')) {
+    let sectionText;
+    if (idx === 0 && normalized.startsWith('## ')) {
       sectionText = sections[0].substring(3); // remove leading "## "
-    } else if (idx > 0) {
-      sectionText = section; // already split after "## "
+    } else {
+      sectionText = section;
     }
     if (!sectionText.trim()) return;
     const lines = sectionText.split('\n');
