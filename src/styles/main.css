@@ -2678,6 +2678,127 @@ body {
   color: var(--text-primary);
 }
 
+/* Analysis Module Sections */
+.analysis-module {
+  margin-bottom: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+.analysis-module:last-child {
+  margin-bottom: 0;
+}
+.analysis-module-unclassified {
+  border: none;
+  background: transparent;
+  margin-bottom: 12px;
+}
+.analysis-module-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+.analysis-module-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.analysis-module-regen-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.analysis-module-regen-btn:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.analysis-module-regen-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.analysis-module-content {
+  padding: 14px 16px;
+}
+.analysis-module-content .trace-links {
+  display: inline;
+}
+
+/* Module loading animation */
+.analysis-module-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.analysis-module-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Module Regenerate Popup */
+.analysis-regen-popup {
+  position: fixed;
+  z-index: 100020;
+  width: 320px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 8px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  padding: 14px 16px;
+  font-size: 13px;
+}
+.analysis-regen-popup-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+}
+.analysis-regen-popup-note {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  resize: vertical;
+  min-height: 48px;
+  font-family: inherit;
+}
+.analysis-regen-popup-note:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.analysis-regen-popup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 @media (max-width: 1200px) {
   .kanban-columns {
     grid-template-columns: repeat(3, 1fr);

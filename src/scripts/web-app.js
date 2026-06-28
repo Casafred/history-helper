@@ -2562,7 +2562,7 @@ const PatentCache = {
       const analysisContentEl = document.getElementById("kanban-analysis-content");
       const analysisSection = document.getElementById("kanban-analysis");
       if (kanbanState.analysis) {
-        if (analysisContentEl) analysisContentEl.innerHTML = renderMarkdownWithTrace(kanbanState.analysis);
+        if (analysisContentEl) analysisContentEl.innerHTML = renderAnalysisModules(kanbanState.analysis);
         if (analysisSection) analysisSection.classList.remove("hidden");
       } else {
         if (analysisContentEl) analysisContentEl.innerHTML = "";
@@ -5042,8 +5042,8 @@ function buildReviewManualSelectPanel() {
           }
         }
       }
-      // Final render to ensure all content is displayed
-      if (streamContainer) streamContainer.innerHTML = renderMarkdownWithTrace(fullText);
+      // Final render to ensure all content is displayed (with module sections)
+      if (streamContainer) streamContainer.innerHTML = renderAnalysisModules(fullText);
       kanbanState.analysis = fullText;
       kanbanState.hasUnsavedWork = true;
       // Save context for continued chat
@@ -5176,6 +5176,269 @@ function renderMarkdownWithTrace(text) {
     }
   }
   return linkifyPatentNumbers(escapeHtml(processed).replace(/\n/g, "<br>"));
+}
+
+// ===== Analysis Module Parsing & Rendering =====
+
+// Module definitions: keyword groups for robust matching
+const ANALYSIS_MODULES = [
+  { id: "summary",           label: "案件概要",     keywords: ["案件概要", "审查概要", "概要", "案件概述"] },
+  { id: "timeline",          label: "审查对话时间线", keywords: ["时间线", "对话时间线", "审查时间线", "审查对话"] },
+  { id: "dispute",           label: "争议焦点辩驳表", keywords: ["争议焦点", "辩驳", "焦点辩驳"] },
+  { id: "claims-evolution",  label: "权利要求范围演变", keywords: ["权利要求范围演变", "权利要求演变", "范围演变", "联动对照"] },
+  { id: "invalidity",        label: "关键无效机会",   keywords: ["无效机会", "无效理由", "关键无效"] },
+  { id: "risk-rating",       label: "授权前景与风险评级", keywords: ["授权前景", "风险评级", "风险速评"] },
+  { id: "monitoring",        label: "监控建议",       keywords: ["监控建议", "监控", "建议关注"] },
+];
+
+// Identify module by heading text (e.g. "### 一、案件概要" → "summary")
+function identifyAnalysisModule(headingText) {
+  const cleaned = headingText.replace(/^[一二三四五六七八九十]+[、.]\s*/, "").trim();
+  for (const mod of ANALYSIS_MODULES) {
+    for (const kw of mod.keywords) {
+      if (cleaned.includes(kw)) return mod;
+    }
+  }
+  return null;
+}
+
+// Parse the analysis markdown text into an array of module segments
+function parseAnalysisModules(text) {
+  if (!text || !text.trim()) return [];
+
+  const lines = text.split("\n");
+  const segments = [];
+  let currentHeading = null;
+  let currentLines = [];
+  let preModuleLines = []; // content before first ### heading
+
+  for (const line of lines) {
+    const h3Match = line.match(/^###\s+(.+)/);
+    if (h3Match) {
+      // Flush previous segment
+      if (currentHeading !== null) {
+        segments.push({ heading: currentHeading, module: identifyAnalysisModule(currentHeading), content: currentLines.join("\n") });
+      } else if (currentLines.length > 0) {
+        preModuleLines = currentLines;
+      }
+      currentHeading = h3Match[1].trim();
+      currentLines = [line];
+    } else {
+      currentLines.push(line);
+    }
+  }
+  // Flush last segment
+  if (currentHeading !== null) {
+    segments.push({ heading: currentHeading, module: identifyAnalysisModule(currentHeading), content: currentLines.join("\n") });
+  } else if (currentLines.length > 0) {
+    preModuleLines = currentLines;
+  }
+
+  // If there's pre-module content, prepend as an unclassified segment
+  if (preModuleLines.length > 0) {
+    segments.unshift({ heading: null, module: null, content: preModuleLines.join("\n") });
+  }
+
+  return segments;
+}
+
+// Render analysis content with module sections, each with a regenerate button
+function renderAnalysisModules(text) {
+  if (!text || !text.trim()) return renderMarkdownWithTrace(text);
+
+  const segments = parseAnalysisModules(text);
+  if (segments.length === 0) return renderMarkdownWithTrace(text);
+
+  let html = "";
+  segments.forEach((seg, idx) => {
+    if (seg.module) {
+      // Named module section with header bar and regenerate button
+      html += '<div class="analysis-module" data-module-id="' + seg.module.id + '">';
+      html += '<div class="analysis-module-header">';
+      html += '<span class="analysis-module-title">' + escapeHtml(seg.module.label) + '</span>';
+      html += '<button class="analysis-module-regen-btn" data-module-id="' + seg.module.id + '" data-module-label="' + escapeHtml(seg.module.label) + '" title="重新生成此模块">⟳ 重新生成</button>';
+      html += '</div>';
+      // Strip the leading ### heading from content to avoid duplication with the header bar
+      const contentWithoutHeading = seg.content.replace(/^###\s+[^\n]*\n?/, "");
+      html += '<div class="analysis-module-content">' + renderMarkdownWithTrace(contentWithoutHeading) + '</div>';
+      html += '</div>';
+    } else {
+      // Unclassified content (before first ### heading)
+      html += '<div class="analysis-module analysis-module-unclassified">';
+      html += '<div class="analysis-module-content">' + renderMarkdownWithTrace(seg.content) + '</div>';
+      html += '</div>';
+    }
+  });
+  return html;
+}
+
+// Extract a single module's raw markdown text from the full analysis
+function extractModuleText(fullText, moduleId) {
+  const segments = parseAnalysisModules(fullText);
+  const seg = segments.find(s => s.module && s.module.id === moduleId);
+  return seg ? seg.content : null;
+}
+
+// Replace a single module's text in the full analysis and return the new full text
+function replaceModuleText(fullText, moduleId, newModuleText) {
+  const segments = parseAnalysisModules(fullText);
+  let result = "";
+  let replaced = false;
+  segments.forEach((seg, idx) => {
+    if (idx > 0) result += "\n";
+    if (seg.module && seg.module.id === moduleId && !replaced) {
+      result += newModuleText;
+      replaced = true;
+    } else {
+      result += seg.content;
+    }
+  });
+  return result;
+}
+
+// Regenerate a single analysis module via AI
+async function regenerateAnalysisModule(moduleId, moduleLabel, customNote) {
+  const fullText = kanbanState.analysis;
+  if (!fullText) return;
+
+  const provider = window.AI.getActiveProvider();
+  if (!provider) {
+    showError("请先配置 AI 服务");
+    return;
+  }
+
+  const moduleEl = document.querySelector('.analysis-module[data-module-id="' + moduleId + '"]');
+  const contentEl = moduleEl ? moduleEl.querySelector('.analysis-module-content') : null;
+  if (!contentEl) return;
+
+  // Show loading state in the module content area
+  contentEl.innerHTML = '<div class="analysis-module-loading"><div class="analysis-module-spinner"></div><span>正在重新生成「' + escapeHtml(moduleLabel) + '」...</span></div>';
+
+  // Disable the regenerate button
+  const regenBtn = moduleEl.querySelector('.analysis-module-regen-btn');
+  if (regenBtn) regenBtn.disabled = true;
+
+  const originalModuleText = extractModuleText(fullText, moduleId) || "";
+
+  // Build prompt for regeneration
+  const systemPrompt = kanbanState.analysisSystemPrompt || "";
+  const userMessage = kanbanState.analysisUserMessage || "";
+
+  const regenInstruction = `请仅重新生成报告中的「${moduleLabel}」部分。` +
+    (customNote ? `\n\n用户补充要求：${customNote}` : "") +
+    `\n\n请保持 Markdown 格式，以 ### 开头的标题开头。不要生成其他模块的内容，只生成「${moduleLabel}」这一个模块。` +
+    `\n\n以下是该模块的当前内容，供参考改进：\n${originalModuleText}`;
+
+  const fullUserMsg = userMessage + "\n\n---\n\n" + regenInstruction;
+
+  try {
+    let newModuleText = "";
+    const stream = window.AI.streamChat(
+      provider.type, provider.apiKey, provider.baseUrl,
+      {
+        model: provider.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: fullUserMsg },
+        ],
+        temperature: 0.3,
+        maxTokens: 8192,
+      }
+    );
+
+    let _streamRafPending = false;
+    let _lastRenderLen = 0;
+    for await (const chunk of stream) {
+      if (chunk.content) {
+        newModuleText += chunk.content;
+        if (!_streamRafPending && (newModuleText.length - _lastRenderLen > 20 || newModuleText.length < 200)) {
+          _streamRafPending = true;
+          requestAnimationFrame(() => {
+            if (contentEl) {
+              contentEl.innerHTML = renderMarkdownWithTrace(newModuleText);
+            }
+            _lastRenderLen = newModuleText.length;
+            _streamRafPending = false;
+          });
+        }
+      }
+    }
+    // Final render (strip leading ### heading to avoid duplication with module header bar)
+    if (contentEl) {
+      const displayText = newModuleText.replace(/^###\s+[^\n]*\n?/, "");
+      contentEl.innerHTML = renderMarkdownWithTrace(displayText);
+    }
+
+    // Update the full analysis text
+    kanbanState.analysis = replaceModuleText(fullText, moduleId, newModuleText);
+    kanbanState.hasUnsavedWork = true;
+    autoSaveCache();
+    prefetchPatentLinks();
+  } catch (e) {
+    // Restore original content on error
+    if (contentEl) contentEl.innerHTML = renderMarkdownWithTrace(originalModuleText);
+    showError("重新生成失败: " + e.message);
+  } finally {
+    if (regenBtn) regenBtn.disabled = false;
+  }
+}
+
+// Show a mini popup for custom note input before regenerating
+function showModuleRegenPopup(btnEl, moduleId, moduleLabel) {
+  // Remove any existing popup
+  const existing = document.getElementById("analysis-regen-popup");
+  if (existing) existing.remove();
+
+  const popup = document.createElement("div");
+  popup.id = "analysis-regen-popup";
+  popup.className = "analysis-regen-popup";
+
+  popup.innerHTML =
+    '<div class="analysis-regen-popup-title">重新生成「' + escapeHtml(moduleLabel) + '」</div>' +
+    '<textarea class="analysis-regen-popup-note" placeholder="可选：输入补充要求或修改方向..." rows="2"></textarea>' +
+    '<div class="analysis-regen-popup-actions">' +
+    '<button class="btn-secondary btn-small analysis-regen-cancel">取消</button>' +
+    '<button class="btn-primary btn-small analysis-regen-confirm">开始生成</button>' +
+    '</div>';
+
+  // Position the popup near the button
+  const rect = btnEl.getBoundingClientRect();
+  popup.style.position = "fixed";
+  popup.style.right = (window.innerWidth - rect.right) + "px";
+  popup.style.top = (rect.bottom + 6) + "px";
+
+  document.body.appendChild(popup);
+
+  // Focus the textarea
+  const noteInput = popup.querySelector(".analysis-regen-popup-note");
+  setTimeout(() => noteInput.focus(), 50);
+
+  // Cancel
+  popup.querySelector(".analysis-regen-cancel").addEventListener("click", () => popup.remove());
+  // Click outside to close
+  const closeOnOutside = (ev) => {
+    if (!popup.contains(ev.target) && ev.target !== btnEl) {
+      popup.remove();
+      document.removeEventListener("mousedown", closeOnOutside);
+    }
+  };
+  setTimeout(() => document.addEventListener("mousedown", closeOnOutside), 100);
+
+  // Confirm
+  popup.querySelector(".analysis-regen-confirm").addEventListener("click", () => {
+    const customNote = noteInput.value.trim();
+    popup.remove();
+    document.removeEventListener("mousedown", closeOnOutside);
+    regenerateAnalysisModule(moduleId, moduleLabel, customNote);
+  });
+
+  // Enter key in textarea (Ctrl+Enter to confirm)
+  noteInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
+      ev.preventDefault();
+      popup.querySelector(".analysis-regen-confirm").click();
+    }
+  });
 }
 
 function onTraceClick(blockIdStr) {
@@ -5508,7 +5771,7 @@ function selectReaderAnalysis() {
   if (activeEl) activeEl.classList.add("active");
 
   if (kanbanState.analysis) {
-    readerContent.innerHTML = '<div class="markdown-body">' + renderMarkdownWithTrace(kanbanState.analysis) + '</div>';
+    readerContent.innerHTML = '<div class="markdown-body">' + renderAnalysisModules(kanbanState.analysis) + '</div>';
   } else {
     readerContent.innerHTML = '<p class="placeholder">尚未生成 AI 分析报告</p>';
   }
@@ -7567,6 +7830,18 @@ document.addEventListener("DOMContentLoaded", () => {
   if (exportWordBtn) {
     exportWordBtn.addEventListener("click", exportToWord);
   }
+
+  // Event delegation for analysis module regenerate buttons
+  document.addEventListener("click", (ev) => {
+    const regenBtn = ev.target.closest(".analysis-module-regen-btn");
+    if (regenBtn && !regenBtn.disabled) {
+      const moduleId = regenBtn.dataset.moduleId;
+      const moduleLabel = regenBtn.dataset.moduleLabel;
+      if (moduleId && moduleLabel) {
+        showModuleRegenPopup(regenBtn, moduleId, moduleLabel);
+      }
+    }
+  });
 
   if (readerExportBtn) {
     readerExportBtn.addEventListener("click", exportToWord);
