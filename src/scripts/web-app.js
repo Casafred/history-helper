@@ -424,6 +424,27 @@ async function searchPatentDetail(input) {
   const raw = input.trim().toUpperCase().replace(/[\s\/]/g, "");
   if (!raw) { showError("请输入专利号"); return; }
 
+  // Check if we already have a full cache entry for this patent
+  const cachedEntry = PatentCache.get(raw);
+  if (cachedEntry && cachedEntry.kanbanState) {
+    // Restore from cache instead of re-fetching from API
+    if (currentData) {
+      const currentPatent = currentData.raw || (currentData.office + currentData.applicationNumber);
+      if (currentPatent !== raw && kanbanState.hasUnsavedWork) {
+        promptSaveCache(() => doRestoreFromCache(raw));
+        return;
+      }
+    }
+    const success = PatentCache.restoreState(cachedEntry);
+    if (success) {
+      if (patentInput) patentInput.value = raw;
+      patentDetailSection.classList.remove("hidden");
+      refreshHistoryList();
+      showDataSourceBadge("本地缓存", "从缓存恢复，无需重新查询");
+      return;
+    }
+  }
+
   searchBtn.disabled = true;
   loadingText.textContent = "正在从 Google Patents 获取专利信息...";
   loading.classList.remove("hidden");
@@ -2504,13 +2525,21 @@ const PatentCache = {
           kanbanState.extractions[idx] = { ...ext, pageDimensions: {} };
           // Re-populate pageDimensions from blocks if available
           if (ext.blocks && Array.isArray(ext.blocks)) {
+            const pageMax = {}; // { pageNum: { maxX2, maxY2 } }
             for (const b of ext.blocks) {
               if (b.page != null && b.bbox) {
-                if (!kanbanState.extractions[idx].pageDimensions[b.page]) {
-                  // Estimate page dimensions from bbox if not available
-                  kanbanState.extractions[idx].pageDimensions[b.page] = null;
-                }
+                const [x1, y1, x2, y2] = b.bbox;
+                if (!pageMax[b.page]) pageMax[b.page] = { maxX2: 0, maxY2: 0 };
+                if (x2 > pageMax[b.page].maxX2) pageMax[b.page].maxX2 = x2;
+                if (y2 > pageMax[b.page].maxY2) pageMax[b.page].maxY2 = y2;
               }
+            }
+            for (const [p, m] of Object.entries(pageMax)) {
+              // Use max bbox extent as page dimensions (add small padding)
+              kanbanState.extractions[idx].pageDimensions[p] = {
+                width: m.maxX2 + 10,
+                height: m.maxY2 + 10,
+              };
             }
           }
         }
