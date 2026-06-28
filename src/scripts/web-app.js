@@ -5849,6 +5849,20 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
     pdfViewState.renderedPages[pageNum] = wrapper;
   }
 
+  // PDF scroll → extract panel page sync (install once)
+  if (!readerPdfContainer._extractScrollSyncInstalled) {
+    readerPdfContainer._extractScrollSyncInstalled = true;
+    let _extractScrollRaf = false;
+    readerPdfContainer.addEventListener("scroll", () => {
+      if (_extractScrollRaf) return;
+      _extractScrollRaf = true;
+      requestAnimationFrame(() => {
+        _extractScrollRaf = false;
+        syncExtractPanelToPdfPage();
+      });
+    });
+  }
+
   // 全局 mousemove / mouseup 用于框选
   if (readerPdfContainer._selectionHandlersInstalled) return;
   readerPdfContainer._selectionHandlersInstalled = true;
@@ -5862,12 +5876,12 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
     const x = Math.max(0, Math.min(ev.clientX - rect.left, rect.width));
     const y = Math.max(0, Math.min(ev.clientY - rect.top, rect.height));
     pdfViewState.selectEnd = { x, y, page };
+    const left = Math.min(pdfViewState.selectStart.x, x);
+    const top = Math.min(pdfViewState.selectStart.y, y);
+    const width = Math.abs(x - pdfViewState.selectStart.x);
+    const height = Math.abs(y - pdfViewState.selectStart.y);
     const selectionRect = wrapper.querySelector(".pdf-selection-rect");
     if (selectionRect) {
-      const left = Math.min(pdfViewState.selectStart.x, x);
-      const top = Math.min(pdfViewState.selectStart.y, y);
-      const width = Math.abs(x - pdfViewState.selectStart.x);
-      const height = Math.abs(y - pdfViewState.selectStart.y);
       selectionRect.style.left = left + "px";
       selectionRect.style.top = top + "px";
       selectionRect.style.width = width + "px";
@@ -6695,7 +6709,64 @@ function updateExtractPanel() {
   if (ext.blocks && ext.blocks.length > 0) {
     blocksInfo = `<div class="extract-blocks-info">共 ${ext.blocks.length} 个文本块</div>`;
   }
-  contentEl.innerHTML = blocksInfo + '<pre class="extract-pre">' + escapeHtml(text) + '</pre>';
+
+  // Split by page separator (---) and render with page dividers
+  const pages = text.split(/\n\n---\n\n/);
+  let html = blocksInfo;
+  pages.forEach((pageText, i) => {
+    if (i > 0) {
+      // Page divider - not selectable for copy
+      html += '<div class="extract-page-divider" data-extract-page="' + (i + 1) + '"><span>第 ' + (i + 1) + ' 页</span></div>';
+    } else {
+      // First page divider (subtle)
+      html += '<div class="extract-page-divider extract-page-divider-first" data-extract-page="1"><span>第 1 页</span></div>';
+    }
+    if (pageText.trim()) {
+      html += '<div class="extract-page-content" data-extract-page="' + (i + 1) + '">' + renderMarkdown(pageText) + '</div>';
+    }
+  });
+
+  contentEl.innerHTML = html;
+}
+
+// Sync extract panel scroll position to match the currently visible PDF page
+function syncExtractPanelToPdfPage() {
+  const extractPanel = document.getElementById("reader-extract-panel");
+  if (!extractPanel || extractPanel.classList.contains("hidden")) return;
+
+  // Determine the currently visible PDF page
+  const containerRect = readerPdfContainer.getBoundingClientRect();
+  const viewTop = containerRect.top + containerRect.height * 0.3; // 30% from top as reference point
+  let currentPage = 1;
+  let minDist = Infinity;
+
+  for (let p = 1; p <= pdfViewState.totalPages; p++) {
+    const wrapper = pdfViewState.renderedPages[p];
+    if (!wrapper) continue;
+    const rect = wrapper.getBoundingClientRect();
+    const mid = rect.top + rect.height / 2;
+    const dist = Math.abs(mid - viewTop);
+    if (dist < minDist) {
+      minDist = dist;
+      currentPage = p;
+    }
+  }
+
+  pdfViewState.currentPage = currentPage;
+  updatePdfToolbar();
+
+  // Sync extract panel to the same page
+  const contentEl = document.getElementById("reader-extract-content");
+  if (!contentEl) return;
+  const target = contentEl.querySelector('[data-extract-page="' + currentPage + '"]');
+  if (target) {
+    // Only scroll if the target is not already in view
+    const contentRect = contentEl.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    if (targetRect.top < contentRect.top || targetRect.bottom > contentRect.bottom) {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
 }
 
 // ===== Open reader for specific document from kanban =====
