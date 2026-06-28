@@ -5301,7 +5301,7 @@ async function regenerateAnalysisModule(moduleId, moduleLabel, customNote) {
   const fullText = kanbanState.analysis;
   if (!fullText) return;
 
-  const provider = window.AI.getActiveProvider();
+  const provider = window.AI.getCurrentProvider(window.AI.loadAIConfig());
   if (!provider) {
     showError("请先配置 AI 服务");
     return;
@@ -6063,6 +6063,8 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
             overlay.classList.add("block-selected");
           }
           updatePdfSelectionInfo();
+          // Navigate extract panel to the corresponding page
+          navigateExtractPanelToBlock(b);
         });
 
         overlay.addEventListener("contextmenu", (ev) => {
@@ -6992,6 +6994,29 @@ function updateExtractPanel() {
   contentEl.innerHTML = html;
 }
 
+// Navigate extract panel to the page containing a given OCR block
+function navigateExtractPanelToBlock(block) {
+  const extractPanel = document.getElementById("reader-extract-panel");
+  if (!extractPanel) return;
+
+  // Switch to extract panel if not already visible
+  if (extractPanel.classList.contains("hidden")) {
+    switchRightPanelTab("extract");
+  }
+
+  const contentEl = document.getElementById("reader-extract-content");
+  if (!contentEl) return;
+
+  const page = block.page;
+  if (!page) return;
+
+  // Scroll to the corresponding page divider or content
+  const target = contentEl.querySelector('[data-extract-page="' + page + '"]');
+  if (target) {
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
 // Sync extract panel scroll position to match the currently visible PDF page
 function syncExtractPanelToPdfPage() {
   const extractPanel = document.getElementById("reader-extract-panel");
@@ -7911,12 +7936,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const translateSelBtn = document.getElementById("pdf-translate-selection-btn");
   if (translateSelBtn) {
     translateSelBtn.addEventListener("click", translateSelectedBlocks);
-  }
-
-  // Page translate button (Google Translate widget)
-  const pageTranslateBtn = document.getElementById("page-translate-btn");
-  if (pageTranslateBtn) {
-    pageTranslateBtn.addEventListener("click", toggleGoogleTranslate);
   }
 
   // PDF clear selection button
