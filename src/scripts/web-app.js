@@ -5180,48 +5180,41 @@ function renderMarkdownWithTrace(text) {
 
 // ===== Analysis Module Parsing & Rendering =====
 
-// Module definitions: keyword groups for robust matching
-const ANALYSIS_MODULES = [
-  { id: "summary",           label: "案件概要",     keywords: ["案件概要", "审查概要", "概要", "案件概述"] },
-  { id: "timeline",          label: "审查对话时间线", keywords: ["时间线", "对话时间线", "审查时间线", "审查对话"] },
-  { id: "dispute",           label: "争议焦点辩驳表", keywords: ["争议焦点", "辩驳", "焦点辩驳"] },
-  { id: "claims-evolution",  label: "权利要求范围演变", keywords: ["权利要求范围演变", "权利要求演变", "范围演变", "联动对照"] },
-  { id: "invalidity",        label: "关键无效机会",   keywords: ["无效机会", "无效理由", "关键无效"] },
-  { id: "risk-rating",       label: "授权前景与风险评级", keywords: ["授权前景", "风险评级", "风险速评"] },
-  { id: "monitoring",        label: "监控建议",       keywords: ["监控建议", "监控", "建议关注"] },
-];
-
-// Identify module by heading text (e.g. "### 一、案件概要" → "summary")
-function identifyAnalysisModule(headingText) {
-  const cleaned = headingText.replace(/^[一二三四五六七八九十]+[、.]\s*/, "").trim();
-  for (const mod of ANALYSIS_MODULES) {
-    for (const kw of mod.keywords) {
-      if (cleaned.includes(kw)) return mod;
-    }
-  }
-  return null;
+// Clean heading text for display: strip leading numbering like "一、" "1." "1、" etc.
+function cleanModuleHeading(heading) {
+  return heading
+    .replace(/^[一二三四五六七八九十]+[、.]\s*/, "")
+    .replace(/^\d+[、.]\s*/, "")
+    .trim();
 }
 
-// Parse the analysis markdown text into an array of module segments
+// Parse the analysis markdown text into an array of module segments.
+// Any ### heading creates a new module — fully dynamic, no hardcoded module list.
 function parseAnalysisModules(text) {
   if (!text || !text.trim()) return [];
 
   const lines = text.split("\n");
   const segments = [];
   let currentHeading = null;
+  let currentLabel = "";
+  let currentId = "";
   let currentLines = [];
-  let preModuleLines = []; // content before first ### heading
+  let preModuleLines = [];
+  let moduleIdx = 0;
 
   for (const line of lines) {
     const h3Match = line.match(/^###\s+(.+)/);
     if (h3Match) {
       // Flush previous segment
       if (currentHeading !== null) {
-        segments.push({ heading: currentHeading, module: identifyAnalysisModule(currentHeading), content: currentLines.join("\n") });
+        segments.push({ heading: currentHeading, label: currentLabel, id: currentId, content: currentLines.join("\n") });
       } else if (currentLines.length > 0) {
         preModuleLines = currentLines;
       }
       currentHeading = h3Match[1].trim();
+      currentLabel = cleanModuleHeading(currentHeading);
+      currentId = "mod-" + moduleIdx;
+      moduleIdx++;
       currentLines = [line];
     } else {
       currentLines.push(line);
@@ -5229,34 +5222,47 @@ function parseAnalysisModules(text) {
   }
   // Flush last segment
   if (currentHeading !== null) {
-    segments.push({ heading: currentHeading, module: identifyAnalysisModule(currentHeading), content: currentLines.join("\n") });
+    segments.push({ heading: currentHeading, label: currentLabel, id: currentId, content: currentLines.join("\n") });
   } else if (currentLines.length > 0) {
     preModuleLines = currentLines;
   }
 
   // If there's pre-module content, prepend as an unclassified segment
   if (preModuleLines.length > 0) {
-    segments.unshift({ heading: null, module: null, content: preModuleLines.join("\n") });
+    segments.unshift({ heading: null, label: null, id: null, content: preModuleLines.join("\n") });
   }
 
   return segments;
 }
 
-// Render analysis content with module sections, each with a regenerate button
+// Render analysis content with module sections, sticky tab bar, and regenerate buttons
 function renderAnalysisModules(text) {
   if (!text || !text.trim()) return renderMarkdownWithTrace(text);
 
   const segments = parseAnalysisModules(text);
   if (segments.length === 0) return renderMarkdownWithTrace(text);
 
+  // Count named modules (with heading) for the tab bar
+  const namedSegments = segments.filter(s => s.heading);
+
   let html = "";
-  segments.forEach((seg, idx) => {
-    if (seg.module) {
+
+  // Sticky module navigation tabs
+  if (namedSegments.length > 1) {
+    html += '<div class="analysis-module-tabs">';
+    namedSegments.forEach(seg => {
+      html += '<button class="analysis-module-tab" data-module-id="' + seg.id + '">' + escapeHtml(seg.label) + '</button>';
+    });
+    html += '</div>';
+  }
+
+  segments.forEach((seg) => {
+    if (seg.heading) {
       // Named module section with header bar and regenerate button
-      html += '<div class="analysis-module" data-module-id="' + seg.module.id + '">';
+      html += '<div class="analysis-module" data-module-id="' + seg.id + '">';
       html += '<div class="analysis-module-header">';
-      html += '<span class="analysis-module-title">' + escapeHtml(seg.module.label) + '</span>';
-      html += '<button class="analysis-module-regen-btn" data-module-id="' + seg.module.id + '" data-module-label="' + escapeHtml(seg.module.label) + '" title="重新生成此模块">⟳ 重新生成</button>';
+      html += '<span class="analysis-module-title">' + escapeHtml(seg.label) + '</span>';
+      html += '<button class="analysis-module-regen-btn" data-module-id="' + seg.id + '" data-module-label="' + escapeHtml(seg.label) + '" title="重新生成此模块">⟳ 重新生成</button>';
       html += '</div>';
       // Strip the leading ### heading from content to avoid duplication with the header bar
       const contentWithoutHeading = seg.content.replace(/^###\s+[^\n]*\n?/, "");
@@ -5269,13 +5275,24 @@ function renderAnalysisModules(text) {
       html += '</div>';
     }
   });
+
+  // Schedule IntersectionObserver setup after DOM update
+  requestAnimationFrame(() => {
+    const container = document.getElementById("kanban-analysis-content");
+    if (container && window._analysisScrollObserver) {
+      container.querySelectorAll(".analysis-module[data-module-id]").forEach(mod => {
+        window._analysisScrollObserver.observe(mod);
+      });
+    }
+  });
+
   return html;
 }
 
 // Extract a single module's raw markdown text from the full analysis
 function extractModuleText(fullText, moduleId) {
   const segments = parseAnalysisModules(fullText);
-  const seg = segments.find(s => s.module && s.module.id === moduleId);
+  const seg = segments.find(s => s.id === moduleId);
   return seg ? seg.content : null;
 }
 
@@ -5286,7 +5303,7 @@ function replaceModuleText(fullText, moduleId, newModuleText) {
   let replaced = false;
   segments.forEach((seg, idx) => {
     if (idx > 0) result += "\n";
-    if (seg.module && seg.module.id === moduleId && !replaced) {
+    if (seg.id === moduleId && !replaced) {
       result += newModuleText;
       replaced = true;
     } else {
@@ -7856,7 +7873,7 @@ document.addEventListener("DOMContentLoaded", () => {
     exportWordBtn.addEventListener("click", exportToWord);
   }
 
-  // Event delegation for analysis module regenerate buttons
+  // Event delegation for analysis module regenerate buttons and module tabs
   document.addEventListener("click", (ev) => {
     const regenBtn = ev.target.closest(".analysis-module-regen-btn");
     if (regenBtn && !regenBtn.disabled) {
@@ -7865,8 +7882,40 @@ document.addEventListener("DOMContentLoaded", () => {
       if (moduleId && moduleLabel) {
         showModuleRegenPopup(regenBtn, moduleId, moduleLabel);
       }
+      return;
+    }
+    const moduleTab = ev.target.closest(".analysis-module-tab");
+    if (moduleTab) {
+      const moduleId = moduleTab.dataset.moduleId;
+      if (moduleId) {
+        const container = document.getElementById("kanban-analysis-content");
+        const target = container ? container.querySelector('.analysis-module[data-module-id="' + moduleId + '"]') : null;
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+          // Briefly highlight active tab
+          container.querySelectorAll(".analysis-module-tab").forEach(t => t.classList.remove("active"));
+          moduleTab.classList.add("active");
+        }
+      }
     }
   });
+
+  // Scroll-based active tab highlighting for analysis module tabs
+  if (!window._analysisScrollObserver) {
+    window._analysisScrollObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const moduleId = entry.target.dataset.moduleId;
+          const container = document.getElementById("kanban-analysis-content");
+          if (container && moduleId) {
+            container.querySelectorAll(".analysis-module-tab").forEach(t => {
+              t.classList.toggle("active", t.dataset.moduleId === moduleId);
+            });
+          }
+        }
+      });
+    }, { rootMargin: "-80px 0px -60% 0px", threshold: 0 });
+  }
 
   if (readerExportBtn) {
     readerExportBtn.addEventListener("click", exportToWord);

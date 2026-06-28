@@ -2799,6 +2799,50 @@ body {
   margin-top: 10px;
 }
 
+/* Analysis Module Sticky Tabs */
+.analysis-module-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 0 8px 0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  margin: 0 -20px 16px;
+  padding-left: 20px;
+  padding-right: 20px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.analysis-module-tabs::-webkit-scrollbar {
+  display: none;
+}
+.analysis-module-tab {
+  font-size: 12px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+.analysis-module-tab:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.analysis-module-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
 @media (max-width: 1200px) {
   .kanban-columns {
     grid-template-columns: repeat(3, 1fr);
