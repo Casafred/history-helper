@@ -114,6 +114,7 @@ const patentDetailContent = document.getElementById("patent-detail-content");
 const loading = document.getElementById("loading");
 const loadingText = document.getElementById("loading-text");
 const loadingGpLink = document.getElementById("loading-gp-link");
+const loadingEspacenetLink = document.getElementById("loading-espacenet-link");
 const errorToast = document.getElementById("error-toast");
 
 let searchMode = "dossier"; // "dossier" | "patent"
@@ -448,12 +449,17 @@ async function searchPatentDetail(input) {
 
   searchBtn.disabled = true;
   loadingText.textContent = "正在从 Google Patents 获取专利信息...";
-  // Show Google Patents link immediately so user can jump if loading takes too long
+  // Show Google Patents + Espacenet links immediately so user can jump if loading takes too long
   if (loadingGpLink) {
     const gpUrl = "https://patents.google.com/patent/" + encodeURIComponent(raw);
     loadingGpLink.href = gpUrl;
     loadingGpLink.onclick = function(e) { e.preventDefault(); openInAppWebview(gpUrl, "Google Patents: " + raw); };
     loadingGpLink.classList.remove("hidden");
+  }
+  if (loadingEspacenetLink) {
+    const espUrl = "https://worldwide.espacenet.com/patent/search?q=" + encodeURIComponent(raw);
+    loadingEspacenetLink.onclick = function(e) { e.preventDefault(); openInAppWebview(espUrl, "Espacenet: " + raw); };
+    loadingEspacenetLink.classList.remove("hidden");
   }
   loading.classList.remove("hidden");
   resultSection.classList.add("hidden");
@@ -464,11 +470,46 @@ async function searchPatentDetail(input) {
     const resp = await fetch(gpApiUrl(raw));
     const json = await resp.json();
 
+    // 调试信息输出到开发者工具 console
+    console.group("%c[PatentLens 调试] " + raw, "color: #4CAF50; font-weight: bold;");
+    console.log("API 响应:", json);
+    if (json.data) {
+      const d = json.data;
+      console.log("数据来源:", json.data_source || d.data_source || "Google Patents");
+      console.log("标题:", d.title || "(空)");
+      console.log("权利要求数量:", (d.claims || []).length);
+      if (d.claims && d.claims.length > 0) {
+        console.table(d.claims.map(c => ({ 序号: c.num, 类型: c.type, 文本预览: c.text.substring(0, 60) + "..." })));
+      }
+      console.log("引证专利数量:", (d.patent_citations || []).length);
+      if (d.patent_citations && d.patent_citations.length > 0) {
+        console.table(d.patent_citations.slice(0, 5).map(c => ({
+          专利号: c.patent_number, 标题: (c.title||'').substring(0, 30),
+          优先权日: c.priority_date||'(空)', 公开日: c.publication_date||'(空)', 申请人: (c.assignee||'').substring(0, 20),
+        })));
+      }
+      console.log("被引专利数量:", (d.cited_by || []).length);
+      if (d.cited_by && d.cited_by.length > 0) {
+        console.table(d.cited_by.slice(0, 5).map(c => ({
+          专利号: c.patent_number, 标题: (c.title||'').substring(0, 30),
+          优先权日: c.priority_date||'(空)', 公开日: c.publication_date||'(空)', 申请人: (c.assignee||'').substring(0, 20),
+        })));
+      }
+      console.log("说明书长度:", (d.description || "").length);
+      if (d.description) {
+        const headings = d.description.split('\n').filter(l => l.startsWith('## '));
+        console.log("说明书标题:", headings.length > 0 ? headings : "(未识别到标题)");
+      }
+      console.log("完整数据对象:", d);
+    }
+    console.groupEnd();
+
     if (!json.success) {
       showError(json.error || "未找到该专利");
       patentDetailSection.classList.add("hidden");
       searchBtn.disabled = false;
       if (loadingGpLink) loadingGpLink.classList.add("hidden");
+      if (loadingEspacenetLink) loadingEspacenetLink.classList.add("hidden");
       loading.classList.add("hidden");
       return;
     }
@@ -479,6 +520,7 @@ async function searchPatentDetail(input) {
       const pn = json.patent_number || raw;
       searchBtn.disabled = false;
       if (loadingGpLink) loadingGpLink.classList.add("hidden");
+      if (loadingEspacenetLink) loadingEspacenetLink.classList.add("hidden");
       loading.classList.add("hidden");
       openInAppWebview(espacenetUrl, "Espacenet: " + pn);
       return;
@@ -512,6 +554,7 @@ async function searchPatentDetail(input) {
 
   searchBtn.disabled = false;
   if (loadingGpLink) loadingGpLink.classList.add("hidden");
+  if (loadingEspacenetLink) loadingEspacenetLink.classList.add("hidden");
   loading.classList.add("hidden");
 }
 
