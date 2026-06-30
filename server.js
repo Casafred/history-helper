@@ -1470,12 +1470,21 @@ function extractPatentFromHtml(html, patentId) {
     // Google Patents sometimes uses flat divs where each line is a separate <div class="claim" num="N">
     // with sequential line numbers (not claim numbers). In this case, claims whose text doesn't start
     // with a claim number prefix (e.g., "9.") are continuations of the preceding claim.
-    if (htmlResult.claims.length > 1) {
+    // IMPORTANT: Only merge when there's evidence of fragmentation (e.g., duplicate num values
+    // or very short claim texts). If claims are already properly grouped by num, skip merging.
+    const needsMerge = htmlResult.claims.length > 1 && (
+      // Check for duplicate num values (fragmentation indicator)
+      new Set(htmlResult.claims.map(c => c.num)).size < htmlResult.claims.length ||
+      // Check for very short claims (< 20 chars) that look like fragments
+      htmlResult.claims.some(c => c.text.length < 20)
+    );
+    if (needsMerge) {
       const merged = [];
       let current = null;
       for (const claim of htmlResult.claims) {
         // Check if this claim starts with a claim number prefix like "9." or "10."
-        const prefixMatch = claim.text.match(/^(\d+)\.\s/);
+        // Support both "9. " (with space) and "9.中文" (without space after period)
+        const prefixMatch = claim.text.match(/^(\d+)\.[\s\u4e00-\u9fff\w]/);
         if (prefixMatch) {
           // Start of a new claim - use the text prefix as the actual claim number
           if (current) merged.push(current);
