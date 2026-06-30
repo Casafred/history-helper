@@ -113,6 +113,7 @@ const patentDetailSection = document.getElementById("patent-detail-section");
 const patentDetailContent = document.getElementById("patent-detail-content");
 const loading = document.getElementById("loading");
 const loadingText = document.getElementById("loading-text");
+const loadingGpLink = document.getElementById("loading-gp-link");
 const errorToast = document.getElementById("error-toast");
 
 let searchMode = "dossier"; // "dossier" | "patent"
@@ -447,6 +448,13 @@ async function searchPatentDetail(input) {
 
   searchBtn.disabled = true;
   loadingText.textContent = "正在从 Google Patents 获取专利信息...";
+  // Show Google Patents link immediately so user can jump if loading takes too long
+  if (loadingGpLink) {
+    const gpUrl = "https://patents.google.com/patent/" + encodeURIComponent(raw);
+    loadingGpLink.href = gpUrl;
+    loadingGpLink.onclick = function(e) { e.preventDefault(); openInAppWebview(gpUrl, "Google Patents: " + raw); };
+    loadingGpLink.classList.remove("hidden");
+  }
   loading.classList.remove("hidden");
   resultSection.classList.add("hidden");
   patentDetailSection.classList.add("hidden");
@@ -460,6 +468,7 @@ async function searchPatentDetail(input) {
       showError(json.error || "未找到该专利");
       patentDetailSection.classList.add("hidden");
       searchBtn.disabled = false;
+      if (loadingGpLink) loadingGpLink.classList.add("hidden");
       loading.classList.add("hidden");
       return;
     }
@@ -469,6 +478,7 @@ async function searchPatentDetail(input) {
       const espacenetUrl = json.espacenet_url || (json.data && json.data.espacenet_url) || "";
       const pn = json.patent_number || raw;
       searchBtn.disabled = false;
+      if (loadingGpLink) loadingGpLink.classList.add("hidden");
       loading.classList.add("hidden");
       openInAppWebview(espacenetUrl, "Espacenet: " + pn);
       return;
@@ -501,6 +511,7 @@ async function searchPatentDetail(input) {
   }
 
   searchBtn.disabled = false;
+  if (loadingGpLink) loadingGpLink.classList.add("hidden");
   loading.classList.add("hidden");
 }
 

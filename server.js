@@ -1900,6 +1900,95 @@ function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl, opsKey, opsSe
   })();
 }
 
+// Debug function: fetch raw HTML from Google Patents and return both raw HTML and parsed result
+function scrapeGooglePatentDebug(patentNumber, res, useProxy, proxyUrl) {
+  const { normalized, variants } = normalizePatentNumber(patentNumber);
+  const allToTry = [normalized, ...variants];
+
+  (async () => {
+    for (const tryNumber of allToTry) {
+      const url = `${GOOGLE_PATENTS_BASE}/patent/${encodeURIComponent(tryNumber)}`;
+      const args = [
+        "-s", "-k", "-w", "\n__HTTP_CODE__%{http_code}",
+        "--max-time", "30",
+        "-L",
+        "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "-H", "Accept-Language: en-US,en;q=0.9",
+        "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        url,
+      ];
+      if (useProxy && proxyUrl) {
+        args.splice(2, 0, "--proxy", proxyUrl);
+      }
+
+      console.log(`[GP-DEBUG] 尝试抓取: ${url}`);
+
+      const result = await new Promise((resolve) => {
+        execFile("curl", args, { maxBuffer: 20 * 1024 * 1024 }, (err, stdout) => {
+          if (err) {
+            console.log(`[GP-DEBUG] curl 错误: ${err.message}`);
+            resolve(null);
+            return;
+          }
+          const marker = "\n__HTTP_CODE__";
+          const idx = stdout.lastIndexOf(marker);
+          let httpCode = 200;
+          let body = stdout;
+          if (idx !== -1) {
+            httpCode = parseInt(stdout.substring(idx + marker.length), 10);
+            body = stdout.substring(0, idx);
+          }
+          console.log(`[GP-DEBUG] HTTP ${httpCode}, body长度: ${body.length}`);
+          resolve({ httpCode, body });
+        });
+      });
+
+      if (!result) continue;
+
+      if (result.httpCode === 200 && result.body && result.body.length > 1000) {
+        const data = extractPatentFromHtml(result.body, tryNumber);
+        // Return debug info: raw HTML + parsed result + diagnostics
+        const diagnostics = {
+          patent_number: tryNumber,
+          http_code: result.httpCode,
+          html_length: result.body.length,
+          has_jsonld: /<script\s+type="application\/ld\+json"/i.test(result.body),
+          has_claims_section: /<section[^>]*itemprop="claims"/i.test(result.body),
+          has_description_section: /<section[^>]*itemprop="description"/i.test(result.body),
+          has_backward_refs: /backwardReferences/i.test(result.body),
+          has_forward_refs: /forwardReferences/i.test(result.body),
+          has_claim_divs: /<div[^>]*class="[^"]*claim[^"]*"[^>]*num=/i.test(result.body),
+          has_claim_dependent: /class="claim-dependent"/i.test(result.body),
+          has_itemprop_title: /itemprop="title"/i.test(result.body),
+          has_itemprop_assignee: /itemprop="assigneeOriginal"/i.test(result.body),
+          has_itemprop_priority_date: /itemprop="priorityDate"/i.test(result.body),
+          has_itemprop_publication_date: /itemprop="publicationDate"/i.test(result.body),
+          parsed_claims_count: data.claims?.length || 0,
+          parsed_claims_types: (data.claims || []).map(c => ({ num: c.num, type: c.type, text_preview: c.text.substring(0, 80) })),
+          parsed_citations_count: data.patent_citations?.length || 0,
+          parsed_cited_by_count: data.cited_by?.length || 0,
+          parsed_description_length: data.description?.length || 0,
+        };
+        res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+        res.end(JSON.stringify({
+          success: true,
+          diagnostics,
+          parsed_data: data,
+          raw_html: result.body,
+        }));
+        return;
+      }
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({
+      success: false,
+      error: "Google Patents 抓取失败，所有变体均未返回有效数据",
+      tried: allToTry,
+    }));
+  })();
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
@@ -1943,6 +2032,11 @@ const server = http.createServer((req, res) => {
     // OPS 降级查询凭证（前端从设置中读取并透传）
     const opsKey = urlObj.searchParams.get("opsKey") || process.env.OPS_CONSUMER_KEY || "";
     const opsSecret = urlObj.searchParams.get("opsSecret") || process.env.OPS_CONSUMER_SECRET || "";
+    // Debug mode: return raw HTML + parsed result for diagnosis
+    if (urlObj.searchParams.get("debug") === "1") {
+      scrapeGooglePatentDebug(decodeURIComponent(patentNumber), res, useProxy, proxyUrl);
+      return;
+    }
     scrapeGooglePatent(decodeURIComponent(patentNumber), res, useProxy, proxyUrl, opsKey, opsSecret);
     return;
   }
