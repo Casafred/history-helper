@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PatentLens - 专利审查文档获取与梳理</title>
-  <link rel="stylesheet" href="styles/main.css?v=20260630c">
+  <link rel="stylesheet" href="styles/main.css?v=20260701b">
 </head>
 <body>
   <div id="splash-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:var(--bg-primary, #0f1117);display:flex;align-items:center;justify-content:center;z-index:99999;transition:opacity 0.5s ease;">
@@ -211,6 +211,12 @@
                     <button id="pdf-search-prev-btn" class="btn-small" disabled title="上一个匹配">▲</button>
                     <button id="pdf-search-next-btn" class="btn-small" disabled title="下一个匹配">▼</button>
                     <span id="pdf-search-info" class="pdf-search-info"></span>
+                    <span class="pdf-toolbar-separator"></span>
+                    <button id="pdf-annot-highlight" class="btn-small pdf-annot-btn" title="高亮框选：拖动选择矩形区域生成半透明高亮标注">高亮</button>
+                    <button id="pdf-annot-underline" class="btn-small pdf-annot-btn" title="划线标注：拖动选择矩形区域，在底边生成划线">划线</button>
+                    <button id="pdf-annot-note" class="btn-small pdf-annot-btn" title="文字注释：拖动放置注释框并输入文字">注释</button>
+                    <button id="pdf-annot-export" class="btn-small" title="导出带标注的 PDF">导出标注</button>
+                    <button id="pdf-annot-clear" class="btn-small" title="清空当前文档的全部标注">清空标注</button>
                   </div>
                   <div id="reader-pdf-container" class="reader-pdf-container">
                     <!-- PDF pages rendered here with canvas + overlay -->
@@ -281,6 +287,7 @@
             <span id="ppv-patent-title" class="ppv-patent-title"></span>
           </div>
           <div class="ppv-actions">
+            <button id="ppv-ai-ask-btn" class="pd-ai-ask-btn" title="针对本篇专利向 AI 提问">AI 问一问</button>
             <a id="ppv-gp-link" href="#" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:12px;">Google Patents</a>
             <button id="ppv-espacenet-btn" class="pd-gp-link" style="font-size:12px;cursor:pointer;border:1px solid var(--accent);padding:1px 6px;">Espacenet</button>
             <a id="ppv-pdf-link" href="#" target="_blank" rel="noopener" class="pd-pdf-link hidden">PDF原文</a>
@@ -298,6 +305,26 @@
       <!-- 专利原文悬浮球 -->
       <div id="patent-popup-ball" class="patent-popup-ball hidden" title="点击查看专利原文">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </div>
+
+      <!-- AI 问一问 悬浮窗 -->
+      <div id="patent-ask-modal" class="patent-ask-modal hidden">
+        <div class="patent-ask-header">
+          <span class="patent-ask-title">AI 问一问</span>
+          <span id="patent-ask-pn" class="patent-ask-pn"></span>
+          <button id="patent-ask-close-btn" class="ppv-close-btn" title="关闭">&times;</button>
+        </div>
+        <div class="patent-ask-context">
+          <span class="patent-ask-context-label">纳入上下文：</span>
+          <label><input type="checkbox" id="patent-ask-ctx-abstract" checked> 摘要</label>
+          <label><input type="checkbox" id="patent-ask-ctx-claims" checked> 权利要求</label>
+          <label><input type="checkbox" id="patent-ask-ctx-description"> 说明书</label>
+        </div>
+        <div id="patent-ask-messages" class="patent-ask-messages"></div>
+        <div class="patent-ask-input-area">
+          <textarea id="patent-ask-input" class="patent-ask-input" placeholder="针对本篇专利提问细节…" rows="2"></textarea>
+          <button id="patent-ask-send-btn" class="btn-primary btn-small">发送</button>
+        </div>
       </div>
 
       <div id="ai-settings-modal" class="modal hidden">
@@ -648,8 +675,8 @@
   <script src="scripts/docx.umd.js?v=20260623c"></script>
   <script src="scripts/FileSaver.min.js?v=20260623c"></script>
   <script src="scripts/pdf-lib.min.js?v=20260623c"></script>
-  <script src="scripts/web-ai.js?v=20260623c"></script>
+  <script src="scripts/web-ai.js?v=20260701a"></script>
   <script src="scripts/patent-status.js?v=20260623c"></script>
-  <script src="scripts/web-app.js?v=20260630c"></script>
+  <script src="scripts/web-app.js?v=20260701b"></script>
 </body>
 </html>

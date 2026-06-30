@@ -577,41 +577,67 @@ function extractPatentFromHtml(html, patentId) {
     //     <heading id="h-0002">BACKGROUND ART</heading>
     //     <li>...</li>
     //   </ul>
-    const ulDesc = descHtml.match(/<ul[^>]*class="description"[^>]*>([\s\S]*?)<\/ul>/i);
-    if (ulDesc) {
-      const ulContent = ulDesc[1];
-      const parts = [];
-      // Match <heading> and <li> elements in document order
-      const elementRegex = /<(heading|li)\b[^>]*>([\s\S]*?)<\/\1>/gi;
-      let elemMatch;
-      while ((elemMatch = elementRegex.exec(ulContent)) !== null) {
-        const tag = elemMatch[1].toLowerCase();
-        const content = elemMatch[2];
-        if (tag === 'heading') {
-          const headingText = content.replace(/<[^>]+>/g, "").trim();
-          if (headingText) parts.push('## ' + headingText);
-        } else if (tag === 'li') {
-          // Extract paragraph number from <para-num num="[0001]">
-          const paraNumMatch = content.match(/<para-num[^>]*num="(\[[^\]]*\])"[^>]*>/i);
-          const paraNum = paraNumMatch ? paraNumMatch[1] : "";
-          // Extract description-line div content (preferred), or fallback to full li content
-          const descLineMatch = content.match(/<div[^>]*class="description-line"[^>]*>([\s\S]*?)<\/div>/i);
-          let paraText = descLineMatch ? descLineMatch[1] : content;
-          // Clean: remove figure-callout tags but keep inner text, strip other tags
-          paraText = paraText
-            .replace(/<\/?figure-callout[^>]*>/gi, '')
-            .replace(/<[^>]+>/g, " ")
-            .replace(/&nbsp;/gi, " ")
-            .replace(/&amp;/gi, "&")
-            .replace(/&lt;/gi, "<")
-            .replace(/&gt;/gi, ">")
-            .replace(/\s+/g, " ")
-            .trim();
-          if (paraText) {
-            parts.push(paraNum ? paraNum + ' ' + paraText : paraText);
-          }
+    // Normalize a paragraph-number token to [NNNN] form (accepts "0006" or "[0006]")
+    const normalizeParaNum = (raw) => {
+      if (!raw) return "";
+      const s = String(raw).trim();
+      if (!s) return "";
+      if (/^\[\d+\]$/.test(s)) return s;
+      const m = s.match(/^\[(.+)\]$/);
+      if (m && /^\d+$/.test(m[1])) return "[" + m[1] + "]";
+      if (/^\d+$/.test(s)) return "[" + s + "]";
+      return "";
+    };
+
+    // Clean inline HTML from a paragraph text fragment
+    const cleanParaText = (frag) => frag
+      .replace(/<\/?figure-callout[^>]*>/gi, '')
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // Description content: prefer <ul class="description">, else walk the whole section.
+    // GP sometimes omits the <ul> wrapper and places <heading>/<li> directly in the section.
+    const ulDesc = descHtml.match(/<ul[^>]*class="[^"]*\bdescription\b[^"]*"[^>]*>([\s\S]*?)<\/ul>/i);
+    const descContent = ulDesc ? ulDesc[1] : descHtml;
+
+    // Walk <heading> and <li> elements in document order, extracting paragraph numbers
+    // from <para-num num="..."> OR from a <div class="description-line" num="...">.
+    const parts = [];
+    const elementRegex = /<(heading|li)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+    let elemMatch;
+    while ((elemMatch = elementRegex.exec(descContent)) !== null) {
+      const tag = elemMatch[1].toLowerCase();
+      const content = elemMatch[2];
+      if (tag === 'heading') {
+        const headingText = content.replace(/<[^>]+>/g, "").trim();
+        if (headingText) parts.push('## ' + headingText);
+      } else if (tag === 'li') {
+        // Paragraph number: try <para-num num="..."> first (accepts bracketed or bare)
+        let paraNum = "";
+        const paraNumMatch = content.match(/<para-num[^>]*num="([^"]*)"[^>]*>/i);
+        if (paraNumMatch) paraNum = normalizeParaNum(paraNumMatch[1]);
+        // Fallback: num attribute on the description-line div itself
+        if (!paraNum) {
+          const divNumMatch = content.match(/<div[^>]*class="description-line"[^>]*num="([^"]*)"[^>]*>/i)
+            || content.match(/<div[^>]*num="([^"]*)"[^>]*class="description-line"[^>]*>/i);
+          if (divNumMatch) paraNum = normalizeParaNum(divNumMatch[1]);
+        }
+        // Extract description-line div content (preferred), or fallback to full li content
+        const descLineMatch = content.match(/<div[^>]*class="description-line"[^>]*>([\s\S]*?)<\/div>/i);
+        let paraText = descLineMatch ? descLineMatch[1] : content;
+        paraText = cleanParaText(paraText);
+        if (paraText) {
+          parts.push(paraNum ? paraNum + ' ' + paraText : paraText);
         }
       }
+    }
+
+    if (parts.length > 0) {
       htmlResult.description = parts.join('\n\n');
     } else {
       // Try description-paragraph divs

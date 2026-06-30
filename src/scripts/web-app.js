@@ -206,6 +206,7 @@ const readerChatToggle = document.getElementById("reader-chat-toggle");
 let pdfViewState = {
   active: false,
   currentDocIdx: null,
+  currentDocKey: null,
   pdfDoc: null,
   currentPage: 1,
   totalPages: 0,
@@ -222,6 +223,14 @@ let pdfViewState = {
   selectEnd: null,
   traceJumpPending: false,
   renderVersion: 0,
+  // PDF 标注功能
+  annotTool: null,        // "highlight" | "underline" | "note" | null
+  annotList: {},          // { docKey: [annotation, ...] }
+  annotDragging: false,
+  annotDragStart: null,
+  annotDragEnd: null,
+  annotDragPage: null,
+  annotDragViewport: null,
 };
 
 let _pdfDocCache = {}; // Cache loaded PDF documents by key (idx_url)
@@ -395,6 +404,19 @@ searchBtn.addEventListener("click", async () => {
   doSearch(input);
 });
 
+// ── 悬浮球可见性 ──
+// 右侧三个悬浮球（阅读器/专利原文弹窗/AI 对话）仅在「审查文档」模式下出现；
+// 切到「专利原文」模式时全部隐藏。
+function updateFloatingBallsVisibility() {
+  const ids = ["reader-floating-ball", "patent-popup-ball", "analysis-chat-float-ball"];
+  if (searchMode === "patent") {
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add("hidden");
+    });
+  }
+}
+
 // ── 搜索模式切换 ──
 document.querySelectorAll(".search-mode-btn").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -412,6 +434,7 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
       // Restore result section if there's cached data
       if (currentData) resultSection.classList.remove("hidden");
     }
+    updateFloatingBallsVisibility();
   });
 });
 
@@ -843,6 +866,7 @@ function renderPatentDetail(data) {
   html += '<div class="pd-patent-number">' + escapeHtml(data.patent_number) + '</div>';
   html += '<div class="pd-title">' + escapeHtml(data.title || "无标题") + '</div>';
   html += '<div class="pd-links">';
+  html += '<button class="pd-ai-ask-btn" onclick="openPatentAsk(\'detail\')" title="针对本篇专利向 AI 提问">AI 问一问</button>';
   html += '<button class="pd-gp-link" onclick="toggleGoogleTranslate()" title="使用 Google 翻译翻译整个页面" style="cursor:pointer;border:1px solid var(--accent);">网页翻译</button>';
   html += '<button class="pd-gp-link" onclick="openInAppWebview(\'' + escapeHtml(data.url) + '\', \'Google Patents: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);" title="在应用内打开 Google Patents 页面">Google Patents</button>';
   html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(data.patent_number) + '\', \'Espacenet: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);" title="在应用内打开 Espacenet 页面">Espacenet</button>';
@@ -882,6 +906,12 @@ function renderPatentDetail(data) {
 
   // Left column: info
   html += '<div class="pd-overview-info">';
+
+  // AI 解读（位于摘要之前的小区域）
+  html += '<div class="pd-section pd-ai-interpret" data-source="detail">';
+  html += '<div class="pd-section-title">AI 解读 <button class="pd-ai-interpret-btn" onclick="runPatentInterpretation(\'detail\')">AI 解读</button></div>';
+  html += '<div class="pd-ai-interpret-content"><p class="pd-ai-interpret-hint">点击「AI 解读」，基于本篇摘要与权利要求，自动梳理技术问题 / 技术手段 / 技术效果。</p></div>';
+  html += '</div>';
 
   // Abstract
   if (data.abstract) {
@@ -1853,6 +1883,12 @@ function renderPatentPopupContent(data) {
   // ─── Tab 1: Overview ───
   html += '<div class="pd-tab-panel active" data-panel="overview">';
 
+  // AI 解读（位于摘要之前的小区域）
+  html += '<div class="pd-section pd-ai-interpret" data-source="popup">';
+  html += '<div class="pd-section-title">AI 解读 <button class="pd-ai-interpret-btn" onclick="runPatentInterpretation(\'popup\')">AI 解读</button></div>';
+  html += '<div class="pd-ai-interpret-content"><p class="pd-ai-interpret-hint">点击「AI 解读」，基于本篇摘要与权利要求，自动梳理技术问题 / 技术手段 / 技术效果。</p></div>';
+  html += '</div>';
+
   // Abstract
   if (data.abstract) {
     html += '<div class="pd-section"><div class="pd-section-title">摘要</div><div class="pd-abstract">' + escapeHtml(data.abstract) + '</div></div>';
@@ -2088,39 +2124,7 @@ function renderPatentPopupContent(data) {
     html += '</tbody></table></div></div>';
   }
 
-  // Family applications
-  if (data.family_applications && data.family_applications.length > 0) {
-    html += '<div class="pd-section">';
-    html += '<div class="pd-section-title">同族申请 (' + data.family_applications.length + ')</div>';
-    html += '<div class="pd-citations">';
-    data.family_applications.forEach(fa => {
-      html += '<div class="pd-citation-item">';
-      if (fa.publication_number) {
-        html += '<a class="pd-patent-link" data-patent="' + escapeHtml(fa.publication_number) + '">' + escapeHtml(fa.publication_number) + '</a>';
-      }
-      if (fa.title) html += '<span class="pd-citation-title">' + escapeHtml(fa.title) + '</span>';
-      if (fa.status) html += '<span class="pd-citation-date">' + escapeHtml(fa.status) + '</span>';
-      html += '</div>';
-    });
-    html += '</div></div>';
-  }
-
-  // External links
-  if (data.external_links && Object.keys(data.external_links).length > 0) {
-    html += '<div class="pd-section">';
-    html += '<div class="pd-section-title">外部链接</div>';
-    html += '<div class="pd-citations">';
-    for (const [key, link] of Object.entries(data.external_links)) {
-      if (link.url) {
-        html += '<div class="pd-citation-item">';
-        html += '<a href="' + escapeHtml(link.url) + '" target="_blank" rel="noopener" class="pd-external-link">' + escapeHtml(link.text || key) + '</a>';
-        html += '</div>';
-      }
-    }
-    html += '</div></div>';
-  }
-
-  if ((!data.patent_citations || data.patent_citations.length === 0) && (!data.cited_by || data.cited_by.length === 0) && (!data.similar_documents || data.similar_documents.length === 0) && (!data.family_applications || data.family_applications.length === 0)) {
+  if ((!data.patent_citations || data.patent_citations.length === 0) && (!data.cited_by || data.cited_by.length === 0) && (!data.similar_documents || data.similar_documents.length === 0)) {
     html += '<div class="pd-empty">暂无引用文献数据</div>';
   }
 
@@ -2326,7 +2330,8 @@ function closePatentPopup() {
   const viewer = document.getElementById("patent-popup-viewer");
   const ball = document.getElementById("patent-popup-ball");
   if (viewer) viewer.classList.add("hidden");
-  if (ball) ball.classList.remove("hidden");
+  // 专利原文模式下不显示悬浮球
+  if (ball && searchMode !== "patent") ball.classList.remove("hidden");
   _ppvOpenPatents = [];
   _ppvActivePatent = "";
   const tabsBar = document.getElementById("ppv-patent-tabs");
@@ -3675,6 +3680,208 @@ function renderDescriptionHtml(text) {
   });
   return html;
 }
+
+// ===== AI 解读 / AI 问一问（专利原文详情 & 右侧弹窗共用） =====
+
+function _getPatentDataSource(source) {
+  return source === "popup" ? window._patentPopupData : window._currentPatentData;
+}
+
+function _buildClaimsText(data) {
+  if (!data || !data.claims || !data.claims.length) return "";
+  return data.claims.map(c => (c.num ? c.num + ". " : "") + (c.text || "")).join("\n");
+}
+
+// AI 解读：基于摘要 + 权利要求，梳理 技术问题 / 技术手段 / 技术效果
+async function runPatentInterpretation(source) {
+  const data = _getPatentDataSource(source);
+  if (!data) { alert("暂无专利数据"); return; }
+  const container = document.querySelector(
+    source === "popup"
+      ? '#ppv-content .pd-ai-interpret[data-source="popup"]'
+      : '#patent-detail-content .pd-ai-interpret[data-source="detail"]'
+  );
+  if (!container) return;
+  const contentEl = container.querySelector(".pd-ai-interpret-content");
+  const btn = container.querySelector(".pd-ai-interpret-btn");
+  if (!contentEl) return;
+
+  const config = window.AI.loadAIConfig();
+  const provider = window.AI.getCurrentProvider(config);
+  if (!provider) { alert("请先在「设置」中配置 AI 服务"); return; }
+
+  const abstract = data.abstract || "（无摘要）";
+  const claimsText = _buildClaimsText(data) || "（无权利要求）";
+  const prompt = window.AI.getCustomPrompt(config, "patentInterpretation");
+
+  if (btn) { btn.disabled = true; btn.textContent = "解读中…"; }
+  contentEl.innerHTML = '<p class="pd-ai-interpret-hint">AI 正在解读…</p>';
+
+  const userMessage = "【专利号】" + (data.patent_number || "") + "\n\n【摘要】\n" + abstract + "\n\n【权利要求】\n" + claimsText;
+
+  let acc = "";
+  try {
+    const stream = window.AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
+      model: provider.model,
+      messages: [
+        { role: "system", content: prompt },
+        { role: "user", content: userMessage },
+      ],
+      temperature: 0.3,
+      maxTokens: 2048,
+    });
+    let renderRaf = null;
+    for await (const chunk of stream) {
+      if (chunk.content) {
+        acc += chunk.content;
+        if (!renderRaf) {
+          renderRaf = requestAnimationFrame(() => {
+            renderRaf = null;
+            contentEl.innerHTML = renderMarkdown(acc) || '<p class="pd-ai-interpret-hint">…</p>';
+          });
+        }
+      }
+    }
+    contentEl.innerHTML = renderMarkdown(acc) || '<p class="pd-ai-interpret-hint">未返回内容</p>';
+  } catch (e) {
+    contentEl.innerHTML = '<p class="pd-ai-interpret-hint">解读失败：' + escapeHtml(e && e.message ? e.message : String(e)) + '</p>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "AI 解读"; }
+  }
+}
+
+// ===== AI 问一问 悬浮窗 =====
+let _patentAskSource = "detail";
+let _patentAskMessages = []; // [{role, content}]
+let _patentAskStreaming = false;
+
+function openPatentAsk(source) {
+  const modal = document.getElementById("patent-ask-modal");
+  if (!modal) return;
+  _patentAskSource = source || "detail";
+  const data = _getPatentDataSource(_patentAskSource);
+  const pnEl = document.getElementById("patent-ask-pn");
+  if (pnEl) pnEl.textContent = data && data.patent_number ? data.patent_number : "";
+  _patentAskMessages = [];
+  const msgEl = document.getElementById("patent-ask-messages");
+  if (msgEl) msgEl.innerHTML = '<p class="patent-ask-placeholder">勾选下方上下文，输入问题后发送。AI 将基于本篇专利内容回答。</p>';
+  const inputEl = document.getElementById("patent-ask-input");
+  if (inputEl) inputEl.value = "";
+  modal.classList.remove("hidden");
+  if (inputEl) setTimeout(() => inputEl.focus(), 50);
+}
+
+function closePatentAsk() {
+  const modal = document.getElementById("patent-ask-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+function _buildPatentAskContext() {
+  const data = _getPatentDataSource(_patentAskSource);
+  if (!data) return "";
+  const parts = [];
+  const absCb = document.getElementById("patent-ask-ctx-abstract");
+  const clmCb = document.getElementById("patent-ask-ctx-claims");
+  const descCb = document.getElementById("patent-ask-ctx-description");
+  if (absCb && absCb.checked && data.abstract) parts.push("【摘要】\n" + data.abstract);
+  if (clmCb && clmCb.checked && data.claims && data.claims.length) parts.push("【权利要求】\n" + _buildClaimsText(data));
+  if (descCb && descCb.checked && data.description) parts.push("【说明书】\n" + data.description);
+  return parts.join("\n\n");
+}
+
+function _appendPatentAskMessage(role, content) {
+  const msgEl = document.getElementById("patent-ask-messages");
+  if (!msgEl) return null;
+  const ph = msgEl.querySelector(".patent-ask-placeholder");
+  if (ph) ph.remove();
+  const el = document.createElement("div");
+  el.className = "patent-ask-msg " + role;
+  if (role === "assistant") {
+    el.innerHTML = '<div class="patent-ask-msg-content markdown-body">' + renderMarkdown(content) + '</div>';
+  } else {
+    el.textContent = content;
+  }
+  msgEl.appendChild(el);
+  msgEl.scrollTop = msgEl.scrollHeight;
+  return el;
+}
+
+async function sendPatentAsk() {
+  if (_patentAskStreaming) return;
+  const inputEl = document.getElementById("patent-ask-input");
+  if (!inputEl) return;
+  const question = inputEl.value.trim();
+  if (!question) return;
+  const config = window.AI.loadAIConfig();
+  const provider = window.AI.getCurrentProvider(config);
+  if (!provider) { alert("请先在「设置」中配置 AI 服务"); return; }
+
+  _appendPatentAskMessage("user", question);
+  inputEl.value = "";
+  _patentAskStreaming = true;
+  const sendBtn = document.getElementById("patent-ask-send-btn");
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = "回答中…"; }
+
+  // 首轮：注入系统提示词 + 勾选的上下文
+  if (_patentAskMessages.length === 0) {
+    const context = _buildPatentAskContext();
+    const sys = "你是一位资深专利分析工程师。请根据用户提供的专利内容回答用户关于该专利细节的问题。"
+      + "如果问题超出提供内容范围，请明确说明。请用中文回答，使用 Markdown 格式。\n\n" + (context || "（未纳入任何上下文）");
+    _patentAskMessages.push({ role: "system", content: sys });
+  }
+  _patentAskMessages.push({ role: "user", content: question });
+
+  const assistantEl = _appendPatentAskMessage("assistant", "");
+  const contentEl = assistantEl.querySelector(".patent-ask-msg-content");
+
+  let acc = "";
+  try {
+    const stream = window.AI.streamChat(provider.type, provider.apiKey, provider.baseUrl, {
+      model: provider.model,
+      messages: _patentAskMessages.map(m => ({ role: m.role, content: m.content })),
+      temperature: 0.3,
+      maxTokens: 4096,
+    });
+    let renderRaf = null;
+    for await (const chunk of stream) {
+      if (chunk.content) {
+        acc += chunk.content;
+        if (!renderRaf) {
+          renderRaf = requestAnimationFrame(() => {
+            renderRaf = null;
+            if (contentEl) contentEl.innerHTML = renderMarkdown(acc);
+          });
+        }
+      }
+    }
+    if (contentEl) contentEl.innerHTML = renderMarkdown(acc) || "（未返回内容）";
+    _patentAskMessages.push({ role: "assistant", content: acc });
+  } catch (e) {
+    if (contentEl) contentEl.textContent = "回答失败：" + (e && e.message ? e.message : String(e));
+  } finally {
+    _patentAskStreaming = false;
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = "发送"; }
+    const msgEl = document.getElementById("patent-ask-messages");
+    if (msgEl) msgEl.scrollTop = msgEl.scrollHeight;
+  }
+}
+
+function _initPatentAskBindings() {
+  const closeBtn = document.getElementById("patent-ask-close-btn");
+  if (closeBtn) closeBtn.addEventListener("click", closePatentAsk);
+  const sendBtn = document.getElementById("patent-ask-send-btn");
+  if (sendBtn) sendBtn.addEventListener("click", sendPatentAsk);
+  const inputEl = document.getElementById("patent-ask-input");
+  if (inputEl) {
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendPatentAsk(); }
+    });
+  }
+  // 弹窗头部 AI 问一问按钮（数据来自 window._patentPopupData，由 openPatentPopup/switchPpvPatent 同步）
+  const ppvAskBtn = document.getElementById("ppv-ai-ask-btn");
+  if (ppvAskBtn) ppvAskBtn.addEventListener("click", () => openPatentAsk("popup"));
+}
+_initPatentAskBindings();
 
 function renderDocuments(data) {
   const container = document.getElementById("documents-content");
@@ -6142,6 +6349,11 @@ async function renderPdfView(idx) {
   // Check if the same document is already cached
   if (typeof _pdfDocCache === 'undefined') window._pdfDocCache = {};
   const cacheKey = idx + '_' + pdfUrl;
+  // 加载该文档的标注（持久化于 localStorage）
+  pdfViewState.currentDocKey = cacheKey;
+  if (!pdfViewState.annotList[cacheKey]) {
+    pdfViewState.annotList[cacheKey] = loadPdfAnnotations(cacheKey);
+  }
   if (_pdfDocCache[cacheKey]) {
     // Use cached pdfDoc - skip re-fetching
     const pdfDoc = _pdfDocCache[cacheKey];
@@ -6300,6 +6512,12 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
     selectionRect.className = "pdf-selection-rect";
     wrapper.appendChild(selectionRect);
 
+    // 标注层（承载高亮/划线/注释元素）
+    const annotLayer = document.createElement("div");
+    annotLayer.className = "pdf-annot-layer";
+    annotLayer.dataset.page = pageNum;
+    wrapper.appendChild(annotLayer);
+
     if (pageBlocks.length > 0 && pageDim) {
       const scaleX = viewport.width / pageDim.width;
       const scaleY = viewport.height / pageDim.height;
@@ -6323,6 +6541,8 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
 
         overlay.addEventListener("click", (ev) => {
           ev.stopPropagation();
+          // 标注模式下不触发块选择
+          if (pdfViewState.annotTool) return;
           // 单击切换选中状态（选中后保持持久，用于翻译范围选择）
           const blockId = b.block_id;
           const idx = pdfViewState.selectedBlockIds.indexOf(blockId);
@@ -6341,6 +6561,8 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
         overlay.addEventListener("contextmenu", (ev) => {
           ev.preventDefault();
           ev.stopPropagation();
+          // 标注模式下禁用块右键菜单
+          if (pdfViewState.annotTool) return;
           // 右键：如果此框已在选中集合中，翻译整个范围；否则先选中此框再翻译
           const blockId = b.block_id;
           const isInSelection = pdfViewState.selectedBlockIds.includes(blockId);
@@ -6362,6 +6584,13 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
     // 框选：在 wrapper 内按住鼠标左键拖动
     wrapper.addEventListener("mousedown", (ev) => {
       if (ev.button !== 0) return;
+      // 标注工具激活时，优先进入标注拖拽流程
+      if (pdfViewState.annotTool) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        startPdfAnnotDrag(ev, wrapper, pageNum, viewport);
+        return;
+      }
       if (ev.target.classList && ev.target.classList.contains("pdf-block-overlay")) return;
       ev.preventDefault();
       const rect = wrapper.getBoundingClientRect();
@@ -6400,64 +6629,126 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
   }
 
   // 全局 mousemove / mouseup 用于框选
-  if (readerPdfContainer._selectionHandlersInstalled) return;
-  readerPdfContainer._selectionHandlersInstalled = true;
+  if (!readerPdfContainer._selectionHandlersInstalled) {
+    readerPdfContainer._selectionHandlersInstalled = true;
 
-  document.addEventListener("mousemove", (ev) => {
-    if (!pdfViewState.selecting || !pdfViewState.selectStart) return;
-    const page = pdfViewState.selectStart.page;
-    const wrapper = pdfViewState.renderedPages[page];
-    if (!wrapper) return;
-    const rect = wrapper.getBoundingClientRect();
-    const x = Math.max(0, Math.min(ev.clientX - rect.left, rect.width));
-    const y = Math.max(0, Math.min(ev.clientY - rect.top, rect.height));
-    pdfViewState.selectEnd = { x, y, page };
-    const left = Math.min(pdfViewState.selectStart.x, x);
-    const top = Math.min(pdfViewState.selectStart.y, y);
-    const width = Math.abs(x - pdfViewState.selectStart.x);
-    const height = Math.abs(y - pdfViewState.selectStart.y);
-    const selectionRect = wrapper.querySelector(".pdf-selection-rect");
-    if (selectionRect) {
-      selectionRect.style.left = left + "px";
-      selectionRect.style.top = top + "px";
-      selectionRect.style.width = width + "px";
-      selectionRect.style.height = height + "px";
-    }
-    // 实时高亮被框中的 blocks（仅视觉预览）
-    refreshPdfBoxSelectionVisual(left, top, width, height, page);
-  });
-
-  document.addEventListener("mouseup", (ev) => {
-    if (!pdfViewState.selecting) return;
-    pdfViewState.selecting = false;
-    const page = pdfViewState.selectStart ? pdfViewState.selectStart.page : null;
-    if (page) {
+    document.addEventListener("mousemove", (ev) => {
+      if (!pdfViewState.selecting || !pdfViewState.selectStart) return;
+      const page = pdfViewState.selectStart.page;
       const wrapper = pdfViewState.renderedPages[page];
-      if (wrapper) {
-        const selectionRect = wrapper.querySelector(".pdf-selection-rect");
-        if (selectionRect) selectionRect.style.display = "none";
+      if (!wrapper) return;
+      const rect = wrapper.getBoundingClientRect();
+      const x = Math.max(0, Math.min(ev.clientX - rect.left, rect.width));
+      const y = Math.max(0, Math.min(ev.clientY - rect.top, rect.height));
+      pdfViewState.selectEnd = { x, y, page };
+      const left = Math.min(pdfViewState.selectStart.x, x);
+      const top = Math.min(pdfViewState.selectStart.y, y);
+      const width = Math.abs(x - pdfViewState.selectStart.x);
+      const height = Math.abs(y - pdfViewState.selectStart.y);
+      const selectionRect = wrapper.querySelector(".pdf-selection-rect");
+      if (selectionRect) {
+        selectionRect.style.left = left + "px";
+        selectionRect.style.top = top + "px";
+        selectionRect.style.width = width + "px";
+        selectionRect.style.height = height + "px";
       }
-      const s = pdfViewState.selectStart;
-      const e = pdfViewState.selectEnd;
-      if (s && e) {
-        const left = Math.min(s.x, e.x);
-        const top = Math.min(s.y, e.y);
-        const width = Math.abs(e.x - s.x);
-        const height = Math.abs(e.y - s.y);
-        if (width > 5 && height > 5) {
-          // 真正的框选，将框中的 blocks 加入选中集合
-          selectBlocksInRect(left, top, width, height, page);
-        } else {
-          // 过小的拖动视为点击空白，清除选择
-          clearPdfBlockSelection();
+      // 实时高亮被框中的 blocks（仅视觉预览）
+      refreshPdfBoxSelectionVisual(left, top, width, height, page);
+    });
+
+    document.addEventListener("mouseup", (ev) => {
+      if (!pdfViewState.selecting) return;
+      pdfViewState.selecting = false;
+      const page = pdfViewState.selectStart ? pdfViewState.selectStart.page : null;
+      if (page) {
+        const wrapper = pdfViewState.renderedPages[page];
+        if (wrapper) {
+          const selectionRect = wrapper.querySelector(".pdf-selection-rect");
+          if (selectionRect) selectionRect.style.display = "none";
+        }
+        const s = pdfViewState.selectStart;
+        const e = pdfViewState.selectEnd;
+        if (s && e) {
+          const left = Math.min(s.x, e.x);
+          const top = Math.min(s.y, e.y);
+          const width = Math.abs(e.x - s.x);
+          const height = Math.abs(e.y - s.y);
+          if (width > 5 && height > 5) {
+            // 真正的框选，将框中的 blocks 加入选中集合
+            selectBlocksInRect(left, top, width, height, page);
+          } else {
+            // 过小的拖动视为点击空白，清除选择
+            clearPdfBlockSelection();
+          }
         }
       }
-    }
-    pdfViewState.selectStart = null;
-    pdfViewState.selectEnd = null;
-    refreshPdfBlockSelectionVisual();
-    updatePdfSelectionInfo();
-  });
+      pdfViewState.selectStart = null;
+      pdfViewState.selectEnd = null;
+      refreshPdfBlockSelectionVisual();
+      updatePdfSelectionInfo();
+    });
+  }
+
+  // 全局 mousemove / mouseup 用于标注拖拽
+  if (!readerPdfContainer._annotHandlersInstalled) {
+    readerPdfContainer._annotHandlersInstalled = true;
+
+    document.addEventListener("mousemove", (ev) => {
+      if (!pdfViewState.annotDragging || !pdfViewState.annotDragStart) return;
+      const page = pdfViewState.annotDragPage;
+      const wrapper = pdfViewState.renderedPages[page];
+      if (!wrapper) return;
+      const rect = wrapper.getBoundingClientRect();
+      const x = Math.max(0, Math.min(ev.clientX - rect.left, rect.width));
+      const y = Math.max(0, Math.min(ev.clientY - rect.top, rect.height));
+      pdfViewState.annotDragEnd = { x, y };
+      const left = Math.min(pdfViewState.annotDragStart.x, x);
+      const top = Math.min(pdfViewState.annotDragStart.y, y);
+      const width = Math.abs(x - pdfViewState.annotDragStart.x);
+      const height = Math.abs(y - pdfViewState.annotDragStart.y);
+      const dragRect = wrapper.querySelector(".pdf-annot-drag-rect");
+      if (dragRect) {
+        dragRect.style.left = left + "px";
+        dragRect.style.top = top + "px";
+        dragRect.style.width = width + "px";
+        dragRect.style.height = height + "px";
+      }
+    });
+
+    document.addEventListener("mouseup", (ev) => {
+      if (!pdfViewState.annotDragging) return;
+      pdfViewState.annotDragging = false;
+      const page = pdfViewState.annotDragPage;
+      const viewport = pdfViewState.annotDragViewport;
+      const wrapper = page ? pdfViewState.renderedPages[page] : null;
+      const dragRect = wrapper ? wrapper.querySelector(".pdf-annot-drag-rect") : null;
+      if (dragRect) dragRect.style.display = "none";
+      const s = pdfViewState.annotDragStart;
+      const e = pdfViewState.annotDragEnd;
+      const tool = pdfViewState.annotTool;
+      pdfViewState.annotDragStart = null;
+      pdfViewState.annotDragEnd = null;
+      pdfViewState.annotDragPage = null;
+      pdfViewState.annotDragViewport = null;
+      if (!wrapper || !viewport || !s || !e || !tool) return;
+      const left = Math.min(s.x, e.x);
+      const top = Math.min(s.y, e.y);
+      const width = Math.abs(e.x - s.x);
+      const height = Math.abs(e.y - s.y);
+      if (tool === "note") {
+        // 注释支持点击放置：拖动过小时使用默认尺寸
+        let nw = width, nh = height;
+        if (nw < 10 || nh < 10) { nw = 28; nh = 20; }
+        _finalizePdfAnnotation(tool, page, viewport, left, top, nw, nh);
+      } else {
+        if (width < 5 || height < 5) return; // 过小视为误点击，取消
+        _finalizePdfAnnotation(tool, page, viewport, left, top, width, height);
+      }
+    });
+  }
+
+  // 渲染已存在的标注
+  await renderAllPdfAnnots();
 }
 
 async function rerenderPdfPages() {
@@ -6505,6 +6796,340 @@ function pdfZoomOutAction() {
 function pdfZoomFitAction() {
   pdfViewState.scale = pdfViewState.baseScale;
   rerenderPdfPages();
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * PDF 标注功能（高亮 / 划线 / 文字注释 / 导出带标注 PDF）
+ * 标注以 PDF 原生坐标（点为单位，Y 轴自下而上）存储，与缩放无关，
+ * 持久化到 localStorage，键为 docKey（与 _pdfDocCache 相同）。
+ * ════════════════════════════════════════════════════════════════ */
+
+const _PDF_ANNOT_STORAGE_PREFIX = "patentlens_pdf_annot_";
+
+function _buildPdfDocKey(idx) {
+  const it = kanbanState.documents.find(d => d.idx === idx);
+  if (!it) return null;
+  const isUS = currentData.office === "US";
+  const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+  const encodedDocId = encodeURIComponent(it.docId);
+  const pdfUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+  return idx + '_' + pdfUrl;
+}
+
+function _getCurrentPdfAnnotKey() {
+  return pdfViewState.currentDocKey || _buildPdfDocKey(pdfViewState.currentDocIdx);
+}
+
+function loadPdfAnnotations(docKey) {
+  if (!docKey) return [];
+  try {
+    const raw = localStorage.getItem(_PDF_ANNOT_STORAGE_PREFIX + docKey);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+
+function savePdfAnnotations(docKey) {
+  if (!docKey) return;
+  try {
+    const list = pdfViewState.annotList[docKey] || [];
+    localStorage.setItem(_PDF_ANNOT_STORAGE_PREFIX + docKey, JSON.stringify(list));
+  } catch (e) { /* localStorage 配额超限等，忽略 */ }
+}
+
+function setPdfAnnotTool(tool) {
+  if (pdfViewState.annotTool === tool) {
+    pdfViewState.annotTool = null;
+  } else {
+    pdfViewState.annotTool = tool;
+  }
+  ["highlight", "underline", "note"].forEach(t => {
+    const btn = document.getElementById("pdf-annot-" + t);
+    if (btn) btn.classList.toggle("active", pdfViewState.annotTool === t);
+  });
+  if (readerPdfContainer) {
+    readerPdfContainer.classList.toggle("pdf-annot-mode", !!pdfViewState.annotTool);
+  }
+}
+
+function _hexToRgb(hex) {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || "");
+  return m
+    ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) }
+    : { r: 255, g: 235, b: 59 };
+}
+
+function _createAnnotElement(annot, viewport) {
+  const [ax1, ay1] = viewport.convertToViewportPoint(annot.x1, annot.y1);
+  const [ax2, ay2] = viewport.convertToViewportPoint(annot.x2, annot.y2);
+  const left = Math.min(ax1, ax2);
+  const top = Math.min(ay1, ay2);
+  const width = Math.abs(ax2 - ax1);
+  const height = Math.abs(ay2 - ay1);
+
+  const el = document.createElement("div");
+  el.className = "pdf-annot pdf-annot-" + annot.type;
+  el.style.left = left + "px";
+  el.style.top = top + "px";
+  el.style.width = width + "px";
+  el.style.height = height + "px";
+  el.dataset.annotId = annot.id;
+
+  if (annot.type === "highlight") {
+    el.style.backgroundColor = annot.color;
+    el.style.opacity = "0.4";
+  } else if (annot.type === "underline") {
+    el.style.borderBottom = "2px solid " + annot.color;
+  } else if (annot.type === "note") {
+    el.style.backgroundColor = "rgba(255, 235, 59, 0.55)";
+    el.style.border = "1px solid #f9a825";
+    const label = document.createElement("span");
+    label.className = "pdf-annot-note-label";
+    label.textContent = "📝";
+    el.appendChild(label);
+    if (annot.text) {
+      const popup = document.createElement("div");
+      popup.className = "pdf-annot-note-popup";
+      popup.textContent = annot.text;
+      el.appendChild(popup);
+    }
+  }
+
+  const del = document.createElement("span");
+  del.className = "pdf-annot-delete";
+  del.textContent = "×";
+  del.title = "删除此标注";
+  del.addEventListener("mousedown", (e) => { e.stopPropagation(); });
+  del.addEventListener("click", (e) => {
+    e.stopPropagation();
+    removePdfAnnotation(annot.id);
+  });
+  el.appendChild(del);
+  return el;
+}
+
+async function renderPdfAnnotsForPage(pageNum) {
+  const wrapper = pdfViewState.renderedPages[pageNum];
+  if (!wrapper) return;
+  const layer = wrapper.querySelector(".pdf-annot-layer");
+  if (!layer) return;
+  layer.innerHTML = "";
+  const docKey = _getCurrentPdfAnnotKey();
+  if (!docKey) return;
+  const annots = pdfViewState.annotList[docKey] || [];
+  const pageAnnots = annots.filter(a => a.page === pageNum);
+  if (pageAnnots.length === 0) return;
+  if (!pdfViewState.pdfDoc) return;
+  const page = await pdfViewState.pdfDoc.getPage(pageNum);
+  const viewport = page.getViewport({ scale: pdfViewState.scale });
+  pageAnnots.forEach(annot => {
+    layer.appendChild(_createAnnotElement(annot, viewport));
+  });
+}
+
+async function renderAllPdfAnnots() {
+  if (!pdfViewState.pdfDoc) return;
+  const tasks = [];
+  for (let p = 1; p <= pdfViewState.totalPages; p++) {
+    tasks.push(renderPdfAnnotsForPage(p));
+  }
+  await Promise.all(tasks);
+}
+
+function startPdfAnnotDrag(ev, wrapper, pageNum, viewport) {
+  const rect = wrapper.getBoundingClientRect();
+  const startX = ev.clientX - rect.left;
+  const startY = ev.clientY - rect.top;
+  pdfViewState.annotDragging = true;
+  pdfViewState.annotDragPage = pageNum;
+  pdfViewState.annotDragViewport = viewport;
+  pdfViewState.annotDragStart = { x: startX, y: startY };
+  pdfViewState.annotDragEnd = { x: startX, y: startY };
+  let dragRect = wrapper.querySelector(".pdf-annot-drag-rect");
+  if (!dragRect) {
+    dragRect = document.createElement("div");
+    dragRect.className = "pdf-annot-drag-rect";
+    wrapper.appendChild(dragRect);
+  }
+  dragRect.style.display = "block";
+  dragRect.style.left = startX + "px";
+  dragRect.style.top = startY + "px";
+  dragRect.style.width = "0px";
+  dragRect.style.height = "0px";
+}
+
+function _finalizePdfAnnotation(tool, page, viewport, left, top, width, height) {
+  // 将 CSS 像素矩形（相对 canvas）转为 PDF 原生坐标（点，Y 自下而上）
+  const [x1, y1] = viewport.convertToPDFPoint(left, top);
+  const [x2, y2] = viewport.convertToPDFPoint(left + width, top + height);
+  let text = "";
+  if (tool === "note") {
+    text = window.prompt("请输入注释内容：", "");
+    if (text === null) return; // 用户取消
+    text = text.trim();
+    if (!text) return;
+  }
+  const docKey = _getCurrentPdfAnnotKey();
+  if (!docKey) return;
+  if (!pdfViewState.annotList[docKey]) pdfViewState.annotList[docKey] = [];
+  const color = tool === "highlight" ? "#fff176"
+    : tool === "underline" ? "#f44336"
+    : "#ffeb3b";
+  const annot = {
+    id: "annot_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+    type: tool,
+    page: page,
+    x1: x1, y1: y1, x2: x2, y2: y2,
+    text: text,
+    color: color,
+    createdAt: Date.now(),
+  };
+  pdfViewState.annotList[docKey].push(annot);
+  savePdfAnnotations(docKey);
+  renderPdfAnnotsForPage(page);
+}
+
+function removePdfAnnotation(annotId) {
+  const docKey = _getCurrentPdfAnnotKey();
+  if (!docKey) return;
+  const list = pdfViewState.annotList[docKey];
+  if (!list) return;
+  const idx = list.findIndex(a => a.id === annotId);
+  if (idx < 0) return;
+  const annot = list[idx];
+  list.splice(idx, 1);
+  savePdfAnnotations(docKey);
+  renderPdfAnnotsForPage(annot.page);
+}
+
+function clearPdfAnnotations() {
+  const docKey = _getCurrentPdfAnnotKey();
+  if (!docKey) return;
+  const list = pdfViewState.annotList[docKey];
+  if (!list || list.length === 0) {
+    showError("当前文档暂无标注");
+    return;
+  }
+  if (!window.confirm("确定清空当前文档的全部标注吗？此操作不可撤销。")) return;
+  pdfViewState.annotList[docKey] = [];
+  savePdfAnnotations(docKey);
+  Object.values(pdfViewState.renderedPages).forEach(wrapper => {
+    const layer = wrapper.querySelector(".pdf-annot-layer");
+    if (layer) layer.innerHTML = "";
+  });
+}
+
+async function exportPdfWithAnnotations() {
+  if (!pdfViewState.pdfDoc) {
+    showError("请先打开一个 PDF 文档");
+    return;
+  }
+  if (typeof window.PDFLib === "undefined") {
+    showError("PDF 导出库（pdf-lib）未加载，无法导出");
+    return;
+  }
+  const docKey = _getCurrentPdfAnnotKey();
+  const annots = (docKey && pdfViewState.annotList[docKey]) || [];
+  if (annots.length === 0) {
+    showError("当前文档尚无标注，无需导出");
+    return;
+  }
+  const exportBtn = document.getElementById("pdf-annot-export");
+  const origText = exportBtn ? exportBtn.textContent : "";
+  if (exportBtn) { exportBtn.disabled = true; exportBtn.textContent = "导出中..."; }
+  try {
+    const idx = pdfViewState.currentDocIdx;
+    const it = kanbanState.documents.find(d => d.idx === idx);
+    if (!it) throw new Error("未找到文档信息");
+    const isUS = currentData.office === "US";
+    const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+    const encodedDocId = encodeURIComponent(it.docId);
+    const pdfUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+    const resp = await fetch(pdfUrl, { headers: { "Accept": "application/pdf,*/*" } });
+    if (!resp.ok) throw new Error("PDF 下载失败: HTTP " + resp.status);
+    const pdfBytes = await resp.arrayBuffer();
+
+    const { PDFDocument, rgb } = window.PDFLib;
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const pages = pdfDoc.getPages();
+
+    // 注释文字可能含中日韩字符，嵌入 NotoSansSC 字体（自动子集化）
+    let cjkFont = null;
+    const hasNoteText = annots.some(a => a.type === "note" && a.text);
+    if (hasNoteText) {
+      try {
+        const fontResp = await fetch("/fonts/NotoSansSC-Regular.ttf");
+        if (fontResp.ok) {
+          const fontBytes = await fontResp.arrayBuffer();
+          cjkFont = await pdfDoc.embedFont(fontBytes, { subset: true });
+        }
+      } catch (e) { /* 字体加载失败时跳过注释文字绘制 */ }
+    }
+
+    annots.forEach(annot => {
+      const page = pages[annot.page - 1];
+      if (!page) return;
+      const x1 = Math.min(annot.x1, annot.x2);
+      const x2 = Math.max(annot.x1, annot.x2);
+      const y1 = Math.min(annot.y1, annot.y2); // 较低 PDF Y（视觉下方）
+      const y2 = Math.max(annot.y1, annot.y2); // 较高 PDF Y（视觉上方）
+      const w = x2 - x1;
+      const h = y2 - y1;
+      const c = _hexToRgb(annot.color);
+      const col = rgb(c.r / 255, c.g / 255, c.b / 255);
+
+      if (annot.type === "highlight") {
+        page.drawRectangle({
+          x: x1, y: y1, width: w, height: h,
+          color: col, opacity: 0.4,
+        });
+      } else if (annot.type === "underline") {
+        // 划线绘制在矩形视觉底边（PDF 中 Y 较小的一侧）
+        page.drawLine({
+          start: { x: x1, y: y1 },
+          end: { x: x2, y: y1 },
+          thickness: 2,
+          color: col,
+        });
+      } else if (annot.type === "note") {
+        // 注释框：浅黄底 + 边框
+        page.drawRectangle({
+          x: x1, y: y1, width: w, height: h,
+          borderColor: col, borderWidth: 1,
+          color: rgb(1, 0.99, 0.84), opacity: 0.7,
+        });
+        if (annot.text && cjkFont) {
+          const fontSize = Math.max(8, Math.min(14, h * 0.5));
+          const textY = y2 - fontSize - 2; // 顶部留出字号空间
+          try {
+            page.drawText(annot.text, {
+              x: x1 + 2, y: textY,
+              size: fontSize, font: cjkFont,
+              color: rgb(0.2, 0.13, 0),
+              maxWidth: Math.max(20, w - 4),
+            });
+          } catch (e) { /* 个别字符无法编码时跳过 */ }
+        }
+      }
+    });
+
+    const out = await pdfDoc.save();
+    const blob = new Blob([out], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const docLabel = (it.docId || ("doc_" + idx)).replace(/[\\/:*?"<>|]/g, "_");
+    a.download = "annotated_" + docLabel + ".pdf";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) {
+    showError("导出失败: " + (e.message || e));
+  } finally {
+    if (exportBtn) { exportBtn.disabled = false; exportBtn.textContent = origText; }
+  }
 }
 
 function highlightPdfBlock(blockId) {
@@ -8247,6 +8872,28 @@ document.addEventListener("DOMContentLoaded", () => {
     clearSelBtn.addEventListener("click", clearPdfBlockSelection);
   }
 
+  // PDF 标注按钮
+  const annotHighlightBtn = document.getElementById("pdf-annot-highlight");
+  if (annotHighlightBtn) {
+    annotHighlightBtn.addEventListener("click", () => setPdfAnnotTool("highlight"));
+  }
+  const annotUnderlineBtn = document.getElementById("pdf-annot-underline");
+  if (annotUnderlineBtn) {
+    annotUnderlineBtn.addEventListener("click", () => setPdfAnnotTool("underline"));
+  }
+  const annotNoteBtn = document.getElementById("pdf-annot-note");
+  if (annotNoteBtn) {
+    annotNoteBtn.addEventListener("click", () => setPdfAnnotTool("note"));
+  }
+  const annotExportBtn = document.getElementById("pdf-annot-export");
+  if (annotExportBtn) {
+    annotExportBtn.addEventListener("click", exportPdfWithAnnotations);
+  }
+  const annotClearBtn = document.getElementById("pdf-annot-clear");
+  if (annotClearBtn) {
+    annotClearBtn.addEventListener("click", clearPdfAnnotations);
+  }
+
   // Extract copy button
   const extractCopyBtn = document.getElementById("extract-copy-btn");
   if (extractCopyBtn) {
@@ -8578,6 +9225,7 @@ function appendChatMessage(role, content) {
 // ===== Analysis Chat (continued conversation with AI analysis report) =====
 
 function showAnalysisChatToggle() {
+  if (searchMode === "patent") return;
   const floatBall = document.getElementById("analysis-chat-float-ball");
   if (floatBall) floatBall.classList.remove("hidden");
 }

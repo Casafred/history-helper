@@ -22,6 +22,9 @@ const MIME_TYPES = {
   ".json": "application/json; charset=utf-8",
   ".png": "image/png",
   ".ico": "image/x-icon",
+  ".ttf": "font/ttf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
 };
 
 function serveStatic(filePath, res) {
@@ -1213,7 +1216,13 @@ const server = http.createServer((req, res) => {
   let urlPath = req.url === "/" ? "/web.html" : req.url;
   const qIdx = urlPath.indexOf("?");
   if (qIdx !== -1) urlPath = urlPath.substring(0, qIdx);
-  let filePath = path.join(__dirname, "src", urlPath);
+  // /fonts/* served from workspace root fonts/ directory (for CJK font embedding in PDF export)
+  let filePath;
+  if (urlPath.startsWith("/fonts/")) {
+    filePath = path.join(__dirname, urlPath);
+  } else {
+    filePath = path.join(__dirname, "src", urlPath);
+  }
   serveStatic(filePath, res);
 });
 
