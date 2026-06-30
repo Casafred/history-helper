@@ -968,9 +968,20 @@ function renderPatentDetail(data) {
     html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'claims\')">复制</button>';
     html += '</div></div>';
     html += '<div class="pd-claims-list" data-section-type="claims">';
+    // Group claims: each independent claim starts a new group, dependent claims follow
+    let currentGroup = null;
     data.claims.forEach((c, i) => {
       const claimType = c.type === 'independent' ? 'independent' : 'dependent';
       const claimClass = c.type === 'independent' ? 'claim-independent' : 'claim-dependent';
+      // Start a new group for independent claims
+      if (c.type === 'independent') {
+        if (currentGroup !== null) {
+          html += '</div>'; // close previous group
+        }
+        currentGroup = i;
+        html += '<div class="pd-claim-group">';
+        html += '<div class="pd-claim-group-header">独立权利要求 ' + escapeHtml(String(c.num || (i + 1))) + '</div>';
+      }
       html += '<div class="pd-claim-item ' + claimClass + '" data-claim-index="' + i + '">';
       html += '<div class="pd-claim-main" style="display:flex;align-items:flex-start;gap:4px;">';
       html += '<span class="pd-claim-num">' + escapeHtml(String(c.num || (i + 1))) + '.</span>';
@@ -981,6 +992,9 @@ function renderPatentDetail(data) {
       html += '<div class="pd-claim-translation" data-claim-translation="' + i + '" style="display:none;margin-top:4px;padding:4px 8px;background:#f0f7ff;border-radius:4px;font-size:13px;color:#333;border-left:3px solid var(--accent);"></div>';
       html += '</div>';
     });
+    if (currentGroup !== null) {
+      html += '</div>'; // close last group
+    }
     html += '</div>';
   } else {
     html += '<div class="pd-empty">暂无权利要求数据</div>';
@@ -1008,20 +1022,26 @@ function renderPatentDetail(data) {
   if (data.patent_citations && data.patent_citations.length > 0) {
     html += '<div class="pd-section">';
     html += '<div class="pd-section-title">引用专利 (' + data.patent_citations.length + ')</div>';
-    html += '<div class="pd-citations">';
+    html += '<div class="pd-citation-table-wrap"><table class="pd-citation-table"><thead><tr>';
+    html += '<th></th><th>专利号</th><th>标题</th><th>优先权日</th><th>公开日</th><th>权利人</th>';
+    html += '</tr></thead><tbody>';
     data.patent_citations.forEach(c => {
-      html += '<div class="pd-citation-item">';
+      html += '<tr>';
+      html += '<td class="pd-ct-marker">';
       if (c.citation_type) {
         html += '<span class="pd-citation-marker ' + escapeHtml(c.citation_type) + '" title="' + (c.citation_type === 'examiner' ? '审查员引用' : '申请人引用') + '">' + (c.citation_type === 'examiner' ? '*' : '†') + '</span>';
       }
-      html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);" title="在应用内打开 Google Patents">GP</button>';
-      if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
-      if (c.assignee) html += '<span class="pd-citation-assignee">' + escapeHtml(c.assignee) + '</span>';
-      if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
-      html += '</div>';
+      html += '</td>';
+      html += '<td class="pd-ct-num"><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" title="在应用内打开 Google Patents">GP</button>';
+      html += '</td>';
+      html += '<td class="pd-ct-title">' + (c.title ? escapeHtml(c.title) : '') + '</td>';
+      html += '<td class="pd-ct-date">' + (c.priority_date ? escapeHtml(c.priority_date) : '') + '</td>';
+      html += '<td class="pd-ct-date">' + (c.publication_date ? escapeHtml(c.publication_date) : '') + '</td>';
+      html += '<td class="pd-ct-assignee">' + (c.assignee ? escapeHtml(c.assignee) : '') + '</td>';
+      html += '</tr>';
     });
-    html += '</div>';
+    html += '</tbody></table></div>';
     html += '<div class="pd-citation-legend"><span class="pd-citation-marker examiner">*</span> 审查员引用 &nbsp; <span class="pd-citation-marker applicant">†</span> 申请人引用</div>';
     html += '</div>';
   }
@@ -1030,16 +1050,21 @@ function renderPatentDetail(data) {
   if (data.cited_by && data.cited_by.length > 0) {
     html += '<div class="pd-section">';
     html += '<div class="pd-section-title">被引用专利 (' + data.cited_by.length + ')</div>';
-    html += '<div class="pd-citations">';
+    html += '<div class="pd-citation-table-wrap"><table class="pd-citation-table"><thead><tr>';
+    html += '<th>专利号</th><th>标题</th><th>优先权日</th><th>公开日</th><th>权利人</th>';
+    html += '</tr></thead><tbody>';
     data.cited_by.forEach(c => {
-      html += '<div class="pd-citation-item">';
-      html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);" title="在应用内打开 Google Patents">GP</button>';
-      if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
-      if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
-      html += '</div>';
+      html += '<tr>';
+      html += '<td class="pd-ct-num"><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" title="在应用内打开 Google Patents">GP</button>';
+      html += '</td>';
+      html += '<td class="pd-ct-title">' + (c.title ? escapeHtml(c.title) : '') + '</td>';
+      html += '<td class="pd-ct-date">' + (c.priority_date ? escapeHtml(c.priority_date) : '') + '</td>';
+      html += '<td class="pd-ct-date">' + (c.publication_date ? escapeHtml(c.publication_date) : '') + '</td>';
+      html += '<td class="pd-ct-assignee">' + (c.assignee ? escapeHtml(c.assignee) : '') + '</td>';
+      html += '</tr>';
     });
-    html += '</div></div>';
+    html += '</tbody></table></div></div>';
   }
 
   // Similar documents
@@ -1858,9 +1883,20 @@ function renderPatentPopupContent(data) {
     html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'claims\')">复制</button>';
     html += '</div></div>';
     html += '<div class="pd-claims-list" data-section-type="claims">';
+    // Group claims: each independent claim starts a new group, dependent claims follow
+    let currentGroup = null;
     data.claims.forEach((c, i) => {
       const claimType = c.type === 'independent' ? 'independent' : 'dependent';
       const claimClass = c.type === 'independent' ? 'claim-independent' : 'claim-dependent';
+      // Start a new group for independent claims
+      if (c.type === 'independent') {
+        if (currentGroup !== null) {
+          html += '</div>'; // close previous group
+        }
+        currentGroup = i;
+        html += '<div class="pd-claim-group">';
+        html += '<div class="pd-claim-group-header">独立权利要求 ' + escapeHtml(String(c.num || (i + 1))) + '</div>';
+      }
       html += '<div class="pd-claim-item ' + claimClass + '" data-claim-index="' + i + '">';
       html += '<div class="pd-claim-main" style="display:flex;align-items:flex-start;gap:4px;">';
       html += '<span class="pd-claim-num">' + escapeHtml(String(c.num || (i + 1))) + '.</span>';
@@ -1871,6 +1907,9 @@ function renderPatentPopupContent(data) {
       html += '<div class="pd-claim-translation" data-claim-translation="' + i + '" style="display:none;margin-top:4px;padding:4px 8px;background:#f0f7ff;border-radius:4px;font-size:13px;color:#333;border-left:3px solid var(--accent);"></div>';
       html += '</div>';
     });
+    if (currentGroup !== null) {
+      html += '</div>'; // close last group
+    }
     html += '</div>';
   } else {
     html += '<div class="pd-empty">暂无权利要求数据</div>';
@@ -1898,20 +1937,26 @@ function renderPatentPopupContent(data) {
   if (data.patent_citations && data.patent_citations.length > 0) {
     html += '<div class="pd-section">';
     html += '<div class="pd-section-title">引用专利 (' + data.patent_citations.length + ')</div>';
-    html += '<div class="pd-citations">';
+    html += '<div class="pd-citation-table-wrap"><table class="pd-citation-table"><thead><tr>';
+    html += '<th></th><th>专利号</th><th>标题</th><th>优先权日</th><th>公开日</th><th>权利人</th>';
+    html += '</tr></thead><tbody>';
     data.patent_citations.forEach(c => {
-      html += '<div class="pd-citation-item">';
+      html += '<tr>';
+      html += '<td class="pd-ct-marker">';
       if (c.citation_type) {
         html += '<span class="pd-citation-marker ' + escapeHtml(c.citation_type) + '" title="' + (c.citation_type === 'examiner' ? '审查员引用' : '申请人引用') + '">' + (c.citation_type === 'examiner' ? '*' : '†') + '</span>';
       }
-      html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);" title="在应用内打开 Google Patents">GP</button>';
-      if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
-      if (c.assignee) html += '<span class="pd-citation-assignee">' + escapeHtml(c.assignee) + '</span>';
-      if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
-      html += '</div>';
+      html += '</td>';
+      html += '<td class="pd-ct-num"><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" title="在应用内打开 Google Patents">GP</button>';
+      html += '</td>';
+      html += '<td class="pd-ct-title">' + (c.title ? escapeHtml(c.title) : '') + '</td>';
+      html += '<td class="pd-ct-date">' + (c.priority_date ? escapeHtml(c.priority_date) : '') + '</td>';
+      html += '<td class="pd-ct-date">' + (c.publication_date ? escapeHtml(c.publication_date) : '') + '</td>';
+      html += '<td class="pd-ct-assignee">' + (c.assignee ? escapeHtml(c.assignee) : '') + '</td>';
+      html += '</tr>';
     });
-    html += '</div>';
+    html += '</tbody></table></div>';
     html += '<div class="pd-citation-legend"><span class="pd-citation-marker examiner">*</span> 审查员引用 &nbsp; <span class="pd-citation-marker applicant">†</span> 申请人引用</div>';
     html += '</div>';
   }
@@ -1920,16 +1965,21 @@ function renderPatentPopupContent(data) {
   if (data.cited_by && data.cited_by.length > 0) {
     html += '<div class="pd-section">';
     html += '<div class="pd-section-title">被引用专利 (' + data.cited_by.length + ')</div>';
-    html += '<div class="pd-citations">';
+    html += '<div class="pd-citation-table-wrap"><table class="pd-citation-table"><thead><tr>';
+    html += '<th>专利号</th><th>标题</th><th>优先权日</th><th>公开日</th><th>权利人</th>';
+    html += '</tr></thead><tbody>';
     data.cited_by.forEach(c => {
-      html += '<div class="pd-citation-item">';
-      html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" style="font-size:11px;padding:1px 5px;margin-left:4px;cursor:pointer;border:1px solid var(--accent);" title="在应用内打开 Google Patents">GP</button>';
-      if (c.title) html += '<span class="pd-citation-title">' + escapeHtml(c.title) + '</span>';
-      if (c.publication_date) html += '<span class="pd-citation-date">' + escapeHtml(c.publication_date) + '</span>';
-      html += '</div>';
+      html += '<tr>';
+      html += '<td class="pd-ct-num"><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" title="在应用内打开 Google Patents">GP</button>';
+      html += '</td>';
+      html += '<td class="pd-ct-title">' + (c.title ? escapeHtml(c.title) : '') + '</td>';
+      html += '<td class="pd-ct-date">' + (c.priority_date ? escapeHtml(c.priority_date) : '') + '</td>';
+      html += '<td class="pd-ct-date">' + (c.publication_date ? escapeHtml(c.publication_date) : '') + '</td>';
+      html += '<td class="pd-ct-assignee">' + (c.assignee ? escapeHtml(c.assignee) : '') + '</td>';
+      html += '</tr>';
     });
-    html += '</div></div>';
+    html += '</tbody></table></div></div>';
   }
 
   // Similar documents
@@ -3417,9 +3467,46 @@ function escapeHtml(str) {
 
 function renderDescriptionHtml(text) {
   if (!text) return '';
+  // Known section heading patterns for Chinese and English patents
+  const headingPatterns = [
+    /^技术领域$/,
+    /^背景技术$/,
+    /^发明内容$/,
+    /^附图说明$/,
+    /^具体实施方式$/,
+    /^具体实施例$/,
+    /^实施方式$/,
+    /^实施例$/,
+    /^工业应用性$/,
+    /^TECHNICAL FIELD$/i,
+    /^BACKGROUND$/i,
+    /^BACKGROUND OF THE INVENTION$/i,
+    /^SUMMARY$/i,
+    /^SUMMARY OF THE INVENTION$/i,
+    /^DETAILED DESCRIPTION$/i,
+    /^DETAILED DESCRIPTION OF(?: THE)? (?:PREFERRED)?(?: EMBODIMENTS?)?$/i,
+    /^DRAWINGS$/i,
+    /^BRIEF DESCRIPTION OF (?:THE )?DRAWINGS$/i,
+    /^EMBODIMENTS?$/i,
+    /^DESCRIPTION OF EMBODIMENTS?$/i,
+  ];
   // Normalize: ensure ## section headers are preceded by a newline
   // The backend may collapse whitespace, so "## " could appear inline like "...text. ## TECHNICAL FIELD..."
-  const normalized = text.replace(/\s*## /g, '\n## ');
+  let normalized = text.replace(/\s*## /g, '\n## ');
+  // Additionally, detect heading patterns in lines that don't have ## markers
+  // and add ## prefix to them
+  const lines = normalized.split('\n');
+  const processedLines = lines.map(line => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('## ')) return line; // already marked
+    for (const pattern of headingPatterns) {
+      if (pattern.test(trimmed)) {
+        return '## ' + trimmed;
+      }
+    }
+    return line;
+  });
+  normalized = processedLines.join('\n');
   // Split by ## section headers
   const sections = normalized.split(/\n## /);
   let html = '';
@@ -3431,9 +3518,9 @@ function renderDescriptionHtml(text) {
       sectionText = section;
     }
     if (!sectionText.trim()) return;
-    const lines = sectionText.split('\n');
-    const header = lines[0].trim();
-    const body = lines.slice(1).join('\n');
+    const secLines = sectionText.split('\n');
+    const header = secLines[0].trim();
+    const body = secLines.slice(1).join('\n');
     if (header) {
       html += '<div class="pd-desc-section-title">' + escapeHtml(header) + '</div>';
     }

@@ -4269,6 +4269,26 @@ body {
 }
 
 /* Claims */
+.pd-claim-group {
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--border);
+}
+.pd-claim-group:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.pd-claim-group-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: #2e7d32;
+  margin-bottom: 8px;
+  padding: 4px 10px;
+  background: rgba(46, 125, 50, 0.08);
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
 .pd-claims-list {
   display: flex;
   flex-direction: column;
@@ -4422,6 +4442,80 @@ body {
   font-size: 11px;
   color: var(--text-muted);
   margin-left: 8px;
+}
+
+/* Citation table layout */
+.pd-citation-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.pd-citation-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pd-citation-table thead th {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-hover);
+  position: sticky;
+  top: 0;
+}
+.pd-citation-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.pd-citation-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+.pd-citation-table tbody td {
+  padding: 6px 8px;
+  vertical-align: top;
+  color: var(--text-secondary);
+}
+.pd-ct-marker {
+  width: 20px;
+  text-align: center;
+}
+.pd-ct-num {
+  white-space: nowrap;
+}
+.pd-ct-num .pd-gp-link {
+  font-size: 10px;
+  padding: 1px 4px;
+  margin-left: 4px;
+  cursor: pointer;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+.pd-ct-num .pd-gp-link:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.pd-ct-title {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pd-ct-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.pd-ct-assignee {
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Subsection title */

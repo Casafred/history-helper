@@ -746,7 +746,15 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
             const texts = opsArray(claimText);
             text = texts.map(t => typeof t === "string" ? t : (t.$ || extractNestedText(t))).join("");
           }
-          return { num: String(num), type: "independent", text: text.trim() };
+          // Detect dependent claims by checking if text references other claims
+          const trimmedText = text.trim();
+          const isDependent =
+            /根据权利要求/.test(trimmedText) ||
+            /根據權利要求/.test(trimmedText) ||
+            /claim\s*\d+/i.test(trimmedText.substring(0, 300)) ||
+            /claims\s*\d+/i.test(trimmedText.substring(0, 300)) ||
+            /所述的/.test(trimmedText.substring(0, 80));
+          return { num: String(num), type: isDependent ? "dependent" : "independent", text: trimmedText };
         });
       }
     }
@@ -820,11 +828,43 @@ function convertOpsToGpStructure(patentInput, biblioData, abstractData, claimsDa
         result.cited_by = exDocs.map(doc => {
           const docId = doc["@id"] || doc["bibliographic-data"];
           if (typeof docId === "string") return { patent_number: docId };
-          // 从 bibliographic-data 提取公开号
+          // 从 bibliographic-data 提取公开号及更多信息
           try {
-            const pubRef = doc["bibliographic-data"]["publication-reference"]["document-id"];
+            const bibData = doc["bibliographic-data"];
+            const pubRef = bibData["publication-reference"]["document-id"];
             const epodoc = opsExtractDocId(opsArray(pubRef), "epodoc");
-            if (epodoc) return { patent_number: epodoc.country + epodoc.docNumber };
+            const entry = { patent_number: epodoc ? epodoc.country + epodoc.docNumber : "" };
+            // Extract title
+            try {
+              const titleData = bibData["invention-title"];
+              if (typeof titleData === "string") entry.title = titleData;
+              else if (titleData && titleData.$) entry.title = titleData.$;
+              else if (titleData) entry.title = extractNestedText(titleData);
+            } catch (e) { /* ignore */ }
+            // Extract publication date
+            try {
+              const pubRefArr = opsArray(pubRef);
+              const docdb = opsExtractDocId(pubRefArr, "docdb");
+              if (docdb && docdb.date) entry.publication_date = docdb.date;
+              else {
+                // Try from epodoc
+                if (epodoc && epodoc.date) entry.publication_date = epodoc.date;
+              }
+            } catch (e) { /* ignore */ }
+            // Extract assignee/applicant
+            try {
+              const parties = bibData["parties"];
+              if (parties && parties.applicants) {
+                const applicants = opsArray(parties.applicants.applicant);
+                if (applicants.length > 0) {
+                  const first = applicants[0];
+                  if (typeof first === "string") entry.assignee = first;
+                  else if (first["name"]) entry.assignee = first["name"].$ || first["name"];
+                  else entry.assignee = extractNestedText(first);
+                }
+              }
+            } catch (e) { /* ignore */ }
+            if (entry.patent_number) return entry;
           } catch (e) { /* ignore */ }
           return null;
         }).filter(Boolean);
@@ -1088,17 +1128,20 @@ function extractPatentFromHtml(html, patentId) {
     const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
     const pubDateMatch = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
     const assigneeMatch = row.match(/<td[^>]*class="patent-assignee[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const priorityDateMatch = row.match(/<time[^>]*itemprop="priorityDate"[^>]*>([\s\S]*?)<\/time>/i);
     // Check for * marker in the row (examiner citation indicator)
     const hasStar = /\*/.test(row.replace(/<[^>]+>/g, ""));
     if (numMatch) {
-      htmlResult.patent_citations.push({
+      const entry = {
         patent_number: numMatch[1].replace(/<[^>]+>/g, "").trim(),
         title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
         publication_date: pubDateMatch ? pubDateMatch[1].replace(/<[^>]+>/g, "").trim() : "",
         assignee: assigneeMatch ? assigneeMatch[1].replace(/<[^>]+>/g, "").trim() : "",
         link: "https://patents.google.com/patent/" + numMatch[1].replace(/<[^>]+>/g, "").trim(),
         citation_type: hasStar ? "examiner" : "applicant",
-      });
+      };
+      if (priorityDateMatch) entry.priority_date = priorityDateMatch[1].replace(/<[^>]+>/g, "").trim();
+      htmlResult.patent_citations.push(entry);
     }
   }
   // backwardReferencesFamily = family-level citations (typically applicant)
@@ -1107,15 +1150,23 @@ function extractPatentFromHtml(html, patentId) {
     const row = m[1];
     const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
     const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const pubDateMatch = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
+    const assigneeMatch = row.match(/<td[^>]*class="patent-assignee[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    // Try to extract priority date from time elements with itemprop="priorityDate"
+    const priorityDateMatch = row.match(/<time[^>]*itemprop="priorityDate"[^>]*>([\s\S]*?)<\/time>/i);
     if (numMatch) {
       const pn = numMatch[1].replace(/<[^>]+>/g, "").trim();
       if (!htmlResult.patent_citations.find(c => c.patent_number === pn)) {
-        htmlResult.patent_citations.push({
+        const entry = {
           patent_number: pn,
           title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
+          publication_date: pubDateMatch ? pubDateMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+          assignee: assigneeMatch ? assigneeMatch[1].replace(/<[^>]+>/g, "").trim() : "",
           link: "https://patents.google.com/patent/" + pn,
           citation_type: "applicant",
-        });
+        };
+        if (priorityDateMatch) entry.priority_date = priorityDateMatch[1].replace(/<[^>]+>/g, "").trim();
+        htmlResult.patent_citations.push(entry);
       }
     }
   }
@@ -1183,7 +1234,32 @@ function extractPatentFromHtml(html, patentId) {
         const hasDependentClass = /(?:^|\s)claim-dependent(?:\s|$)/.test(className);
         if (!hasClaimClass && !hasDependentClass) continue;
         const claimNum = numMatch[1];
-        const isDependentByClass = hasDependentClass;
+        // Check if this inner claim div is inside a parent wrapper with class "claim-dependent"
+        // For Chinese patents, the structure is:
+        //   <div class="claim-dependent"><div id="..." num="0002" class="claim">...</div></div>
+        // The inner div has class="claim" (not "claim-dependent"), so we need to check
+        // the surrounding context for a parent wrapper with class "claim-dependent".
+        let isDependentByParentWrapper = false;
+        if (!hasDependentClass) {
+          // Look backwards from the current div's position to find an unclosed parent wrapper
+          // We scan backwards through the HTML, tracking open/close div depth
+          const beforeTag = html.substring(0, m.index);
+          // Find all <div...claim-dependent...> opening tags and their positions
+          const parentDivMatches = [...beforeTag.matchAll(/<div[^>]*class="[^"]*claim-dependent[^"]*"[^>]*>/gi)];
+          for (let pi = parentDivMatches.length - 1; pi >= 0; pi--) {
+            const parentOpenPos = parentDivMatches[pi].index;
+            // Count opens vs closes between the parent claim-dependent div and current position
+            const between = beforeTag.substring(parentOpenPos + parentDivMatches[pi][0].length);
+            const openCount = (between.match(/<div[\s>]/gi) || []).length;
+            const closeCount = (between.match(/<\/div>/gi) || []).length;
+            // If opens >= closes, the parent claim-dependent div is still open (we're inside it)
+            if (openCount >= closeCount) {
+              isDependentByParentWrapper = true;
+              break;
+            }
+          }
+        }
+        const isDependentByClass = hasDependentClass || isDependentByParentWrapper;
         const openTagEnd = m.index + m[0].length;
         const closeIdx = findMatchingCloseDiv(html, m.index);
         if (closeIdx === -1) continue;
@@ -1393,14 +1469,73 @@ function extractPatentFromHtml(html, patentId) {
       htmlResult.description = parts;
     } else {
       // Try description-paragraph divs
-      const paraMatches = descHtml.matchAll(/<div[^>]*class="description-paragraph"[^>]*>([\s\S]*?)<\/div>/gi);
+      // First, detect semantic HTML tags that mark section boundaries
+      // Chinese patent HTML uses tags like <technical-field>, <background-art>, <disclosure>, etc.
+      const semanticTagMap = {
+        'technical-field': '技术领域',
+        'background-art': '背景技术',
+        'disclosure': '发明内容',
+        'description-of-drawings': '附图说明',
+        'best-mode': '最佳实施方式',
+        'mode-for-invention': '实施方式',
+        'embodiment': '具体实施方式',
+        'description-of-embodiments': '实施例描述',
+        'industrial-applicability': '工业应用性',
+        'sequence-list': '序列表',
+      };
+      // Map from semantic tags to section headings and insert ## markers
+      let processedDescHtml = descHtml;
+      for (const [tag, heading] of Object.entries(semanticTagMap)) {
+        // Find <tag> opening and insert ## heading before its first description-paragraph
+        const tagOpenRegex = new RegExp(`<${tag}[^>]*>`, 'gi');
+        processedDescHtml = processedDescHtml.replace(tagOpenRegex, (match) => {
+          return match + `<div class="description-paragraph">## ${heading}</div>`;
+        });
+      }
+
+      const paraMatches = processedDescHtml.matchAll(/<div[^>]*class="description-paragraph"[^>]*>([\s\S]*?)<\/div>/gi);
       const paragraphs = [];
       for (const pm of paraMatches) {
         const pText = pm[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
         if (pText) paragraphs.push(pText);
       }
       if (paragraphs.length > 0) {
-        htmlResult.description = paragraphs.join('\n\n');
+        // Fallback: detect common Chinese/English section heading patterns in paragraph text
+        // and prefix them with ## if not already marked
+        const sectionHeadingPatterns = [
+          /^技术领域$/,
+          /^背景技术$/,
+          /^发明内容$/,
+          /^附图说明$/,
+          /^具体实施方式$/,
+          /^具体实施例$/,
+          /^实施方式$/,
+          /^实施例$/,
+          /^工业应用性$/,
+          /^TECHNICAL FIELD$/i,
+          /^BACKGROUND$/i,
+          /^BACKGROUND OF THE INVENTION$/i,
+          /^SUMMARY$/i,
+          /^SUMMARY OF THE INVENTION$/i,
+          /^DETAILED DESCRIPTION$/i,
+          /^DETAILED DESCRIPTION OF(?: THE)? (?:PREFERRED)?(?: EMBODIMENTS?)?$/i,
+          /^DRAWINGS$/i,
+          /^BRIEF DESCRIPTION OF (?:THE )?DRAWINGS$/i,
+          /^EMBODIMENTS?$/i,
+          /^DESCRIPTION OF EMBODIMENTS?$/i,
+        ];
+        const processedParagraphs = paragraphs.map(p => {
+          // Check if this paragraph is already a ## heading
+          if (p.startsWith('## ')) return p;
+          // Check if this paragraph matches a known section heading
+          for (const pattern of sectionHeadingPatterns) {
+            if (pattern.test(p)) {
+              return '## ' + p;
+            }
+          }
+          return p;
+        });
+        htmlResult.description = processedParagraphs.join('\n\n');
       } else {
         htmlResult.description = descHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
       }
@@ -1457,13 +1592,18 @@ function extractPatentFromHtml(html, patentId) {
     const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
     const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
     const pubDateMatch = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
+    const assigneeMatch = row.match(/<td[^>]*class="patent-assignee[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const priorityDateMatch = row.match(/<time[^>]*itemprop="priorityDate"[^>]*>([\s\S]*?)<\/time>/i);
     if (numMatch) {
-      htmlResult.cited_by.push({
+      const entry = {
         patent_number: numMatch[1].replace(/<[^>]+>/g, "").trim(),
         title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
         publication_date: pubDateMatch ? pubDateMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+        assignee: assigneeMatch ? assigneeMatch[1].replace(/<[^>]+>/g, "").trim() : "",
         link: "https://patents.google.com/patent/" + numMatch[1].replace(/<[^>]+>/g, "").trim(),
-      });
+      };
+      if (priorityDateMatch) entry.priority_date = priorityDateMatch[1].replace(/<[^>]+>/g, "").trim();
+      htmlResult.cited_by.push(entry);
     }
   }
   // Also try forwardReferencesFamily
@@ -1472,15 +1612,22 @@ function extractPatentFromHtml(html, patentId) {
     const row = m[1];
     const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
     const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const pubDateMatch = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
+    const assigneeMatch = row.match(/<td[^>]*class="patent-assignee[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const priorityDateMatch = row.match(/<time[^>]*itemprop="priorityDate"[^>]*>([\s\S]*?)<\/time>/i);
     if (numMatch) {
       const pn = numMatch[1].replace(/<[^>]+>/g, "").trim();
       // Avoid duplicates
       if (!htmlResult.cited_by.find(c => c.patent_number === pn)) {
-        htmlResult.cited_by.push({
+        const entry = {
           patent_number: pn,
           title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
+          publication_date: pubDateMatch ? pubDateMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+          assignee: assigneeMatch ? assigneeMatch[1].replace(/<[^>]+>/g, "").trim() : "",
           link: "https://patents.google.com/patent/" + pn,
-        });
+        };
+        if (priorityDateMatch) entry.priority_date = priorityDateMatch[1].replace(/<[^>]+>/g, "").trim();
+        htmlResult.cited_by.push(entry);
       }
     }
   }
