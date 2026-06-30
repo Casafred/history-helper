@@ -537,12 +537,7 @@ async function searchPatentDetail(input) {
       showDataSourceBadge("Google Patents", null);
     }
 
-    // Record to history
-    const country = raw.match(/^[A-Z]{2}/)?.[0] || "";
-    PatentCache.addHistory(raw, country, {
-      applicantName: (json.data.assignees || []).join(", "),
-      title: json.data.title || "",
-    });
+    // Record to patent history only (NOT dossier history, to avoid duplicate entries)
     PatentCache.addPatentHistory(raw, {
       applicantName: (json.data.assignees || []).join(", "),
       title: json.data.title || "",
@@ -1125,14 +1120,15 @@ function renderPatentDetail(data) {
   if (data.similar_documents && data.similar_documents.length > 0) {
     html += '<div class="pd-section">';
     html += '<div class="pd-section-title">相似文档 (' + data.similar_documents.length + ')</div>';
-    html += '<div class="pd-citations">';
+    html += '<div class="pd-citations-table"><table><thead><tr><th>Publication</th><th>Publication Date</th><th>Title</th></tr></thead><tbody>';
     data.similar_documents.forEach(c => {
-      html += '<div class="pd-citation-item">';
-      html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<a href="' + escapeHtml(c.link) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;">GP</a>';
-      html += '</div>';
+      html += '<tr>';
+      html += '<td><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a> <a href="' + escapeHtml(c.link) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;">GP</a></td>';
+      html += '<td>' + escapeHtml(c.publication_date || '') + '</td>';
+      html += '<td>' + escapeHtml(c.title || '') + '</td>';
+      html += '</tr>';
     });
-    html += '</div></div>';
+    html += '</tbody></table></div></div>';
   }
 
   if ((!data.patent_citations || data.patent_citations.length === 0) && (!data.cited_by || data.cited_by.length === 0) && (!data.similar_documents || data.similar_documents.length === 0)) {
@@ -2040,14 +2036,15 @@ function renderPatentPopupContent(data) {
   if (data.similar_documents && data.similar_documents.length > 0) {
     html += '<div class="pd-section">';
     html += '<div class="pd-section-title">相似文档 (' + data.similar_documents.length + ')</div>';
-    html += '<div class="pd-citations">';
+    html += '<div class="pd-citations-table"><table><thead><tr><th>Publication</th><th>Publication Date</th><th>Title</th></tr></thead><tbody>';
     data.similar_documents.forEach(c => {
-      html += '<div class="pd-citation-item">';
-      html += '<a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<a href="' + escapeHtml(c.link) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;">GP</a>';
-      html += '</div>';
+      html += '<tr>';
+      html += '<td><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a> <a href="' + escapeHtml(c.link) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;">GP</a></td>';
+      html += '<td>' + escapeHtml(c.publication_date || '') + '</td>';
+      html += '<td>' + escapeHtml(c.title || '') + '</td>';
+      html += '</tr>';
     });
-    html += '</div></div>';
+    html += '</tbody></table></div></div>';
   }
 
   // Family applications
@@ -2911,84 +2908,119 @@ function refreshHistoryList() {
   // Update history sidebar
   const historyList = document.getElementById("history-list");
   if (historyList) {
-    if (entries.length === 0 && Object.keys(PatentCache.getPatentHistoryAll()).length === 0) {
+    // Merge dossier entries and patent entries into a unified sorted list
+    const patentHistory = PatentCache.getPatentHistoryAll();
+    const unifiedEntries = entries.map(e => ({ ...e, _type: "dossier" }));
+    Object.entries(patentHistory).forEach(([pn, item]) => {
+      if (item.timestamp) {
+        // Skip if already shown as dossier entry (avoid duplicate display)
+        if (!unifiedEntries.find(e => e.patentNumber === pn)) {
+          unifiedEntries.push({
+            patentNumber: pn,
+            office: "GP",
+            timestamp: item.timestamp,
+            isCached: false,
+            hasOCR: false,
+            hasAnalysis: false,
+            hasCitedRefs: false,
+            applicantName: item.applicantName || "",
+            title: item.title || "",
+            _type: "patent",
+          });
+        }
+      }
+    });
+    unifiedEntries.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    if (unifiedEntries.length === 0) {
       historyList.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px 4px;">暂无历史记录</div>';
     } else {
-      historyList.innerHTML = entries.map(e => {
+      const isSelectMode = historyList.classList.contains("select-mode");
+      historyList.innerHTML = unifiedEntries.map(e => {
         const currentPatent = currentData ? (currentData.raw || (currentData.office + currentData.applicationNumber)) : "";
         const isActive = e.patentNumber === currentPatent;
         let badges = "";
-        if (!e.isCached) badges += '<span class="history-badge" style="background:var(--bg-hover);color:var(--text-muted);">仅记录</span>';
-        if (e.hasOCR) badges += '<span class="history-badge badge-ocr">OCR</span>';
-        if (e.hasAnalysis) badges += '<span class="history-badge badge-analysis">分析</span>';
-        if (e.hasCitedRefs) badges += '<span class="history-badge badge-cited">引用</span>';
+        if (e._type === "patent") {
+          badges += '<span class="history-badge" style="background:var(--accent);color:#fff;">GP原文</span>';
+        } else {
+          if (!e.isCached) badges += '<span class="history-badge" style="background:var(--bg-hover);color:var(--text-muted);">仅记录</span>';
+          if (e.hasOCR) badges += '<span class="history-badge badge-ocr">OCR</span>';
+          if (e.hasAnalysis) badges += '<span class="history-badge badge-analysis">分析</span>';
+          if (e.hasCitedRefs) badges += '<span class="history-badge badge-cited">引用</span>';
+        }
         const titleHtml = e.title ? '<div class="history-item-title">' + escapeHtml(e.title.length > 30 ? e.title.substring(0, 30) + '...' : e.title) + '</div>' : '';
         const applicantHtml = e.applicantName ? '<div class="history-item-applicant">申请人: ' + escapeHtml(e.applicantName.length > 20 ? e.applicantName.substring(0, 20) + '...' : e.applicantName) + '</div>' : '';
-        return `<div class="history-item${isActive ? ' active' : ''}" data-patent="${escapeHtml(e.patentNumber)}" data-cached="${e.isCached ? '1' : '0'}" data-timestamp="${e.timestamp || 0}">
-          <div class="history-item-patent">${escapeHtml(e.patentNumber)}</div>
-          ${titleHtml}
-          ${applicantHtml}
-          <div class="history-item-time">${e.office ? '<span style="color:var(--accent);margin-right:4px;">' + escapeHtml(e.office) + '</span>' : ''}${timeAgo(e.timestamp)}</div>
-          ${badges ? '<div class="history-item-badges">' + badges + '</div>' : ''}
+        const officeBadge = e._type === "patent"
+          ? '<span style="color:var(--accent);margin-right:4px;">GP</span>'
+          : (e.office ? '<span style="color:var(--accent);margin-right:4px;">' + escapeHtml(e.office) + '</span>' : '');
+        const checkboxHtml = isSelectMode ? '<input type="checkbox" class="history-item-checkbox" data-patent="' + escapeHtml(e.patentNumber) + '" data-type="' + e._type + '" style="margin-right:6px;flex-shrink:0;">' : '';
+        const deleteBtnHtml = isSelectMode ? '' : '<button class="history-item-delete-btn" data-patent="' + escapeHtml(e.patentNumber) + '" data-type="' + e._type + '" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>';
+        return `<div class="history-item${isActive ? ' active' : ''}${isSelectMode ? ' select-mode' : ''}" data-patent="${escapeHtml(e.patentNumber)}" data-type="${e._type}" data-cached="${e.isCached ? '1' : '0'}" data-timestamp="${e.timestamp || 0}">
+          <div class="history-item-row" style="display:flex;align-items:center;">
+            ${checkboxHtml}
+            <div class="history-item-main" style="flex:1;min-width:0;">
+              <div class="history-item-patent">${officeBadge}${escapeHtml(e.patentNumber)}</div>
+              ${titleHtml}
+              ${applicantHtml}
+              <div class="history-item-time">${timeAgo(e.timestamp)}</div>
+              ${badges ? '<div class="history-item-badges">' + badges + '</div>' : ''}
+            </div>
+            ${deleteBtnHtml}
+          </div>
         </div>`;
       }).join("");
 
-      // Also show patent original text history
-      const patentHistory = PatentCache.getPatentHistoryAll();
-      for (const [key, item] of Object.entries(patentHistory)) {
-        if (item.timestamp) {
-          const ts = new Date(item.timestamp);
-          const timeStr = ts.toLocaleDateString() + " " + ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-          const li = document.createElement("div");
-          li.className = "history-item patent-history-item";
-          li.dataset.patentNumber = item.patentNumber;
-          li.dataset.type = "patent";
-          li.dataset.timestamp = item.timestamp;
-          li.innerHTML = `
-            <div class="history-item-patent"><span class="history-office-badge gp-badge" style="background:var(--accent);color:#fff;font-size:10px;padding:1px 4px;border-radius:3px;margin-right:4px;">GP</span>${escapeHtml(item.patentNumber)}</div>
-            ${item.title ? `<div class="history-item-title">${escapeHtml(item.title.length > 30 ? item.title.substring(0, 30) + '...' : item.title)}</div>` : ""}
-            ${item.applicantName ? `<div class="history-item-applicant">申请人: ${escapeHtml(item.applicantName.length > 20 ? item.applicantName.substring(0, 20) + '...' : item.applicantName)}</div>` : ""}
-            <div class="history-item-time">${timeStr}</div>
-          `;
-          // Insert at the right position by timestamp
-          const existingItems = historyList.querySelectorAll(".history-item");
-          let inserted = false;
-          for (const existing of existingItems) {
-            const existingTs = parseInt(existing.dataset.timestamp || "0");
-            if (item.timestamp > existingTs) {
-              historyList.insertBefore(li, existing);
-              inserted = true;
-              break;
+      // Add click handlers
+      historyList.querySelectorAll(".history-item").forEach(item => {
+        if (isSelectMode) {
+          // In select mode, clicking toggles the checkbox
+          item.addEventListener("click", (ev) => {
+            if (ev.target.tagName === 'INPUT' || ev.target.closest('.history-item-checkbox')) return;
+            const cb = item.querySelector('.history-item-checkbox');
+            if (cb) { cb.checked = !cb.checked; updateHistoryBatchCount(); }
+          });
+        } else {
+          // Normal mode: click to restore, delete button to remove
+          const deleteBtn = item.querySelector('.history-item-delete-btn');
+          if (deleteBtn) {
+            deleteBtn.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              const pn = deleteBtn.dataset.patent;
+              const type = deleteBtn.dataset.type;
+              if (!confirm("确认删除 " + pn + " 的历史记录？")) return;
+              if (type === "patent") {
+                PatentCache.removePatentHistory(pn);
+              } else {
+                PatentCache.removeHistory(pn);
+                PatentCache.remove(pn);
+              }
+              refreshHistoryList();
+            });
+          }
+          item.addEventListener("click", () => {
+            const patentNumber = item.dataset.patent;
+            const type = item.dataset.type;
+            if (type === "patent") {
+              searchMode = "patent";
+              document.querySelectorAll(".search-mode-btn").forEach(b => {
+                b.classList.toggle("active", b.dataset.mode === "patent");
+              });
+              searchPatentDetail(patentNumber);
+            } else {
+              const isCached = item.dataset.cached === "1";
+              if (isCached) {
+                restoreFromCache(patentNumber);
+              } else {
+                restoreFromHistory(patentNumber);
+              }
             }
-          }
-          if (!inserted) historyList.appendChild(li);
+          });
         }
-      }
-
-      // Add click handlers for dossier history items
-      historyList.querySelectorAll(".history-item:not(.patent-history-item)").forEach(item => {
-        item.addEventListener("click", () => {
-          const patentNumber = item.dataset.patent;
-          const isCached = item.dataset.cached === "1";
-          if (isCached) {
-            restoreFromCache(patentNumber);
-          } else {
-            restoreFromHistory(patentNumber);
-          }
-        });
       });
 
-      // Add click handlers for patent history items
-      historyList.querySelectorAll(".patent-history-item").forEach(item => {
-        item.addEventListener("click", () => {
-          const patentNumber = item.dataset.patentNumber;
-          // Switch to patent mode and search
-          searchMode = "patent";
-          document.querySelectorAll(".search-mode-btn").forEach(b => {
-            b.classList.toggle("active", b.dataset.mode === "patent");
-          });
-          searchPatentDetail(patentNumber);
-        });
+      // Update batch count when checkboxes change
+      historyList.querySelectorAll('.history-item-checkbox').forEach(cb => {
+        cb.addEventListener('change', updateHistoryBatchCount);
       });
     }
   }
@@ -9050,6 +9082,82 @@ if (historySidebarEdgeToggle && historySidebar) {
     if (!historySidebar.classList.contains("collapsed")) {
       refreshHistoryList();
     }
+  });
+}
+
+// ── History delete / batch operations ──
+function updateHistoryBatchCount() {
+  const checked = document.querySelectorAll('.history-item-checkbox:checked');
+  const countEl = document.getElementById("history-batch-count");
+  const deleteBtn = document.getElementById("history-batch-delete-btn");
+  const selectAllCb = document.getElementById("history-select-all-cb");
+  const totalCbs = document.querySelectorAll('.history-item-checkbox');
+  if (countEl) countEl.textContent = "已选 " + checked.length + " 项";
+  if (deleteBtn) deleteBtn.disabled = checked.length === 0;
+  if (selectAllCb) selectAllCb.checked = totalCbs.length > 0 && checked.length === totalCbs.length;
+}
+
+const historySelectBtn = document.getElementById("history-select-btn");
+const historyBatchBar = document.getElementById("history-batch-bar");
+const historyListEl = document.getElementById("history-list");
+if (historySelectBtn && historyBatchBar && historyListEl) {
+  historySelectBtn.addEventListener("click", () => {
+    const entering = !historyListEl.classList.contains("select-mode");
+    historyListEl.classList.toggle("select-mode", entering);
+    historyBatchBar.classList.toggle("hidden", !entering);
+    refreshHistoryList();
+  });
+
+  // Cancel batch mode
+  const batchCancelBtn = document.getElementById("history-batch-cancel-btn");
+  if (batchCancelBtn) {
+    batchCancelBtn.addEventListener("click", () => {
+      historyListEl.classList.remove("select-mode");
+      historyBatchBar.classList.add("hidden");
+      refreshHistoryList();
+    });
+  }
+
+  // Select all
+  const selectAllCb = document.getElementById("history-select-all-cb");
+  if (selectAllCb) {
+    selectAllCb.addEventListener("change", () => {
+      document.querySelectorAll('.history-item-checkbox').forEach(cb => { cb.checked = selectAllCb.checked; });
+      updateHistoryBatchCount();
+    });
+  }
+
+  // Batch delete
+  const batchDeleteBtn = document.getElementById("history-batch-delete-btn");
+  if (batchDeleteBtn) {
+    batchDeleteBtn.addEventListener("click", () => {
+      const checked = document.querySelectorAll('.history-item-checkbox:checked');
+      if (checked.length === 0) return;
+      if (!confirm("确认删除选中的 " + checked.length + " 条历史记录？")) return;
+      checked.forEach(cb => {
+        const pn = cb.dataset.patent;
+        const type = cb.dataset.type;
+        if (type === "patent") {
+          PatentCache.removePatentHistory(pn);
+        } else {
+          PatentCache.removeHistory(pn);
+          PatentCache.remove(pn);
+        }
+      });
+      historyListEl.classList.remove("select-mode");
+      historyBatchBar.classList.add("hidden");
+      refreshHistoryList();
+    });
+  }
+}
+
+// Clear all history
+const historyClearBtn = document.getElementById("history-clear-btn");
+if (historyClearBtn) {
+  historyClearBtn.addEventListener("click", () => {
+    if (!confirm("确定要清空全部历史记录吗？此操作不可撤销（缓存中的数据不会被删除）。")) return;
+    PatentCache.clearAllHistory();
+    refreshHistoryList();
   });
 }
 

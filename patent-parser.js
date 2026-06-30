@@ -734,12 +734,15 @@ function extractPatentFromHtml(html, patentId) {
   const similarMatches = html.matchAll(/<tr[^>]*itemprop="similarDocuments"[^>]*>([\s\S]*?)<\/tr>/gi);
   for (const m of similarMatches) {
     const row = m[1];
-    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
-    if (numMatch) {
-      htmlResult.similar_documents.push({
-        patent_number: numMatch[1].replace(/<[^>]+>/g, "").trim(),
-        link: "https://patents.google.com/patent/" + numMatch[1].replace(/<[^>]+>/g, "").trim(),
-      });
+    const extracted = extractCitationRow(row);
+    if (extracted) {
+      const entry = {
+        patent_number: extracted.patent_number,
+        title: extracted.title,
+        publication_date: extracted.publication_date,
+        link: "https://patents.google.com/patent/" + extracted.patent_number,
+      };
+      htmlResult.similar_documents.push(entry);
     }
   }
 
