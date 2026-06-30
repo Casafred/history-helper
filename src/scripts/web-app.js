@@ -1120,12 +1120,16 @@ function renderPatentDetail(data) {
   if (data.similar_documents && data.similar_documents.length > 0) {
     html += '<div class="pd-section">';
     html += '<div class="pd-section-title">相似文档 (' + data.similar_documents.length + ')</div>';
-    html += '<div class="pd-citations-table"><table><thead><tr><th>Publication</th><th>Publication Date</th><th>Title</th></tr></thead><tbody>';
+    html += '<div class="pd-citation-table-wrap"><table class="pd-citation-table"><thead><tr>';
+    html += '<th>专利号</th><th>标题</th><th>公开日</th>';
+    html += '</tr></thead><tbody>';
     data.similar_documents.forEach(c => {
       html += '<tr>';
-      html += '<td><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a> <a href="' + escapeHtml(c.link) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;">GP</a></td>';
-      html += '<td>' + escapeHtml(c.publication_date || '') + '</td>';
-      html += '<td>' + escapeHtml(c.title || '') + '</td>';
+      html += '<td class="pd-ct-num"><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" title="在应用内打开 Google Patents">GP</button>';
+      html += '</td>';
+      html += '<td class="pd-ct-title">' + (c.title ? escapeHtml(c.title) : '') + '</td>';
+      html += '<td class="pd-ct-date">' + (c.publication_date ? escapeHtml(c.publication_date) : '') + '</td>';
       html += '</tr>';
     });
     html += '</tbody></table></div></div>';
@@ -2036,12 +2040,16 @@ function renderPatentPopupContent(data) {
   if (data.similar_documents && data.similar_documents.length > 0) {
     html += '<div class="pd-section">';
     html += '<div class="pd-section-title">相似文档 (' + data.similar_documents.length + ')</div>';
-    html += '<div class="pd-citations-table"><table><thead><tr><th>Publication</th><th>Publication Date</th><th>Title</th></tr></thead><tbody>';
+    html += '<div class="pd-citation-table-wrap"><table class="pd-citation-table"><thead><tr>';
+    html += '<th>专利号</th><th>标题</th><th>公开日</th>';
+    html += '</tr></thead><tbody>';
     data.similar_documents.forEach(c => {
       html += '<tr>';
-      html += '<td><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a> <a href="' + escapeHtml(c.link) + '" target="_blank" rel="noopener" class="pd-gp-link" style="font-size:11px;padding:1px 5px;margin-left:4px;">GP</a></td>';
-      html += '<td>' + escapeHtml(c.publication_date || '') + '</td>';
-      html += '<td>' + escapeHtml(c.title || '') + '</td>';
+      html += '<td class="pd-ct-num"><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
+      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" title="在应用内打开 Google Patents">GP</button>';
+      html += '</td>';
+      html += '<td class="pd-ct-title">' + (c.title ? escapeHtml(c.title) : '') + '</td>';
+      html += '<td class="pd-ct-date">' + (c.publication_date ? escapeHtml(c.publication_date) : '') + '</td>';
       html += '</tr>';
     });
     html += '</tbody></table></div></div>';
