@@ -402,11 +402,13 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
     if (searchMode === "patent") {
       patentInput.placeholder = "输入专利号查询原文信息（如 US12030161B2, EP4252965A3）";
       resultSection.classList.add("hidden");
+      document.body.classList.add("patent-search-mode");
       // Restore patent detail if previously loaded
       if (window._currentPatentData) patentDetailSection.classList.remove("hidden");
     } else {
       patentInput.placeholder = "输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型";
       patentDetailSection.classList.add("hidden");
+      document.body.classList.remove("patent-search-mode");
       // Restore result section if there's cached data
       if (currentData) resultSection.classList.remove("hidden");
     }
@@ -723,6 +725,7 @@ function renderPatentDetail(data) {
   html += '<div class="pd-patent-number">' + escapeHtml(data.patent_number) + '</div>';
   html += '<div class="pd-title">' + escapeHtml(data.title || "无标题") + '</div>';
   html += '<div class="pd-links">';
+  html += '<button class="pd-gp-link pd-ai-ask-btn" onclick="openAiAskChat(\'main\')" title="向 AI 提问本篇专利的细节" style="cursor:pointer;border:1px solid var(--accent);background:var(--accent);color:#fff;">AI 问一问</button>';
   html += '<button class="pd-gp-link" onclick="toggleGoogleTranslate()" title="使用 Google 翻译翻译整个页面" style="cursor:pointer;border:1px solid var(--accent);">网页翻译</button>';
   html += '<button class="pd-gp-link" onclick="openInAppWebview(\'' + escapeHtml(data.url) + '\', \'Google Patents: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);" title="在应用内打开 Google Patents 页面">Google Patents</button>';
   html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(data.patent_number) + '\', \'Espacenet: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);" title="在应用内打开 Espacenet 页面">Espacenet</button>';
@@ -762,6 +765,9 @@ function renderPatentDetail(data) {
 
   // Left column: info
   html += '<div class="pd-overview-info">';
+
+  // AI Interpretation (before abstract)
+  html += renderAiInterpretationArea("main");
 
   // Abstract
   if (data.abstract) {
@@ -924,7 +930,7 @@ function renderPatentDetail(data) {
     html += '<div class="pd-panel-actions">';
     html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'description\')">复制</button>';
     html += '</div></div>';
-    html += '<div class="pd-description-text" data-section-type="description">' + escapeHtml(data.description) + '</div>';
+    html += '<div class="pd-description-text" data-section-type="description">' + renderDescriptionHtml(data.description) + '</div>';
   } else {
     html += '<div class="pd-empty">暂无说明书数据</div>';
   }
@@ -1684,6 +1690,9 @@ function renderPatentPopupContent(data) {
   // ─── Tab 1: Overview ───
   html += '<div class="pd-tab-panel active" data-panel="overview">';
 
+  // AI Interpretation (before abstract)
+  html += renderAiInterpretationArea("popup");
+
   // Abstract
   if (data.abstract) {
     html += '<div class="pd-section"><div class="pd-section-title">摘要</div><div class="pd-abstract">' + escapeHtml(data.abstract) + '</div></div>';
@@ -1791,7 +1800,7 @@ function renderPatentPopupContent(data) {
     html += '<div class="pd-panel-actions">';
     html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'description\')">复制</button>';
     html += '</div></div>';
-    html += '<div class="pd-description-text" data-section-type="description">' + escapeHtml(data.description) + '</div>';
+    html += '<div class="pd-description-text" data-section-type="description">' + renderDescriptionHtml(data.description) + '</div>';
   } else {
     html += '<div class="pd-empty">暂无说明书数据</div>';
   }
@@ -1852,39 +1861,7 @@ function renderPatentPopupContent(data) {
     html += '</div></div>';
   }
 
-  // Family applications
-  if (data.family_applications && data.family_applications.length > 0) {
-    html += '<div class="pd-section">';
-    html += '<div class="pd-section-title">同族申请 (' + data.family_applications.length + ')</div>';
-    html += '<div class="pd-citations">';
-    data.family_applications.forEach(fa => {
-      html += '<div class="pd-citation-item">';
-      if (fa.publication_number) {
-        html += '<a class="pd-patent-link" data-patent="' + escapeHtml(fa.publication_number) + '">' + escapeHtml(fa.publication_number) + '</a>';
-      }
-      if (fa.title) html += '<span class="pd-citation-title">' + escapeHtml(fa.title) + '</span>';
-      if (fa.status) html += '<span class="pd-citation-date">' + escapeHtml(fa.status) + '</span>';
-      html += '</div>';
-    });
-    html += '</div></div>';
-  }
-
-  // External links
-  if (data.external_links && Object.keys(data.external_links).length > 0) {
-    html += '<div class="pd-section">';
-    html += '<div class="pd-section-title">外部链接</div>';
-    html += '<div class="pd-citations">';
-    for (const [key, link] of Object.entries(data.external_links)) {
-      if (link.url) {
-        html += '<div class="pd-citation-item">';
-        html += '<a href="' + escapeHtml(link.url) + '" target="_blank" rel="noopener" class="pd-external-link">' + escapeHtml(link.text || key) + '</a>';
-        html += '</div>';
-      }
-    }
-    html += '</div></div>';
-  }
-
-  if ((!data.patent_citations || data.patent_citations.length === 0) && (!data.cited_by || data.cited_by.length === 0) && (!data.similar_documents || data.similar_documents.length === 0) && (!data.family_applications || data.family_applications.length === 0)) {
+  if ((!data.patent_citations || data.patent_citations.length === 0) && (!data.cited_by || data.cited_by.length === 0) && (!data.similar_documents || data.similar_documents.length === 0)) {
     html += '<div class="pd-empty">暂无引用文献数据</div>';
   }
 
@@ -3284,6 +3261,259 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
+}
+
+// 渲染说明书 HTML：支持 ## 标题分段 + [0001] 段号高亮
+function renderDescriptionHtml(text) {
+  if (!text) return '';
+  const headingPatterns = [
+    /^技术领域$/, /^背景技术$/, /^发明内容$/, /^附图说明$/,
+    /^具体实施方式$/, /^具体实施例$/, /^实施方式$/, /^实施例$/, /^工业应用性$/,
+    /^TECHNICAL FIELD$/i, /^BACKGROUND$/i, /^BACKGROUND OF THE INVENTION$/i,
+    /^BACKGROUND ART$/i, /^SUMMARY$/i, /^SUMMARY OF THE INVENTION$/i,
+    /^DETAILED DESCRIPTION$/i, /^DETAILED DESCRIPTION OF(?: THE)? (?:PREFERRED)?(?: EMBODIMENTS?)?$/i,
+    /^DRAWINGS$/i, /^BRIEF DESCRIPTION OF (?:THE )?DRAWINGS$/i,
+    /^EMBODIMENTS?$/i, /^DESCRIPTION OF EMBODIMENTS?$/i,
+    /^DISCLOSURE OF THE INVENTION$/i, /^PROBLEMS TO BE SOLVED BY THE INVENTION$/i,
+    /^MEANS FOR SOLVING THE PROBLEMS$/i, /^ADVANTAGEOUS EFFECTS?$/i,
+  ];
+  // 确保 ## 标题前有换行
+  let normalized = text.replace(/\s*## /g, '\n## ');
+  // 检测未标记的标题模式
+  const lines = normalized.split('\n');
+  const processedLines = lines.map(line => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('## ')) return line;
+    for (const pattern of headingPatterns) {
+      if (pattern.test(trimmed)) return '## ' + trimmed;
+    }
+    return line;
+  });
+  normalized = processedLines.join('\n');
+  // 按 ## 标题分段
+  const sections = normalized.split(/\n## /);
+  let html = '';
+  sections.forEach((section, idx) => {
+    let sectionText;
+    if (idx === 0 && normalized.startsWith('## ')) {
+      sectionText = sections[0].substring(3);
+    } else {
+      sectionText = section;
+    }
+    if (!sectionText.trim()) return;
+    const secLines = sectionText.split('\n');
+    const header = secLines[0].trim();
+    const body = secLines.slice(1).join('\n');
+    if (header) {
+      html += '<div class="pd-desc-section-title">' + escapeHtml(header) + '</div>';
+    }
+    if (body.trim()) {
+      const paragraphs = body.trim().split(/\n\s*\n/);
+      paragraphs.forEach(para => {
+        const trimmed = para.trim();
+        if (trimmed) {
+          const paraNumMatch = trimmed.match(/^(\[\d+\])\s*(.*)$/);
+          if (paraNumMatch) {
+            html += '<p><span class="pd-para-num">' + escapeHtml(paraNumMatch[1]) + '</span> ' + escapeHtml(paraNumMatch[2]).replace(/\n/g, '<br>') + '</p>';
+          } else {
+            html += '<p>' + escapeHtml(trimmed).replace(/\n/g, '<br>') + '</p>';
+          }
+        }
+      });
+    }
+  });
+  return html;
+}
+
+// ── AI 解读 & AI 问一问 ──
+function renderAiInterpretationArea(scope) {
+  const prefix = scope === "popup" ? "ppv" : "pd";
+  let html = '<div class="pd-section pd-ai-interpret" data-scope="' + scope + '">';
+  html += '<div class="pd-section-title">AI 解读';
+  html += '<button class="pd-ai-interpret-btn" onclick="runAiInterpretation(\'' + scope + '\')">AI 解读</button>';
+  html += '</div>';
+  html += '<div class="pd-ai-interpret-body" id="' + prefix + '-ai-interpret-body">';
+  html += '<div class="pd-ai-interpret-placeholder">点击「AI 解读」按钮，基于摘要和权利要求自动分析技术问题、技术手段、技术效果</div>';
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+async function runAiInterpretation(scope) {
+  const prefix = scope === "popup" ? "ppv" : "pd";
+  const bodyEl = document.getElementById(prefix + "-ai-interpret-body");
+  if (!bodyEl) return;
+  const patentData = scope === "popup" ? _patentPopupData : window._currentPatentData;
+  if (!patentData) { showError("无专利数据"); return; }
+
+  const config = window.AI.loadAIConfig();
+  const provider = window.AI.getCurrentProvider(config);
+  if (!provider || !provider.apiKey) {
+    showError("请先在 AI 设置中配置 API Key");
+    return;
+  }
+
+  let context = "";
+  if (patentData.abstract) context += "【摘要】\n" + patentData.abstract + "\n\n";
+  if (patentData.claims && patentData.claims.length > 0) {
+    context += "【权利要求】\n" + patentData.claims.map(c => (c.num || "") + ". " + c.text).join("\n");
+  }
+  if (!context) { showError("无摘要和权利要求数据"); return; }
+
+  bodyEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:16px;height:16px;border-width:2px;margin:0;"></div><span style="font-size:13px;color:var(--text-muted);">AI 分析中...</span></div>';
+
+  const prompt = "你是一位资深专利分析师。请根据以下专利的摘要和权利要求，从三个维度进行解读分析：\n\n1. 技术问题：本发明要解决的技术问题是什么？\n2. 技术手段：本发明采用的核心技术手段是什么？\n3. 技术效果：本发明能达到什么技术效果？\n\n请用简洁专业的中文回答，每个维度用 2-4 句话概括。严格按以下格式输出（不要加多余标题）：\n\n【技术问题】\n...\n\n【技术手段】\n...\n\n【技术效果】\n...";
+
+  try {
+    const apiBase = window.AI.buildUrl(provider.type, provider.baseUrl);
+    const resp = await fetch(apiBase + "/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + provider.apiKey },
+      body: JSON.stringify({
+        model: provider.model,
+        messages: [
+          { role: "system", content: prompt },
+          { role: "user", content: context }
+        ],
+        temperature: 0.3,
+        max_tokens: 1500,
+      }),
+    });
+    if (!resp.ok) throw new Error("API 请求失败: " + resp.status);
+    const json = await resp.json();
+    const text = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content || "分析失败";
+
+    const sections = { problem: "", means: "", effect: "" };
+    const probMatch = text.match(/【技术问题】([\s\S]*?)(?=【技术手段】|$)/);
+    const meansMatch = text.match(/【技术手段】([\s\S]*?)(?=【技术效果】|$)/);
+    const effectMatch = text.match(/【技术效果】([\s\S]*?)$/);
+    if (probMatch) sections.problem = probMatch[1].trim();
+    if (meansMatch) sections.means = meansMatch[1].trim();
+    if (effectMatch) sections.effect = effectMatch[1].trim();
+
+    let html = '<div class="pd-ai-interpret-result">';
+    html += '<div class="pd-ai-interpret-item"><div class="pd-ai-interpret-label">技术问题</div><div class="pd-ai-interpret-text">' + escapeHtml(sections.problem || text) + '</div></div>';
+    html += '<div class="pd-ai-interpret-item"><div class="pd-ai-interpret-label">技术手段</div><div class="pd-ai-interpret-text">' + escapeHtml(sections.means || '') + '</div></div>';
+    html += '<div class="pd-ai-interpret-item"><div class="pd-ai-interpret-label">技术效果</div><div class="pd-ai-interpret-text">' + escapeHtml(sections.effect || '') + '</div></div>';
+    html += '</div>';
+    bodyEl.innerHTML = html;
+  } catch (e) {
+    bodyEl.innerHTML = '<div style="color:var(--danger);font-size:13px;">分析失败: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+let _aiAskChatOpen = false;
+function openAiAskChat(scope) {
+  if (_aiAskChatOpen) { closeAiAskChat(); return; }
+  const patentData = scope === "popup" ? _patentPopupData : window._currentPatentData;
+  if (!patentData) { showError("无专利数据"); return; }
+
+  _aiAskChatOpen = true;
+  const overlay = document.createElement("div");
+  overlay.id = "ai-ask-chat-overlay";
+  overlay.className = "ai-ask-chat-overlay";
+  let html = '<div class="ai-ask-chat-window">';
+  html += '<div class="ai-ask-chat-header">';
+  html += '<span class="ai-ask-chat-title">AI 问一问 · ' + escapeHtml(patentData.patent_number || "") + '</span>';
+  html += '<button class="ai-ask-chat-close" onclick="closeAiAskChat()">&times;</button>';
+  html += '</div>';
+  html += '<div class="ai-ask-chat-context">';
+  html += '<div class="ai-ask-chat-context-title">上下文（勾选纳入）</div>';
+  html += '<label class="ai-ask-chat-ctx-item"><input type="checkbox" id="ai-ask-ctx-abstract" checked> 摘要</label>';
+  html += '<label class="ai-ask-chat-ctx-item"><input type="checkbox" id="ai-ask-ctx-claims" checked> 权利要求</label>';
+  html += '<label class="ai-ask-chat-ctx-item"><input type="checkbox" id="ai-ask-ctx-description"> 说明书</label>';
+  html += '</div>';
+  html += '<div class="ai-ask-chat-messages" id="ai-ask-chat-messages"></div>';
+  html += '<div class="ai-ask-chat-input-area">';
+  html += '<input type="text" id="ai-ask-chat-input" class="ai-ask-chat-input" placeholder="提问这篇专利的细节..." autocomplete="off">';
+  html += '<button class="ai-ask-chat-send" id="ai-ask-chat-send">发送</button>';
+  html += '</div>';
+  html += '</div>';
+  overlay.innerHTML = html;
+  document.body.appendChild(overlay);
+  overlay.dataset.scope = scope;
+
+  const inputEl = document.getElementById("ai-ask-chat-input");
+  const sendBtn = document.getElementById("ai-ask-chat-send");
+  const sendMsg = () => {
+    const q = inputEl.value.trim();
+    if (!q) return;
+    sendAiAskMessage(q, scope);
+    inputEl.value = "";
+  };
+  sendBtn.addEventListener("click", sendMsg);
+  inputEl.addEventListener("keydown", (e) => { if (e.key === "Enter") sendMsg(); });
+  inputEl.focus();
+}
+
+function closeAiAskChat() {
+  const overlay = document.getElementById("ai-ask-chat-overlay");
+  if (overlay) overlay.remove();
+  _aiAskChatOpen = false;
+}
+
+async function sendAiAskMessage(question, scope) {
+  const patentData = scope === "popup" ? _patentPopupData : window._currentPatentData;
+  const messagesEl = document.getElementById("ai-ask-chat-messages");
+  if (!messagesEl || !patentData) return;
+
+  const userMsg = document.createElement("div");
+  userMsg.className = "ai-ask-msg user";
+  userMsg.innerHTML = '<div class="ai-ask-msg-bubble">' + escapeHtml(question) + '</div>';
+  messagesEl.appendChild(userMsg);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  let context = "";
+  const cbAbs = document.getElementById("ai-ask-ctx-abstract");
+  const cbClaims = document.getElementById("ai-ask-ctx-claims");
+  const cbDesc = document.getElementById("ai-ask-ctx-description");
+  if (cbAbs && cbAbs.checked && patentData.abstract) context += "【摘要】\n" + patentData.abstract + "\n\n";
+  if (cbClaims && cbClaims.checked && patentData.claims && patentData.claims.length > 0) {
+    context += "【权利要求】\n" + patentData.claims.map(c => (c.num || "") + ". " + c.text).join("\n") + "\n\n";
+  }
+  if (cbDesc && cbDesc.checked && patentData.description) {
+    context += "【说明书】\n" + patentData.description.substring(0, 8000) + "\n\n";
+  }
+
+  const config = window.AI.loadAIConfig();
+  const provider = window.AI.getCurrentProvider(config);
+  if (!provider || !provider.apiKey) {
+    const errMsg = document.createElement("div");
+    errMsg.className = "ai-ask-msg ai";
+    errMsg.innerHTML = '<div class="ai-ask-msg-bubble" style="color:var(--danger);">请先在 AI 设置中配置 API Key</div>';
+    messagesEl.appendChild(errMsg);
+    return;
+  }
+
+  const aiMsg = document.createElement("div");
+  aiMsg.className = "ai-ask-msg ai";
+  aiMsg.innerHTML = '<div class="ai-ask-msg-bubble"><div class="spinner" style="width:14px;height:14px;border-width:2px;margin:0;display:inline-block;vertical-align:middle;"></div> 思考中...</div>';
+  messagesEl.appendChild(aiMsg);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  try {
+    const apiBase = window.AI.buildUrl(provider.type, provider.baseUrl);
+    const resp = await fetch(apiBase + "/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + provider.apiKey },
+      body: JSON.stringify({
+        model: provider.model,
+        messages: [
+          { role: "system", content: "你是一位资深专利分析师。根据用户提供的专利上下文回答问题。回答要专业、准确、简洁。如果上下文中没有相关信息，请如实说明。\n\n" + context },
+          { role: "user", content: question }
+        ],
+        temperature: 0.3,
+        max_tokens: 2000,
+      }),
+    });
+    if (!resp.ok) throw new Error("API 请求失败: " + resp.status);
+    const json = await resp.json();
+    const answer = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content || "回答失败";
+    aiMsg.innerHTML = '<div class="ai-ask-msg-bubble">' + escapeHtml(answer).replace(/\n/g, '<br>') + '</div>';
+  } catch (e) {
+    aiMsg.innerHTML = '<div class="ai-ask-msg-bubble" style="color:var(--danger);">回答失败: ' + escapeHtml(e.message) + '</div>';
+  }
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 function renderDocuments(data) {

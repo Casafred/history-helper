@@ -1499,6 +1499,13 @@ body {
   vertical-align: top;
 }
 
+/* 专利原文搜索模式下隐藏右侧三个悬浮球，仅在审查文档TAB显示 */
+body.patent-search-mode #reader-floating-ball,
+body.patent-search-mode #patent-popup-ball,
+body.patent-search-mode #analysis-chat-float-ball {
+  display: none !important;
+}
+
 /* ── Analysis Chat Floating Ball ── */
 .analysis-chat-float-ball {
   position: fixed;
@@ -4116,11 +4123,34 @@ body {
   font-size: 13px;
   line-height: 1.8;
   color: var(--text-secondary);
-  white-space: pre-wrap;
   word-break: break-word;
   max-height: 600px;
   overflow-y: auto;
   padding-right: 8px;
+}
+
+.pd-description-text p {
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+}
+
+.pd-desc-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-top: 16px;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pd-para-num {
+  display: inline-block;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 12px;
+  margin-right: 2px;
+  user-select: none;
 }
 
 /* Timeline */

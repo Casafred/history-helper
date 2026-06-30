@@ -713,13 +713,49 @@ function extractPatentFromHtml(html, patentId) {
   if (descSection) {
     let descHtml = descSection[1];
     // Try to extract from ul.description structure (Google Patents format)
-    const ulDesc = descHtml.match(/<ul[^>]*class="description"[^>]*>([\s\S]*?)<\/ul>/i);
+    const ulDesc = descHtml.match(/<ul[^>]*class="[^"]*description[^"]*"[^>]*>([\s\S]*?)<\/ul>/i)
+      || descHtml.match(/<ul\b[^>]*>([\s\S]*?)<\/ul>/i);
     if (ulDesc) {
-      // Process headings and list items
-      let parts = ulDesc[1].replace(/<heading[^>]*>([\s\S]*?)<\/heading>/gi, '\n\n## $1\n');
-      parts = parts.replace(/<\/li>/gi, '\n');
-      parts = parts.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      htmlResult.description = parts;
+      // 解析 heading 和 li 元素，提取段号 [0001]
+      const ulContent = ulDesc[1];
+      const parts = [];
+      const elementRegex = /<(heading|li)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+      let elemMatch;
+      while ((elemMatch = elementRegex.exec(ulContent)) !== null) {
+        const tag = elemMatch[1].toLowerCase();
+        const content = elemMatch[2];
+        if (tag === 'heading') {
+          const headingText = content.replace(/<[^>]+>/g, "").trim();
+          if (headingText) parts.push('## ' + headingText);
+        } else if (tag === 'li') {
+          let paraNum = "";
+          const paraNumMatch = content.match(/<para-num[^>]*num="(\[[^\]]*\])"[^>]*>/i);
+          if (paraNumMatch) {
+            paraNum = paraNumMatch[1];
+          } else {
+            const divNumMatch = content.match(/<div[^>]*\bnum="(\d+)"[^>]*class="[^"]*description-line[^"]*"[^>]*>/i)
+              || content.match(/<div[^>]*class="[^"]*description-line[^"]*"[^>]*\bnum="(\d+)"[^>]*>/i);
+            if (divNumMatch) paraNum = '[' + divNumMatch[1] + ']';
+          }
+          const descLineMatch = content.match(/<div[^>]*class="description-line"[^>]*>([\s\S]*?)<\/div>/i);
+          let paraText = descLineMatch ? descLineMatch[1] : content;
+          paraText = paraText.replace(/<\/?figure-callout[^>]*>/gi, '').replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim();
+          if (paraText) parts.push(paraNum ? paraNum + ' ' + paraText : paraText);
+        }
+      }
+      // Fallback: 若未提取到 li 内容，直接提取 description-line divs
+      if (parts.length === 0) {
+        const allDescLines = [...ulContent.matchAll(/<div[^>]*class="description-line"[^>]*>([\s\S]*?)<\/div>/gi)];
+        for (const dl of allDescLines) {
+          let t = dl[1].replace(/<\/?figure-callout[^>]*>/gi, '').replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+          if (t) parts.push(t);
+        }
+      }
+      if (parts.length > 0) {
+        htmlResult.description = parts.join('\n\n');
+      } else {
+        htmlResult.description = ulContent.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      }
     } else {
       // Try description-paragraph divs
       const paraMatches = descHtml.matchAll(/<div[^>]*class="description-paragraph"[^>]*>([\s\S]*?)<\/div>/gi);
