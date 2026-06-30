@@ -1219,7 +1219,8 @@ function extractPatentFromHtml(html, patentId) {
     // Strategy 1: Extract from <div class="claim..." num="N"> or <div num="N" class="claim...">
     function extractDivClaims(html) {
       // First pass: collect all claim fragments, grouped by num
-      const claimMap = new Map(); // num -> { texts: [], isDependentByClass: false }
+      // wrapperType: 'independent' if inside <div class="claim">, 'dependent' if inside <div class="claim-dependent">, null if unknown
+      const claimMap = new Map(); // num -> { texts: [], wrapperType: null|'independent'|'dependent' }
       const claimStartRegex = /<div([^>]*?)>/gi;
       let m;
       while ((m = claimStartRegex.exec(html)) !== null) {
@@ -1234,32 +1235,47 @@ function extractPatentFromHtml(html, patentId) {
         const hasDependentClass = /(?:^|\s)claim-dependent(?:\s|$)/.test(className);
         if (!hasClaimClass && !hasDependentClass) continue;
         const claimNum = numMatch[1];
-        // Check if this inner claim div is inside a parent wrapper with class "claim-dependent"
-        // For Chinese patents, the structure is:
-        //   <div class="claim-dependent"><div id="..." num="0002" class="claim">...</div></div>
-        // The inner div has class="claim" (not "claim-dependent"), so we need to check
-        // the surrounding context for a parent wrapper with class "claim-dependent".
-        let isDependentByParentWrapper = false;
-        if (!hasDependentClass) {
-          // Look backwards from the current div's position to find an unclosed parent wrapper
-          // We scan backwards through the HTML, tracking open/close div depth
-          const beforeTag = html.substring(0, m.index);
-          // Find all <div...claim-dependent...> opening tags and their positions
-          const parentDivMatches = [...beforeTag.matchAll(/<div[^>]*class="[^"]*claim-dependent[^"]*"[^>]*>/gi)];
-          for (let pi = parentDivMatches.length - 1; pi >= 0; pi--) {
-            const parentOpenPos = parentDivMatches[pi].index;
-            // Count opens vs closes between the parent claim-dependent div and current position
-            const between = beforeTag.substring(parentOpenPos + parentDivMatches[pi][0].length);
+        // Detect parent wrapper class: <div class="claim"> = independent, <div class="claim-dependent"> = dependent
+        // The outer wrapper is the MOST RELIABLE indicator of independent/dependent status.
+        // For Chinese patents: <div class="claim"><div num="1" class="claim"> = independent
+        //                      <div class="claim-dependent"><div num="2" class="claim"> = dependent
+        let wrapperType = null; // null = no wrapper info found
+        const beforeTag = html.substring(0, m.index);
+        // Check for unclosed <div class="claim-dependent"> parent wrappers
+        const dependentParentMatches = [...beforeTag.matchAll(/<div[^>]*class="[^"]*claim-dependent[^"]*"[^>]*>/gi)];
+        let insideDependentWrapper = false;
+        for (let pi = dependentParentMatches.length - 1; pi >= 0; pi--) {
+          const parentOpenPos = dependentParentMatches[pi].index;
+          const between = beforeTag.substring(parentOpenPos + dependentParentMatches[pi][0].length);
+          const openCount = (between.match(/<div[\s>]/gi) || []).length;
+          const closeCount = (between.match(/<\/div>/gi) || []).length;
+          if (openCount >= closeCount) {
+            insideDependentWrapper = true;
+            break;
+          }
+        }
+        // Check for unclosed <div class="claim"> (without claim-dependent) parent wrappers
+        let insideIndependentWrapper = false;
+        if (!insideDependentWrapper) {
+          // Match <div class="claim"> or <div class="claim " ...> but NOT <div class="claim-dependent">
+          const independentParentMatches = [...beforeTag.matchAll(/<div[^>]*class="[^"]*(?:^|\s)claim(?:\s|")[^"]*"[^>]*>/gi)];
+          for (let pi = independentParentMatches.length - 1; pi >= 0; pi--) {
+            const pClassMatch = independentParentMatches[pi][0].match(/class="([^"]*)"/i);
+            if (pClassMatch && /claim-dependent/.test(pClassMatch[1])) continue; // skip dependent wrappers
+            const parentOpenPos = independentParentMatches[pi].index;
+            const between = beforeTag.substring(parentOpenPos + independentParentMatches[pi][0].length);
             const openCount = (between.match(/<div[\s>]/gi) || []).length;
             const closeCount = (between.match(/<\/div>/gi) || []).length;
-            // If opens >= closes, the parent claim-dependent div is still open (we're inside it)
             if (openCount >= closeCount) {
-              isDependentByParentWrapper = true;
+              insideIndependentWrapper = true;
               break;
             }
           }
         }
-        const isDependentByClass = hasDependentClass || isDependentByParentWrapper;
+        if (insideDependentWrapper) wrapperType = 'dependent';
+        else if (insideIndependentWrapper) wrapperType = 'independent';
+        // Also check if the div itself has claim-dependent class
+        if (hasDependentClass) wrapperType = 'dependent';
         const openTagEnd = m.index + m[0].length;
         const closeIdx = findMatchingCloseDiv(html, m.index);
         if (closeIdx === -1) continue;
@@ -1278,23 +1294,34 @@ function extractPatentFromHtml(html, patentId) {
           .trim();
         if (claimText.length < 1) continue;
         if (!claimMap.has(claimNum)) {
-          claimMap.set(claimNum, { texts: [], isDependentByClass: false });
+          claimMap.set(claimNum, { texts: [], wrapperType: null });
         }
         const entry = claimMap.get(claimNum);
         entry.texts.push(claimText);
-        if (isDependentByClass) entry.isDependentByClass = true;
+        // wrapperType: 'dependent' always wins; 'independent' only if not already set to 'dependent'
+        if (wrapperType === 'dependent') entry.wrapperType = 'dependent';
+        else if (wrapperType === 'independent' && entry.wrapperType !== 'dependent') entry.wrapperType = 'independent';
       }
       // Second pass: merge fragments of the same claim number
       const claims = [];
       for (const [num, entry] of claimMap) {
         const fullText = entry.texts.join(" ").replace(/\s+/g, " ").trim();
         if (fullText.length < 3) continue;
-        // Determine dependent/independent from full text
-        const isDependent = entry.isDependentByClass
-          || /claim\s*\d+/i.test(fullText.substring(0, 200))
-          || fullText.includes('根据权利要求')
-          || fullText.includes('根據權利要求')
-          || /所述的/.test(fullText.substring(0, 80));
+        // Determine dependent/independent:
+        // Priority 1: wrapper class (most reliable) — <div class="claim"> = independent, <div class="claim-dependent"> = dependent
+        // Priority 2: text-based detection (fallback when no wrapper info)
+        let isDependent;
+        if (entry.wrapperType === 'dependent') {
+          isDependent = true;
+        } else if (entry.wrapperType === 'independent') {
+          isDependent = false;
+        } else {
+          // No wrapper info, use text-based detection
+          isDependent = /claim\s*\d+/i.test(fullText.substring(0, 200))
+            || fullText.includes('根据权利要求')
+            || fullText.includes('根據權利要求')
+            || /所述的/.test(fullText.substring(0, 80));
+        }
         claims.push({ num, text: fullText, type: isDependent ? "dependent" : "independent" });
       }
       // Sort by claim number
@@ -1469,69 +1496,63 @@ function extractPatentFromHtml(html, patentId) {
       htmlResult.description = parts;
     } else {
       // Try description-paragraph divs
-      // First, detect semantic HTML tags that mark section boundaries
-      // Chinese patent HTML uses tags like <technical-field>, <background-art>, <disclosure>, etc.
-      const semanticTagMap = {
-        'technical-field': '技术领域',
-        'background-art': '背景技术',
-        'disclosure': '发明内容',
-        'description-of-drawings': '附图说明',
-        'best-mode': '最佳实施方式',
-        'mode-for-invention': '实施方式',
-        'embodiment': '具体实施方式',
-        'description-of-embodiments': '实施例描述',
-        'industrial-applicability': '工业应用性',
-        'sequence-list': '序列表',
-      };
-      // Map from semantic tags to section headings and insert ## markers
-      let processedDescHtml = descHtml;
-      for (const [tag, heading] of Object.entries(semanticTagMap)) {
-        // Find <tag> opening and insert ## heading before its first description-paragraph
-        const tagOpenRegex = new RegExp(`<${tag}[^>]*>`, 'gi');
-        processedDescHtml = processedDescHtml.replace(tagOpenRegex, (match) => {
-          return match + `<div class="description-paragraph">## ${heading}</div>`;
-        });
+      // Semantic HTML tags (<technical-field>, <background-art>, <disclosure>, etc.) are the
+      // most reliable section boundary markers. We use them to mark the first paragraph
+      // inside each tag as a section heading (## prefix), using the paragraph's actual text.
+      // This way we don't hardcode heading names — any language/variant works automatically.
+      const semanticTags = [
+        'technical-field', 'background-art', 'disclosure',
+        'description-of-drawings', 'best-mode', 'mode-for-invention',
+        'embodiment', 'description-of-embodiments',
+        'industrial-applicability', 'sequence-list',
+      ];
+      // Build a set of paragraph positions that are the first <div class="description-paragraph">
+      // inside a semantic tag — these should be marked as ## headings.
+      const headingPositions = new Set();
+      for (const tag of semanticTags) {
+        const tagRegex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'gi');
+        let tagMatch;
+        while ((tagMatch = tagRegex.exec(descHtml)) !== null) {
+          const tagContent = tagMatch[1];
+          // Find the first description-paragraph inside this semantic tag
+          const firstParaMatch = tagContent.match(/<div[^>]*class="description-paragraph"[^>]*>([\s\S]*?)<\/div>/i);
+          if (firstParaMatch) {
+            // Calculate absolute position of this paragraph in descHtml
+            const relIndex = tagContent.indexOf(firstParaMatch[0]);
+            const absIndex = tagMatch.index + relIndex;
+            headingPositions.add(absIndex);
+          }
+        }
       }
 
-      const paraMatches = processedDescHtml.matchAll(/<div[^>]*class="description-paragraph"[^>]*>([\s\S]*?)<\/div>/gi);
+      const paraMatches = [...descHtml.matchAll(/<div[^>]*class="description-paragraph"[^>]*>([\s\S]*?)<\/div>/gi)];
       const paragraphs = [];
       for (const pm of paraMatches) {
-        const pText = pm[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-        if (pText) paragraphs.push(pText);
+        let pText = pm[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        if (!pText) continue;
+        // If this paragraph is the first one inside a semantic tag, mark it as a heading
+        if (headingPositions.has(pm.index)) {
+          if (!pText.startsWith('## ')) pText = '## ' + pText;
+        }
+        paragraphs.push(pText);
       }
       if (paragraphs.length > 0) {
         // Fallback: detect common Chinese/English section heading patterns in paragraph text
-        // and prefix them with ## if not already marked
+        // and prefix them with ## if not already marked. This catches headings that don't
+        // have semantic tag wrappers (e.g., some Google Patents formats).
         const sectionHeadingPatterns = [
-          /^技术领域$/,
-          /^背景技术$/,
-          /^发明内容$/,
-          /^附图说明$/,
-          /^具体实施方式$/,
-          /^具体实施例$/,
-          /^实施方式$/,
-          /^实施例$/,
-          /^工业应用性$/,
-          /^TECHNICAL FIELD$/i,
-          /^BACKGROUND$/i,
-          /^BACKGROUND OF THE INVENTION$/i,
-          /^SUMMARY$/i,
-          /^SUMMARY OF THE INVENTION$/i,
-          /^DETAILED DESCRIPTION$/i,
-          /^DETAILED DESCRIPTION OF(?: THE)? (?:PREFERRED)?(?: EMBODIMENTS?)?$/i,
-          /^DRAWINGS$/i,
-          /^BRIEF DESCRIPTION OF (?:THE )?DRAWINGS$/i,
-          /^EMBODIMENTS?$/i,
-          /^DESCRIPTION OF EMBODIMENTS?$/i,
+          /^技术领域$/, /^背景技术$/, /^发明内容$/, /^附图说明$/,
+          /^具体实施方式$/, /^具体实施例$/, /^实施方式$/, /^实施例$/, /^工业应用性$/,
+          /^TECHNICAL FIELD$/i, /^BACKGROUND$/i, /^BACKGROUND OF THE INVENTION$/i,
+          /^SUMMARY$/i, /^SUMMARY OF THE INVENTION$/i,
+          /^DETAILED DESCRIPTION$/i, /^DETAILED DESCRIPTION OF(?: THE)? (?:PREFERRED)?(?: EMBODIMENTS?)?$/i,
+          /^DRAWINGS$/i, /^BRIEF DESCRIPTION OF (?:THE )?DRAWINGS$/i,
+          /^EMBODIMENTS?$/i, /^DESCRIPTION OF EMBODIMENTS?$/i,
         ];
         const processedParagraphs = paragraphs.map(p => {
-          // Check if this paragraph is already a ## heading
           if (p.startsWith('## ')) return p;
-          // Check if this paragraph matches a known section heading
           for (const pattern of sectionHeadingPatterns) {
-            if (pattern.test(p)) {
-              return '## ' + p;
-            }
+            if (pattern.test(p)) return '## ' + p;
           }
           return p;
         });
