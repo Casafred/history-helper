@@ -1119,28 +1119,77 @@ function extractPatentFromHtml(html, patentId) {
     }
   }
 
+  // Helper: extract citation fields from a <tr> row, supporting both old class-based
+  // and new itemprop-based Google Patents HTML formats
+  function extractCitationRow(row) {
+    // Patent number: try href link, then itemprop="publicationNumber"
+    let patentNumber = "";
+    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
+    if (numMatch) {
+      patentNumber = numMatch[1].replace(/<[^>]+>/g, "").trim();
+    } else {
+      const pubNumMatch = row.match(/itemprop="publicationNumber"[^>]*>([\s\S]*?)<\/span>/i);
+      if (pubNumMatch) patentNumber = pubNumMatch[1].replace(/<[^>]+>/g, "").trim();
+    }
+    if (!patentNumber) return null;
+
+    // Title: try class="patent-title", then itemprop="title"
+    let title = "";
+    const titleByClass = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    if (titleByClass) {
+      title = titleByClass[1].replace(/<[^>]+>/g, "").trim();
+    } else {
+      const titleByItemprop = row.match(/<td[^>]*itemprop="title"[^>]*>([\s\S]*?)<\/td>/i);
+      if (titleByItemprop) title = titleByItemprop[1].replace(/<[^>]+>/g, "").trim();
+    }
+
+    // Publication date: try <time>, then itemprop="publicationDate" on <td>
+    let pubDate = "";
+    const pubDateByTime = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
+    if (pubDateByTime) {
+      pubDate = pubDateByTime[1].replace(/<[^>]+>/g, "").trim();
+    } else {
+      const pubDateByItemprop = row.match(/<td[^>]*itemprop="publicationDate"[^>]*>([\s\S]*?)<\/td>/i);
+      if (pubDateByItemprop) pubDate = pubDateByItemprop[1].replace(/<[^>]+>/g, "").trim();
+    }
+
+    // Assignee: try class="patent-assignee", then itemprop="assigneeOriginal"
+    let assignee = "";
+    const assigneeByClass = row.match(/<td[^>]*class="patent-assignee[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    if (assigneeByClass) {
+      assignee = assigneeByClass[1].replace(/<[^>]+>/g, "").trim();
+    } else {
+      const assigneeByItemprop = row.match(/itemprop="assigneeOriginal"[^>]*>([\s\S]*?)<\/span>/i);
+      if (assigneeByItemprop) assignee = assigneeByItemprop[1].replace(/<[^>]+>/g, "").trim();
+    }
+
+    // Priority date: try <time itemprop="priorityDate">, then <td itemprop="priorityDate">
+    let priorityDate = "";
+    const priorityByTime = row.match(/<time[^>]*itemprop="priorityDate"[^>]*>([\s\S]*?)<\/time>/i);
+    if (priorityByTime) {
+      priorityDate = priorityByTime[1].replace(/<[^>]+>/g, "").trim();
+    } else {
+      const priorityByTd = row.match(/<td[^>]*itemprop="priorityDate"[^>]*>([\s\S]*?)<\/td>/i);
+      if (priorityByTd) priorityDate = priorityByTd[1].replace(/<[^>]+>/g, "").trim();
+    }
+
+    return { patent_number: patentNumber, title, publication_date: pubDate, assignee, priority_date: priorityDate };
+  }
+
   // Patent citations (backward references)
   // backwardReferencesOrig = examiner citations (marked with * in Google Patents)
   const citationMatches = html.matchAll(/<tr[^>]*itemprop="backwardReferencesOrig"[^>]*>([\s\S]*?)<\/tr>/gi);
   for (const m of citationMatches) {
     const row = m[1];
-    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
-    const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
-    const pubDateMatch = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
-    const assigneeMatch = row.match(/<td[^>]*class="patent-assignee[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
-    const priorityDateMatch = row.match(/<time[^>]*itemprop="priorityDate"[^>]*>([\s\S]*?)<\/time>/i);
-    // Check for * marker in the row (examiner citation indicator)
-    const hasStar = /\*/.test(row.replace(/<[^>]+>/g, ""));
-    if (numMatch) {
+    const extracted = extractCitationRow(row);
+    if (extracted) {
+      const hasStar = /\*/.test(row.replace(/<[^>]+>/g, ""));
       const entry = {
-        patent_number: numMatch[1].replace(/<[^>]+>/g, "").trim(),
-        title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
-        publication_date: pubDateMatch ? pubDateMatch[1].replace(/<[^>]+>/g, "").trim() : "",
-        assignee: assigneeMatch ? assigneeMatch[1].replace(/<[^>]+>/g, "").trim() : "",
-        link: "https://patents.google.com/patent/" + numMatch[1].replace(/<[^>]+>/g, "").trim(),
+        ...extracted,
+        link: "https://patents.google.com/patent/" + extracted.patent_number,
         citation_type: hasStar ? "examiner" : "applicant",
       };
-      if (priorityDateMatch) entry.priority_date = priorityDateMatch[1].replace(/<[^>]+>/g, "").trim();
+      if (!extracted.priority_date) delete entry.priority_date;
       htmlResult.patent_citations.push(entry);
     }
   }
@@ -1148,24 +1197,16 @@ function extractPatentFromHtml(html, patentId) {
   const citationFamilyMatches = html.matchAll(/<tr[^>]*itemprop="backwardReferencesFamily"[^>]*>([\s\S]*?)<\/tr>/gi);
   for (const m of citationFamilyMatches) {
     const row = m[1];
-    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
-    const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
-    const pubDateMatch = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
-    const assigneeMatch = row.match(/<td[^>]*class="patent-assignee[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
-    // Try to extract priority date from time elements with itemprop="priorityDate"
-    const priorityDateMatch = row.match(/<time[^>]*itemprop="priorityDate"[^>]*>([\s\S]*?)<\/time>/i);
-    if (numMatch) {
-      const pn = numMatch[1].replace(/<[^>]+>/g, "").trim();
+    const extracted = extractCitationRow(row);
+    if (extracted) {
+      const pn = extracted.patent_number;
       if (!htmlResult.patent_citations.find(c => c.patent_number === pn)) {
         const entry = {
-          patent_number: pn,
-          title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
-          publication_date: pubDateMatch ? pubDateMatch[1].replace(/<[^>]+>/g, "").trim() : "",
-          assignee: assigneeMatch ? assigneeMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+          ...extracted,
           link: "https://patents.google.com/patent/" + pn,
           citation_type: "applicant",
         };
-        if (priorityDateMatch) entry.priority_date = priorityDateMatch[1].replace(/<[^>]+>/g, "").trim();
+        if (!extracted.priority_date) delete entry.priority_date;
         htmlResult.patent_citations.push(entry);
       }
     }
@@ -1241,35 +1282,34 @@ function extractPatentFromHtml(html, patentId) {
         //                      <div class="claim-dependent"><div num="2" class="claim"> = dependent
         let wrapperType = null; // null = no wrapper info found
         const beforeTag = html.substring(0, m.index);
-        // Check for unclosed <div class="claim-dependent"> parent wrappers
-        const dependentParentMatches = [...beforeTag.matchAll(/<div[^>]*class="[^"]*claim-dependent[^"]*"[^>]*>/gi)];
+        // Find ALL <div ...> opening tags before current position and classify them.
+        // We distinguish wrappers (no num attribute) from inner claim divs (have num attribute).
         let insideDependentWrapper = false;
-        for (let pi = dependentParentMatches.length - 1; pi >= 0; pi--) {
-          const parentOpenPos = dependentParentMatches[pi].index;
-          const between = beforeTag.substring(parentOpenPos + dependentParentMatches[pi][0].length);
-          const openCount = (between.match(/<div[\s>]/gi) || []).length;
-          const closeCount = (between.match(/<\/div>/gi) || []).length;
-          if (openCount >= closeCount) {
+        let insideIndependentWrapper = false;
+        const allDivBefore = [...beforeTag.matchAll(/<div([^>]*?)>/gi)];
+        for (let di = allDivBefore.length - 1; di >= 0; di--) {
+          const divAttrs = allDivBefore[di][1];
+          const divClassMatch = divAttrs.match(/class="([^"]*)"/i);
+          if (!divClassMatch) continue;
+          const divClass = divClassMatch[1];
+          // Only consider divs that have "claim" or "claim-dependent" as standalone word in class
+          const hasClaimWord = /(?:^|\s)claim(?:\s|$)/.test(divClass);
+          const hasDependentWord = /(?:^|\s)claim-dependent(?:\s|$)/.test(divClass);
+          if (!hasClaimWord && !hasDependentWord) continue;
+          // Skip inner claim divs (they have num attribute; wrappers don't)
+          if (/num="/i.test(divAttrs)) continue;
+          // Check if this wrapper div is still open (unclosed)
+          const afterDiv = beforeTag.substring(allDivBefore[di].index + allDivBefore[di][0].length);
+          const openCount = (afterDiv.match(/<div[\s>]/gi) || []).length;
+          const closeCount = (afterDiv.match(/<\/div>/gi) || []).length;
+          if (openCount < closeCount) continue; // already closed
+          // Found an unclosed wrapper
+          if (hasDependentWord) {
             insideDependentWrapper = true;
             break;
-          }
-        }
-        // Check for unclosed <div class="claim"> (without claim-dependent) parent wrappers
-        let insideIndependentWrapper = false;
-        if (!insideDependentWrapper) {
-          // Match <div class="claim"> or <div class="claim " ...> but NOT <div class="claim-dependent">
-          const independentParentMatches = [...beforeTag.matchAll(/<div[^>]*class="[^"]*(?:^|\s)claim(?:\s|")[^"]*"[^>]*>/gi)];
-          for (let pi = independentParentMatches.length - 1; pi >= 0; pi--) {
-            const pClassMatch = independentParentMatches[pi][0].match(/class="([^"]*)"/i);
-            if (pClassMatch && /claim-dependent/.test(pClassMatch[1])) continue; // skip dependent wrappers
-            const parentOpenPos = independentParentMatches[pi].index;
-            const between = beforeTag.substring(parentOpenPos + independentParentMatches[pi][0].length);
-            const openCount = (between.match(/<div[\s>]/gi) || []).length;
-            const closeCount = (between.match(/<\/div>/gi) || []).length;
-            if (openCount >= closeCount) {
-              insideIndependentWrapper = true;
-              break;
-            }
+          } else if (hasClaimWord) {
+            insideIndependentWrapper = true;
+            break;
           }
         }
         if (insideDependentWrapper) wrapperType = 'dependent';
@@ -1610,20 +1650,13 @@ function extractPatentFromHtml(html, patentId) {
   const citedByMatches = html.matchAll(/<tr[^>]*itemprop="forwardReferencesOrig"[^>]*>([\s\S]*?)<\/tr>/gi);
   for (const m of citedByMatches) {
     const row = m[1];
-    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
-    const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
-    const pubDateMatch = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
-    const assigneeMatch = row.match(/<td[^>]*class="patent-assignee[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
-    const priorityDateMatch = row.match(/<time[^>]*itemprop="priorityDate"[^>]*>([\s\S]*?)<\/time>/i);
-    if (numMatch) {
+    const extracted = extractCitationRow(row);
+    if (extracted) {
       const entry = {
-        patent_number: numMatch[1].replace(/<[^>]+>/g, "").trim(),
-        title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
-        publication_date: pubDateMatch ? pubDateMatch[1].replace(/<[^>]+>/g, "").trim() : "",
-        assignee: assigneeMatch ? assigneeMatch[1].replace(/<[^>]+>/g, "").trim() : "",
-        link: "https://patents.google.com/patent/" + numMatch[1].replace(/<[^>]+>/g, "").trim(),
+        ...extracted,
+        link: "https://patents.google.com/patent/" + extracted.patent_number,
       };
-      if (priorityDateMatch) entry.priority_date = priorityDateMatch[1].replace(/<[^>]+>/g, "").trim();
+      if (!extracted.priority_date) delete entry.priority_date;
       htmlResult.cited_by.push(entry);
     }
   }
@@ -1631,23 +1664,16 @@ function extractPatentFromHtml(html, patentId) {
   const citedByFamilyMatches = html.matchAll(/<tr[^>]*itemprop="forwardReferencesFamily"[^>]*>([\s\S]*?)<\/tr>/gi);
   for (const m of citedByFamilyMatches) {
     const row = m[1];
-    const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
-    const titleMatch2 = row.match(/<td[^>]*class="patent-title[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
-    const pubDateMatch = row.match(/<time[^>]*>([\s\S]*?)<\/time>/i);
-    const assigneeMatch = row.match(/<td[^>]*class="patent-assignee[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
-    const priorityDateMatch = row.match(/<time[^>]*itemprop="priorityDate"[^>]*>([\s\S]*?)<\/time>/i);
-    if (numMatch) {
-      const pn = numMatch[1].replace(/<[^>]+>/g, "").trim();
+    const extracted = extractCitationRow(row);
+    if (extracted) {
+      const pn = extracted.patent_number;
       // Avoid duplicates
       if (!htmlResult.cited_by.find(c => c.patent_number === pn)) {
         const entry = {
-          patent_number: pn,
-          title: titleMatch2 ? titleMatch2[1].replace(/<[^>]+>/g, "").trim() : "",
-          publication_date: pubDateMatch ? pubDateMatch[1].replace(/<[^>]+>/g, "").trim() : "",
-          assignee: assigneeMatch ? assigneeMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+          ...extracted,
           link: "https://patents.google.com/patent/" + pn,
         };
-        if (priorityDateMatch) entry.priority_date = priorityDateMatch[1].replace(/<[^>]+>/g, "").trim();
+        if (!extracted.priority_date) delete entry.priority_date;
         htmlResult.cited_by.push(entry);
       }
     }
