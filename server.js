@@ -1127,6 +1127,8 @@ function extractPatentFromHtml(html, patentId) {
     const numMatch = row.match(/<a[^>]*href="\/patent\/([^"]+)"[^>]*>/);
     if (numMatch) {
       patentNumber = numMatch[1].replace(/<[^>]+>/g, "").trim();
+      // Remove language suffix from href like "WO2017147208A1/en" -> "WO2017147208A1"
+      patentNumber = patentNumber.replace(/\/[a-z]{2}$/, '');
     } else {
       const pubNumMatch = row.match(/itemprop="publicationNumber"[^>]*>([\s\S]*?)<\/span>/i);
       if (pubNumMatch) patentNumber = pubNumMatch[1].replace(/<[^>]+>/g, "").trim();
@@ -1537,41 +1539,49 @@ function extractPatentFromHtml(html, patentId) {
     } else {
       // Try description-paragraph divs
       // Semantic HTML tags (<technical-field>, <background-art>, <disclosure>, etc.) are the
-      // most reliable section boundary markers. We use them to mark the first paragraph
-      // inside each tag as a section heading (## prefix), using the paragraph's actual text.
-      // This way we don't hardcode heading names — any language/variant works automatically.
+      // most reliable section boundary markers. We extract each semantic tag's content
+      // and process its paragraphs, marking the first one as a ## heading.
       const semanticTags = [
         'technical-field', 'background-art', 'disclosure',
         'description-of-drawings', 'best-mode', 'mode-for-invention',
         'embodiment', 'description-of-embodiments',
         'industrial-applicability', 'sequence-list',
       ];
-      // Build a set of paragraph positions that are the first <div class="description-paragraph">
-      // inside a semantic tag — these should be marked as ## headings.
-      const headingPositions = new Set();
+
+      // Build ranges [start, end) in descHtml for each semantic tag occurrence
+      const semanticRanges = [];
       for (const tag of semanticTags) {
         const tagRegex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'gi');
         let tagMatch;
         while ((tagMatch = tagRegex.exec(descHtml)) !== null) {
-          const tagContent = tagMatch[1];
-          // Find the first description-paragraph inside this semantic tag
-          const firstParaMatch = tagContent.match(/<div[^>]*class="description-paragraph"[^>]*>([\s\S]*?)<\/div>/i);
-          if (firstParaMatch) {
-            // Calculate absolute position of this paragraph in descHtml
-            const relIndex = tagContent.indexOf(firstParaMatch[0]);
-            const absIndex = tagMatch.index + relIndex;
-            headingPositions.add(absIndex);
-          }
+          // tagMatch.index is the start of the opening tag
+          // The content starts after the opening tag
+          const contentStart = tagMatch.index + tagMatch[0].indexOf('>') + 1;
+          const contentEnd = tagMatch.index + tagMatch[0].length - (`</${tag}>`).length;
+          semanticRanges.push({ start: tagMatch.index, contentStart, contentEnd, end: tagMatch.index + tagMatch[0].length, tag });
         }
       }
 
       const paraMatches = [...descHtml.matchAll(/<div[^>]*class="description-paragraph"[^>]*>([\s\S]*?)<\/div>/gi)];
+
+      // For each semantic tag, find which paragraph is the first one inside it
+      const firstParaInSemantic = new Set(); // stores pm.index values
+      for (const range of semanticRanges) {
+        for (const pm of paraMatches) {
+          // pm.index is the start of the <div> opening tag
+          if (pm.index >= range.contentStart && pm.index < range.contentEnd) {
+            firstParaInSemantic.add(pm.index);
+            break; // only the first paragraph in each semantic tag
+          }
+        }
+      }
+
       const paragraphs = [];
       for (const pm of paraMatches) {
         let pText = pm[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
         if (!pText) continue;
         // If this paragraph is the first one inside a semantic tag, mark it as a heading
-        if (headingPositions.has(pm.index)) {
+        if (firstParaInSemantic.has(pm.index)) {
           if (!pText.startsWith('## ')) pText = '## ' + pText;
         }
         paragraphs.push(pText);
