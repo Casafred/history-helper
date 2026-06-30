@@ -1196,18 +1196,22 @@ function switchPpvTab(tabName) {
 
 // Translate patent section using AI
 async function translatePatentSection(sectionType) {
-  // Find the section container - support both tab layout and collapsible layout
-  let sectionEl = document.querySelector('[data-section-type="' + sectionType + '"]');
+  // Find the section container — prefer popup context if active, else main page
+  const popupContent = document.getElementById('ppv-content');
+  const isPopupActive = popupContent && !popupContent.closest('.hidden');
+  let sectionEl;
+  if (isPopupActive) {
+    sectionEl = popupContent.querySelector('[data-section-type="' + sectionType + '"]');
+  }
+  if (!sectionEl) {
+    sectionEl = document.querySelector('[data-section-type="' + sectionType + '"]');
+  }
   if (!sectionEl) return;
-
-  const translateBtn = sectionEl.querySelector('.pd-translate-btn');
-  if (!translateBtn) return;
 
   // Check if translation already exists - toggle: restore original text and remove
   const existingResult = sectionEl.querySelector('.pd-translation-result');
   if (existingResult) {
     existingResult.remove();
-    translateBtn.textContent = '翻译';
     // Restore original text
     if (sectionType === 'claims') {
       sectionEl.querySelectorAll('.pd-claim-text[data-original-text]').forEach(el => {
@@ -1217,15 +1221,12 @@ async function translatePatentSection(sectionType) {
     } else if (sectionType === 'description') {
       const descEl = sectionEl.querySelector('.pd-description-text[data-original-text]');
       if (descEl) {
-        descEl.textContent = descEl.dataset.originalText;
+        descEl.innerHTML = renderDescriptionHtml(descEl.dataset.originalText);
         delete descEl.dataset.translated;
       }
     }
     return;
   }
-
-  translateBtn.textContent = '翻译中...';
-  translateBtn.disabled = true;
 
   // Show loading spinner in the section
   const loadingEl = document.createElement('div');
@@ -1285,13 +1286,13 @@ async function translatePatentSection(sectionType) {
     const translated = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content || "翻译失败";
 
     // Remove loading spinner
-    const loadingEl = document.getElementById('pd-translation-loading-' + sectionType);
-    if (loadingEl) loadingEl.remove();
+    const loadingEl2 = document.getElementById('pd-translation-loading-' + sectionType);
+    if (loadingEl2) loadingEl2.remove();
 
     // Show translation result
     const resultDiv = document.createElement('div');
     resultDiv.className = 'pd-translation-result';
-    resultDiv.innerHTML = '<div class="pd-translation-header"><span>AI 翻译结果</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove(); var btn=document.querySelector(\'[data-section-type=' + sectionType + '] .pd-translate-btn\'); if(btn) btn.textContent=\'翻译\';">&times;</button></div><div class="pd-translation-body">' + escapeHtml(translated).replace(/\n/g, '<br>') + '</div>';
+    resultDiv.innerHTML = '<div class="pd-translation-header"><span>AI 翻译结果</span><button class="pd-translation-close" onclick="this.parentElement.parentElement.remove();">&times;</button></div><div class="pd-translation-body">' + escapeHtml(translated).replace(/\n/g, '<br>') + '</div>';
 
     // Append to the section element (works for both tab and collapsible layouts)
     sectionEl.appendChild(resultDiv);
@@ -1320,21 +1321,16 @@ async function translatePatentSection(sectionType) {
       const descEl = sectionEl.querySelector('.pd-description-text');
       if (descEl) {
         if (!descEl.dataset.originalText) {
-          descEl.dataset.originalText = descEl.textContent;
+          descEl.dataset.originalText = patentData.description;
         }
-        descEl.textContent = translated;
+        descEl.innerHTML = renderDescriptionHtml(translated);
         descEl.dataset.translated = 'true';
       }
     }
-
-    translateBtn.textContent = '隐藏翻译';
   } catch (e) {
     showError("翻译失败: " + e.message);
-    translateBtn.textContent = '翻译';
-    const loadingEl = document.getElementById('pd-translation-loading-' + sectionType);
-    if (loadingEl) loadingEl.remove();
-  } finally {
-    translateBtn.disabled = false;
+    const loadingEl3 = document.getElementById('pd-translation-loading-' + sectionType);
+    if (loadingEl3) loadingEl3.remove();
   }
 }
 
@@ -1876,6 +1872,9 @@ function renderPatentPopupContent(data) {
   if (data.publication_date) {
     html += '<div class="pd-info-item"><span class="pd-info-label">公开日期</span><span class="pd-info-value">' + escapeHtml(data.publication_date) + '</span></div>';
   }
+  if (data.priority_date) {
+    html += '<div class="pd-info-item"><span class="pd-info-label">优先权日期</span><span class="pd-info-value">' + escapeHtml(data.priority_date) + '</span></div>';
+  }
   html += '</div></div>';
 
   // CPC Classifications
@@ -1887,6 +1886,40 @@ function renderPatentPopupContent(data) {
       html += '</div>';
     });
     html += '</div></div>';
+  }
+
+  // Landscapes (技术领域)
+  if (data.landscapes && data.landscapes.length > 0) {
+    html += '<div class="pd-section"><div class="pd-section-title">技术领域</div><div class="pd-landscapes">';
+    data.landscapes.forEach(l => {
+      html += '<span class="pd-landscape-tag">' + escapeHtml(l.name) + '</span>';
+    });
+    html += '</div></div>';
+  }
+
+  // Family information (同族信息)
+  if (data.family_id || (data.family_applications && data.family_applications.length > 0) || (data.country_status && data.country_status.length > 0)) {
+    html += '<div class="pd-section">';
+    html += '<div class="pd-section-title">同族信息' + (data.family_id ? ' <span class="pd-family-id">ID: ' + escapeHtml(data.family_id) + '</span>' : '') + '</div>';
+    if (data.family_applications && data.family_applications.length > 0) {
+      html += '<table class="pd-legal-table"><thead><tr><th>公开号</th><th>标题</th><th>状态</th></tr></thead><tbody>';
+      data.family_applications.forEach(fa => {
+        html += '<tr>';
+        html += '<td><a class="pd-patent-link" data-patent="' + escapeHtml(fa.publication_number) + '">' + escapeHtml(fa.publication_number) + '</a></td>';
+        html += '<td>' + escapeHtml(fa.title || "") + '</td>';
+        html += '<td>' + escapeHtml(fa.status || "") + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+    if (data.country_status && data.country_status.length > 0) {
+      html += '<div class="pd-country-status">';
+      data.country_status.forEach(cs => {
+        html += '<span class="pd-country-badge">' + escapeHtml(cs.country_code) + '</span>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
   }
 
   // Drawings
@@ -3575,6 +3608,7 @@ function renderDescriptionHtml(text) {
     /^TECHNICAL FIELD$/i,
     /^BACKGROUND$/i,
     /^BACKGROUND OF THE INVENTION$/i,
+    /^BACKGROUND ART$/i,
     /^SUMMARY$/i,
     /^SUMMARY OF THE INVENTION$/i,
     /^DETAILED DESCRIPTION$/i,
@@ -3583,16 +3617,20 @@ function renderDescriptionHtml(text) {
     /^BRIEF DESCRIPTION OF (?:THE )?DRAWINGS$/i,
     /^EMBODIMENTS?$/i,
     /^DESCRIPTION OF EMBODIMENTS?$/i,
+    /^DISCLOSURE OF THE INVENTION$/i,
+    /^PROBLEMS TO BE SOLVED BY THE INVENTION$/i,
+    /^MEANS FOR SOLVING THE PROBLEMS$/i,
+    /^PRIOR ART REFERENCE$/i,
+    /^PATENT DOCUMENT$/i,
+    /^ADVANTAGEOUS EFFECTS?$/i,
   ];
   // Normalize: ensure ## section headers are preceded by a newline
-  // The backend may collapse whitespace, so "## " could appear inline like "...text. ## TECHNICAL FIELD..."
   let normalized = text.replace(/\s*## /g, '\n## ');
   // Additionally, detect heading patterns in lines that don't have ## markers
-  // and add ## prefix to them
   const lines = normalized.split('\n');
   const processedLines = lines.map(line => {
     const trimmed = line.trim();
-    if (trimmed.startsWith('## ')) return line; // already marked
+    if (trimmed.startsWith('## ')) return line;
     for (const pattern of headingPatterns) {
       if (pattern.test(trimmed)) {
         return '## ' + trimmed;
@@ -3607,7 +3645,7 @@ function renderDescriptionHtml(text) {
   sections.forEach((section, idx) => {
     let sectionText;
     if (idx === 0 && normalized.startsWith('## ')) {
-      sectionText = sections[0].substring(3); // remove leading "## "
+      sectionText = sections[0].substring(3);
     } else {
       sectionText = section;
     }
@@ -3624,7 +3662,13 @@ function renderDescriptionHtml(text) {
       paragraphs.forEach(para => {
         const trimmed = para.trim();
         if (trimmed) {
-          html += '<p>' + escapeHtml(trimmed).replace(/\n/g, '<br>') + '</p>';
+          // Detect paragraph number prefix like [0001]
+          const paraNumMatch = trimmed.match(/^(\[\d+\])\s*(.*)$/);
+          if (paraNumMatch) {
+            html += '<p><span class="pd-para-num">' + escapeHtml(paraNumMatch[1]) + '</span> ' + escapeHtml(paraNumMatch[2]).replace(/\n/g, '<br>') + '</p>';
+          } else {
+            html += '<p>' + escapeHtml(trimmed).replace(/\n/g, '<br>') + '</p>';
+          }
         }
       });
     }

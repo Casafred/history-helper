@@ -570,13 +570,49 @@ function extractPatentFromHtml(html, patentId) {
   if (descSection) {
     let descHtml = descSection[1];
     // Try to extract from ul.description structure (Google Patents format)
+    // Actual GP structure:
+    //   <ul class="description">
+    //     <heading id="h-0001">TECHNICAL FIELD</heading>
+    //     <li> <para-num num="[0001]"> </para-num> <div class="description-line">text</div> </li>
+    //     <heading id="h-0002">BACKGROUND ART</heading>
+    //     <li>...</li>
+    //   </ul>
     const ulDesc = descHtml.match(/<ul[^>]*class="description"[^>]*>([\s\S]*?)<\/ul>/i);
     if (ulDesc) {
-      // Process headings and list items
-      let parts = ulDesc[1].replace(/<heading[^>]*>([\s\S]*?)<\/heading>/gi, '\n\n## $1\n');
-      parts = parts.replace(/<\/li>/gi, '\n');
-      parts = parts.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      htmlResult.description = parts;
+      const ulContent = ulDesc[1];
+      const parts = [];
+      // Match <heading> and <li> elements in document order
+      const elementRegex = /<(heading|li)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+      let elemMatch;
+      while ((elemMatch = elementRegex.exec(ulContent)) !== null) {
+        const tag = elemMatch[1].toLowerCase();
+        const content = elemMatch[2];
+        if (tag === 'heading') {
+          const headingText = content.replace(/<[^>]+>/g, "").trim();
+          if (headingText) parts.push('## ' + headingText);
+        } else if (tag === 'li') {
+          // Extract paragraph number from <para-num num="[0001]">
+          const paraNumMatch = content.match(/<para-num[^>]*num="(\[[^\]]*\])"[^>]*>/i);
+          const paraNum = paraNumMatch ? paraNumMatch[1] : "";
+          // Extract description-line div content (preferred), or fallback to full li content
+          const descLineMatch = content.match(/<div[^>]*class="description-line"[^>]*>([\s\S]*?)<\/div>/i);
+          let paraText = descLineMatch ? descLineMatch[1] : content;
+          // Clean: remove figure-callout tags but keep inner text, strip other tags
+          paraText = paraText
+            .replace(/<\/?figure-callout[^>]*>/gi, '')
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&nbsp;/gi, " ")
+            .replace(/&amp;/gi, "&")
+            .replace(/&lt;/gi, "<")
+            .replace(/&gt;/gi, ">")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (paraText) {
+            parts.push(paraNum ? paraNum + ' ' + paraText : paraText);
+          }
+        }
+      }
+      htmlResult.description = parts.join('\n\n');
     } else {
       // Try description-paragraph divs
       // Semantic HTML tags (<technical-field>, <background-art>, <disclosure>, etc.) are the

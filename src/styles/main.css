@@ -2452,7 +2452,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: var(--shadow-lg);
-  z-index: 1000;
+  z-index: 100100;
   min-width: 180px;
   padding: 4px;
 }
@@ -5064,6 +5064,15 @@ body {
   margin-bottom: 6px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
+}
+
+.pd-para-num {
+  display: inline-block;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 12px;
+  margin-right: 2px;
+  user-select: none;
 }
 
 
