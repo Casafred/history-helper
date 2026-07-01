@@ -457,9 +457,9 @@ async function searchPatentDetail(input) {
   const raw = input.trim().toUpperCase().replace(/[\s\/]/g, "");
   if (!raw) { showError("请输入专利号"); return; }
 
-  // Check if we already have a full cache entry for this patent
+  // 审查文档模式下的缓存恢复（专利原文模式不应恢复 kanbanState 缓存，否则拦截了 GP 查询）
   const cachedEntry = PatentCache.get(raw);
-  if (cachedEntry && cachedEntry.kanbanState) {
+  if (cachedEntry && cachedEntry.kanbanState && searchMode === "dossier") {
     // Restore from cache instead of re-fetching from API
     if (currentData) {
       const currentPatent = currentData.raw || (currentData.office + currentData.applicationNumber);
@@ -752,11 +752,16 @@ function openInAppWebview(url, title) {
   const popoutBtn = document.getElementById("pd-wv-popout-btn");
   if (popoutBtn) {
     popoutBtn.addEventListener("click", function() {
-      const popoutUrl = location.origin + "/popout.html?url=" + encodeURIComponent(_currentWebviewUrl) + "&title=" + encodeURIComponent(title || url);
-      const opened = window.open(popoutUrl, "_blank", "width=1100,height=800");
-      // 浏览器环境若被拦截则回退到外部打开；Electron 由 setWindowOpenHandler 接管
-      if (!opened && !window.electronAPI) {
-        window.open(_currentWebviewUrl, "_blank");
+      if (window.electronAPI && typeof window.electronAPI.openPopoutWindow === "function") {
+        // Electron：IPC 直连，主进程创建窗口并加载 popout.html
+        window.electronAPI.openPopoutWindow(_currentWebviewUrl, title || url);
+      } else {
+        // 浏览器环境：回退到 window.open
+        const popoutUrl = location.origin + "/popout.html?url=" + encodeURIComponent(_currentWebviewUrl) + "&title=" + encodeURIComponent(title || url);
+        const opened = window.open(popoutUrl, "_blank", "width=1100,height=800");
+        if (!opened) {
+          window.open(_currentWebviewUrl, "_blank");
+        }
       }
       closeInAppWebview();
     });
@@ -6782,23 +6787,30 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
     wrapper.appendChild(annotLayer);
 
     if (pageBlocks.length > 0) {
-      // 用 PDF 页面原始尺寸（scale=1 viewport）作为基准计算 scaleX/Y，
-      // 而非缓存的 pageDimensions（缓存恢复时可能由 bbox 估算，与实际不符导致错位）
-      const baseViewport = page.getViewport({ scale: 1.0 });
-      const scaleX = viewport.width / baseViewport.width;
-      const scaleY = viewport.height / baseViewport.height;
+      // OCR bbox 坐标系：基于 OCR 引擎内部像素分辨率（如 PaddleOCR 用原始图像像素，
+      // GLM OCR 用归一化坐标乘以页面像素宽高），与 PDF 点(72DPI)坐标系不同。
+      // 必须先通过 pageDimensions 归一化到 [0,1]，再映射到 viewport 的 CSS 像素。
+      const pd = pageDimensions[pageNum];
+      const ocrW = (pd && pd.width) || 0;
+      const ocrH = (pd && pd.height) || 0;
+      const useOcrDims = ocrW > 0 && ocrH > 0;
 
       pageBlocks.forEach(b => {
-        if (!b.bbox) return;
+        if (!b.bbox || !useOcrDims) return;
         const [x1, y1, x2, y2] = b.bbox;
+        // 将 OCR 像素坐标归一化到 [0,1]，再映射到 viewport CSS 像素
+        const cx1 = (x1 / ocrW) * viewport.width;
+        const cy1 = (y1 / ocrH) * viewport.height;
+        const cw = ((x2 - x1) / ocrW) * viewport.width;
+        const ch = ((y2 - y1) / ocrH) * viewport.height;
         const overlay = document.createElement("div");
         overlay.className = "pdf-block-overlay";
         overlay.dataset.blockId = b.block_id;
         overlay.dataset.label = b.label || "text";
-        overlay.style.left = (x1 * scaleX) + "px";
-        overlay.style.top = (y1 * scaleY) + "px";
-        overlay.style.width = ((x2 - x1) * scaleX) + "px";
-        overlay.style.height = ((y2 - y1) * scaleY) + "px";
+        overlay.style.left = cx1 + "px";
+        overlay.style.top = cy1 + "px";
+        overlay.style.width = cw + "px";
+        overlay.style.height = ch + "px";
 
         const tooltip = document.createElement("div");
         tooltip.className = "pdf-block-tooltip";
