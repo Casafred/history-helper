@@ -2552,6 +2552,89 @@ body {
   border-radius: 2px;
 }
 
+/* 划线拖拽预览（一条直线） */
+.pdf-annot-drag-line {
+  position: absolute;
+  display: none;
+  height: 2px;
+  background: #f44336;
+  transform-origin: 0 0;
+  pointer-events: none;
+  z-index: 50;
+}
+
+/* 隐藏 OCR 文本框（便于标注） */
+.reader-pdf-container.pdf-ocr-hidden .pdf-block-overlay {
+  display: none !important;
+}
+
+/* 非标注模式：标注元素可接收鼠标事件，便于拖动移动位置 */
+.reader-pdf-container:not(.pdf-annot-mode) .pdf-annot {
+  pointer-events: auto;
+  cursor: move;
+}
+.reader-pdf-container:not(.pdf-annot-mode) .pdf-annot-note {
+  cursor: move;
+}
+/* 标注模式下：标注元素不拦截事件，便于在其上方绘制新标注 */
+.reader-pdf-container.pdf-annot-mode .pdf-annot {
+  pointer-events: none;
+}
+
+/* 划线标注元素：一条可拖动的直线 */
+.pdf-annot.pdf-annot-underline {
+  height: 2px !important;
+  background: #f44336;
+  transform-origin: 0 0;
+  border-bottom: none !important;
+}
+
+/* 注释输入弹窗 */
+.pdf-annot-note-modal {
+  position: fixed;
+  z-index: 100002;
+  background: #fff;
+  border: 1px solid #d8dce6;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  padding: 14px;
+  width: 320px;
+  font-size: 13px;
+  color: #1a1d27;
+}
+.pdf-annot-note-modal-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.pdf-annot-note-modal textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  resize: vertical;
+  font-family: inherit;
+}
+.pdf-annot-note-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+.pdf-annot-note-modal-actions button {
+  padding: 5px 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid #ccc;
+}
+.pdf-annot-note-modal-actions .pdf-annot-note-ok {
+  background: var(--accent, #4f8ff7);
+  color: #fff;
+  border-color: var(--accent, #4f8ff7);
+}
+
 .pdf-selection-info {
   display: inline-block;
   padding: 2px 8px;
