@@ -7638,10 +7638,6 @@ async function exportPdfWithAnnotations() {
     showError("请先打开一个 PDF 文档");
     return;
   }
-  if (typeof window.PDFLib === "undefined") {
-    showError("PDF 导出库（pdf-lib）未加载，无法导出");
-    return;
-  }
   const docKey = _getCurrentPdfAnnotKey();
   const annots = (docKey && pdfViewState.annotList[docKey]) || [];
   if (annots.length === 0) {
@@ -7662,21 +7658,47 @@ async function exportPdfWithAnnotations() {
     const resp = await fetch(pdfUrl, { headers: { "Accept": "application/pdf,*/*" } });
     if (!resp.ok) throw new Error("PDF 下载失败: HTTP " + resp.status);
     const pdfBytes = await resp.arrayBuffer();
+    const patentNum = (currentData && (currentData.raw || currentData.applicationNumber || currentData.docNumber)) || "patent";
+    const docTitle = (it.name || it.docDesc || it.documentDescription || it.description || it.docId || ("doc_" + idx));
 
+    // Electron 环境：通过 IPC 委托主进程导出（主进程有 fontkit，可靠）
+    if (window.electronAPI && typeof window.electronAPI.exportPdfWithAnnotations === "function") {
+      const result = await window.electronAPI.exportPdfWithAnnotations({
+        pdfBytes: pdfBytes,
+        annots: annots,
+        patentNum: patentNum,
+        docTitle: docTitle,
+      });
+      if (!result || !result.success) throw new Error(result.error || "主进程导出失败");
+      const out = Uint8Array.from(atob(result.data), c => c.charCodeAt(0));
+      const blob = new Blob([out], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeName = (patentNum + "_" + docTitle).replace(/[\\/:*?"<>|]/g, "_").slice(0, 120);
+      a.download = safeName + ".pdf";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      if (exportBtn) { exportBtn.disabled = false; exportBtn.textContent = origText; }
+      return;
+    }
+
+    // 浏览器环境：客户端导出（依赖 window.fontkit UMD）
+    if (typeof window.PDFLib === "undefined") {
+      throw new Error("PDF 导出库（pdf-lib）未加载");
+    }
     const { PDFDocument, rgb } = window.PDFLib;
     const pdfDoc = await PDFDocument.load(pdfBytes);
-    // 嵌入自定义字体（NotoSansSC）必须注册 fontkit，否则 embedFont 抛错
-    // 优先从 Electron preload 暴露的 getFontkit 获取（sandbox 下 UMD 脚本可能无法挂载 window.fontkit）
-    const fk = (window.electronAPI && typeof window.electronAPI.getFontkit === "function" && window.electronAPI.getFontkit())
-      || window.fontkit || null;
-    if (fk) {
-      pdfDoc.registerFontkit(fk);
+
+    if (window.fontkit) {
+      pdfDoc.registerFontkit(window.fontkit);
     } else {
       console.warn("[PDF导出] fontkit 未加载，中文注释文字将无法导出");
     }
     const pages = pdfDoc.getPages();
 
-    // 注释文字可能含中日韩字符，嵌入 NotoSansSC 字体（自动子集化）
     let cjkFont = null;
     const hasNoteText = annots.some(a => a.type === "note" && a.text);
     if (hasNoteText) {
@@ -7698,7 +7720,6 @@ async function exportPdfWithAnnotations() {
       const col = rgb(c.r / 255, c.g / 255, c.b / 255);
 
       if (annot.type === "highlight") {
-        // 高亮：红色边框 + 低透明度填充
         const x1 = Math.min(annot.x1, annot.x2);
         const x2 = Math.max(annot.x1, annot.x2);
         const y1 = Math.min(annot.y1, annot.y2);
@@ -7709,20 +7730,16 @@ async function exportPdfWithAnnotations() {
           color: col, opacity: 0.12,
         });
       } else if (annot.type === "underline") {
-        // 划线：从 (x1,y1) 到 (x2,y2) 的直线（支持任意角度）
         page.drawLine({
           start: { x: annot.x1, y: annot.y1 },
           end: { x: annot.x2, y: annot.y2 },
-          thickness: 2,
-          color: col,
+          thickness: 2, color: col,
         });
       } else if (annot.type === "arrow") {
-        // 箭头：主线 + 箭头头部两条短线
         page.drawLine({
           start: { x: annot.x1, y: annot.y1 },
           end: { x: annot.x2, y: annot.y2 },
-          thickness: 2,
-          color: col,
+          thickness: 2, color: col,
         });
         const angle = Math.atan2(annot.y2 - annot.y1, annot.x2 - annot.x1);
         const headLen = 10;
@@ -7734,26 +7751,22 @@ async function exportPdfWithAnnotations() {
         page.drawLine({ start: { x: annot.x2, y: annot.y2 }, end: { x: hx1, y: hy1 }, thickness: 2, color: col });
         page.drawLine({ start: { x: annot.x2, y: annot.y2 }, end: { x: hx2, y: hy2 }, thickness: 2, color: col });
       } else if (annot.type === "note") {
-        // 注释：仅绘制文字（无背景、无边框）
         if (annot.text && cjkFont) {
           const fontSize = annot.fontSize || 14;
           const maxWidth = Math.max(40, Math.abs(annot.x2 - annot.x1));
-          // 支持多行：按 \n 拆分，每行从基线向下偏移
           const lines = annot.text.split("\n");
           const lineHeight = fontSize * 1.3;
-          // annot.y2 是文字框顶部（较高 Y），第一行基线在 y2 - fontSize
           const baseY = annot.y2 - fontSize;
           for (let li = 0; li < lines.length; li++) {
             const lineY = baseY - li * lineHeight;
-            if (lineY < annot.y1) break; // 超出框底则停止
+            if (lineY < annot.y1) break;
             try {
               page.drawText(lines[li], {
                 x: annot.x1, y: lineY,
                 size: fontSize, font: cjkFont,
-                color: col,
-                maxWidth: maxWidth,
+                color: col, maxWidth: maxWidth,
               });
-            } catch (e) { /* 个别字符无法编码时跳过该行 */ }
+            } catch (e) { /* 无法编码的字符跳过 */ }
           }
         }
       }
@@ -7764,9 +7777,6 @@ async function exportPdfWithAnnotations() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    // 文件名 = 专利号 + 文档标题
-    const patentNum = (currentData && (currentData.raw || currentData.applicationNumber || currentData.docNumber)) || "patent";
-    const docTitle = (it.name || it.docDesc || it.documentDescription || it.description || it.docId || ("doc_" + idx));
     const safeName = (patentNum + "_" + docTitle).replace(/[\\/:*?"<>|]/g, "_").slice(0, 120);
     a.download = safeName + ".pdf";
     document.body.appendChild(a);

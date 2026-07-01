@@ -103,6 +103,7 @@ function findCjkFont() {
 
 let mainWindow;
 let server;
+let _serverPort = null;  // 本地 HTTP 服务端口，供 createPopoutWindow 使用
 
 function getSrcDir() {
   return path.join(__dirname, "src");
@@ -1323,56 +1324,11 @@ function createWindow(port) {
   mainWindow.on("closed", () => { mainWindow = null; });
 }
 
-// 弹出独立窗口：用于 GP / espacenet 原文对照查看，启用 webview 标签以绕过 X-Frame-Options
-// 直接在窗口中写入 HTML+webview，不依赖 HTTP 服务（彻底避免 404）
-function createPopoutWindow(targetUrl, title) {
-  console.log("[Electron] createPopoutWindow targetUrl=" + targetUrl + ", title=" + title);
-  const safeTitle = (title || targetUrl || "专利原文查看").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  const safeUrl = targetUrl.replace(/"/g, "&quot;").replace(/</g, "&lt;");
-
-  const html = `<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><title>${safeTitle}</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#fff}
-  #po-header{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f5f7fa;border-bottom:1px solid #d8dce6;flex-shrink:0}
-  #po-title{font-size:13px;color:#1a1d27;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .po-btn{cursor:pointer;border:1px solid #bbb;background:#fff;color:#333;font-size:12px;padding:4px 12px;border-radius:4px;transition:all 0.2s;white-space:nowrap;text-decoration:none;display:inline-block}
-  .po-btn:hover{background:#4f8ff7;color:#fff;border-color:#4f8ff7}
-  webview{width:100%;height:calc(100vh - 49px);border:none}
-  .po-loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#888;font-size:14px}
-</style></head><body>
-<div id="po-header">
-  <div id="po-title">${safeTitle}</div>
-  <button id="po-refresh" class="po-btn" title="刷新页面">刷新</button>
-  <a id="po-external" class="po-btn" href="${safeUrl}" target="_blank" rel="noopener" title="在外部浏览器打开">外部打开</a>
-  <button id="po-close" class="po-btn" title="关闭窗口">关闭</button>
-</div>
-<webview src="${safeUrl}" allowpopups></webview>
-<div class="po-loading" id="po-loading">正在加载...</div>
-<script>
-(function(){
-  var wv=document.querySelector("webview");
-  var ld=document.getElementById("po-loading");
-  var refreshBtn=document.getElementById("po-refresh");
-  var closeBtn=document.getElementById("po-close");
-  var extLink=document.getElementById("po-external");
-  if(wv){
-    wv.addEventListener("did-stop-loading",function(){if(ld)ld.remove();});
-    wv.addEventListener("did-fail-load",function(e){
-      if(e&&e.errorCode===-3)return;
-      if(ld)ld.textContent="加载失败，可点击「外部打开」在浏览器中查看";
-    });
-  }
-  if(refreshBtn)refreshBtn.addEventListener("click",function(){if(wv)try{wv.reload();}catch(e){wv.loadURL("${safeUrl}");}});
-  if(closeBtn)closeBtn.addEventListener("click",function(){window.close();});
-  if(extLink)extLink.addEventListener("click",function(e){
-    if(window.electronAPI){e.preventDefault();window.electronAPI.openExternal("${safeUrl}");}
-  });
-  setTimeout(function(){if(ld&&ld.parentNode)ld.textContent="页面加载较慢，请稍候…";},15000);
-})();
-</script></body></html>`;
-
+// 弹出独立窗口：用于 GP / espacenet 原文对照查看
+// 通过本地 HTTP 服务器加载 popout.html（webview 标签需要 http:// 源，data: URL 不支持）
+function createPopoutWindow(targetUrl, title, port) {
+  console.log("[Electron] createPopoutWindow targetUrl=" + targetUrl + ", title=" + title + ", port=" + port);
+  const popoutUrl = `http://127.0.0.1:${port}/popout.html?url=${encodeURIComponent(targetUrl)}&title=${encodeURIComponent(title || targetUrl)}`;
   const win = new BrowserWindow({
     width: 1100,
     height: 800,
@@ -1384,8 +1340,10 @@ function createPopoutWindow(targetUrl, title) {
       webviewTag: true,
     },
   });
-  // 使用 data URL 加载 HTML，完全不依赖本地 HTTP 服务
-  win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+  win.loadURL(popoutUrl);
+  win.webContents.on("did-fail-load", (_e, errorCode, errorDescription) => {
+    console.error("[Electron] popout did-fail-load", errorCode, errorDescription, "url=" + popoutUrl);
+  });
   return win;
 }
 
@@ -1407,12 +1365,102 @@ app.whenReady().then(async () => {
 
   // IPC: 渲染进程请求创建弹出窗口（直连，不依赖 window.open → setWindowOpenHandler 链路）
   ipcMain.on("open-popout-window", (_event, targetUrl, title) => {
-    if (typeof targetUrl === "string") {
-      createPopoutWindow(targetUrl, title);
+    if (typeof targetUrl === "string" && _serverPort) {
+      createPopoutWindow(targetUrl, title, _serverPort);
+    }
+  });
+
+  // IPC: 渲染进程请求导出含标注的 PDF（主进程执行，fontkit 可靠可用）
+  ipcMain.handle("export-pdf-annotations", async (_event, { pdfBytes, annots, patentNum, docTitle }) => {
+    try {
+      const pdfDoc = await PDFDocument.load(Buffer.from(pdfBytes));
+      pdfDoc.registerFontkit(fontkit);
+
+      // 加载 CJK 字体（用于注释文字）
+      let cjkFont = null;
+      const hasNoteText = annots.some(a => a.type === "note" && a.text);
+      if (hasNoteText) {
+        const cjkFontPath = findCjkFont();
+        if (cjkFontPath) {
+          try {
+            const fontBytes = fs.readFileSync(cjkFontPath);
+            cjkFont = await pdfDoc.embedFont(fontBytes, { subset: true });
+            console.log("[ExportPDF] 加载 CJK 字体:", cjkFontPath);
+          } catch (e) { console.warn("[ExportPDF] CJK 字体加载失败:", e.message); }
+        }
+      }
+
+      const pages = pdfDoc.getPages();
+      for (const annot of annots) {
+        const page = pages[annot.page - 1];
+        if (!page) continue;
+        const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(annot.color || "");
+        const cr = m ? parseInt(m[1], 16) / 255 : 229 / 255;
+        const cg = m ? parseInt(m[2], 16) / 255 : 57 / 255;
+        const cb = m ? parseInt(m[3], 16) / 255 : 53 / 255;
+        const col = rgb(cr, cg, cb);
+
+        if (annot.type === "highlight") {
+          const x1 = Math.min(annot.x1, annot.x2);
+          const x2 = Math.max(annot.x1, annot.x2);
+          const y1 = Math.min(annot.y1, annot.y2);
+          const y2 = Math.max(annot.y1, annot.y2);
+          page.drawRectangle({
+            x: x1, y: y1, width: x2 - x1, height: y2 - y1,
+            borderColor: col, borderWidth: 2,
+            color: col, opacity: 0.12,
+          });
+        } else if (annot.type === "underline") {
+          page.drawLine({
+            start: { x: annot.x1, y: annot.y1 },
+            end: { x: annot.x2, y: annot.y2 },
+            thickness: 2, color: col,
+          });
+        } else if (annot.type === "arrow") {
+          page.drawLine({
+            start: { x: annot.x1, y: annot.y1 },
+            end: { x: annot.x2, y: annot.y2 },
+            thickness: 2, color: col,
+          });
+          const angle = Math.atan2(annot.y2 - annot.y1, annot.x2 - annot.x1);
+          const headLen = 10;
+          const headAngle = 0.4;
+          const hx1 = annot.x2 - headLen * Math.cos(angle - headAngle);
+          const hy1 = annot.y2 - headLen * Math.sin(angle - headAngle);
+          const hx2 = annot.x2 - headLen * Math.cos(angle + headAngle);
+          const hy2 = annot.y2 - headLen * Math.sin(angle + headAngle);
+          page.drawLine({ start: { x: annot.x2, y: annot.y2 }, end: { x: hx1, y: hy1 }, thickness: 2, color: col });
+          page.drawLine({ start: { x: annot.x2, y: annot.y2 }, end: { x: hx2, y: hy2 }, thickness: 2, color: col });
+        } else if (annot.type === "note" && annot.text && cjkFont) {
+          const fontSize = annot.fontSize || 14;
+          const maxWidth = Math.max(40, Math.abs(annot.x2 - annot.x1));
+          const lines = annot.text.split("\n");
+          const lineHeight = fontSize * 1.3;
+          const baseY = annot.y2 - fontSize;
+          for (let li = 0; li < lines.length; li++) {
+            const lineY = baseY - li * lineHeight;
+            if (lineY < annot.y1) break;
+            try {
+              page.drawText(lines[li], {
+                x: annot.x1, y: lineY,
+                size: fontSize, font: cjkFont,
+                color: col, maxWidth: maxWidth,
+              });
+            } catch (e) { /* 无法编码的字符跳过 */ }
+          }
+        }
+      }
+
+      const out = await pdfDoc.save();
+      return { success: true, data: Buffer.from(out).toString("base64") };
+    } catch (e) {
+      console.error("[ExportPDF] 导出失败:", e);
+      return { success: false, error: e.message };
     }
   });
 
   const port = await startServer();
+  _serverPort = port;
   createWindow(port);
 
   app.on("activate", () => {
