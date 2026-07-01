@@ -2648,6 +2648,91 @@ body {
   border-color: var(--accent, #4f8ff7);
 }
 
+/* ===== AI 思考过程区（reasoning_content 流式展示） ===== */
+.ai-thinking-block {
+  margin: 8px 0 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.ai-thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--bg-card);
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+.ai-thinking-block:not(.collapsed) .ai-thinking-header {
+  border-bottom-color: var(--border);
+}
+.ai-thinking-header:hover { background: var(--bg-hover); }
+.ai-thinking-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+.ai-thinking-title {
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+}
+.ai-thinking-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ai-thinking-toggle {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+}
+.ai-thinking-block.collapsed .ai-thinking-toggle {
+  transform: rotate(-90deg);
+}
+.ai-thinking-body {
+  padding: 8px 12px 10px 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+}
+.ai-thinking-block.collapsed .ai-thinking-body {
+  display: none;
+}
+.ai-thinking-body::-webkit-scrollbar { width: 6px; }
+.ai-thinking-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+/* 思考中的脉冲动画（标题上的小圆点） */
+.ai-thinking-block.thinking .ai-thinking-icon::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+  animation: ai-thinking-pulse 1.2s ease-in-out infinite;
+}
+@keyframes ai-thinking-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+/* 阅读器/对话气泡里思考区更紧凑 */
+.chat-msg .ai-thinking-block,
+.patent-ask-msg .ai-thinking-block,
+.reader-content .ai-thinking-block {
+  margin: 4px 0 8px 0;
+}
+.patent-ask-msg.user .ai-thinking-block { display: none; }
+
 .pdf-selection-info {
   display: inline-block;
   padding: 2px 8px;

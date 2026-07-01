@@ -3754,19 +3754,42 @@ async function runPatentInterpretation(source) {
       temperature: 0.3,
       maxTokens: 2048,
     });
+    // 准备思考区 + 回答区（contentEl 整体作为 host）
+    contentEl.innerHTML = "";
+    const answerEl = document.createElement("div");
+    answerEl.className = "markdown-body";
+    contentEl.appendChild(answerEl);
+    const thinkingHost = _createThinkingHost(contentEl);
+    let contentStarted = false;
     let renderRaf = null;
     for await (const chunk of stream) {
+      if (chunk.reasoningContent && thinkingHost) {
+        thinkingHost.appendReasoning(chunk.reasoningContent);
+      }
       if (chunk.content) {
+        if (!contentStarted) {
+          contentStarted = true;
+          if (thinkingHost) thinkingHost.startContent();
+          // 移除占位提示
+          const hint = contentEl.querySelector(".pd-ai-interpret-hint");
+          if (hint) hint.remove();
+        }
         acc += chunk.content;
         if (!renderRaf) {
           renderRaf = requestAnimationFrame(() => {
             renderRaf = null;
-            contentEl.innerHTML = renderMarkdown(acc) || '<p class="pd-ai-interpret-hint">…</p>';
+            answerEl.innerHTML = renderMarkdown(acc) || '<p class="pd-ai-interpret-hint">…</p>';
           });
         }
       }
     }
-    contentEl.innerHTML = renderMarkdown(acc) || '<p class="pd-ai-interpret-hint">未返回内容</p>';
+    if (thinkingHost) thinkingHost.finish();
+    if (!contentStarted) {
+      // 全程只有 reasoning 没有 content（罕见），保留思考区，给出提示
+      answerEl.innerHTML = '<p class="pd-ai-interpret-hint">未返回内容</p>';
+    } else {
+      answerEl.innerHTML = renderMarkdown(acc) || '<p class="pd-ai-interpret-hint">未返回内容</p>';
+    }
   } catch (e) {
     contentEl.innerHTML = '<p class="pd-ai-interpret-hint">解读失败：' + escapeHtml(e && e.message ? e.message : String(e)) + '</p>';
   } finally {
@@ -3929,19 +3952,48 @@ async function sendPatentAsk() {
       temperature: 0.3,
       maxTokens: 4096,
     });
+    // 思考区挂在消息气泡内（contentEl 作为 host）
+    const thinkingHost = _createThinkingHost(contentEl);
+    let contentStarted = false;
     let renderRaf = null;
     for await (const chunk of stream) {
+      if (chunk.reasoningContent && thinkingHost) {
+        thinkingHost.appendReasoning(chunk.reasoningContent);
+      }
       if (chunk.content) {
+        if (!contentStarted) {
+          contentStarted = true;
+          if (thinkingHost) thinkingHost.startContent();
+        }
         acc += chunk.content;
         if (!renderRaf) {
           renderRaf = requestAnimationFrame(() => {
             renderRaf = null;
-            if (contentEl) contentEl.innerHTML = renderMarkdown(acc);
+            // 保留思考区，只更新回答文本节点
+            if (contentEl) {
+              // 把回答放到一个独立的 .patent-ask-answer 里
+              let answerEl = contentEl.querySelector(":scope > .patent-ask-answer");
+              if (!answerEl) {
+                answerEl = document.createElement("div");
+                answerEl.className = "patent-ask-answer markdown-body";
+                contentEl.appendChild(answerEl);
+              }
+              answerEl.innerHTML = renderMarkdown(acc);
+            }
           });
         }
       }
     }
-    if (contentEl) contentEl.innerHTML = renderMarkdown(acc) || "（未返回内容）";
+    if (thinkingHost) thinkingHost.finish();
+    if (contentEl) {
+      let answerEl = contentEl.querySelector(":scope > .patent-ask-answer");
+      if (!answerEl) {
+        answerEl = document.createElement("div");
+        answerEl.className = "patent-ask-answer markdown-body";
+        contentEl.appendChild(answerEl);
+      }
+      answerEl.innerHTML = renderMarkdown(acc) || "（未返回内容）";
+    }
     _patentAskMessages.push({ role: "assistant", content: acc });
     _savePatentAskCache(); // 流式完成后持久化对话
   } catch (e) {
@@ -4936,6 +4988,12 @@ async function runCitedRefsAnalysis(selectedIdxs) {
 
     analysisContent.innerHTML = '<div class="kanban-analysis-content markdown-body"></div>';
     const streamContainer = analysisContent.querySelector(".kanban-analysis-content");
+    // 思考区 + 回答区分层，避免 innerHTML 覆盖思考区
+    const answerContainer = document.createElement("div");
+    answerContainer.className = "kanban-analysis-answer";
+    streamContainer.appendChild(answerContainer);
+    const thinkingHost = _createThinkingHost(streamContainer);
+    let _citedContentStarted = false;
     let fullText = "";
     let _streamRafPending = false;
     let _lastRenderLen = 0;
@@ -4952,13 +5010,20 @@ async function runCitedRefsAnalysis(selectedIdxs) {
       },
       citedRefsAbortController ? citedRefsAbortController.signal : undefined
     )) {
+      if (chunk.reasoningContent && thinkingHost) {
+        thinkingHost.appendReasoning(chunk.reasoningContent);
+      }
       if (chunk.content) {
+        if (!_citedContentStarted) {
+          _citedContentStarted = true;
+          if (thinkingHost) thinkingHost.startContent();
+        }
         fullText += chunk.content;
         if (!_streamRafPending && (fullText.length - _lastRenderLen > 20 || fullText.length < 200)) {
           _streamRafPending = true;
           requestAnimationFrame(() => {
-            if (streamContainer) {
-              streamContainer.innerHTML = marked.parse(fullText);
+            if (answerContainer) {
+              answerContainer.innerHTML = marked.parse(fullText);
             }
             _lastRenderLen = fullText.length;
             _streamRafPending = false;
@@ -4966,8 +5031,9 @@ async function runCitedRefsAnalysis(selectedIdxs) {
         }
       }
     }
+    if (thinkingHost) thinkingHost.finish();
     // Final render
-    if (streamContainer) streamContainer.innerHTML = marked.parse(fullText);
+    if (answerContainer) answerContainer.innerHTML = marked.parse(fullText);
 
     kanbanState.citedRefsAnalysis = fullText;
     kanbanState.hasUnsavedWork = true;
@@ -5149,6 +5215,76 @@ if (citedRefsManualBtn) {
       await runCitedRefsAnalysis(selectedIdxs);
     });
   });
+}
+
+// ── AI 思考过程（reasoning_content）流式渲染助手 ──
+// 在 hostEl 内创建/复用一个 .ai-thinking-block，并把 reasoning 实时写进去；
+// 当首个 content token 到达时，把思考区折叠为"已思考 Ns"，并调用 onContent(text) 渲染主回答。
+// 返回 { appendReasoning(txt), startContent(), finish() } 用于驱动流循环。
+function _createThinkingHost(hostEl) {
+  if (!hostEl) return null;
+  // 复用已存在的思考区（例如模块重新生成场景下容器已含思考区）
+  let block = hostEl.querySelector(":scope > .ai-thinking-block");
+  if (!block) {
+    block = document.createElement("div");
+    block.className = "ai-thinking-block thinking";
+    block.innerHTML =
+      '<div class="ai-thinking-header">' +
+        '<span class="ai-thinking-icon">🧠</span>' +
+        '<span class="ai-thinking-title">思考中…</span>' +
+        '<span class="ai-thinking-meta"></span>' +
+        '<span class="ai-thinking-toggle">▼</span>' +
+      '</div>' +
+      '<div class="ai-thinking-body"></div>';
+    hostEl.insertBefore(block, hostEl.firstChild);
+    const header = block.querySelector(".ai-thinking-header");
+    header.addEventListener("click", () => block.classList.toggle("collapsed"));
+  }
+  const body = block.querySelector(".ai-thinking-body");
+  const titleEl = block.querySelector(".ai-thinking-title");
+  const metaEl = block.querySelector(".ai-thinking-meta");
+  block.classList.add("thinking");
+  block.classList.remove("collapsed");
+  titleEl.textContent = "思考中…";
+  metaEl.textContent = "";
+  body.textContent = "";
+  const startTime = performance.now();
+  let _rafPending = false;
+  let _pendingText = "";
+  return {
+    block: block,
+    appendReasoning(txt) {
+      if (!txt) return;
+      _pendingText += txt;
+      if (!_rafPending) {
+        _rafPending = true;
+        requestAnimationFrame(() => {
+          _rafPending = false;
+          // 用 textContent + 末尾追加，避免 reasoning 内 markdown 标记被打断渲染
+          body.textContent = body.textContent + _pendingText;
+          _pendingText = "";
+          // 自动滚到底
+          body.scrollTop = body.scrollHeight;
+        });
+      }
+    },
+    startContent() {
+      // 第一个正式 token 到达：折叠思考区，显示已思考时长
+      const elapsed = Math.max(1, Math.round((performance.now() - startTime) / 1000));
+      block.classList.remove("thinking");
+      block.classList.add("collapsed");
+      titleEl.textContent = "已思考";
+      metaEl.textContent = elapsed + "s · 点击展开";
+    },
+    finish() {
+      // 流结束：若全程无 reasoning（普通模型），移除思考区
+      if (!body.textContent) {
+        if (block.parentNode) block.parentNode.removeChild(block);
+      } else {
+        block.classList.remove("thinking");
+      }
+    },
+  };
 }
 
 // ── AI Analysis Progress Bar UI ──
@@ -5564,6 +5700,13 @@ function buildReviewManualSelectPanel() {
       const streamContainer = document.createElement("div");
       streamContainer.className = "kanban-analysis-content markdown-body";
       analysisContent.appendChild(streamContainer);
+      // 思考区挂在 streamContainer 内（renderMarkdownWithTrace 只会改 innerHTML，需保留思考区）
+      // 为避免被覆盖，把回答放到内层 .kanban-analysis-answer
+      const answerContainer = document.createElement("div");
+      answerContainer.className = "kanban-analysis-answer";
+      streamContainer.appendChild(answerContainer);
+      const thinkingHost = _createThinkingHost(streamContainer);
+      let _streamContentStarted = false;
       let _streamRafPending = false;
       let _lastRenderLen = 0;
       for await (const chunk of window.AI.streamChat(
@@ -5579,17 +5722,23 @@ function buildReviewManualSelectPanel() {
         },
         kanbanAutoAbortController ? kanbanAutoAbortController.signal : undefined
       )) {
+        if (chunk.reasoningContent && thinkingHost) {
+          if (progressPlaceholder.parentNode) progressPlaceholder.remove();
+          thinkingHost.appendReasoning(chunk.reasoningContent);
+        }
         if (chunk.content) {
-          if (progressPlaceholder.parentNode) {
-            progressPlaceholder.remove();
+          if (!_streamContentStarted) {
+            _streamContentStarted = true;
+            if (progressPlaceholder.parentNode) progressPlaceholder.remove();
+            if (thinkingHost) thinkingHost.startContent();
           }
           fullText += chunk.content;
           // Throttle rendering: only render if enough new content or enough time passed
           if (!_streamRafPending && (fullText.length - _lastRenderLen > 20 || fullText.length < 200)) {
             _streamRafPending = true;
             requestAnimationFrame(() => {
-              if (streamContainer) {
-                streamContainer.innerHTML = renderMarkdownWithTrace(fullText);
+              if (answerContainer) {
+                answerContainer.innerHTML = renderMarkdownWithTrace(fullText);
               }
               _lastRenderLen = fullText.length;
               _streamRafPending = false;
@@ -5597,8 +5746,9 @@ function buildReviewManualSelectPanel() {
           }
         }
       }
+      if (thinkingHost) thinkingHost.finish();
       // Final render to ensure all content is displayed (with module sections)
-      if (streamContainer) streamContainer.innerHTML = renderAnalysisModules(fullText);
+      if (answerContainer) answerContainer.innerHTML = renderAnalysisModules(fullText);
       kanbanState.analysis = fullText;
       kanbanState.hasUnsavedWork = true;
       // Save context for continued chat
@@ -5918,16 +6068,30 @@ async function regenerateAnalysisModule(moduleId, moduleLabel, customNote) {
       }
     );
 
+    // 准备思考区 + 回答区
+    contentEl.innerHTML = "";
+    const answerEl = document.createElement("div");
+    answerEl.className = "analysis-module-answer";
+    contentEl.appendChild(answerEl);
+    const thinkingHost = _createThinkingHost(contentEl);
+    let _moduleContentStarted = false;
     let _streamRafPending = false;
     let _lastRenderLen = 0;
     for await (const chunk of stream) {
+      if (chunk.reasoningContent && thinkingHost) {
+        thinkingHost.appendReasoning(chunk.reasoningContent);
+      }
       if (chunk.content) {
+        if (!_moduleContentStarted) {
+          _moduleContentStarted = true;
+          if (thinkingHost) thinkingHost.startContent();
+        }
         newModuleText += chunk.content;
         if (!_streamRafPending && (newModuleText.length - _lastRenderLen > 20 || newModuleText.length < 200)) {
           _streamRafPending = true;
           requestAnimationFrame(() => {
-            if (contentEl) {
-              contentEl.innerHTML = renderMarkdownWithTrace(newModuleText);
+            if (answerEl) {
+              answerEl.innerHTML = renderMarkdownWithTrace(newModuleText);
             }
             _lastRenderLen = newModuleText.length;
             _streamRafPending = false;
@@ -5935,10 +6099,11 @@ async function regenerateAnalysisModule(moduleId, moduleLabel, customNote) {
         }
       }
     }
+    if (thinkingHost) thinkingHost.finish();
     // Final render (strip leading ### heading to avoid duplication with module header bar)
-    if (contentEl) {
+    if (answerEl) {
       const displayText = newModuleText.replace(/^###\s+[^\n]*\n?/, "");
-      contentEl.innerHTML = renderMarkdownWithTrace(displayText);
+      answerEl.innerHTML = renderMarkdownWithTrace(displayText);
     }
 
     // Update the full analysis text
@@ -8527,6 +8692,12 @@ function handleExtensionAnalyze(data) {
   if (readerContent) {
     readerContent.innerHTML = '<div class="markdown-body"></div>';
     const streamContainer = readerContent.querySelector(".markdown-body");
+    // 思考区 + 回答区分层
+    const answerEl = document.createElement("div");
+    answerEl.className = "reader-analysis-answer";
+    streamContainer.appendChild(answerEl);
+    const thinkingHost = _createThinkingHost(streamContainer);
+    let _readerContentStarted = false;
     let fullContent = "";
     let _rafPending = false;
 
@@ -8536,18 +8707,26 @@ function handleExtensionAnalyze(data) {
       maxTokens: 32768,
     }).then(async (stream) => {
       for await (const chunk of stream) {
+        if (chunk.reasoningContent && thinkingHost) {
+          thinkingHost.appendReasoning(chunk.reasoningContent);
+        }
         if (chunk.content) {
+          if (!_readerContentStarted) {
+            _readerContentStarted = true;
+            if (thinkingHost) thinkingHost.startContent();
+          }
           fullContent += chunk.content;
           if (!_rafPending) {
             _rafPending = true;
             requestAnimationFrame(() => {
-              if (streamContainer) streamContainer.innerHTML = marked.parse(fullContent);
+              if (answerEl) answerEl.innerHTML = marked.parse(fullContent);
               _rafPending = false;
             });
           }
         }
       }
-      if (streamContainer) streamContainer.innerHTML = marked.parse(fullContent);
+      if (thinkingHost) thinkingHost.finish();
+      if (answerEl) answerEl.innerHTML = marked.parse(fullContent);
     }).catch((err) => {
       readerContent.innerHTML = `<p class="error">分析失败: ${err.message}</p>`;
     });
@@ -9641,6 +9820,11 @@ async function sendChatMessage() {
   chatSendBtn.disabled = true;
   chatAbortController = new AbortController();
 
+  // 思考区挂在消息气泡内
+  const _chatContentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+  const thinkingHost = _createThinkingHost(_chatContentEl);
+  let _chatContentStarted = false;
+
   try {
     let fullResponse = "";
     let _rafPending = false;
@@ -9652,24 +9836,45 @@ async function sendChatMessage() {
 
     for await (const chunk of stream) {
       if (chatAbortController.signal.aborted) break;
+      if (chunk.reasoningContent && thinkingHost) {
+        thinkingHost.appendReasoning(chunk.reasoningContent);
+      }
       if (chunk.content) {
+        if (!_chatContentStarted) {
+          _chatContentStarted = true;
+          if (thinkingHost) thinkingHost.startContent();
+        }
         fullResponse += chunk.content;
         if (!_rafPending) {
           _rafPending = true;
           requestAnimationFrame(() => {
             if (assistantMsgEl) {
               const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
-              contentEl.innerHTML = renderMarkdown(fullResponse);
+              // 保留思考区，把回答写到独立 .chat-msg-answer
+              let answerEl = contentEl.querySelector(":scope > .chat-msg-answer");
+              if (!answerEl) {
+                answerEl = document.createElement("div");
+                answerEl.className = "chat-msg-answer markdown-body";
+                contentEl.appendChild(answerEl);
+              }
+              answerEl.innerHTML = renderMarkdown(fullResponse);
             }
             _rafPending = false;
           });
         }
       }
     }
+    if (thinkingHost) thinkingHost.finish();
     // Final render
     if (assistantMsgEl) {
       const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
-      contentEl.innerHTML = renderMarkdown(fullResponse);
+      let answerEl = contentEl.querySelector(":scope > .chat-msg-answer");
+      if (!answerEl) {
+        answerEl = document.createElement("div");
+        answerEl.className = "chat-msg-answer markdown-body";
+        contentEl.appendChild(answerEl);
+      }
+      answerEl.innerHTML = renderMarkdown(fullResponse);
     }
 
     chatHistory.push({ role: "assistant", content: fullResponse });
