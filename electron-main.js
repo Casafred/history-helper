@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, dialog } = require("electron");
 const http = require("http");
 const https = require("https");
 const fs = require("fs");
@@ -1305,6 +1305,25 @@ function createWindow(port) {
     shell.openExternal(url);
     return { action: "deny" };
   });
+  // 关闭前确认：若存在未导出的 PDF 标注，弹出原生确认框
+  mainWindow.on("close", (event) => {
+    if (hasUnsavedAnnotations && !mainWindow._forceClose) {
+      event.preventDefault();
+      const choice = dialog.showMessageBoxSync(mainWindow, {
+        type: "question",
+        buttons: ["关闭并丢弃标注", "取消"],
+        defaultId: 1,
+        cancelId: 1,
+        title: "确认关闭",
+        message: "当前有未导出的 PDF 标注，关闭后将丢失。",
+        detail: "如需保留标注，请先点击「导出标注后文档」。",
+      });
+      if (choice === 0) {
+        mainWindow._forceClose = true;
+        mainWindow.close();
+      }
+    }
+  });
   mainWindow.on("closed", () => { mainWindow = null; });
 }
 
@@ -1329,12 +1348,20 @@ function createPopoutWindow(url, port) {
   return win;
 }
 
+// 渲染进程同步的"是否存在未导出 PDF 标注"标志位，供 mainWindow.on('close') 确认
+let hasUnsavedAnnotations = false;
+
 app.whenReady().then(async () => {
   // IPC: 渲染进程请求在系统浏览器中打开外部链接
   ipcMain.on("open-external", (_event, url) => {
     if (typeof url === "string" && (url.startsWith("http://") || url.startsWith("https://"))) {
       shell.openExternal(url);
     }
+  });
+
+  // IPC: 渲染进程同步当前是否存在未导出的 PDF 标注（用于关闭前确认）
+  ipcMain.on("set-has-annotations", (_event, val) => {
+    hasUnsavedAnnotations = !!val;
   });
 
   const port = await startServer();

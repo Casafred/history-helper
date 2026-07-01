@@ -7197,10 +7197,19 @@ function savePdfAnnotations(docKey) {
     const list = pdfViewState.annotList[docKey] || [];
     sessionStorage.setItem(_PDF_ANNOT_STORAGE_PREFIX + docKey, JSON.stringify(list));
   } catch (e) { /* sessionStorage 配额超限等，忽略 */ }
+  // 所有标注变更都会经过此处，统一同步关闭确认标志位到主进程
+  _updateAnnotCloseFlag();
 }
 
 function _hasAnyPdfAnnotations() {
   return Object.values(pdfViewState.annotList).some(list => list && list.length > 0);
+}
+
+// 同步标注状态到 Electron 主进程（用于关闭前原生确认框）
+function _updateAnnotCloseFlag() {
+  if (window.electronAPI && typeof window.electronAPI.setHasAnnotations === "function") {
+    window.electronAPI.setHasAnnotations(_hasAnyPdfAnnotations());
+  }
 }
 
 function setPdfAnnotTool(tool) {
@@ -9560,14 +9569,9 @@ document.addEventListener("DOMContentLoaded", () => {
   if (annotClearBtn) {
     annotClearBtn.addEventListener("click", clearPdfAnnotations);
   }
-  // 关闭前提醒导出 PDF（存在未导出标注时）
-  window.addEventListener("beforeunload", (e) => {
-    if (_hasAnyPdfAnnotations()) {
-      e.preventDefault();
-      e.returnValue = "当前有未导出的 PDF 标注，关闭后将丢失。确定要关闭吗？";
-      return e.returnValue;
-    }
-  });
+  // 关闭前确认：通过 IPC 同步标注状态到主进程，由主进程弹原生确认框
+  // （Electron 中 beforeunload 的 preventDefault 会静默阻止关闭，不能用）
+  _updateAnnotCloseFlag();
 
   // Extract copy button
   const extractCopyBtn = document.getElementById("extract-copy-btn");
