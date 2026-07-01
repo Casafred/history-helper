@@ -2470,18 +2470,16 @@ const PatentCache = {
     const patentNumber = currentData.raw || (currentData.office + currentData.applicationNumber);
     if (!patentNumber) return null;
 
-    // Deep-clone kanbanState but skip pageDimensions in traceIndex
+    // Deep-clone kanbanState (include pageDimensions - they are needed for correct OCR bbox mapping)
     const traceIndexClone = {};
     for (const [key, val] of Object.entries(kanbanState.traceIndex)) {
-      const { pageDimensions, ...rest } = val;
-      traceIndexClone[key] = rest;
+      traceIndexClone[key] = JSON.parse(JSON.stringify(val));
     }
 
-    // Deep-clone extractions but skip pageDimensions
+    // Deep-clone extractions including pageDimensions (critical for OCR coordinate mapping)
     const extractionsClone = {};
     for (const [idx, ext] of Object.entries(kanbanState.extractions)) {
-      const { pageDimensions, ...rest } = ext;
-      extractionsClone[idx] = rest;
+      extractionsClone[idx] = JSON.parse(JSON.stringify(ext));
     }
 
     const hasOCR = Object.keys(kanbanState.extractions).length > 0;
@@ -2527,14 +2525,16 @@ const PatentCache = {
       kanbanState.citedRefsAnalysis = cacheEntry.kanbanState.citedRefsAnalysis || "";
       kanbanState.hasUnsavedWork = false;
 
-      // Restore extractions - re-populate pageDimensions from blocks
+      // Restore extractions - use saved pageDimensions directly for correct OCR bbox mapping
       kanbanState.extractions = {};
       if (cacheEntry.kanbanState.extractions) {
         for (const [idx, ext] of Object.entries(cacheEntry.kanbanState.extractions)) {
-          kanbanState.extractions[idx] = { ...ext, pageDimensions: {} };
-          // Re-populate pageDimensions from blocks if available
-          if (ext.blocks && Array.isArray(ext.blocks)) {
-            const pageMax = {}; // { pageNum: { maxX2, maxY2 } }
+          // Use saved pageDimensions if available; fall back to reconstructing from blocks for old caches
+          let pageDims = ext.pageDimensions || {};
+          const hasValidPageDims = Object.keys(pageDims).length > 0;
+          if (!hasValidPageDims && ext.blocks && Array.isArray(ext.blocks)) {
+            // Legacy cache: reconstruct pageDimensions from max bbox extents (approximation)
+            const pageMax = {};
             for (const b of ext.blocks) {
               if (b.page != null && b.bbox) {
                 const [x1, y1, x2, y2] = b.bbox;
@@ -2543,14 +2543,12 @@ const PatentCache = {
                 if (y2 > pageMax[b.page].maxY2) pageMax[b.page].maxY2 = y2;
               }
             }
+            pageDims = {};
             for (const [p, m] of Object.entries(pageMax)) {
-              // Use max bbox extent as page dimensions (add small padding)
-              kanbanState.extractions[idx].pageDimensions[p] = {
-                width: m.maxX2 + 10,
-                height: m.maxY2 + 10,
-              };
+              pageDims[p] = { width: m.maxX2 + 10, height: m.maxY2 + 10 };
             }
           }
+          kanbanState.extractions[idx] = { ...ext, pageDimensions: pageDims };
         }
       }
 

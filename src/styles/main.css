@@ -3787,13 +3787,20 @@ body {
   width: 280px;
   flex-shrink: 0;
   border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  transition: width 0.3s ease, padding 0.3s ease, border-right 0.3s ease;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.reader-sidebar-scroll {
+  flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 12px;
   padding-right: 20px;
-  background: var(--bg-secondary);
-  transition: width 0.3s ease, padding 0.3s ease, border-right 0.3s ease;
-  position: relative;
 }
 
 .reader-sidebar-collapse-btn {

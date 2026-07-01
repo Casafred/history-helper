@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PatentLens - 专利审查文档获取与梳理</title>
-  <link rel="stylesheet" href="styles/main.css?v=20260701n">
+  <link rel="stylesheet" href="styles/main.css?v=20260701o">
 </head>
 <body>
   <div id="splash-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:var(--bg-primary, #0f1117);display:flex;align-items:center;justify-content:center;z-index:99999;transition:opacity 0.5s ease;">
@@ -177,13 +177,15 @@
           <div class="reader-body">
             <div id="reader-sidebar" class="reader-sidebar">
               <button id="reader-sidebar-toggle" class="reader-sidebar-collapse-btn" title="收起文档列表"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
-              <div class="reader-sidebar-title">
-                <span>审查文档列表</span>
+              <div class="reader-sidebar-scroll">
+                <div class="reader-sidebar-title">
+                  <span>审查文档列表</span>
+                </div>
+                <div class="reader-sidebar-search">
+                  <input type="text" id="reader-doc-search" class="reader-doc-search-input" placeholder="搜索文档...">
+                </div>
+                <div id="reader-doc-list" class="reader-doc-list"></div>
               </div>
-              <div class="reader-sidebar-search">
-                <input type="text" id="reader-doc-search" class="reader-doc-search-input" placeholder="搜索文档...">
-              </div>
-              <div id="reader-doc-list" class="reader-doc-list"></div>
             </div>
             <div class="reader-main">
               <div class="reader-main-center">
@@ -777,9 +779,9 @@
   <script src="scripts/docx.umd.js?v=20260623c"></script>
   <script src="scripts/FileSaver.min.js?v=20260623c"></script>
   <script src="scripts/pdf-lib.min.js?v=20260623c"></script>
-  <script src="scripts/fontkit.umd.min.js?v=20260701n"></script>
-  <script src="scripts/web-ai.js?v=20260701n"></script>
-  <script src="scripts/patent-status.js?v=20260701n"></script>
-  <script src="scripts/web-app.js?v=20260701n"></script>
+  <script src="scripts/fontkit.umd.min.js?v=20260701o"></script>
+  <script src="scripts/web-ai.js?v=20260701o"></script>
+  <script src="scripts/patent-status.js?v=20260701o"></script>
+  <script src="scripts/web-app.js?v=20260701o"></script>
 </body>
 </html>
