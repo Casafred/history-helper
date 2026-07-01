@@ -1324,12 +1324,55 @@ function createWindow(port) {
 }
 
 // 弹出独立窗口：用于 GP / espacenet 原文对照查看，启用 webview 标签以绕过 X-Frame-Options
-// targetUrl: 要嵌入的外部页面 URL（如 Google Patents、Espacenet）
-// title: 窗口标题
-// port: 本地 HTTP 服务端口
-function createPopoutWindow(targetUrl, title, port) {
+// 直接在窗口中写入 HTML+webview，不依赖 HTTP 服务（彻底避免 404）
+function createPopoutWindow(targetUrl, title) {
   console.log("[Electron] createPopoutWindow targetUrl=" + targetUrl + ", title=" + title);
-  const popoutUrl = `http://127.0.0.1:${port}/popout.html?url=${encodeURIComponent(targetUrl)}&title=${encodeURIComponent(title || targetUrl)}`;
+  const safeTitle = (title || targetUrl || "专利原文查看").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const safeUrl = targetUrl.replace(/"/g, "&quot;").replace(/</g, "&lt;");
+
+  const html = `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>${safeTitle}</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#fff}
+  #po-header{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f5f7fa;border-bottom:1px solid #d8dce6;flex-shrink:0}
+  #po-title{font-size:13px;color:#1a1d27;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .po-btn{cursor:pointer;border:1px solid #bbb;background:#fff;color:#333;font-size:12px;padding:4px 12px;border-radius:4px;transition:all 0.2s;white-space:nowrap;text-decoration:none;display:inline-block}
+  .po-btn:hover{background:#4f8ff7;color:#fff;border-color:#4f8ff7}
+  webview{width:100%;height:calc(100vh - 49px);border:none}
+  .po-loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#888;font-size:14px}
+</style></head><body>
+<div id="po-header">
+  <div id="po-title">${safeTitle}</div>
+  <button id="po-refresh" class="po-btn" title="刷新页面">刷新</button>
+  <a id="po-external" class="po-btn" href="${safeUrl}" target="_blank" rel="noopener" title="在外部浏览器打开">外部打开</a>
+  <button id="po-close" class="po-btn" title="关闭窗口">关闭</button>
+</div>
+<webview src="${safeUrl}" allowpopups></webview>
+<div class="po-loading" id="po-loading">正在加载...</div>
+<script>
+(function(){
+  var wv=document.querySelector("webview");
+  var ld=document.getElementById("po-loading");
+  var refreshBtn=document.getElementById("po-refresh");
+  var closeBtn=document.getElementById("po-close");
+  var extLink=document.getElementById("po-external");
+  if(wv){
+    wv.addEventListener("did-stop-loading",function(){if(ld)ld.remove();});
+    wv.addEventListener("did-fail-load",function(e){
+      if(e&&e.errorCode===-3)return;
+      if(ld)ld.textContent="加载失败，可点击「外部打开」在浏览器中查看";
+    });
+  }
+  if(refreshBtn)refreshBtn.addEventListener("click",function(){if(wv)try{wv.reload();}catch(e){wv.loadURL("${safeUrl}");}});
+  if(closeBtn)closeBtn.addEventListener("click",function(){window.close();});
+  if(extLink)extLink.addEventListener("click",function(e){
+    if(window.electronAPI){e.preventDefault();window.electronAPI.openExternal("${safeUrl}");}
+  });
+  setTimeout(function(){if(ld&&ld.parentNode)ld.textContent="页面加载较慢，请稍候…";},15000);
+})();
+</script></body></html>`;
+
   const win = new BrowserWindow({
     width: 1100,
     height: 800,
@@ -1341,10 +1384,8 @@ function createPopoutWindow(targetUrl, title, port) {
       webviewTag: true,
     },
   });
-  win.loadURL(popoutUrl);
-  win.webContents.on("did-fail-load", (_e, errorCode, errorDescription) => {
-    console.error("[Electron] popout did-fail-load", errorCode, errorDescription, "url=" + popoutUrl);
-  });
+  // 使用 data URL 加载 HTML，完全不依赖本地 HTTP 服务
+  win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
   return win;
 }
 
@@ -1365,16 +1406,13 @@ app.whenReady().then(async () => {
   });
 
   // IPC: 渲染进程请求创建弹出窗口（直连，不依赖 window.open → setWindowOpenHandler 链路）
-  let _popoutPort = null;
   ipcMain.on("open-popout-window", (_event, targetUrl, title) => {
-    const port = _popoutPort;
-    if (port && typeof targetUrl === "string") {
-      createPopoutWindow(targetUrl, title, port);
+    if (typeof targetUrl === "string") {
+      createPopoutWindow(targetUrl, title);
     }
   });
 
   const port = await startServer();
-  _popoutPort = port;
   createWindow(port);
 
   app.on("activate", () => {

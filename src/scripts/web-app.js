@@ -7666,8 +7666,11 @@ async function exportPdfWithAnnotations() {
     const { PDFDocument, rgb } = window.PDFLib;
     const pdfDoc = await PDFDocument.load(pdfBytes);
     // 嵌入自定义字体（NotoSansSC）必须注册 fontkit，否则 embedFont 抛错
-    if (window.fontkit) {
-      pdfDoc.registerFontkit(window.fontkit);
+    // 优先从 Electron preload 暴露的 getFontkit 获取（sandbox 下 UMD 脚本可能无法挂载 window.fontkit）
+    const fk = (window.electronAPI && typeof window.electronAPI.getFontkit === "function" && window.electronAPI.getFontkit())
+      || window.fontkit || null;
+    if (fk) {
+      pdfDoc.registerFontkit(fk);
     } else {
       console.warn("[PDF导出] fontkit 未加载，中文注释文字将无法导出");
     }
