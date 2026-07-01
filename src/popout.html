@@ -30,7 +30,7 @@
     <div id="po-title"></div>
     <button id="po-translate" class="po-btn" title="通过 Google 翻译翻译此页面">翻译</button>
     <button id="po-refresh" class="po-btn" title="刷新当前页面">刷新</button>
-    <a id="po-external" class="po-btn" href="#" target="_blank" rel="noopener" title="在外部浏览器打开">外部打开</a>
+    <button id="po-external" class="po-btn" title="在外部浏览器打开">外部打开</button>
     <button id="po-close" class="po-btn" title="关闭窗口">关闭</button>
   </div>
   <div id="po-container">
@@ -46,21 +46,21 @@
       var translateBtn = document.getElementById("po-translate");
       var refreshBtn = document.getElementById("po-refresh");
       var closeBtn = document.getElementById("po-close");
-      var externalLink = document.getElementById("po-external");
+      var externalBtn = document.getElementById("po-external");
       var titleEl = document.getElementById("po-title");
       titleEl.textContent = decodeURIComponent(title);
-      externalLink.setAttribute("href", targetUrl);
 
       var currentUrl = targetUrl;
       var isTranslated = false;
+      var wv = null;
 
-      function clearContainer() { container.innerHTML = ""; }
+      function clearContainer() { container.innerHTML = ""; wv = null; }
 
       function embed() {
         clearContainer();
         console.log("[popout] embed, isElectron=" + isElectron + ", url=" + currentUrl);
         if (isElectron) {
-          var wv = document.createElement("webview");
+          wv = document.createElement("webview");
           wv.setAttribute("src", currentUrl);
           wv.setAttribute("allowpopups", "");
           wv.style.width = "100%";
@@ -75,15 +75,32 @@
             _loaded = true;
             var ld = container.querySelector(".po-loading");
             if (ld) ld.remove();
+            try {
+              if (wv.getURL) currentUrl = wv.getURL();
+            } catch(e) {}
+          });
+          wv.addEventListener("did-navigate", function (e) {
+            if (e && e.url) currentUrl = e.url;
+          });
+          wv.addEventListener("did-navigate-in-page", function (e) {
+            if (e && e.url) currentUrl = e.url;
           });
           wv.addEventListener("did-fail-load", function (e) {
             console.log("[popout] webview did-fail-load", e && e.errorCode, e && e.errorDescription);
-            if (e && e.errorCode === -3) return; // 中止（导航切换）忽略
+            if (e && e.errorCode === -3) return;
             _loaded = true;
             showFallback(e && e.errorDescription);
           });
+          // 阻止 webview 内的新窗口打开外部浏览器，改用应用内弹窗
+          wv.addEventListener("new-window", function (e) {
+            if (e && e.url) {
+              e.preventDefault();
+              if (window.electronAPI && typeof window.electronAPI.openPopoutWindow === "function") {
+                window.electronAPI.openPopoutWindow(e.url, "专利原文查看");
+              }
+            }
+          });
           container.appendChild(wv);
-          // 超时兜底：15 秒仍未加载完成则提示
           setTimeout(function () {
             if (!_loaded) {
               console.warn("[popout] webview 15s 超时仍未加载完成");
@@ -107,7 +124,6 @@
           };
           ifr.onerror = function () { showFallback(); };
           container.appendChild(ifr);
-          // 超时兜底：iframe 受 X-Frame-Options 限制可能不触发 onerror
           setTimeout(function () {
             var ld = container.querySelector(".po-loading");
             if (ld) {
@@ -122,7 +138,7 @@
         clearContainer();
         var div = document.createElement("div");
         div.className = "po-fallback";
-        var msg = "该站点禁止嵌入显示。<br>请点击右上角「外部打开」在浏览器中查看。";
+        var msg = "该站点禁止嵌入显示。<br>请点击「外部打开」在浏览器中查看。";
         if (reason) msg += "<br><br><span style='font-size:11px;color:#aaa'>原因：" + reason + "</span>";
         div.innerHTML = msg;
         container.appendChild(div);
@@ -141,9 +157,7 @@
         isTranslated = true;
         translateBtn.textContent = "原文";
         translateBtn.title = "切换回原始页面";
-        if (isElectron) {
-          var wv = container.querySelector("webview");
-          if (!wv) { loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(targetUrl)); return; }
+        if (isElectron && wv) {
           var injectCode = [
             "(function(){",
             "  if(document.getElementById('google_translate_element_injected')){",
@@ -159,17 +173,15 @@
             "})();"
           ].join("");
           try { wv.executeJavaScript(injectCode); }
-          catch (e) { loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(targetUrl)); }
+          catch (e) { loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(currentUrl)); }
         } else {
-          loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(targetUrl));
+          loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(currentUrl));
         }
       }
 
       function refreshPage() {
-        if (isElectron) {
-          var wv = container.querySelector("webview");
-          if (wv) { try { wv.reload(); } catch (e) { loadUrl(currentUrl); } }
-          else loadUrl(currentUrl);
+        if (isElectron && wv) {
+          try { wv.reload(); } catch (e) { loadUrl(currentUrl); }
         } else {
           var ifr = container.querySelector("iframe");
           if (ifr) ifr.src = ifr.src;
@@ -180,8 +192,13 @@
       translateBtn.addEventListener("click", translatePage);
       refreshBtn.addEventListener("click", refreshPage);
       closeBtn.addEventListener("click", function () { window.close(); });
-      externalLink.addEventListener("click", function (e) {
-        if (window.electronAPI) { e.preventDefault(); window.electronAPI.openExternal(targetUrl); }
+      externalBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (window.electronAPI) {
+          window.electronAPI.openExternal(currentUrl);
+        } else {
+          window.open(currentUrl, "_blank");
+        }
       });
 
       if (targetUrl) embed(); else showFallback();

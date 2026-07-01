@@ -37,6 +37,7 @@
         "to": "src",
         "filter": [
           "web.html",
+          "popout.html",
           "icon.png",
           "PATENTLENS.webp",
           "PatentLens_transparent.png",
@@ -49,6 +50,7 @@
           "scripts/docx.umd.js",
           "scripts/FileSaver.min.js",
           "scripts/pdf-lib.min.js",
+          "scripts/fontkit.umd.min.js",
           "scripts/web-ai.js",
           "scripts/patent-status.js",
           "scripts/web-app.js"

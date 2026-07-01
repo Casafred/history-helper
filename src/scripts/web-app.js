@@ -587,96 +587,47 @@ async function searchPatentDetail(input) {
 // ── 应用内 Webview 弹窗（Google Patents / Espacenet 等） ──
 function openInAppWebview(url, title) {
   const isElectron = !!(window.electronAPI);
+
+  // Electron 环境：直接打开独立弹出窗口（popout），支持拖拽到外部、翻译、刷新、外部浏览器打开
+  if (isElectron && window.electronAPI && typeof window.electronAPI.openPopoutWindow === "function") {
+    window.electronAPI.openPopoutWindow(url, title);
+    return;
+  }
+
+  // 浏览器环境（非 Electron）：保留原有的 iframe overlay 模式
   const overlayId = "pd-inapp-webview-overlay";
   let overlay = document.getElementById(overlayId);
 
-  // 保存当前原始 URL，用于刷新和翻译
   let _currentWebviewUrl = url;
   let _isTranslated = false;
 
-  // 翻译 webview 内容：在 webview 内注入 Google Translate 脚本
   function translateWebview() {
     const container = document.getElementById("pd-inapp-webview-container");
     if (!container) return;
-
     if (_isTranslated) {
-      // 已翻译，切换回原文：重新加载原始 URL
       _isTranslated = false;
       loadUrl(_currentWebviewUrl);
       return;
     }
-
     _isTranslated = true;
-
-    if (isElectron) {
-      // Electron: 在 webview 内执行 JS 注入 Google Translate
-      const wv = container.querySelector("webview");
-      if (!wv) return;
-      const injectCode = `
-        (function() {
-          if (document.getElementById('google_translate_element_injected')) {
-            // 已注入过，切换语言即可
-            var sel = document.querySelector('.goog-te-combo');
-            if (sel) { sel.value = 'zh-CN'; sel.dispatchEvent(new Event('change')); }
-            return;
-          }
-          var container = document.createElement('div');
-          container.id = 'google_translate_element_injected';
-          container.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;';
-          document.body.prepend(container);
-          window.googleTranslateElementInitInner = function() {
-            new google.translate.TranslateElement({
-              pageLanguage: 'auto',
-              includedLanguages: 'zh-CN,zh-TW,en,ja,ko,de,fr',
-              layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
-              autoDisplay: true
-            }, 'google_translate_element_injected');
-          };
-          var script = document.createElement('script');
-          script.type = 'text/javascript';
-          script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInitInner';
-          document.head.appendChild(script);
-        })();
-      `;
-      try {
-        wv.executeJavaScript(injectCode);
-      } catch (e) {
-        // executeJavaScript 失败（如 webview 还未加载完），回退到 URL 代理
-        const translateUrl = "https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(_currentWebviewUrl);
-        loadUrl(translateUrl);
-      }
-    } else {
-      // 浏览器 iframe：无法跨域注入脚本，使用 Google Translate URL 代理
-      const translateUrl = "https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(_currentWebviewUrl);
-      loadUrl(translateUrl);
-    }
+    const translateUrl = "https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(_currentWebviewUrl);
+    loadUrl(translateUrl);
   }
 
   function loadUrl(targetUrl) {
     const container = document.getElementById("pd-inapp-webview-container");
     if (!container) return;
-    if (isElectron) {
-      const wv = container.querySelector("webview");
-      if (wv) wv.loadURL(targetUrl);
-    } else {
-      const ifr = container.querySelector("iframe");
-      if (ifr) ifr.src = targetUrl;
-    }
+    const ifr = container.querySelector("iframe");
+    if (ifr) ifr.src = targetUrl;
   }
 
   function refreshWebview() {
     const container = document.getElementById("pd-inapp-webview-container");
     if (!container) return;
-    if (isElectron) {
-      const wv = container.querySelector("webview");
-      if (wv) wv.reload();
-    } else {
-      const ifr = container.querySelector("iframe");
-      if (ifr) ifr.src = ifr.src;
-    }
+    const ifr = container.querySelector("iframe");
+    if (ifr) ifr.src = ifr.src;
   }
 
-  // 构建 header 按钮样式（统一：白色背景、深色文字、hover 时蓝底白字）
   const btnStyle = "cursor:pointer;border:1px solid #bbb;background:#fff;color:#333;font-size:12px;padding:2px 10px;border-radius:4px;transition:all 0.2s;";
   let webviewHtml = `
     <div class="pd-header" style="position:relative;">
@@ -684,28 +635,18 @@ function openInAppWebview(url, title) {
       <div class="pd-links" style="position:absolute;right:0;top:50%;transform:translateY(-50%);display:flex;gap:6px;align-items:center;">
         <button id="pd-wv-translate-btn" style="${btnStyle}" title="通过 Google 翻译翻译此页面内容">翻译</button>
         <button id="pd-wv-refresh-btn" style="${btnStyle}" title="刷新当前页面">刷新</button>
-        <button id="pd-wv-popout-btn" style="${btnStyle}" title="弹出独立窗口，可拖到一旁对照查看">弹出窗口</button>
-        <a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="font-size:12px;color:#333;border:1px solid #bbb;background:#fff;padding:2px 10px;border-radius:4px;text-decoration:none;transition:all 0.2s;" onmouseenter="this.style.background='var(--accent, #4f8ff7)';this.style.color='#fff';" onmouseleave="this.style.background='#fff';this.style.color='#333';">外部浏览器打开</a>
+        <button id="pd-wv-external-btn" style="${btnStyle}" title="在外部浏览器打开">外部浏览器打开</button>
         <button id="pd-wv-close-btn" style="${btnStyle}" title="关闭">✕ 关闭</button>
       </div>
     </div>
     <div id="pd-inapp-webview-container" style="width:100%;height:calc(100vh - 160px);border:none;position:relative;">
-  `;
-  if (isElectron) {
-    webviewHtml += `<webview src="${escapeHtml(url)}" style="width:100%;height:100%;border:1px solid #ddd;border-radius:8px;" allowpopups></webview>`;
-  } else {
-    webviewHtml += `<iframe src="${escapeHtml(url)}" style="width:100%;height:100%;border:1px solid #ddd;border-radius:8px;"
+      <iframe src="${escapeHtml(url)}" style="width:100%;height:100%;border:1px solid #ddd;border-radius:8px;"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
               allow="clipboard-read; clipboard-write"
-              referrerpolicy="no-referrer"
-              onload="this.parentElement.querySelector('.espacenet-loading')?.remove()"
-              onerror="window.open('${escapeHtml(url)}','_blank');this.parentElement.innerHTML='<div style=\\'padding:40px;text-align:center;color:#888\\'>iframe 加载失败，已在外部浏览器打开</div>'">
+              referrerpolicy="no-referrer">
       </iframe>
-      <div class="espacenet-loading" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#888;">正在加载...</div>`;
-  }
-  webviewHtml += `</div>`;
+    </div>`;
 
-  // 创建全屏覆盖层
   if (!overlay) {
     overlay = document.createElement("div");
     overlay.id = overlayId;
@@ -715,140 +656,35 @@ function openInAppWebview(url, title) {
   overlay.innerHTML = webviewHtml;
   overlay.style.display = "block";
 
-  // 隐藏主应用的 Google Translate 悬浮栏及相关元素
   const gtBar = document.getElementById("google_translate_element");
   if (gtBar) gtBar.style.display = "none";
   document.querySelectorAll(".skiptranslate").forEach(el => { el.dataset.wasVisible = el.style.display; el.style.display = "none"; });
 
-  // 绑定按钮事件
+  function bindBtnHover(btn) {
+    if (!btn) return;
+    btn.addEventListener("mouseenter", function() { this.style.background = "var(--accent, #4f8ff7)"; this.style.color = "#fff"; });
+    btn.addEventListener("mouseleave", function() { this.style.background = "#fff"; this.style.color = "#333"; });
+  }
   const closeBtn = document.getElementById("pd-wv-close-btn");
   const translateBtn = document.getElementById("pd-wv-translate-btn");
   const refreshBtn = document.getElementById("pd-wv-refresh-btn");
-  if (closeBtn) {
-    closeBtn.addEventListener("click", closeInAppWebview);
-    closeBtn.addEventListener("mouseenter", function() { this.style.background = "var(--accent, #4f8ff7)"; this.style.color = "#fff"; });
-    closeBtn.addEventListener("mouseleave", function() { this.style.background = "#fff"; this.style.color = "#333"; });
-  }
+  const externalBtn = document.getElementById("pd-wv-external-btn");
+  if (closeBtn) { closeBtn.addEventListener("click", closeInAppWebview); bindBtnHover(closeBtn); }
   if (translateBtn) {
     translateBtn.addEventListener("click", function() {
       translateWebview();
-      if (_isTranslated) {
-        this.textContent = "原文";
-        this.title = "切换回原始页面";
-      } else {
-        this.textContent = "翻译";
-        this.title = "通过 Google 翻译翻译此页面内容";
-      }
+      if (_isTranslated) { this.textContent = "原文"; this.title = "切换回原始页面"; }
+      else { this.textContent = "翻译"; this.title = "通过 Google 翻译翻译此页面内容"; }
     });
-    translateBtn.addEventListener("mouseenter", function() { this.style.background = "var(--accent, #4f8ff7)"; this.style.color = "#fff"; });
-    translateBtn.addEventListener("mouseleave", function() { this.style.background = "#fff"; this.style.color = "#333"; });
+    bindBtnHover(translateBtn);
   }
-  if (refreshBtn) {
-    refreshBtn.addEventListener("click", refreshWebview);
-    refreshBtn.addEventListener("mouseenter", function() { this.style.background = "var(--accent, #4f8ff7)"; this.style.color = "#fff"; });
-    refreshBtn.addEventListener("mouseleave", function() { this.style.background = "#fff"; this.style.color = "#333"; });
-  }
-  // 弹出独立窗口：在新窗口中打开原文，主窗口释放供对照使用
-  const popoutBtn = document.getElementById("pd-wv-popout-btn");
-  if (popoutBtn) {
-    popoutBtn.addEventListener("click", function() {
-      // Electron: window.open → setWindowOpenHandler 创建独立 BrowserWindow 直接加载 URL
-      // 浏览器: window.open 在新标签页中打开
-      const opened = window.open(_currentWebviewUrl, "_blank");
-      // 如果被拦截（浏览器弹窗拦截器），回退到外部打开
-      if (!opened && window.electronAPI) {
-        window.electronAPI.openExternal(_currentWebviewUrl);
-      }
-      closeInAppWebview();
+  if (refreshBtn) { refreshBtn.addEventListener("click", refreshWebview); bindBtnHover(refreshBtn); }
+  if (externalBtn) {
+    externalBtn.addEventListener("click", function() {
+      window.open(_currentWebviewUrl, "_blank");
     });
-    popoutBtn.addEventListener("mouseenter", function() { this.style.background = "var(--accent, #4f8ff7)"; this.style.color = "#fff"; });
-    popoutBtn.addEventListener("mouseleave", function() { this.style.background = "#fff"; this.style.color = "#333"; });
+    bindBtnHover(externalBtn);
   }
-
-  // 右键上下文菜单（翻译 + 刷新）
-  overlay.addEventListener("contextmenu", function(e) {
-    e.preventDefault();
-    // 移除已有的右键菜单
-    const existingMenu = document.getElementById("pd-wv-ctx-menu");
-    if (existingMenu) existingMenu.remove();
-
-    const menu = document.createElement("div");
-    menu.id = "pd-wv-ctx-menu";
-    menu.style.cssText = "position:fixed;left:" + e.clientX + "px;top:" + e.clientY + "px;z-index:100001;background:#fff;border:1px solid #ddd;border-radius:6px;box-shadow:0 2px 12px rgba(0,0,0,0.15);padding:4px 0;min-width:140px;";
-
-    // Build menu items dynamically - check for selected text
-    let selectedTextForMenu = window.getSelection ? window.getSelection().toString().trim() : '';
-    let menuItems = '';
-    if (selectedTextForMenu) {
-      menuItems += '<div class="pd-wv-ctx-item" data-action="translate-selection" style="padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;">📝 翻译选中文本</div>';
-    }
-    menuItems += '<div class="pd-wv-ctx-item" data-action="translate" style="padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;">🌐 ' + (_isTranslated ? '查看原文' : 'Google 翻译此页') + '</div>';
-    menuItems += '<div class="pd-wv-ctx-item" data-action="refresh" style="padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;">🔄 刷新页面</div>';
-    menuItems += '<div class="pd-wv-ctx-item" data-action="external" style="padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;">🔗 在外部浏览器打开</div>';
-    menu.innerHTML = menuItems;
-
-    // For Electron webview, check selected text inside webview asynchronously
-    if (isElectron) {
-      const wv = document.querySelector("#pd-inapp-webview-container webview");
-      if (wv) {
-        try {
-          wv.executeJavaScript('window.getSelection().toString()').then(wvSelection => {
-            const wvSel = (wvSelection || '').trim();
-            if (wvSel && !selectedTextForMenu) {
-              selectedTextForMenu = wvSel;
-              const translateSelItem = document.createElement("div");
-              translateSelItem.className = "pd-wv-ctx-item";
-              translateSelItem.dataset.action = "translate-selection";
-              translateSelItem.style.cssText = "padding:6px 16px;cursor:pointer;font-size:13px;color:#333;white-space:nowrap;";
-              translateSelItem.textContent = "📝 翻译选中文本";
-              menu.insertBefore(translateSelItem, menu.firstChild);
-              // Bind events for the new item
-              translateSelItem.addEventListener("mouseenter", function() { this.style.background = "#f0f4ff"; });
-              translateSelItem.addEventListener("mouseleave", function() { this.style.background = "transparent"; });
-              translateSelItem.addEventListener("click", function() {
-                menu.remove();
-                translateSelectedPatentText(wvSel, "");
-              });
-            }
-          }).catch(() => {});
-        } catch(err) {}
-      }
-    }
-
-    document.body.appendChild(menu);
-
-    // 菜单项 hover and click
-    menu.querySelectorAll(".pd-wv-ctx-item").forEach(item => {
-      item.addEventListener("mouseenter", function() { this.style.background = "#f0f4ff"; });
-      item.addEventListener("mouseleave", function() { this.style.background = "transparent"; });
-      item.addEventListener("click", function() {
-        const action = this.dataset.action;
-        const capturedSelText = selectedTextForMenu;
-        menu.remove();
-        if (action === "translate-selection") {
-          translateSelectedPatentText(capturedSelText, "");
-        } else if (action === "translate") {
-          translateWebview();
-          if (translateBtn) {
-            if (_isTranslated) { translateBtn.textContent = "原文"; translateBtn.title = "切换回原始页面"; }
-            else { translateBtn.textContent = "翻译"; translateBtn.title = "通过 Google 翻译翻译此页面内容"; }
-          }
-        } else if (action === "refresh") {
-          refreshWebview();
-        } else if (action === "external") {
-          if (window.electronAPI) {
-            window.electronAPI.openExternal(_currentWebviewUrl);
-          } else {
-            window.open(_currentWebviewUrl, "_blank");
-          }
-        }
-      });
-    });
-
-    // 点击其他位置关闭菜单
-    const closeMenu = () => { menu.remove(); document.removeEventListener("click", closeMenu); };
-    setTimeout(() => document.addEventListener("click", closeMenu), 10);
-  });
 }
 
 function closeInAppWebview() {
@@ -7749,20 +7585,24 @@ async function exportPdfWithAnnotations() {
       } else if (annot.type === "note") {
         if (annot.text && cjkFont) {
           const fontSize = annot.fontSize || 14;
-          const maxWidth = Math.max(40, Math.abs(annot.x2 - annot.x1));
+          const pdfLeft = Math.min(annot.x1, annot.x2);
+          const pdfRight = Math.max(annot.x1, annot.x2);
+          const pdfBottom = Math.min(annot.y1, annot.y2);
+          const pdfTop = Math.max(annot.y1, annot.y2);
+          const maxWidth = Math.max(40, pdfRight - pdfLeft);
           const lines = annot.text.split("\n");
           const lineHeight = fontSize * 1.3;
-          const baseY = annot.y2 - fontSize;
+          let curY = pdfTop - fontSize * 0.85;
           for (let li = 0; li < lines.length; li++) {
-            const lineY = baseY - li * lineHeight;
-            if (lineY < annot.y1) break;
+            if (curY < pdfBottom) break;
             try {
               page.drawText(lines[li], {
-                x: annot.x1, y: lineY,
+                x: pdfLeft, y: curY,
                 size: fontSize, font: cjkFont,
                 color: col, maxWidth: maxWidth,
               });
             } catch (e) { /* 无法编码的字符跳过 */ }
+            curY -= lineHeight;
           }
         }
       }

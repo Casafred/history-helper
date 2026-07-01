@@ -1316,25 +1316,14 @@ function createWindow(port) {
   });
 
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
-  // 窗口打开处理：本地同域请求允许；GP/Espacenet 等外部链接创建独立 BrowserWindow 加载
+  // 窗口打开处理：本地同域请求允许；外部链接统一通过 createPopoutWindow 创建带工具栏的弹窗
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    console.log("[Electron] setWindowOpenHandler url=" + url);
+    console.log("[Electron] mainWindow setWindowOpenHandler url=" + url);
     if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
       return { action: "allow" };
     }
-    // Google Patents / Espacenet 等外部链接：创建独立窗口直接加载（与 5b69896 行为一致）
-    const extWin = new BrowserWindow({
-      width: 1100,
-      height: 800,
-      title: "专利原文查看",
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-        preload: path.join(__dirname, "preload.js"),
-      },
-    });
-    extWin.loadURL(url);
-    return { action: "deny" }; // 阻止默认行为，已手动创建窗口
+    createPopoutWindow(url, "专利原文查看", port);
+    return { action: "deny" };
   });
   // 关闭前确认：若存在未导出的 PDF 标注，弹出原生确认框
   mainWindow.on("close", (event) => {
@@ -1375,6 +1364,15 @@ function createPopoutWindow(targetUrl, title, port) {
     },
   });
   win.loadURL(popoutUrl);
+  // 弹窗中点击外部链接时，同样创建带工具栏的弹窗（而不是裸窗口）
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    console.log("[Electron] popout setWindowOpenHandler url=" + url);
+    if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
+      return { action: "allow" };
+    }
+    createPopoutWindow(url, "专利原文查看", port);
+    return { action: "deny" };
+  });
   win.webContents.on("did-fail-load", (_e, errorCode, errorDescription) => {
     console.error("[Electron] popout did-fail-load", errorCode, errorDescription, "url=" + popoutUrl);
   });
@@ -1469,20 +1467,26 @@ app.whenReady().then(async () => {
           page.drawLine({ start: { x: annot.x2, y: annot.y2 }, end: { x: hx2, y: hy2 }, thickness: 2, color: col });
         } else if (annot.type === "note" && annot.text && cjkFont) {
           const fontSize = annot.fontSize || 14;
-          const maxWidth = Math.max(40, Math.abs(annot.x2 - annot.x1));
+          // 归一化坐标：PDF 坐标系 Y 轴自下而上，拖拽方向可能不同
+          const pdfLeft = Math.min(annot.x1, annot.x2);
+          const pdfRight = Math.max(annot.x1, annot.x2);
+          const pdfBottom = Math.min(annot.y1, annot.y2);
+          const pdfTop = Math.max(annot.y1, annot.y2);
+          const maxWidth = Math.max(40, pdfRight - pdfLeft);
           const lines = annot.text.split("\n");
           const lineHeight = fontSize * 1.3;
-          const baseY = annot.y2 - fontSize;
+          // 基线从顶部下方 fontSize 处开始（文字从基线向上延伸到顶部附近）
+          let curY = pdfTop - fontSize * 0.85;
           for (let li = 0; li < lines.length; li++) {
-            const lineY = baseY - li * lineHeight;
-            if (lineY < annot.y1) break;
+            if (curY < pdfBottom) break;
             try {
               page.drawText(lines[li], {
-                x: annot.x1, y: lineY,
+                x: pdfLeft, y: curY,
                 size: fontSize, font: cjkFont,
                 color: col, maxWidth: maxWidth,
               });
             } catch (e) { /* 无法编码的字符跳过 */ }
+            curY -= lineHeight;
           }
         }
       }
