@@ -224,7 +224,7 @@ let pdfViewState = {
   traceJumpPending: false,
   renderVersion: 0,
   // PDF 标注功能
-  annotTool: null,        // "highlight" | "underline" | "note" | null
+  annotTool: null,        // "highlight" | "underline" | "arrow" | "note" | null
   annotList: {},          // { docKey: [annotation, ...] }
   annotDragging: false,
   annotDragStart: null,
@@ -233,8 +233,12 @@ let pdfViewState = {
   annotDragViewport: null,
   annotUndoStack: {},     // { docKey: [snapshot, ...] }
   annotRedoStack: {},     // { docKey: [snapshot, ...] }
-  annotMoving: null,      // 移动中的标注 { id, startMouse, origAnnot, el, viewport, page }
+  annotMoving: null,      // 拖动标注换位置
+  annotResizing: null,    // 拖动线条端点调整角度/长度
   ocrHidden: false,       // OCR 文本框是否隐藏
+  annotTextColor: "#e53935",   // 注释文字默认颜色
+  annotFontSize: 14,      // 注释文字默认字号
+  annotLineColor: "#e53935",   // 划线/箭头/高亮默认颜色
 };
 
 let _pdfDocCache = {}; // Cache loaded PDF documents by key (idx_url)
@@ -6439,12 +6443,15 @@ async function renderPdfView(idx) {
   // Check if the same document is already cached
   if (typeof _pdfDocCache === 'undefined') window._pdfDocCache = {};
   const cacheKey = idx + '_' + pdfUrl;
-  // 加载该文档的标注（临时保存于 sessionStorage，应用关闭即清除）
+  // 加载该文档的标注（临时保存于 sessionStorage）
   pdfViewState.currentDocKey = cacheKey;
   if (!pdfViewState.annotList[cacheKey]) {
     pdfViewState.annotList[cacheKey] = loadPdfAnnotations(cacheKey);
   }
   _updateAnnotUndoRedoBtns(cacheKey);
+  // 同步字号下拉菜单默认值
+  const fontSizeSel = document.getElementById("pdf-annot-font-size");
+  if (fontSizeSel) fontSizeSel.value = String(pdfViewState.annotFontSize);
   if (_pdfDocCache[cacheKey]) {
     // Use cached pdfDoc - skip re-fetching
     const pdfDoc = _pdfDocCache[cacheKey];
@@ -6780,22 +6787,43 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
     });
   }
 
-  // 全局 mousemove / mouseup 用于标注拖拽 + 标注移动
+  // 全局 mousemove / mouseup 用于标注拖拽 + 移动 + 端点旋转
   if (!readerPdfContainer._annotHandlersInstalled) {
     readerPdfContainer._annotHandlersInstalled = true;
 
     document.addEventListener("mousemove", (ev) => {
-      // —— 标注移动（拖动已有标注换位置）——
+      // —— 标注端点拖拽（旋转/调整长度）——
+      if (pdfViewState.annotResizing) {
+        const r = pdfViewState.annotResizing;
+        const wrapper = pdfViewState.renderedPages[r.pageNum];
+        if (!wrapper) return;
+        const rect = wrapper.getBoundingClientRect();
+        const mx = ev.clientX - rect.left;
+        const my = ev.clientY - rect.top;
+        const [px, py] = r.viewport.convertToPdfPoint(mx, my);
+        // 实时更新内存中的标注数据（undo 已在 mousedown 时推入）
+        const docKey = _getCurrentPdfAnnotKey();
+        if (docKey) {
+          const list = pdfViewState.annotList[docKey] || [];
+          const target = list.find(a => a.id === r.id);
+          if (target) {
+            target.x2 = px;
+            target.y2 = py;
+            r.moved = true;
+            renderPdfAnnotsForPage(r.pageNum);
+          }
+        }
+        return;
+      }
+      // —— 标注移动（拖动整体位置）——
       if (pdfViewState.annotMoving) {
         const m = pdfViewState.annotMoving;
         const dx = ev.clientX - m.startMouseX;
         const dy = ev.clientY - m.startMouseY;
         if (m.el) {
-          m.el.style.left = (parseFloat(m.el.style.left) + dx) + "px";
-          m.el.style.top = (parseFloat(m.el.style.top) + dy) + "px";
+          m.el.style.left = (m.origCssLeft + dx) + "px";
+          m.el.style.top = (m.origCssTop + dy) + "px";
         }
-        m.startMouseX = ev.clientX;
-        m.startMouseY = ev.clientY;
         m.moved = true;
         return;
       }
@@ -6810,12 +6838,11 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
       pdfViewState.annotDragEnd = { x, y };
       const tool = pdfViewState.annotTool;
       const s = pdfViewState.annotDragStart;
-      if (tool === "underline") {
-        // 划线预览：从起点到当前点的直线
+      if (tool === "underline" || tool === "arrow") {
+        // 直线预览
         const lineEl = wrapper.querySelector(".pdf-annot-drag-line");
         if (lineEl) {
-          const dx = x - s.x;
-          const dy = y - s.y;
+          const dx = x - s.x, dy = y - s.y;
           const length = Math.sqrt(dx * dx + dy * dy);
           const angle = Math.atan2(dy, dx) * 180 / Math.PI;
           lineEl.style.left = s.x + "px";
@@ -6839,19 +6866,26 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
     });
 
     document.addEventListener("mouseup", (ev) => {
+      // —— 完成端点拖拽（旋转/调整）——
+      if (pdfViewState.annotResizing) {
+        const r = pdfViewState.annotResizing;
+        if (r.moved) {
+          const docKey = _getCurrentPdfAnnotKey();
+          if (docKey) savePdfAnnotations(docKey);
+        }
+        pdfViewState.annotResizing = null;
+        return;
+      }
       // —— 完成标注移动 ——
       if (pdfViewState.annotMoving) {
         const m = pdfViewState.annotMoving;
         const docKey = _getCurrentPdfAnnotKey();
-        if (m.moved && docKey && m.viewport && m.origAnnot) {
-          // 把整页所有标注元素相对原位置的 CSS 位移转成 PDF 坐标位移并落库
-          // 读取移动后元素的当前 left/top 与原始 left/top 之差
+        if (m.moved && docKey && m.viewport && m.el) {
           const list = pdfViewState.annotList[docKey] || [];
           const target = list.find(a => a.id === m.id);
-          if (target && m.el) {
-            // 用 viewport 把“零向量”和“(cssDx,cssDy)”分别转 PDF 点，差值即 PDF 位移
-            const cssDx = parseFloat(m.el.style.left) - m.origCssLeft;
-            const cssDy = parseFloat(m.el.style.top) - m.origCssTop;
+          if (target) {
+            const cssDx = (parseFloat(m.el.style.left) || 0) - m.origCssLeft;
+            const cssDy = (parseFloat(m.el.style.top) || 0) - m.origCssTop;
             const [ox0, oy0] = m.viewport.convertToPdfPoint(0, 0);
             const [ox1, oy1] = m.viewport.convertToPdfPoint(cssDx, cssDy);
             const dpx = ox1 - ox0, dpy = oy1 - oy0;
@@ -6859,6 +6893,7 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
             target.x1 += dpx; target.y1 += dpy;
             target.x2 += dpx; target.y2 += dpy;
             savePdfAnnotations(docKey);
+            renderPdfAnnotsForPage(m.pageNum);
           }
         }
         pdfViewState.annotMoving = null;
@@ -6886,20 +6921,19 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
       pdfViewState.annotDragViewport = null;
       if (!wrapper || !viewport || !s || !e || !tool) return;
       if (tool === "note") {
-        // 注释支持点击放置：拖动过小时使用默认尺寸（以起点为中心）
-        let nx = e.x, ny = e.y;
+        // 注释：点击放置时使用默认尺寸
+        let ex = e.x, ey = e.y;
         if (Math.abs(e.x - s.x) < 10 || Math.abs(e.y - s.y) < 10) {
-          nx = s.x; ny = s.y;
-          _finalizePdfAnnotation(tool, page, viewport, nx, ny, nx + 28, ny + 20);
-        } else {
-          _finalizePdfAnnotation(tool, page, viewport, s.x, s.y, e.x, e.y);
+          ex = s.x + 120; ey = s.y + 24; // 默认文字框大小
         }
-      } else if (tool === "underline") {
-        // 划线：起点到终点为一条线；过短视为误点击
+        _finalizePdfAnnotation(tool, page, viewport, s.x, s.y, ex, ey);
+      } else if (tool === "underline" || tool === "arrow") {
+        // 划线/箭头：起点到终点
         if (Math.abs(e.x - s.x) < 5 && Math.abs(e.y - s.y) < 5) return;
         _finalizePdfAnnotation(tool, page, viewport, s.x, s.y, e.x, e.y);
       } else {
-        if (Math.abs(e.x - s.x) < 5 || Math.abs(e.y - s.y) < 5) return; // 过小视为误点击
+        // 高亮
+        if (Math.abs(e.x - s.x) < 5 || Math.abs(e.y - s.y) < 5) return;
         _finalizePdfAnnotation(tool, page, viewport, s.x, s.y, e.x, e.y);
       }
     });
@@ -6957,10 +6991,10 @@ function pdfZoomFitAction() {
 }
 
 /* ════════════════════════════════════════════════════════════════
- * PDF 标注功能（高亮 / 划线 / 文字注释 / 导出带标注 PDF）
+ * PDF 标注功能（高亮 / 划线 / 箭头 / 文字注释 / 导出带标注 PDF）
  * 标注以 PDF 原生坐标（点为单位，Y 轴自下而上）存储，与缩放无关。
- * 临时保存于 sessionStorage（应用关闭即清除），关闭前提醒导出 PDF。
- * 支持撤回/重做、拖动移动标注位置。
+ * 临时保存于 sessionStorage（应用关闭即清除），关闭前提醒导出。
+ * 支持撤回/重做、拖动移动、线条端点拖拽旋转。
  * ════════════════════════════════════════════════════════════════ */
 
 const _PDF_ANNOT_STORAGE_PREFIX = "patentlens_pdf_annot_";
@@ -6982,7 +7016,6 @@ function _getCurrentPdfAnnotKey() {
 function loadPdfAnnotations(docKey) {
   if (!docKey) return [];
   try {
-    // 临时保存：使用 sessionStorage，应用关闭即清除
     const raw = sessionStorage.getItem(_PDF_ANNOT_STORAGE_PREFIX + docKey);
     if (!raw) return [];
     const arr = JSON.parse(raw);
@@ -6998,7 +7031,6 @@ function savePdfAnnotations(docKey) {
   } catch (e) { /* sessionStorage 配额超限等，忽略 */ }
 }
 
-// 是否存在任何未导出的标注（用于关闭前提醒）
 function _hasAnyPdfAnnotations() {
   return Object.values(pdfViewState.annotList).some(list => list && list.length > 0);
 }
@@ -7009,7 +7041,7 @@ function setPdfAnnotTool(tool) {
   } else {
     pdfViewState.annotTool = tool;
   }
-  ["highlight", "underline", "note"].forEach(t => {
+  ["highlight", "underline", "arrow", "note"].forEach(t => {
     const btn = document.getElementById("pdf-annot-" + t);
     if (btn) btn.classList.toggle("active", pdfViewState.annotTool === t);
   });
@@ -7018,13 +7050,24 @@ function setPdfAnnotTool(tool) {
   }
 }
 
-// 撤回/重做：基于快照。每次变更前推入 undo 快照，并清空 redo。
+function togglePdfOcrHide() {
+  pdfViewState.ocrHidden = !pdfViewState.ocrHidden;
+  if (readerPdfContainer) {
+    readerPdfContainer.classList.toggle("pdf-ocr-hidden", pdfViewState.ocrHidden);
+  }
+  const btn = document.getElementById("pdf-annot-hide-ocr");
+  if (btn) {
+    btn.textContent = pdfViewState.ocrHidden ? "显示OCR框" : "隐藏OCR框";
+    btn.classList.toggle("active", pdfViewState.ocrHidden);
+  }
+}
+
+// 撤回/重做（快照式）
 function _pushAnnotUndo(docKey) {
   if (!docKey) return;
   if (!pdfViewState.annotUndoStack[docKey]) pdfViewState.annotUndoStack[docKey] = [];
-  const snap = JSON.parse(JSON.stringify(pdfViewState.annotList[docKey] || []));
-  pdfViewState.annotUndoStack[docKey].push(snap);
-  pdfViewState.annotRedoStack[docKey] = []; // 新操作清空 redo
+  pdfViewState.annotUndoStack[docKey].push(JSON.parse(JSON.stringify(pdfViewState.annotList[docKey] || [])));
+  pdfViewState.annotRedoStack[docKey] = [];
   _updateAnnotUndoRedoBtns(docKey);
 }
 
@@ -7043,10 +7086,8 @@ function undoPdfAnnotation() {
   if (!docKey) return;
   const undoStack = pdfViewState.annotUndoStack[docKey] || [];
   if (undoStack.length === 0) return;
-  // 当前状态推入 redo
   if (!pdfViewState.annotRedoStack[docKey]) pdfViewState.annotRedoStack[docKey] = [];
   pdfViewState.annotRedoStack[docKey].push(JSON.parse(JSON.stringify(pdfViewState.annotList[docKey] || [])));
-  // 弹出 undo 快照作为当前
   pdfViewState.annotList[docKey] = undoStack.pop();
   savePdfAnnotations(docKey);
   renderAllPdfAnnots();
@@ -7066,27 +7107,14 @@ function redoPdfAnnotation() {
   _updateAnnotUndoRedoBtns(docKey);
 }
 
-// 隐藏/显示 OCR 文本框
-function togglePdfOcrHide() {
-  pdfViewState.ocrHidden = !pdfViewState.ocrHidden;
-  if (readerPdfContainer) {
-    readerPdfContainer.classList.toggle("pdf-ocr-hidden", pdfViewState.ocrHidden);
-  }
-  const btn = document.getElementById("pdf-annot-hide-ocr");
-  if (btn) {
-    btn.textContent = pdfViewState.ocrHidden ? "显示OCR框" : "隐藏OCR框";
-    btn.classList.toggle("active", pdfViewState.ocrHidden);
-  }
-}
-
 function _hexToRgb(hex) {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || "");
   return m
     ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) }
-    : { r: 255, g: 235, b: 59 };
+    : { r: 229, g: 57, b: 53 };
 }
 
-// 自定义注释输入弹窗（Electron 不支持 window.prompt），返回 Promise<string|null>
+// 自定义注释输入弹窗（Electron 不支持 window.prompt）
 function _showAnnotNotePrompt(defaultText) {
   return new Promise((resolve) => {
     const modal = document.createElement("div");
@@ -7099,23 +7127,36 @@ function _showAnnotNotePrompt(defaultText) {
       '<button class="pdf-annot-note-ok">确定</button>' +
       '</div>';
     document.body.appendChild(modal);
-    // 居中显示
     modal.style.left = "50%";
     modal.style.top = "50%";
     modal.style.transform = "translate(-50%, -50%)";
     const ta = modal.querySelector("textarea");
     ta.value = defaultText || "";
     setTimeout(() => { ta.focus(); }, 0);
-    const cancelBtn = modal.querySelector(".pdf-annot-note-cancel");
-    const okBtn = modal.querySelector(".pdf-annot-note-ok");
     const finish = (val) => { modal.remove(); resolve(val); };
-    okBtn.addEventListener("click", () => finish(ta.value.trim()));
-    cancelBtn.addEventListener("click", () => finish(null));
+    modal.querySelector(".pdf-annot-note-ok").addEventListener("click", () => finish(ta.value.trim()));
+    modal.querySelector(".pdf-annot-note-cancel").addEventListener("click", () => finish(null));
     ta.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(ta.value.trim()); }
       else if (e.key === "Escape") { e.preventDefault(); finish(null); }
     });
   });
+}
+
+// 角度自动水平/竖直校正：接近 0/90/180/270 度时吸附
+function _snapAngle(x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+  const tolerance = 10;
+  const snapPoints = [0, 90, 180, -90, -180, 270, -270];
+  for (const sp of snapPoints) {
+    if (Math.abs(angle - sp) <= tolerance) {
+      const rad = sp * Math.PI / 180;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      return { x2: x1 + length * Math.cos(rad), y2: y1 + length * Math.sin(rad) };
+    }
+  }
+  return { x2: x2, y2: y2 };
 }
 
 function _createAnnotElement(annot, viewport) {
@@ -7126,19 +7167,72 @@ function _createAnnotElement(annot, viewport) {
   el.className = "pdf-annot pdf-annot-" + annot.type;
   el.dataset.annotId = annot.id;
 
-  if (annot.type === "underline") {
-    // 划线：一条直线（从 (ax1,ay1) 到 (ax2,ay2)）
-    const dx = ax2 - ax1;
-    const dy = ay2 - ay1;
-    const length = Math.sqrt(dx * dx + dy * dy);
-    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-    el.style.left = ax1 + "px";
-    el.style.top = ay1 + "px";
-    el.style.width = length + "px";
-    el.style.height = "2px";
-    el.style.transform = "rotate(" + angle + "deg)";
-    el.style.background = annot.color;
-  } else {
+  if (annot.type === "underline" || annot.type === "arrow") {
+    // 划线/箭头：SVG 直线（支持任意角度），容器定位在线条外接矩形
+    const left = Math.min(ax1, ax2);
+    const top = Math.min(ay1, ay2);
+    const w = Math.abs(ax2 - ax1);
+    const h = Math.abs(ay2 - ay1);
+    el.style.left = left + "px";
+    el.style.top = top + "px";
+    el.style.width = Math.max(w, 2) + "px";
+    el.style.height = Math.max(h, 2) + "px";
+    // SVG 内坐标相对于外接矩形左上角
+    const sx1 = ax1 - left, sy1 = ay1 - top;
+    const sx2 = ax2 - left, sy2 = ay2 - top;
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("width", Math.max(w, 12));
+    svg.setAttribute("height", Math.max(h, 12));
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", sx1);
+    line.setAttribute("y1", sy1);
+    line.setAttribute("x2", sx2);
+    line.setAttribute("y2", sy2);
+    line.setAttribute("stroke", annot.color || "#e53935");
+    line.setAttribute("stroke-width", "2");
+    svg.appendChild(line);
+    if (annot.type === "arrow") {
+      // 箭头头部（三角形）
+      const angle = Math.atan2(sy2 - sy1, sx2 - sx1);
+      const headLen = 12;
+      const headAngle = 0.4; // ~23°
+      const p2x = sx2 - headLen * Math.cos(angle - headAngle);
+      const p2y = sy2 - headLen * Math.sin(angle - headAngle);
+      const p3x = sx2 - headLen * Math.cos(angle + headAngle);
+      const p3y = sy2 - headLen * Math.sin(angle + headAngle);
+      const poly = document.createElementNS(svgNS, "polygon");
+      poly.setAttribute("points", sx2 + "," + sy2 + " " + p2x + "," + p2y + " " + p3x + "," + p3y);
+      poly.setAttribute("fill", annot.color || "#e53935");
+      svg.appendChild(poly);
+    }
+    el.appendChild(svg);
+
+    // 端点手柄（非标注模式下拖拽可旋转/调整长度）
+    const handle = document.createElement("div");
+    handle.className = "pdf-annot-handle";
+    handle.style.left = sx2 + "px";
+    handle.style.top = sy2 + "px";
+    handle.addEventListener("mousedown", (ev) => {
+      if (pdfViewState.annotTool) return;
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const wrapper = el.closest(".pdf-page-wrapper");
+      const pageNum = parseInt(wrapper.dataset.page, 10);
+      // 提前推入 undo 快照（保存修改前状态）
+      const docKey = _getCurrentPdfAnnotKey();
+      if (docKey) _pushAnnotUndo(docKey);
+      pdfViewState.annotResizing = {
+        id: annot.id,
+        pageNum: pageNum,
+        viewport: viewport,
+      };
+    });
+    el.appendChild(handle);
+
+  } else if (annot.type === "highlight") {
+    // 高亮：红色边框 + 低透明度填充
     const left = Math.min(ax1, ax2);
     const top = Math.min(ay1, ay2);
     const width = Math.abs(ax2 - ax1);
@@ -7147,23 +7241,28 @@ function _createAnnotElement(annot, viewport) {
     el.style.top = top + "px";
     el.style.width = width + "px";
     el.style.height = height + "px";
-    if (annot.type === "highlight") {
-      el.style.backgroundColor = annot.color;
-      el.style.opacity = "0.4";
-    } else if (annot.type === "note") {
-      el.style.backgroundColor = "rgba(255, 235, 59, 0.55)";
-      el.style.border = "1px solid #f9a825";
-      const label = document.createElement("span");
-      label.className = "pdf-annot-note-label";
-      label.textContent = "📝";
-      el.appendChild(label);
-      if (annot.text) {
-        const popup = document.createElement("div");
-        popup.className = "pdf-annot-note-popup";
-        popup.textContent = annot.text;
-        el.appendChild(popup);
-      }
-    }
+    el.style.border = "2px solid " + (annot.color || "#e53935");
+    el.style.backgroundColor = annot.color || "#e53935";
+    el.style.opacity = "0.15";
+
+  } else if (annot.type === "note") {
+    // 注释：无背景、无边框，仅显示文字
+    const left = Math.min(ax1, ax2);
+    const top = Math.min(ay1, ay2);
+    const width = Math.abs(ax2 - ax1);
+    const height = Math.abs(ay2 - ay1);
+    el.style.left = left + "px";
+    el.style.top = top + "px";
+    el.style.width = Math.max(width, 40) + "px";
+    el.style.minHeight = Math.max(height, (annot.fontSize || 14) + 4) + "px";
+    el.style.height = "auto";
+    el.style.color = annot.color || "#e53935";
+    el.style.fontSize = (annot.fontSize || 14) + "px";
+    el.style.fontWeight = "500";
+    el.style.textShadow = "0 0 3px rgba(255,255,255,0.9), 0 0 3px rgba(255,255,255,0.9)"; // 白色描边确保深色背景上可读
+    const span = document.createElement("span");
+    span.textContent = annot.text || "";
+    el.appendChild(span);
   }
 
   // 删除按钮
@@ -7178,28 +7277,27 @@ function _createAnnotElement(annot, viewport) {
   });
   el.appendChild(del);
 
-  // 拖动移动（非标注模式生效；删除按钮已 stopPropagation 不会触发）
+  // 拖动移动（非标注模式；删除按钮和手柄已 stopPropagation）
   el.addEventListener("mousedown", (ev) => {
-    if (pdfViewState.annotTool) return; // 标注模式下不移动
+    if (pdfViewState.annotTool) return;
     if (ev.button !== 0) return;
+    // 点击在手柄或删除按钮上时不触发移动（它们已 stopPropagation）
+    if (ev.target.classList.contains("pdf-annot-handle") || ev.target.classList.contains("pdf-annot-delete")) return;
     ev.preventDefault();
     ev.stopPropagation();
     const wrapper = el.closest(".pdf-page-wrapper");
     if (!wrapper) return;
     const pageNum = parseInt(wrapper.dataset.page, 10);
-    const wrapperRect = wrapper.getBoundingClientRect();
     pdfViewState.annotMoving = {
       id: annot.id,
       startMouseX: ev.clientX,
       startMouseY: ev.clientY,
-      origAnnot: JSON.parse(JSON.stringify(annot)),
       origCssLeft: parseFloat(el.style.left) || 0,
       origCssTop: parseFloat(el.style.top) || 0,
       el: el,
-      wrapper: wrapper,
       pageNum: pageNum,
     };
-    // 同步获取当前页 viewport（移动后缩放可能变化，实时取）
+    // 获取当前 viewport（缩放可能变化）
     if (pdfViewState.pdfDoc) {
       pdfViewState.pdfDoc.getPage(pageNum).then(page => {
         if (pdfViewState.annotMoving && pdfViewState.annotMoving.id === annot.id) {
@@ -7249,8 +7347,8 @@ function startPdfAnnotDrag(ev, wrapper, pageNum, viewport) {
   pdfViewState.annotDragStart = { x: startX, y: startY };
   pdfViewState.annotDragEnd = { x: startX, y: startY };
   const tool = pdfViewState.annotTool;
-  // 划线用直线预览，高亮/注释用矩形预览
-  const previewClass = tool === "underline" ? "pdf-annot-drag-line" : "pdf-annot-drag-rect";
+  // 划线/箭头用直线预览，高亮/注释用矩形预览
+  const previewClass = (tool === "underline" || tool === "arrow") ? "pdf-annot-drag-line" : "pdf-annot-drag-rect";
   let preview = wrapper.querySelector("." + previewClass);
   if (!preview) {
     preview = document.createElement("div");
@@ -7261,7 +7359,7 @@ function startPdfAnnotDrag(ev, wrapper, pageNum, viewport) {
   preview.style.left = startX + "px";
   preview.style.top = startY + "px";
   preview.style.width = "0px";
-  if (tool === "underline") {
+  if (tool === "underline" || tool === "arrow") {
     preview.style.transform = "rotate(0deg)";
   } else {
     preview.style.height = "0px";
@@ -7271,19 +7369,32 @@ function startPdfAnnotDrag(ev, wrapper, pageNum, viewport) {
 async function _finalizePdfAnnotation(tool, page, viewport, startX, startY, endX, endY) {
   // 将 CSS 像素两个端点转为 PDF 原生坐标（点，Y 自下而上）
   const [x1, y1] = viewport.convertToPdfPoint(startX, startY);
-  const [x2, y2] = viewport.convertToPdfPoint(endX, endY);
+  let x2, y2;
+  [x2, y2] = viewport.convertToPdfPoint(endX, endY);
+
+  // 划线/箭头：自动水平/竖直校正
+  if (tool === "underline" || tool === "arrow") {
+    const snapped = _snapAngle(x1, y1, x2, y2);
+    x2 = snapped.x2;
+    y2 = snapped.y2;
+  }
+
   let text = "";
+  let fontSize = pdfViewState.annotFontSize;
+  let textColor = pdfViewState.annotTextColor;
   if (tool === "note") {
     text = await _showAnnotNotePrompt("");
     if (text === null) return; // 用户取消
     if (!text) return;
   }
+
   const docKey = _getCurrentPdfAnnotKey();
   if (!docKey) return;
   if (!pdfViewState.annotList[docKey]) pdfViewState.annotList[docKey] = [];
-  const color = tool === "highlight" ? "#fff176"
-    : tool === "underline" ? "#f44336"
-    : "#ffeb3b";
+
+  // 颜色：注释用文字色，其余用线条色
+  const color = (tool === "note") ? textColor : pdfViewState.annotLineColor;
+
   const annot = {
     id: "annot_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
     type: tool,
@@ -7291,6 +7402,7 @@ async function _finalizePdfAnnotation(tool, page, viewport, startX, startY, endX
     x1: x1, y1: y1, x2: x2, y2: y2,
     text: text,
     color: color,
+    fontSize: fontSize,
     createdAt: Date.now(),
   };
   _pushAnnotUndo(docKey);
@@ -7382,19 +7494,19 @@ async function exportPdfWithAnnotations() {
     annots.forEach(annot => {
       const page = pages[annot.page - 1];
       if (!page) return;
-      const x1 = Math.min(annot.x1, annot.x2);
-      const x2 = Math.max(annot.x1, annot.x2);
-      const y1 = Math.min(annot.y1, annot.y2); // 较低 PDF Y（视觉下方）
-      const y2 = Math.max(annot.y1, annot.y2); // 较高 PDF Y（视觉上方）
-      const w = x2 - x1;
-      const h = y2 - y1;
       const c = _hexToRgb(annot.color);
       const col = rgb(c.r / 255, c.g / 255, c.b / 255);
 
       if (annot.type === "highlight") {
+        // 高亮：红色边框 + 低透明度填充
+        const x1 = Math.min(annot.x1, annot.x2);
+        const x2 = Math.max(annot.x1, annot.x2);
+        const y1 = Math.min(annot.y1, annot.y2);
+        const y2 = Math.max(annot.y1, annot.y2);
         page.drawRectangle({
-          x: x1, y: y1, width: w, height: h,
-          color: col, opacity: 0.4,
+          x: x1, y: y1, width: x2 - x1, height: y2 - y1,
+          borderColor: col, borderWidth: 2,
+          color: col, opacity: 0.12,
         });
       } else if (annot.type === "underline") {
         // 划线：从 (x1,y1) 到 (x2,y2) 的直线（支持任意角度）
@@ -7404,22 +7516,35 @@ async function exportPdfWithAnnotations() {
           thickness: 2,
           color: col,
         });
-      } else if (annot.type === "note") {
-        // 注释框：浅黄底 + 边框
-        page.drawRectangle({
-          x: x1, y: y1, width: w, height: h,
-          borderColor: col, borderWidth: 1,
-          color: rgb(1, 0.99, 0.84), opacity: 0.7,
+      } else if (annot.type === "arrow") {
+        // 箭头：主线 + 箭头头部两条短线
+        page.drawLine({
+          start: { x: annot.x1, y: annot.y1 },
+          end: { x: annot.x2, y: annot.y2 },
+          thickness: 2,
+          color: col,
         });
+        const angle = Math.atan2(annot.y2 - annot.y1, annot.x2 - annot.x1);
+        const headLen = 10;
+        const headAngle = 0.4;
+        const hx1 = annot.x2 - headLen * Math.cos(angle - headAngle);
+        const hy1 = annot.y2 - headLen * Math.sin(angle - headAngle);
+        const hx2 = annot.x2 - headLen * Math.cos(angle + headAngle);
+        const hy2 = annot.y2 - headLen * Math.sin(angle + headAngle);
+        page.drawLine({ start: { x: annot.x2, y: annot.y2 }, end: { x: hx1, y: hy1 }, thickness: 2, color: col });
+        page.drawLine({ start: { x: annot.x2, y: annot.y2 }, end: { x: hx2, y: hy2 }, thickness: 2, color: col });
+      } else if (annot.type === "note") {
+        // 注释：仅绘制文字（无背景、无边框）
         if (annot.text && cjkFont) {
-          const fontSize = Math.max(8, Math.min(14, h * 0.5));
-          const textY = y2 - fontSize - 2; // 顶部留出字号空间
+          const fontSize = annot.fontSize || 14;
+          // PDF 中文字 y 坐标是基线位置；annot.y2 是文字框顶部（较高 Y）
+          const textY = annot.y2 - fontSize;
           try {
             page.drawText(annot.text, {
-              x: x1 + 2, y: textY,
+              x: annot.x1, y: textY,
               size: fontSize, font: cjkFont,
-              color: rgb(0.2, 0.13, 0),
-              maxWidth: Math.max(20, w - 4),
+              color: col,
+              maxWidth: Math.max(40, Math.abs(annot.x2 - annot.x1)),
             });
           } catch (e) { /* 个别字符无法编码时跳过 */ }
         }
@@ -9196,17 +9321,13 @@ document.addEventListener("DOMContentLoaded", () => {
   if (annotUnderlineBtn) {
     annotUnderlineBtn.addEventListener("click", () => setPdfAnnotTool("underline"));
   }
+  const annotArrowBtn = document.getElementById("pdf-annot-arrow");
+  if (annotArrowBtn) {
+    annotArrowBtn.addEventListener("click", () => setPdfAnnotTool("arrow"));
+  }
   const annotNoteBtn = document.getElementById("pdf-annot-note");
   if (annotNoteBtn) {
     annotNoteBtn.addEventListener("click", () => setPdfAnnotTool("note"));
-  }
-  const annotExportBtn = document.getElementById("pdf-annot-export");
-  if (annotExportBtn) {
-    annotExportBtn.addEventListener("click", exportPdfWithAnnotations);
-  }
-  const annotClearBtn = document.getElementById("pdf-annot-clear");
-  if (annotClearBtn) {
-    annotClearBtn.addEventListener("click", clearPdfAnnotations);
   }
   const annotHideOcrBtn = document.getElementById("pdf-annot-hide-ocr");
   if (annotHideOcrBtn) {
@@ -9219,6 +9340,27 @@ document.addEventListener("DOMContentLoaded", () => {
   const annotRedoBtn = document.getElementById("pdf-annot-redo");
   if (annotRedoBtn) {
     annotRedoBtn.addEventListener("click", redoPdfAnnotation);
+  }
+  // 颜色/字号设置
+  const annotTextColor = document.getElementById("pdf-annot-text-color");
+  if (annotTextColor) {
+    annotTextColor.addEventListener("change", (e) => { pdfViewState.annotTextColor = e.target.value; });
+  }
+  const annotFontSize = document.getElementById("pdf-annot-font-size");
+  if (annotFontSize) {
+    annotFontSize.addEventListener("change", (e) => { pdfViewState.annotFontSize = parseInt(e.target.value, 10) || 14; });
+  }
+  const annotLineColor = document.getElementById("pdf-annot-line-color");
+  if (annotLineColor) {
+    annotLineColor.addEventListener("change", (e) => { pdfViewState.annotLineColor = e.target.value; });
+  }
+  const annotExportBtn = document.getElementById("pdf-annot-export");
+  if (annotExportBtn) {
+    annotExportBtn.addEventListener("click", exportPdfWithAnnotations);
+  }
+  const annotClearBtn = document.getElementById("pdf-annot-clear");
+  if (annotClearBtn) {
+    annotClearBtn.addEventListener("click", clearPdfAnnotations);
   }
   // 关闭前提醒导出 PDF（存在未导出标注时）
   window.addEventListener("beforeunload", (e) => {

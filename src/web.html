@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PatentLens - 专利审查文档获取与梳理</title>
-  <link rel="stylesheet" href="styles/main.css?v=20260701c">
+  <link rel="stylesheet" href="styles/main.css?v=20260701e">
 </head>
 <body>
   <div id="splash-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:var(--bg-primary, #0f1117);display:flex;align-items:center;justify-content:center;z-index:99999;transition:opacity 0.5s ease;">
@@ -213,11 +213,17 @@
                     <span id="pdf-search-info" class="pdf-search-info"></span>
                     <span class="pdf-toolbar-separator"></span>
                     <button id="pdf-annot-hide-ocr" class="btn-small" title="隐藏/显示 OCR 文本框，便于标注">隐藏OCR框</button>
-                    <button id="pdf-annot-highlight" class="btn-small pdf-annot-btn" title="高亮框选：拖动选择矩形区域生成半透明高亮标注">高亮</button>
-                    <button id="pdf-annot-underline" class="btn-small pdf-annot-btn" title="划线标注：按下拖动绘制直线，松手生成划线">划线</button>
-                    <button id="pdf-annot-note" class="btn-small pdf-annot-btn" title="文字注释：拖动放置注释框并输入文字">注释</button>
-                    <button id="pdf-annot-undo" class="btn-small" title="撤回上一步标注操作">撤回</button>
-                    <button id="pdf-annot-redo" class="btn-small" title="重做已撤回的标注操作">重做</button>
+                    <span class="pdf-toolbar-separator"></span>
+                    <label class="pdf-annot-setting" title="注释文字颜色">文字色<input type="color" id="pdf-annot-text-color" value="#e53935" class="pdf-annot-color-input"></label>
+                    <label class="pdf-annot-setting" title="注释文字字号">字号<select id="pdf-annot-font-size" class="pdf-annot-select"><option>10</option><option>12</option><option>14</option><option>16</option><option>18</option><option>20</option><option>24</option></select></label>
+                    <label class="pdf-annot-setting" title="划线/箭头/高亮颜色">线条色<input type="color" id="pdf-annot-line-color" value="#e53935" class="pdf-annot-color-input"></label>
+                    <span class="pdf-toolbar-separator"></span>
+                    <button id="pdf-annot-highlight" class="btn-small pdf-annot-btn" title="高亮：拖动选择矩形区域，生成带边框的半透明高亮框">高亮</button>
+                    <button id="pdf-annot-underline" class="btn-small pdf-annot-btn" title="划线：拖动绘制直线，自动水平/竖直校正；非标注模式下可拖动端点旋转">划线</button>
+                    <button id="pdf-annot-arrow" class="btn-small pdf-annot-btn" title="箭头：拖动绘制带箭头的直线，指向目标区域">箭头</button>
+                    <button id="pdf-annot-note" class="btn-small pdf-annot-btn" title="文字注释：拖动放置文字框并输入文字，无背景无边框">注释</button>
+                    <button id="pdf-annot-undo" class="btn-small" title="撤回上一步标注操作" disabled>撤回</button>
+                    <button id="pdf-annot-redo" class="btn-small" title="重做已撤回的标注操作" disabled>重做</button>
                     <button id="pdf-annot-export" class="btn-small" title="导出带标注的 PDF（文件名=专利号+文档标题）">导出标注后文档</button>
                     <button id="pdf-annot-clear" class="btn-small" title="清空当前文档的全部标注">清空标注</button>
                   </div>
@@ -681,6 +687,6 @@
   <script src="scripts/pdf-lib.min.js?v=20260623c"></script>
   <script src="scripts/web-ai.js?v=20260701a"></script>
   <script src="scripts/patent-status.js?v=20260623c"></script>
-  <script src="scripts/web-app.js?v=20260701d"></script>
+  <script src="scripts/web-app.js?v=20260701e"></script>
 </body>
 </html>
