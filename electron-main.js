@@ -1231,6 +1231,27 @@ function startServer() {
         return;
       }
 
+      // OPS 配额查询端点（Electron 版精简实现，前端 20 分钟自动刷新调用）
+      if (req.url.startsWith("/api/ops/quota")) {
+        res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+        res.end(JSON.stringify({ success: false, quota: null, message: "Electron 版暂不支持 OPS 配额查询" }));
+        return;
+      }
+
+      // JPO 文档代理（精简实现）
+      if (req.url.startsWith("/api/jpo/doc/")) {
+        res.writeHead(501, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+        res.end(JSON.stringify({ error: "JPO API 未在 Electron 版中配置" }));
+        return;
+      }
+
+      // DE 专利代理（精简实现）
+      if (req.url.startsWith("/api/de/")) {
+        res.writeHead(501, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+        res.end(JSON.stringify({ error: "DPMA API 未在 Electron 版中配置" }));
+        return;
+      }
+
       if (req.url.startsWith("/api/gd/")) {
         const gdPath = req.url.replace("/api/gd", "");
         proxyGdApi(gdPath, res);
@@ -1384,7 +1405,9 @@ app.whenReady().then(async () => {
         if (cjkFontPath) {
           try {
             const fontBytes = fs.readFileSync(cjkFontPath);
-            cjkFont = await pdfDoc.embedFont(fontBytes, { subset: true });
+            // 不使用 subset:true — CJK 字体（特别是 TTC/CFF 格式）子集化会导致
+            // fontkit CFFSubset.encode RangeError 崩溃，全量嵌入更可靠
+            cjkFont = await pdfDoc.embedFont(fontBytes);
             console.log("[ExportPDF] 加载 CJK 字体:", cjkFontPath);
           } catch (e) { console.warn("[ExportPDF] CJK 字体加载失败:", e.message); }
         }
