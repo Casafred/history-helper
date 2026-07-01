@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PatentLens - 专利审查文档获取与梳理</title>
-  <link rel="stylesheet" href="styles/main.css?v=20260701m">
+  <link rel="stylesheet" href="styles/main.css?v=20260701n">
 </head>
 <body>
   <div id="splash-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:var(--bg-primary, #0f1117);display:flex;align-items:center;justify-content:center;z-index:99999;transition:opacity 0.5s ease;">
@@ -176,9 +176,9 @@
           </div>
           <div class="reader-body">
             <div id="reader-sidebar" class="reader-sidebar">
+              <button id="reader-sidebar-toggle" class="reader-sidebar-collapse-btn" title="收起文档列表"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
               <div class="reader-sidebar-title">
                 <span>审查文档列表</span>
-                <button id="reader-sidebar-toggle" class="btn-icon-sm" title="收起文档列表"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
               </div>
               <div class="reader-sidebar-search">
                 <input type="text" id="reader-doc-search" class="reader-doc-search-input" placeholder="搜索文档...">
@@ -192,40 +192,132 @@
                 </div>
                 <div id="reader-pdf-view" class="reader-pdf-view hidden">
                   <div id="reader-pdf-toolbar" class="reader-pdf-toolbar">
-                    <button id="pdf-prev-page" class="btn-small">上一页</button>
-                    <span id="pdf-page-info">1 / 1</span>
-                    <button id="pdf-next-page" class="btn-small">下一页</button>
-                    <span class="pdf-toolbar-separator"></span>
-                    <button id="pdf-zoom-out" class="btn-small">-</button>
-                    <span id="pdf-zoom-level" class="pdf-zoom-level">100%</span>
-                    <button id="pdf-zoom-in" class="btn-small">+</button>
-                    <button id="pdf-zoom-fit" class="btn-small">适应</button>
-                    <span class="pdf-toolbar-separator"></span>
-                    <button id="pdf-ocr-btn" class="btn-small" title="手动 OCR 提取当前文档文字">OCR 提取</button>
-                    <button id="pdf-translate-btn" class="btn-small" title="翻译全文档（未OCR时自动先提取）">翻译全文档</button>
-                    <button id="pdf-translate-selection-btn" class="btn-small" style="display:none;" title="翻译已选中的文本块">翻译已选</button>
-                    <button id="pdf-clear-selection-btn" class="btn-small" style="display:none;" title="清除选中的文本块">清除选择</button>
-                    <span id="pdf-selection-info" class="pdf-selection-info hidden"></span>
-                    <input type="text" id="pdf-search-input" class="pdf-search-input" placeholder="请先OCR提取..." disabled>
-                    <button id="pdf-search-btn" class="btn-small" disabled>搜索</button>
-                    <button id="pdf-search-prev-btn" class="btn-small" disabled title="上一个匹配">▲</button>
-                    <button id="pdf-search-next-btn" class="btn-small" disabled title="下一个匹配">▼</button>
-                    <span id="pdf-search-info" class="pdf-search-info"></span>
-                    <span class="pdf-toolbar-separator"></span>
-                    <button id="pdf-annot-hide-ocr" class="btn-small" title="隐藏/显示 OCR 文本框，便于标注">隐藏OCR框</button>
-                    <span class="pdf-toolbar-separator"></span>
-                    <label class="pdf-annot-setting" title="注释文字颜色">文字色<input type="color" id="pdf-annot-text-color" value="#e53935" class="pdf-annot-color-input"></label>
-                    <label class="pdf-annot-setting" title="注释文字字号">字号<select id="pdf-annot-font-size" class="pdf-annot-select"><option>10</option><option>12</option><option>14</option><option>16</option><option>18</option><option>20</option><option>24</option></select></label>
-                    <label class="pdf-annot-setting" title="划线/箭头/高亮颜色">线条色<input type="color" id="pdf-annot-line-color" value="#e53935" class="pdf-annot-color-input"></label>
-                    <span class="pdf-toolbar-separator"></span>
-                    <button id="pdf-annot-highlight" class="btn-small pdf-annot-btn" title="高亮：拖动选择矩形区域，生成带边框的半透明高亮框">高亮</button>
-                    <button id="pdf-annot-underline" class="btn-small pdf-annot-btn" title="划线：拖动绘制直线，自动水平/竖直校正；非标注模式下可拖动端点旋转">划线</button>
-                    <button id="pdf-annot-arrow" class="btn-small pdf-annot-btn" title="箭头：拖动绘制带箭头的直线，指向目标区域">箭头</button>
-                    <button id="pdf-annot-note" class="btn-small pdf-annot-btn" title="文字注释：拖动放置文字框并输入文字，无背景无边框">注释</button>
-                    <button id="pdf-annot-undo" class="btn-small" title="撤回上一步标注操作" disabled>撤回</button>
-                    <button id="pdf-annot-redo" class="btn-small" title="重做已撤回的标注操作" disabled>重做</button>
-                    <button id="pdf-annot-export" class="btn-small" title="导出带标注的 PDF（文件名=专利号+文档标题）">导出标注后文档</button>
-                    <button id="pdf-annot-clear" class="btn-small" title="清空当前文档的全部标注">清空标注</button>
+                    <div class="pdf-toolbar-row">
+                      <div class="pdf-toolbar-group">
+                        <button id="pdf-prev-page" class="pdf-toolbar-btn" title="上一页 (PageUp)">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                        </button>
+                        <div class="pdf-page-nav">
+                          <input type="number" id="pdf-page-input" class="pdf-page-input" value="1" min="1" title="输入页码跳转">
+                          <span class="pdf-page-sep">/</span>
+                          <span id="pdf-page-info" class="pdf-page-total">1</span>
+                        </div>
+                        <button id="pdf-next-page" class="pdf-toolbar-btn" title="下一页 (PageDown)">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                        </button>
+                      </div>
+                      <div class="pdf-toolbar-sep"></div>
+                      <div class="pdf-toolbar-group">
+                        <button id="pdf-zoom-out" class="pdf-toolbar-btn" title="缩小 (Ctrl+-)">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                        </button>
+                        <span id="pdf-zoom-level" class="pdf-zoom-level">100%</span>
+                        <button id="pdf-zoom-in" class="pdf-toolbar-btn" title="放大 (Ctrl++)">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                        </button>
+                        <button id="pdf-zoom-fit" class="pdf-toolbar-btn" title="适应宽度">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                        </button>
+                      </div>
+                      <div class="pdf-toolbar-sep"></div>
+                      <div class="pdf-toolbar-group">
+                        <button id="pdf-ocr-btn" class="pdf-toolbar-btn pdf-toolbar-btn-text" title="OCR 提取当前文档文字">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                          <span>OCR</span>
+                        </button>
+                        <button id="pdf-translate-btn" class="pdf-toolbar-btn pdf-toolbar-btn-text" title="翻译全文档（未OCR时自动先提取）">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M22 22l-5-10-5 10"/><path d="M14 18h6"/></svg>
+                          <span>翻译</span>
+                        </button>
+                        <button id="pdf-translate-selection-btn" class="pdf-toolbar-btn pdf-toolbar-btn-text" style="display:none;" title="翻译已选中的文本块">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M22 22l-5-10-5 10"/><path d="M14 18h6"/></svg>
+                          <span>译选</span>
+                        </button>
+                        <button id="pdf-clear-selection-btn" class="pdf-toolbar-btn pdf-toolbar-btn-text" style="display:none;" title="清除选中的文本块">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                          <span>清选</span>
+                        </button>
+                        <span id="pdf-selection-info" class="pdf-selection-info hidden"></span>
+                      </div>
+                      <div class="pdf-toolbar-group pdf-toolbar-search">
+                        <input type="text" id="pdf-search-input" class="pdf-search-input" placeholder="搜索文档..." disabled>
+                        <button id="pdf-search-btn" class="pdf-toolbar-btn pdf-toolbar-btn-icon-sm" disabled title="搜索">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        </button>
+                        <button id="pdf-search-prev-btn" class="pdf-toolbar-btn pdf-toolbar-btn-icon-sm" disabled title="上一个匹配">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+                        </button>
+                        <button id="pdf-search-next-btn" class="pdf-toolbar-btn pdf-toolbar-btn-icon-sm" disabled title="下一个匹配">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        </button>
+                        <span id="pdf-search-info" class="pdf-search-info"></span>
+                      </div>
+                      <div class="pdf-toolbar-spacer"></div>
+                      <div class="pdf-toolbar-group">
+                        <button id="pdf-annot-hide-ocr" class="pdf-toolbar-btn pdf-toolbar-btn-text" title="隐藏/显示 OCR 文本框">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                          <span>隐藏OCR</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div class="pdf-toolbar-row pdf-toolbar-row-annot">
+                      <div class="pdf-toolbar-group">
+                        <span class="pdf-toolbar-label">标注工具</span>
+                        <button id="pdf-annot-highlight" class="pdf-toolbar-btn pdf-toolbar-btn-text pdf-annot-btn" title="高亮：拖动选择矩形区域，生成半透明高亮框">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                          <span>高亮</span>
+                        </button>
+                        <button id="pdf-annot-underline" class="pdf-toolbar-btn pdf-toolbar-btn-text pdf-annot-btn" title="划线：拖动绘制直线">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg>
+                          <span>划线</span>
+                        </button>
+                        <button id="pdf-annot-arrow" class="pdf-toolbar-btn pdf-toolbar-btn-text pdf-annot-btn" title="箭头：拖动绘制带箭头的直线">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                          <span>箭头</span>
+                        </button>
+                        <button id="pdf-annot-note" class="pdf-toolbar-btn pdf-toolbar-btn-text pdf-annot-btn" title="文字注释：拖动放置文字框并输入文字">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                          <span>注释</span>
+                        </button>
+                      </div>
+                      <div class="pdf-toolbar-sep"></div>
+                      <div class="pdf-toolbar-group">
+                        <span class="pdf-toolbar-label">样式</span>
+                        <label class="pdf-color-label" title="注释文字颜色">
+                          <span>A</span>
+                          <input type="color" id="pdf-annot-text-color" value="#e53935" class="pdf-color-input">
+                        </label>
+                        <label class="pdf-color-label" title="线条/高亮颜色">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+                          <input type="color" id="pdf-annot-line-color" value="#e53935" class="pdf-color-input">
+                        </label>
+                        <select id="pdf-annot-font-size" class="pdf-select-sm" title="注释文字字号">
+                          <option>10</option><option>12</option><option selected>14</option><option>16</option><option>18</option><option>20</option><option>24</option>
+                        </select>
+                      </div>
+                      <div class="pdf-toolbar-sep"></div>
+                      <div class="pdf-toolbar-group">
+                        <button id="pdf-annot-undo" class="pdf-toolbar-btn pdf-toolbar-btn-text" title="撤回上一步标注操作 (Ctrl+Z)" disabled>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                          <span>撤回</span>
+                        </button>
+                        <button id="pdf-annot-redo" class="pdf-toolbar-btn pdf-toolbar-btn-text" title="重做已撤回的标注操作 (Ctrl+Y)" disabled>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                          <span>重做</span>
+                        </button>
+                      </div>
+                      <div class="pdf-toolbar-spacer"></div>
+                      <div class="pdf-toolbar-group">
+                        <button id="pdf-annot-export" class="pdf-toolbar-btn pdf-toolbar-btn-text pdf-toolbar-btn-primary" title="导出带标注的 PDF">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                          <span>导出标注</span>
+                        </button>
+                        <button id="pdf-annot-clear" class="pdf-toolbar-btn pdf-toolbar-btn-text pdf-toolbar-btn-danger" title="清空当前文档的全部标注">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                          <span>清空</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                   <div id="reader-pdf-container" class="reader-pdf-container">
                     <!-- PDF pages rendered here with canvas + overlay -->
@@ -685,9 +777,9 @@
   <script src="scripts/docx.umd.js?v=20260623c"></script>
   <script src="scripts/FileSaver.min.js?v=20260623c"></script>
   <script src="scripts/pdf-lib.min.js?v=20260623c"></script>
-  <script src="scripts/fontkit.umd.min.js?v=20260701m"></script>
-  <script src="scripts/web-ai.js?v=20260701m"></script>
-  <script src="scripts/patent-status.js?v=20260701m"></script>
-  <script src="scripts/web-app.js?v=20260701m"></script>
+  <script src="scripts/fontkit.umd.min.js?v=20260701n"></script>
+  <script src="scripts/web-ai.js?v=20260701n"></script>
+  <script src="scripts/patent-status.js?v=20260701n"></script>
+  <script src="scripts/web-app.js?v=20260701n"></script>
 </body>
 </html>

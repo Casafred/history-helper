@@ -186,6 +186,7 @@ const readerFullscreenBtn = null;
 const readerPdfView = document.getElementById("reader-pdf-view");
 const readerPdfContainer = document.getElementById("reader-pdf-container");
 const pdfPageInfo = document.getElementById("pdf-page-info");
+const pdfPageInput = document.getElementById("pdf-page-input");
 const pdfZoomLevel = document.getElementById("pdf-zoom-level");
 const pdfPrevPage = document.getElementById("pdf-prev-page");
 const pdfNextPage = document.getElementById("pdf-next-page");
@@ -6471,8 +6472,8 @@ async function renderPdfView(idx) {
     }
     const firstPage = await pdfDoc.getPage(1);
     const viewport = firstPage.getViewport({ scale: 1.0 });
-    pdfViewState.baseScale = containerWidth > 0 ? Math.min(containerWidth / viewport.width, 1.5) : 1.0;
-    pdfViewState.scale = pdfViewState.baseScale;
+    pdfViewState.baseScale = containerWidth > 0 ? Math.min(containerWidth / viewport.width, 1.0) : 1.0;
+    pdfViewState.scale = 1.0;
 
     updatePdfToolbar();
     await renderAllPdfPages(pdfDoc, blocks, pageDimensions, pdfViewState.scale);
@@ -6534,8 +6535,8 @@ async function renderPdfView(idx) {
     }
     const firstPage = await pdfDoc.getPage(1);
     const viewport = firstPage.getViewport({ scale: 1.0 });
-    pdfViewState.baseScale = containerWidth > 0 ? Math.min(containerWidth / viewport.width, 1.5) : 1.0;
-    pdfViewState.scale = pdfViewState.baseScale;
+    pdfViewState.baseScale = containerWidth > 0 ? Math.min(containerWidth / viewport.width, 1.0) : 1.0;
+    pdfViewState.scale = 1.0;
 
     updatePdfToolbar();
     await renderAllPdfPages(pdfDoc, blocks, pageDimensions, pdfViewState.scale);
@@ -6970,7 +6971,13 @@ async function rerenderPdfPages() {
 
 function updatePdfToolbar() {
   if (pdfPageInfo) {
-    pdfPageInfo.textContent = pdfViewState.currentPage + " / " + pdfViewState.totalPages;
+    pdfPageInfo.textContent = pdfViewState.totalPages;
+  }
+  if (pdfPageInput) {
+    pdfPageInput.max = pdfViewState.totalPages;
+    if (document.activeElement !== pdfPageInput) {
+      pdfPageInput.value = pdfViewState.currentPage;
+    }
   }
   if (pdfZoomLevel) {
     pdfZoomLevel.textContent = Math.round(pdfViewState.scale * 100) + "%";
@@ -7078,7 +7085,8 @@ function togglePdfOcrHide() {
   }
   const btn = document.getElementById("pdf-annot-hide-ocr");
   if (btn) {
-    btn.textContent = pdfViewState.ocrHidden ? "显示OCR框" : "隐藏OCR框";
+    const span = btn.querySelector("span");
+    if (span) span.textContent = pdfViewState.ocrHidden ? "显示OCR" : "隐藏OCR";
     btn.classList.toggle("active", pdfViewState.ocrHidden);
   }
 }
@@ -7477,8 +7485,9 @@ async function exportPdfWithAnnotations() {
     return;
   }
   const exportBtn = document.getElementById("pdf-annot-export");
-  const origText = exportBtn ? exportBtn.textContent : "";
-  if (exportBtn) { exportBtn.disabled = true; exportBtn.textContent = "导出中..."; }
+  const exportSpan = exportBtn ? exportBtn.querySelector("span") : null;
+  const origText = exportSpan ? exportSpan.textContent : "";
+  if (exportBtn) { exportBtn.disabled = true; if (exportSpan) exportSpan.textContent = "导出中..."; }
   try {
     const idx = pdfViewState.currentDocIdx;
     const it = kanbanState.documents.find(d => d.idx === idx);
@@ -7513,7 +7522,7 @@ async function exportPdfWithAnnotations() {
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      if (exportBtn) { exportBtn.disabled = false; exportBtn.textContent = origText; }
+      if (exportBtn) { exportBtn.disabled = false; if (exportSpan) exportSpan.textContent = origText; }
       return;
     }
 
@@ -7622,7 +7631,7 @@ async function exportPdfWithAnnotations() {
   } catch (e) {
     showError("导出失败: " + (e.message || e));
   } finally {
-    if (exportBtn) { exportBtn.disabled = false; exportBtn.textContent = origText; }
+    if (exportBtn) { exportBtn.disabled = false; if (exportSpan) exportSpan.textContent = origText; }
   }
 }
 
@@ -9340,6 +9349,18 @@ document.addEventListener("DOMContentLoaded", () => {
   if (pdfNextPage) {
     pdfNextPage.addEventListener("click", () => pdfGoToPage(pdfViewState.currentPage + 1));
   }
+  if (pdfPageInput) {
+    pdfPageInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const p = parseInt(pdfPageInput.value, 10);
+        if (!isNaN(p)) pdfGoToPage(p);
+      }
+    });
+    pdfPageInput.addEventListener("blur", () => {
+      pdfPageInput.value = pdfViewState.currentPage;
+    });
+  }
   if (pdfZoomIn) {
     pdfZoomIn.addEventListener("click", pdfZoomInAction);
   }
@@ -9353,13 +9374,14 @@ document.addEventListener("DOMContentLoaded", () => {
   // PDF OCR button
   const pdfOcrBtn = document.getElementById("pdf-ocr-btn");
   if (pdfOcrBtn) {
+    const ocrSpan = pdfOcrBtn.querySelector("span");
     pdfOcrBtn.addEventListener("click", async () => {
       if (pdfOcrBtn.disabled) return;
       pdfOcrBtn.disabled = true;
-      pdfOcrBtn.textContent = "OCR中...";
+      if (ocrSpan) ocrSpan.textContent = "OCR中...";
       await ocrPdf();
       pdfOcrBtn.disabled = false;
-      pdfOcrBtn.textContent = "OCR 提取";
+      if (ocrSpan) ocrSpan.textContent = "OCR";
     });
   }
 
