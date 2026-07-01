@@ -752,16 +752,12 @@ function openInAppWebview(url, title) {
   const popoutBtn = document.getElementById("pd-wv-popout-btn");
   if (popoutBtn) {
     popoutBtn.addEventListener("click", function() {
-      if (window.electronAPI && typeof window.electronAPI.openPopoutWindow === "function") {
-        // Electron：IPC 直连，主进程创建窗口并加载 popout.html
-        window.electronAPI.openPopoutWindow(_currentWebviewUrl, title || url);
-      } else {
-        // 浏览器环境：回退到 window.open
-        const popoutUrl = location.origin + "/popout.html?url=" + encodeURIComponent(_currentWebviewUrl) + "&title=" + encodeURIComponent(title || url);
-        const opened = window.open(popoutUrl, "_blank", "width=1100,height=800");
-        if (!opened) {
-          window.open(_currentWebviewUrl, "_blank");
-        }
+      // Electron: window.open → setWindowOpenHandler 创建独立 BrowserWindow 直接加载 URL
+      // 浏览器: window.open 在新标签页中打开
+      const opened = window.open(_currentWebviewUrl, "_blank");
+      // 如果被拦截（浏览器弹窗拦截器），回退到外部打开
+      if (!opened && window.electronAPI) {
+        window.electronAPI.openExternal(_currentWebviewUrl);
       }
       closeInAppWebview();
     });

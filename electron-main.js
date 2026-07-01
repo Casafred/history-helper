@@ -1316,12 +1316,25 @@ function createWindow(port) {
   });
 
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
-  // 外部链接在系统浏览器中打开；本地同域请求允许（弹窗已改用 IPC 直连）
+  // 窗口打开处理：本地同域请求允许；GP/Espacenet 等外部链接创建独立 BrowserWindow 加载
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     console.log("[Electron] setWindowOpenHandler url=" + url);
-    if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) return { action: "allow" };
-    shell.openExternal(url);
-    return { action: "deny" };
+    if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
+      return { action: "allow" };
+    }
+    // Google Patents / Espacenet 等外部链接：创建独立窗口直接加载（与 5b69896 行为一致）
+    const extWin = new BrowserWindow({
+      width: 1100,
+      height: 800,
+      title: "专利原文查看",
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, "preload.js"),
+      },
+    });
+    extWin.loadURL(url);
+    return { action: "deny" }; // 阻止默认行为，已手动创建窗口
   });
   // 关闭前确认：若存在未导出的 PDF 标注，弹出原生确认框
   mainWindow.on("close", (event) => {
