@@ -676,6 +676,7 @@ function openInAppWebview(url, title) {
       <div class="pd-links" style="position:absolute;right:0;top:50%;transform:translateY(-50%);display:flex;gap:6px;align-items:center;">
         <button id="pd-wv-translate-btn" style="${btnStyle}" title="通过 Google 翻译翻译此页面内容">翻译</button>
         <button id="pd-wv-refresh-btn" style="${btnStyle}" title="刷新当前页面">刷新</button>
+        <button id="pd-wv-popout-btn" style="${btnStyle}" title="弹出独立窗口，可拖到一旁对照查看">弹出窗口</button>
         <a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="font-size:12px;color:#333;border:1px solid #bbb;background:#fff;padding:2px 10px;border-radius:4px;text-decoration:none;transition:all 0.2s;" onmouseenter="this.style.background='var(--accent, #4f8ff7)';this.style.color='#fff';" onmouseleave="this.style.background='#fff';this.style.color='#333';">外部浏览器打开</a>
         <button id="pd-wv-close-btn" style="${btnStyle}" title="关闭">✕ 关闭</button>
       </div>
@@ -738,6 +739,21 @@ function openInAppWebview(url, title) {
     refreshBtn.addEventListener("click", refreshWebview);
     refreshBtn.addEventListener("mouseenter", function() { this.style.background = "var(--accent, #4f8ff7)"; this.style.color = "#fff"; });
     refreshBtn.addEventListener("mouseleave", function() { this.style.background = "#fff"; this.style.color = "#333"; });
+  }
+  // 弹出独立窗口：在新窗口中打开原文，主窗口释放供对照使用
+  const popoutBtn = document.getElementById("pd-wv-popout-btn");
+  if (popoutBtn) {
+    popoutBtn.addEventListener("click", function() {
+      const popoutUrl = "/popout.html?url=" + encodeURIComponent(_currentWebviewUrl) + "&title=" + encodeURIComponent(title || url);
+      const opened = window.open(popoutUrl, "_blank", "width=1100,height=800");
+      // 浏览器环境若被拦截则回退到外部打开；Electron 由 setWindowOpenHandler 接管
+      if (!opened && !window.electronAPI) {
+        window.open(_currentWebviewUrl, "_blank");
+      }
+      closeInAppWebview();
+    });
+    popoutBtn.addEventListener("mouseenter", function() { this.style.background = "var(--accent, #4f8ff7)"; this.style.color = "#fff"; });
+    popoutBtn.addEventListener("mouseleave", function() { this.style.background = "#fff"; this.style.color = "#333"; });
   }
 
   // 右键上下文菜单（翻译 + 刷新）
@@ -3754,17 +3770,68 @@ async function runPatentInterpretation(source) {
 let _patentAskSource = "detail";
 let _patentAskMessages = []; // [{role, content}]
 let _patentAskStreaming = false;
+const _PATENT_ASK_CACHE_PREFIX = "patentlens_ask_";
+const _PATENT_ASK_CACHE_TTL = 60 * 60 * 1000; // 1 小时
+
+function _patentAskCacheKey(pn) {
+  return _PATENT_ASK_CACHE_PREFIX + (pn || "unknown");
+}
+
+function _savePatentAskCache() {
+  const data = _getPatentDataSource(_patentAskSource);
+  const pn = data && data.patent_number ? data.patent_number : "";
+  if (!pn) return;
+  try {
+    localStorage.setItem(_patentAskCacheKey(pn), JSON.stringify({
+      messages: _patentAskMessages,
+      ts: Date.now(),
+    }));
+  } catch (e) { /* 忽略配额错误 */ }
+}
+
+function _loadPatentAskCache(pn) {
+  if (!pn) return null;
+  try {
+    const raw = localStorage.getItem(_patentAskCacheKey(pn));
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj || !Array.isArray(obj.messages)) return null;
+    if (Date.now() - (obj.ts || 0) > _PATENT_ASK_CACHE_TTL) {
+      localStorage.removeItem(_patentAskCacheKey(pn));
+      return null;
+    }
+    return obj.messages;
+  } catch (e) { return null; }
+}
+
+function _renderPatentAskMessages() {
+  const msgEl = document.getElementById("patent-ask-messages");
+  if (!msgEl) return;
+  msgEl.innerHTML = "";
+  if (_patentAskMessages.length === 0) {
+    msgEl.innerHTML = '<p class="patent-ask-placeholder">勾选下方上下文，输入问题后发送。AI 将基于本篇专利内容回答。</p>';
+    return;
+  }
+  // 跳过系统消息（系统提示词不展示）
+  _patentAskMessages.forEach(m => {
+    if (m.role === "system") return;
+    _appendPatentAskMessage(m.role, m.content);
+  });
+  msgEl.scrollTop = msgEl.scrollHeight;
+}
 
 function openPatentAsk(source) {
   const modal = document.getElementById("patent-ask-modal");
   if (!modal) return;
   _patentAskSource = source || "detail";
   const data = _getPatentDataSource(_patentAskSource);
+  const pn = data && data.patent_number ? data.patent_number : "";
   const pnEl = document.getElementById("patent-ask-pn");
-  if (pnEl) pnEl.textContent = data && data.patent_number ? data.patent_number : "";
-  _patentAskMessages = [];
-  const msgEl = document.getElementById("patent-ask-messages");
-  if (msgEl) msgEl.innerHTML = '<p class="patent-ask-placeholder">勾选下方上下文，输入问题后发送。AI 将基于本篇专利内容回答。</p>';
+  if (pnEl) pnEl.textContent = pn;
+  // 恢复 1 小时内的历史对话（按专利号缓存）
+  const cached = _loadPatentAskCache(pn);
+  _patentAskMessages = cached ? cached.slice() : [];
+  _renderPatentAskMessages();
   const inputEl = document.getElementById("patent-ask-input");
   if (inputEl) inputEl.value = "";
   modal.classList.remove("hidden");
@@ -3772,8 +3839,20 @@ function openPatentAsk(source) {
 }
 
 function closePatentAsk() {
+  // 关闭时保留对话：仅隐藏，不清空内存与缓存
+  _savePatentAskCache();
   const modal = document.getElementById("patent-ask-modal");
   if (modal) modal.classList.add("hidden");
+}
+
+function clearPatentAsk() {
+  const data = _getPatentDataSource(_patentAskSource);
+  const pn = data && data.patent_number ? data.patent_number : "";
+  _patentAskMessages = [];
+  if (pn) {
+    try { localStorage.removeItem(_patentAskCacheKey(pn)); } catch (e) {}
+  }
+  _renderPatentAskMessages();
 }
 
 function _buildPatentAskContext() {
@@ -3856,8 +3935,10 @@ async function sendPatentAsk() {
     }
     if (contentEl) contentEl.innerHTML = renderMarkdown(acc) || "（未返回内容）";
     _patentAskMessages.push({ role: "assistant", content: acc });
+    _savePatentAskCache(); // 流式完成后持久化对话
   } catch (e) {
     if (contentEl) contentEl.textContent = "回答失败：" + (e && e.message ? e.message : String(e));
+    _savePatentAskCache();
   } finally {
     _patentAskStreaming = false;
     if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = "发送"; }
@@ -3869,6 +3950,11 @@ async function sendPatentAsk() {
 function _initPatentAskBindings() {
   const closeBtn = document.getElementById("patent-ask-close-btn");
   if (closeBtn) closeBtn.addEventListener("click", closePatentAsk);
+  const clearBtn = document.getElementById("patent-ask-clear-btn");
+  if (clearBtn) clearBtn.addEventListener("click", () => {
+    if (_patentAskMessages.length === 0) return;
+    if (window.confirm("确定清空当前专利的对话记录吗？")) clearPatentAsk();
+  });
   const sendBtn = document.getElementById("patent-ask-send-btn");
   if (sendBtn) sendBtn.addEventListener("click", sendPatentAsk);
   const inputEl = document.getElementById("patent-ask-input");
@@ -6961,8 +7047,8 @@ function startPdfAnnotDrag(ev, wrapper, pageNum, viewport) {
 
 function _finalizePdfAnnotation(tool, page, viewport, left, top, width, height) {
   // 将 CSS 像素矩形（相对 canvas）转为 PDF 原生坐标（点，Y 自下而上）
-  const [x1, y1] = viewport.convertToPDFPoint(left, top);
-  const [x2, y2] = viewport.convertToPDFPoint(left + width, top + height);
+  const [x1, y1] = viewport.convertToPdfPoint(left, top);
+  const [x2, y2] = viewport.convertToPdfPoint(left + width, top + height);
   let text = "";
   if (tool === "note") {
     text = window.prompt("请输入注释内容：", "");

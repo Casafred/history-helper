@@ -1288,13 +1288,34 @@ function createWindow(port) {
   });
 
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
-  // 外部链接在系统浏览器中打开
+  // 外部链接在系统浏览器中打开；popout.html 弹出独立窗口（需启用 webview 标签）
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^http:\/\/127\.0\.0\.1(:\d+)?\/popout\.html/.test(url) || /^http:\/\/localhost(:\d+)?\/popout\.html/.test(url)) {
+      createPopoutWindow(url, port);
+      return { action: "deny" };
+    }
     if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) return { action: "allow" };
     shell.openExternal(url);
     return { action: "deny" };
   });
   mainWindow.on("closed", () => { mainWindow = null; });
+}
+
+// 弹出独立窗口：用于 GP / espacenet 原文对照查看，启用 webview 标签以绕过 X-Frame-Options
+function createPopoutWindow(url, port) {
+  const win = new BrowserWindow({
+    width: 1100,
+    height: 800,
+    title: "专利原文查看",
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
+      webviewTag: true,
+    },
+  });
+  win.loadURL(url);
+  return win;
 }
 
 app.whenReady().then(async () => {

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>专利原文查看</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #fff; }
+    #po-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; background: #f5f7fa; border-bottom: 1px solid #d8dce6;
+      flex-shrink: 0;
+    }
+    #po-title { font-size: 13px; color: #1a1d27; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .po-btn {
+      cursor: pointer; border: 1px solid #bbb; background: #fff; color: #333;
+      font-size: 12px; padding: 4px 12px; border-radius: 4px; transition: all 0.2s;
+      white-space: nowrap; text-decoration: none; display: inline-block;
+    }
+    .po-btn:hover { background: #4f8ff7; color: #fff; border-color: #4f8ff7; }
+    #po-container { width: 100%; height: calc(100vh - 49px); position: relative; background: #fff; }
+    #po-container webview, #po-container iframe { width: 100%; height: 100%; border: none; }
+    .po-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #888; font-size: 14px; }
+    .po-fallback { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #888; font-size: 14px; padding: 24px; }
+  </style>
+</head>
+<body>
+  <div id="po-header">
+    <div id="po-title"></div>
+    <button id="po-translate" class="po-btn" title="通过 Google 翻译翻译此页面">翻译</button>
+    <button id="po-refresh" class="po-btn" title="刷新当前页面">刷新</button>
+    <a id="po-external" class="po-btn" href="#" target="_blank" rel="noopener" title="在外部浏览器打开">外部打开</a>
+    <button id="po-close" class="po-btn" title="关闭窗口">关闭</button>
+  </div>
+  <div id="po-container">
+    <div class="po-loading">正在加载...</div>
+  </div>
+  <script>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var targetUrl = params.get("url") || "";
+      var title = params.get("title") || targetUrl || "专利原文";
+      var isElectron = !!window.electronAPI;
+      var container = document.getElementById("po-container");
+      var translateBtn = document.getElementById("po-translate");
+      var refreshBtn = document.getElementById("po-refresh");
+      var closeBtn = document.getElementById("po-close");
+      var externalLink = document.getElementById("po-external");
+      var titleEl = document.getElementById("po-title");
+      titleEl.textContent = decodeURIComponent(title);
+      externalLink.setAttribute("href", targetUrl);
+
+      var currentUrl = targetUrl;
+      var isTranslated = false;
+
+      function clearContainer() { container.innerHTML = ""; }
+
+      function embed() {
+        clearContainer();
+        if (isElectron) {
+          var wv = document.createElement("webview");
+          wv.setAttribute("src", currentUrl);
+          wv.setAttribute("allowpopups", "");
+          wv.style.width = "100%";
+          wv.style.height = "100%";
+          wv.style.border = "none";
+          wv.addEventListener("did-stop-loading", function () {
+            var ld = container.querySelector(".po-loading");
+            if (ld) ld.remove();
+          });
+          wv.addEventListener("did-fail-load", function (e) {
+            if (e && e.errorCode === -3) return; // 中止（导航切换）忽略
+            showFallback();
+          });
+          container.appendChild(wv);
+        } else {
+          var ifr = document.createElement("iframe");
+          ifr.src = currentUrl;
+          ifr.style.width = "100%";
+          ifr.style.height = "100%";
+          ifr.style.border = "none";
+          ifr.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups");
+          ifr.setAttribute("referrerpolicy", "no-referrer");
+          ifr.onload = function () {
+            var ld = container.querySelector(".po-loading");
+            if (ld) ld.remove();
+          };
+          ifr.onerror = function () { showFallback(); };
+          container.appendChild(ifr);
+          // 超时兜底：iframe 受 X-Frame-Options 限制可能不触发 onerror
+          setTimeout(function () {
+            var ld = container.querySelector(".po-loading");
+            if (ld) {
+              ifr.remove();
+              showFallback();
+            }
+          }, 8000);
+        }
+      }
+
+      function showFallback() {
+        clearContainer();
+        var div = document.createElement("div");
+        div.className = "po-fallback";
+        div.innerHTML = "该站点禁止嵌入显示。<br>请点击右上角「外部打开」在浏览器中查看。";
+        container.appendChild(div);
+      }
+
+      function loadUrl(u) { currentUrl = u; embed(); }
+
+      function translatePage() {
+        if (isTranslated) {
+          isTranslated = false;
+          loadUrl(targetUrl);
+          translateBtn.textContent = "翻译";
+          translateBtn.title = "通过 Google 翻译翻译此页面";
+          return;
+        }
+        isTranslated = true;
+        translateBtn.textContent = "原文";
+        translateBtn.title = "切换回原始页面";
+        if (isElectron) {
+          var wv = container.querySelector("webview");
+          if (!wv) { loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(targetUrl)); return; }
+          var injectCode = [
+            "(function(){",
+            "  if(document.getElementById('google_translate_element_injected')){",
+            "    var sel=document.querySelector('.goog-te-combo');if(sel){sel.value='zh-CN';sel.dispatchEvent(new Event('change'));}return;",
+            "  }",
+            "  var c=document.createElement('div');c.id='google_translate_element_injected';",
+            "  c.style.cssText='position:fixed;top:0;left:0;right:0;z-index:999999;';document.body.prepend(c);",
+            "  window.googleTranslateElementInitInner=function(){",
+            "    new google.translate.TranslateElement({pageLanguage:'auto',includedLanguages:'zh-CN,zh-TW,en,ja,ko,de,fr',layout:google.translate.TranslateElement.InlineLayout.SIMPLE,autoDisplay:true},'google_translate_element_injected');",
+            "  };",
+            "  var s=document.createElement('script');s.type='text/javascript';",
+            "  s.src='https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInitInner';document.head.appendChild(s);",
+            "})();"
+          ].join("");
+          try { wv.executeJavaScript(injectCode); }
+          catch (e) { loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(targetUrl)); }
+        } else {
+          loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(targetUrl));
+        }
+      }
+
+      function refreshPage() {
+        if (isElectron) {
+          var wv = container.querySelector("webview");
+          if (wv) { try { wv.reload(); } catch (e) { loadUrl(currentUrl); } }
+          else loadUrl(currentUrl);
+        } else {
+          var ifr = container.querySelector("iframe");
+          if (ifr) ifr.src = ifr.src;
+          else loadUrl(currentUrl);
+        }
+      }
+
+      translateBtn.addEventListener("click", translatePage);
+      refreshBtn.addEventListener("click", refreshPage);
+      closeBtn.addEventListener("click", function () { window.close(); });
+      externalLink.addEventListener("click", function (e) {
+        if (window.electronAPI) { e.preventDefault(); window.electronAPI.openExternal(targetUrl); }
+      });
+
+      if (targetUrl) embed(); else showFallback();
+    })();
+  </script>
+</body>
+</html>

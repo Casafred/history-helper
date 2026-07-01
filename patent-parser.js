@@ -600,13 +600,15 @@ function extractPatentFromHtml(html, patentId) {
       .replace(/\s+/g, " ")
       .trim();
 
-    // Description content: prefer <ul class="description">, else walk the whole section.
-    // GP sometimes omits the <ul> wrapper and places <heading>/<li> directly in the section.
-    const ulDesc = descHtml.match(/<ul[^>]*class="[^"]*\bdescription\b[^"]*"[^>]*>([\s\S]*?)<\/ul>/i);
-    const descContent = ulDesc ? ulDesc[1] : descHtml;
+    // Walk <heading> and <li> elements across the ENTIRE description section in document
+    // order. We intentionally do NOT scope to a single <ul class="description">, because GP
+    // often splits the description across multiple lists (e.g. a separate definitions list),
+    // and scoping to the first <ul> would truncate everything after it.
+    const descContent = descHtml;
 
-    // Walk <heading> and <li> elements in document order, extracting paragraph numbers
-    // from <para-num num="..."> OR from a <div class="description-line" num="...">.
+    // Match <heading>...</heading> and <li ...>...</li> in document order. <li> in GP is
+    // always explicitly closed; if a stray unclosed <li> is encountered, the non-greedy
+    // match simply extends to the next </li>, which is acceptable.
     const parts = [];
     const elementRegex = /<(heading|li)\b[^>]*>([\s\S]*?)<\/\1>/gi;
     let elemMatch;
@@ -617,20 +619,39 @@ function extractPatentFromHtml(html, patentId) {
         const headingText = content.replace(/<[^>]+>/g, "").trim();
         if (headingText) parts.push('## ' + headingText);
       } else if (tag === 'li') {
-        // Paragraph number: try <para-num num="..."> first (accepts bracketed or bare)
+        // Paragraph number: try <para-num num="...">, then <div class="description-line" num="...">,
+        // then <meta itemprop="num_attr" content="..."> (GP definitions format).
         let paraNum = "";
         const paraNumMatch = content.match(/<para-num[^>]*num="([^"]*)"[^>]*>/i);
         if (paraNumMatch) paraNum = normalizeParaNum(paraNumMatch[1]);
-        // Fallback: num attribute on the description-line div itself
         if (!paraNum) {
           const divNumMatch = content.match(/<div[^>]*class="description-line"[^>]*num="([^"]*)"[^>]*>/i)
             || content.match(/<div[^>]*num="([^"]*)"[^>]*class="description-line"[^>]*>/i);
           if (divNumMatch) paraNum = normalizeParaNum(divNumMatch[1]);
         }
-        // Extract description-line div content (preferred), or fallback to full li content
+        if (!paraNum) {
+          const metaNumMatch = content.match(/<meta[^>]*itemprop="num_attr"[^>]*content="([^"]*)"[^>]*>/i)
+            || content.match(/<meta[^>]*content="([^"]*)"[^>]*itemprop="num_attr"[^>]*>/i);
+          if (metaNumMatch) paraNum = normalizeParaNum(metaNumMatch[1]);
+        }
+        // Paragraph text: prefer <div class="description-line"> content; else for the GP
+        // definitions format combine <span itemprop="subject"> + <span itemprop="definition">;
+        // else strip tags from the whole <li> content.
+        let paraText = "";
         const descLineMatch = content.match(/<div[^>]*class="description-line"[^>]*>([\s\S]*?)<\/div>/i);
-        let paraText = descLineMatch ? descLineMatch[1] : content;
-        paraText = cleanParaText(paraText);
+        if (descLineMatch) {
+          paraText = cleanParaText(descLineMatch[1]);
+        } else {
+          const subjectMatch = content.match(/<span[^>]*itemprop="subject"[^>]*>([\s\S]*?)<\/span>/i);
+          const definitionMatch = content.match(/<span[^>]*itemprop="definition"[^>]*>([\s\S]*?)<\/span>/i);
+          if (subjectMatch || definitionMatch) {
+            const subj = subjectMatch ? cleanParaText(subjectMatch[1]) : "";
+            const defn = definitionMatch ? cleanParaText(definitionMatch[1]) : "";
+            paraText = (subj + " " + defn).trim();
+          } else {
+            paraText = cleanParaText(content);
+          }
+        }
         if (paraText) {
           parts.push(paraNum ? paraNum + ' ' + paraText : paraText);
         }
