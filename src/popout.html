@@ -58,6 +58,7 @@
 
       function embed() {
         clearContainer();
+        console.log("[popout] embed, isElectron=" + isElectron + ", url=" + currentUrl);
         if (isElectron) {
           var wv = document.createElement("webview");
           wv.setAttribute("src", currentUrl);
@@ -65,15 +66,33 @@
           wv.style.width = "100%";
           wv.style.height = "100%";
           wv.style.border = "none";
+          var _loaded = false;
+          wv.addEventListener("did-start-loading", function () {
+            console.log("[popout] webview did-start-loading");
+          });
           wv.addEventListener("did-stop-loading", function () {
+            console.log("[popout] webview did-stop-loading");
+            _loaded = true;
             var ld = container.querySelector(".po-loading");
             if (ld) ld.remove();
           });
           wv.addEventListener("did-fail-load", function (e) {
+            console.log("[popout] webview did-fail-load", e && e.errorCode, e && e.errorDescription);
             if (e && e.errorCode === -3) return; // 中止（导航切换）忽略
-            showFallback();
+            _loaded = true;
+            showFallback(e && e.errorDescription);
           });
           container.appendChild(wv);
+          // 超时兜底：15 秒仍未加载完成则提示
+          setTimeout(function () {
+            if (!_loaded) {
+              console.warn("[popout] webview 15s 超时仍未加载完成");
+              var ld = container.querySelector(".po-loading");
+              if (ld) {
+                ld.textContent = "页面加载较慢，请稍候…（若长期无响应可点击「外部打开」）";
+              }
+            }
+          }, 15000);
         } else {
           var ifr = document.createElement("iframe");
           ifr.src = currentUrl;
@@ -99,11 +118,13 @@
         }
       }
 
-      function showFallback() {
+      function showFallback(reason) {
         clearContainer();
         var div = document.createElement("div");
         div.className = "po-fallback";
-        div.innerHTML = "该站点禁止嵌入显示。<br>请点击右上角「外部打开」在浏览器中查看。";
+        var msg = "该站点禁止嵌入显示。<br>请点击右上角「外部打开」在浏览器中查看。";
+        if (reason) msg += "<br><br><span style='font-size:11px;color:#aaa'>原因：" + reason + "</span>";
+        div.innerHTML = msg;
         container.appendChild(div);
       }
 

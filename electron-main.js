@@ -1296,6 +1296,7 @@ function createWindow(port) {
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
   // 外部链接在系统浏览器中打开；popout.html 弹出独立窗口（需启用 webview 标签）
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    console.log("[Electron] setWindowOpenHandler url=" + url);
     if (/^http:\/\/127\.0\.0\.1(:\d+)?\/popout\.html/.test(url) || /^http:\/\/localhost(:\d+)?\/popout\.html/.test(url)) {
       createPopoutWindow(url, port);
       return { action: "deny" };
@@ -1309,6 +1310,7 @@ function createWindow(port) {
 
 // 弹出独立窗口：用于 GP / espacenet 原文对照查看，启用 webview 标签以绕过 X-Frame-Options
 function createPopoutWindow(url, port) {
+  console.log("[Electron] createPopoutWindow url=" + url);
   const win = new BrowserWindow({
     width: 1100,
     height: 800,
@@ -1321,6 +1323,9 @@ function createPopoutWindow(url, port) {
     },
   });
   win.loadURL(url);
+  win.webContents.on("did-fail-load", (_e, errorCode, errorDescription) => {
+    console.error("[Electron] popout did-fail-load", errorCode, errorDescription, "url=" + url);
+  });
   return win;
 }
 

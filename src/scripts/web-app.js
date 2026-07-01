@@ -6781,9 +6781,12 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
     annotLayer.dataset.page = pageNum;
     wrapper.appendChild(annotLayer);
 
-    if (pageBlocks.length > 0 && pageDim) {
-      const scaleX = viewport.width / pageDim.width;
-      const scaleY = viewport.height / pageDim.height;
+    if (pageBlocks.length > 0) {
+      // 用 PDF 页面原始尺寸（scale=1 viewport）作为基准计算 scaleX/Y，
+      // 而非缓存的 pageDimensions（缓存恢复时可能由 bbox 估算，与实际不符导致错位）
+      const baseViewport = page.getViewport({ scale: 1.0 });
+      const scaleX = viewport.width / baseViewport.width;
+      const scaleY = viewport.height / baseViewport.height;
 
       pageBlocks.forEach(b => {
         if (!b.bbox) return;
@@ -7641,6 +7644,12 @@ async function exportPdfWithAnnotations() {
 
     const { PDFDocument, rgb } = window.PDFLib;
     const pdfDoc = await PDFDocument.load(pdfBytes);
+    // 嵌入自定义字体（NotoSansSC）必须注册 fontkit，否则 embedFont 抛错
+    if (window.fontkit) {
+      pdfDoc.registerFontkit(window.fontkit);
+    } else {
+      console.warn("[PDF导出] fontkit 未加载，中文注释文字将无法导出");
+    }
     const pages = pdfDoc.getPages();
 
     // 注释文字可能含中日韩字符，嵌入 NotoSansSC 字体（自动子集化）
