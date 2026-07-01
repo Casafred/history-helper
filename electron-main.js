@@ -1239,7 +1239,13 @@ function startServer() {
       let urlPath = req.url === "/" ? "/web.html" : req.url;
       const qIdx = urlPath.indexOf("?");
       if (qIdx !== -1) urlPath = urlPath.substring(0, qIdx);
-      const filePath = path.join(getSrcDir(), urlPath);
+      // /fonts/* 从 workspace 根目录的 fonts/ 提供（CJK 字体嵌入用）
+      let filePath;
+      if (urlPath.startsWith("/fonts/")) {
+        filePath = path.join(__dirname, urlPath);
+      } else {
+        filePath = path.join(getSrcDir(), urlPath);
+      }
       serveStatic(filePath, res);
     });
 

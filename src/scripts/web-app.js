@@ -752,7 +752,7 @@ function openInAppWebview(url, title) {
   const popoutBtn = document.getElementById("pd-wv-popout-btn");
   if (popoutBtn) {
     popoutBtn.addEventListener("click", function() {
-      const popoutUrl = "/popout.html?url=" + encodeURIComponent(_currentWebviewUrl) + "&title=" + encodeURIComponent(title || url);
+      const popoutUrl = location.origin + "/popout.html?url=" + encodeURIComponent(_currentWebviewUrl) + "&title=" + encodeURIComponent(title || url);
       const opened = window.open(popoutUrl, "_blank", "width=1100,height=800");
       // 浏览器环境若被拦截则回退到外部打开；Electron 由 setWindowOpenHandler 接管
       if (!opened && !window.electronAPI) {
@@ -7652,8 +7652,10 @@ async function exportPdfWithAnnotations() {
         if (fontResp.ok) {
           const fontBytes = await fontResp.arrayBuffer();
           cjkFont = await pdfDoc.embedFont(fontBytes, { subset: true });
+        } else {
+          console.warn("[PDF导出] 字体加载失败 HTTP " + fontResp.status + "，注释文字将无法导出");
         }
-      } catch (e) { /* 字体加载失败时跳过注释文字绘制 */ }
+      } catch (e) { console.warn("[PDF导出] 字体加载异常:", e); }
     }
 
     annots.forEach(annot => {
@@ -7702,16 +7704,24 @@ async function exportPdfWithAnnotations() {
         // 注释：仅绘制文字（无背景、无边框）
         if (annot.text && cjkFont) {
           const fontSize = annot.fontSize || 14;
-          // PDF 中文字 y 坐标是基线位置；annot.y2 是文字框顶部（较高 Y）
-          const textY = annot.y2 - fontSize;
-          try {
-            page.drawText(annot.text, {
-              x: annot.x1, y: textY,
-              size: fontSize, font: cjkFont,
-              color: col,
-              maxWidth: Math.max(40, Math.abs(annot.x2 - annot.x1)),
-            });
-          } catch (e) { /* 个别字符无法编码时跳过 */ }
+          const maxWidth = Math.max(40, Math.abs(annot.x2 - annot.x1));
+          // 支持多行：按 \n 拆分，每行从基线向下偏移
+          const lines = annot.text.split("\n");
+          const lineHeight = fontSize * 1.3;
+          // annot.y2 是文字框顶部（较高 Y），第一行基线在 y2 - fontSize
+          const baseY = annot.y2 - fontSize;
+          for (let li = 0; li < lines.length; li++) {
+            const lineY = baseY - li * lineHeight;
+            if (lineY < annot.y1) break; // 超出框底则停止
+            try {
+              page.drawText(lines[li], {
+                x: annot.x1, y: lineY,
+                size: fontSize, font: cjkFont,
+                color: col,
+                maxWidth: maxWidth,
+              });
+            } catch (e) { /* 个别字符无法编码时跳过该行 */ }
+          }
         }
       }
     });
