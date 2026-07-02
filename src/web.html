@@ -296,6 +296,16 @@
                         <select id="pdf-annot-font-size" class="pdf-select-sm" title="注释文字字号">
                           <option>10</option><option>12</option><option selected>14</option><option>16</option><option>18</option><option>20</option><option>24</option>
                         </select>
+                        <select id="pdf-annot-line-width" class="pdf-select-sm" title="划线/箭头粗细">
+                          <option value="1">1px</option>
+                          <option value="1.5">1.5px</option>
+                          <option value="2" selected>2px</option>
+                          <option value="3">3px</option>
+                          <option value="4">4px</option>
+                        </select>
+                        <button id="pdf-annot-dash" class="pdf-toolbar-btn pdf-toolbar-btn-icon-sm" title="虚线/实线切换（划线/箭头）">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 3"><line x1="3" y1="12" x2="21" y2="12"/></svg>
+                        </button>
                       </div>
                       <div class="pdf-toolbar-sep"></div>
                       <div class="pdf-toolbar-group">
@@ -312,7 +322,7 @@
                       <div class="pdf-toolbar-group">
                         <button id="pdf-annot-export" class="pdf-toolbar-btn pdf-toolbar-btn-text pdf-toolbar-btn-primary" title="导出带标注的 PDF">
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                          <span>导出标注</span>
+                          <span>导出标注后文档</span>
                         </button>
                         <button id="pdf-annot-clear" class="pdf-toolbar-btn pdf-toolbar-btn-text pdf-toolbar-btn-danger" title="清空当前文档的全部标注">
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>

@@ -2986,6 +2986,16 @@ body {
   color: #fff;
 }
 
+.pdf-ctx-menu-item:hover select,
+.pdf-ctx-menu-item:hover input[type="checkbox"] {
+  color: var(--text-primary);
+}
+
+.pdf-ctx-menu-item select,
+.pdf-ctx-menu-item input[type="color"] {
+  cursor: pointer;
+}
+
 .pdf-page-label {
   position: absolute;
   top: -24px;

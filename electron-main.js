@@ -1433,6 +1433,36 @@ app.whenReady().then(async () => {
         const cg = m ? parseInt(m[2], 16) / 255 : 57 / 255;
         const cb = m ? parseInt(m[3], 16) / 255 : 53 / 255;
         const col = rgb(cr, cg, cb);
+        const lineW = annot.lineWidth || 2;
+
+        // Helper: draw a line (supports dash)
+        const drawStyledLine = (x1, y1, x2, y2, thickness, isDash) => {
+          if (!isDash) {
+            page.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness: thickness, color: col });
+            return;
+          }
+          // Draw dashed line as segments
+          const dx = x2 - x1;
+          const dy = y2 - y1;
+          const totalLen = Math.sqrt(dx * dx + dy * dy);
+          const dashLen = thickness * 3;
+          const gapLen = thickness * 2;
+          const cycleLen = dashLen + gapLen;
+          if (totalLen < 1) return;
+          const ux = dx / totalLen;
+          const uy = dy / totalLen;
+          let pos = 0;
+          while (pos < totalLen) {
+            const segStart = pos;
+            const segEnd = Math.min(pos + dashLen, totalLen);
+            page.drawLine({
+              start: { x: x1 + ux * segStart, y: y1 + uy * segStart },
+              end: { x: x1 + ux * segEnd, y: y1 + uy * segEnd },
+              thickness: thickness, color: col,
+            });
+            pos += cycleLen;
+          }
+        };
 
         if (annot.type === "highlight") {
           const x1 = Math.min(annot.x1, annot.x2);
@@ -1441,30 +1471,22 @@ app.whenReady().then(async () => {
           const y2 = Math.max(annot.y1, annot.y2);
           page.drawRectangle({
             x: x1, y: y1, width: x2 - x1, height: y2 - y1,
-            borderColor: col, borderWidth: 2,
+            borderColor: col, borderWidth: lineW,
             color: col, opacity: 0.12,
           });
         } else if (annot.type === "underline") {
-          page.drawLine({
-            start: { x: annot.x1, y: annot.y1 },
-            end: { x: annot.x2, y: annot.y2 },
-            thickness: 2, color: col,
-          });
+          drawStyledLine(annot.x1, annot.y1, annot.x2, annot.y2, lineW, annot.dash);
         } else if (annot.type === "arrow") {
-          page.drawLine({
-            start: { x: annot.x1, y: annot.y1 },
-            end: { x: annot.x2, y: annot.y2 },
-            thickness: 2, color: col,
-          });
+          drawStyledLine(annot.x1, annot.y1, annot.x2, annot.y2, lineW, annot.dash);
           const angle = Math.atan2(annot.y2 - annot.y1, annot.x2 - annot.x1);
-          const headLen = 10;
+          const headLen = 6 + lineW * 2;
           const headAngle = 0.4;
           const hx1 = annot.x2 - headLen * Math.cos(angle - headAngle);
           const hy1 = annot.y2 - headLen * Math.sin(angle - headAngle);
           const hx2 = annot.x2 - headLen * Math.cos(angle + headAngle);
           const hy2 = annot.y2 - headLen * Math.sin(angle + headAngle);
-          page.drawLine({ start: { x: annot.x2, y: annot.y2 }, end: { x: hx1, y: hy1 }, thickness: 2, color: col });
-          page.drawLine({ start: { x: annot.x2, y: annot.y2 }, end: { x: hx2, y: hy2 }, thickness: 2, color: col });
+          page.drawLine({ start: { x: annot.x2, y: annot.y2 }, end: { x: hx1, y: hy1 }, thickness: lineW, color: col });
+          page.drawLine({ start: { x: annot.x2, y: annot.y2 }, end: { x: hx2, y: hy2 }, thickness: lineW, color: col });
         } else if (annot.type === "note" && annot.text && cjkFont) {
           const fontSize = annot.fontSize || 14;
           // 归一化坐标：PDF 坐标系 Y 轴自下而上，拖拽方向可能不同
