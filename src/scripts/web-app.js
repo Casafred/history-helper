@@ -416,15 +416,43 @@ searchBtn.addEventListener("click", async () => {
 });
 
 // ── 悬浮球可见性 ──
-// 右侧三个悬浮球（阅读器/专利原文弹窗/AI 对话）仅在「审查文档」模式下出现；
-// 切到「专利原文」模式时全部隐藏。
+// 三个悬浮球（阅读器/专利原文弹窗/AI 对话）仅在「审查文档」界面显示；
+// 主页（首页搜索状态）和「专利原文」模式下全部隐藏。
 function updateFloatingBallsVisibility() {
-  const ids = ["reader-floating-ball", "patent-popup-ball", "analysis-chat-float-ball"];
-  if (searchMode === "patent") {
-    ids.forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.classList.add("hidden");
-    });
+  const appEl = document.getElementById("app");
+  const isHomeMode = appEl && appEl.classList.contains("home-mode");
+  const isPatentMode = searchMode === "patent";
+  const shouldShow = !isHomeMode && !isPatentMode && currentData && kanbanState.documents && kanbanState.documents.length > 0;
+
+  // 阅读器悬浮球：只要在审查模式有文档就显示
+  const readerBall = document.getElementById("reader-floating-ball");
+  if (readerBall) {
+    if (shouldShow) {
+      readerBall.classList.remove("hidden");
+    } else {
+      readerBall.classList.add("hidden");
+    }
+  }
+
+  // 专利原文悬浮球：审查模式下且弹窗未打开时显示
+  const ppvBall = document.getElementById("patent-popup-ball");
+  const ppvViewer = document.getElementById("patent-popup-viewer");
+  if (ppvBall) {
+    if (shouldShow && (!ppvViewer || ppvViewer.classList.contains("hidden"))) {
+      ppvBall.classList.remove("hidden");
+    } else {
+      ppvBall.classList.add("hidden");
+    }
+  }
+
+  // AI对话悬浮球：审查模式下且有分析结果时显示
+  const chatBall = document.getElementById("analysis-chat-float-ball");
+  if (chatBall) {
+    if (shouldShow && kanbanState.analysis) {
+      chatBall.classList.remove("hidden");
+    } else {
+      chatBall.classList.add("hidden");
+    }
   }
 }
 
@@ -2194,12 +2222,11 @@ function closePatentPopup() {
   const viewer = document.getElementById("patent-popup-viewer");
   const ball = document.getElementById("patent-popup-ball");
   if (viewer) viewer.classList.add("hidden");
-  // 专利原文模式下不显示悬浮球
-  if (ball && searchMode !== "patent") ball.classList.remove("hidden");
   _ppvOpenPatents = [];
   _ppvActivePatent = "";
   const tabsBar = document.getElementById("ppv-patent-tabs");
   if (tabsBar) tabsBar.innerHTML = "";
+  updateFloatingBallsVisibility();
 }
 
 function showPatentPopup() {
@@ -2634,10 +2661,7 @@ const PatentCache = {
       }
       resultSection.classList.remove("hidden");
 
-      // Show reader floating ball
-      if (readerFloatingBall && kanbanState.documents.length > 0) {
-        readerFloatingBall.classList.remove("hidden");
-      }
+      updateFloatingBallsVisibility();
 
       // Show analysis chat toggle if analysis exists
       if (kanbanState.analysis) {
@@ -3083,20 +3107,18 @@ function renderKanban(data) {
     mergeExportBtn.style.display = hasDownloadable ? "" : "none";
   }
   analysisChatHistory = [];
-  const analysisChatFloatBall = document.getElementById("analysis-chat-float-ball");
-  if (analysisChatFloatBall) analysisChatFloatBall.classList.add("hidden");
   const analysisChatPanel = document.getElementById("analysis-chat-panel");
   if (analysisChatPanel) analysisChatPanel.classList.add("hidden");
 
-  // Show reader floating ball when documents are loaded
+  // Update reader floating ball icon state
   if (readerFloatingBall && items.length > 0) {
-    readerFloatingBall.classList.remove("hidden");
     const iconOpen = readerFloatingBall.querySelector(".reader-fb-icon-open");
     const iconBack = readerFloatingBall.querySelector(".reader-fb-icon-back");
     readerFloatingBall.title = "点击打开阅读器";
     if (iconOpen) iconOpen.classList.remove("hidden");
     if (iconBack) iconBack.classList.add("hidden");
   }
+  updateFloatingBallsVisibility();
 
   // Build filter bar
   const filterBar = document.getElementById("kanban-filter-bar");
@@ -10173,9 +10195,7 @@ function appendChatMessage(role, content) {
 // ===== Analysis Chat (continued conversation with AI analysis report) =====
 
 function showAnalysisChatToggle() {
-  if (searchMode === "patent") return;
-  const floatBall = document.getElementById("analysis-chat-float-ball");
-  if (floatBall) floatBall.classList.remove("hidden");
+  updateFloatingBallsVisibility();
 }
 
 function appendAnalysisChatMessage(role, content) {
@@ -10987,6 +11007,9 @@ setInterval(() => {
 
 // ── Initialize history list on page load ──
 refreshHistoryList();
+
+// ── Initialize floating balls visibility ──
+updateFloatingBallsVisibility();
 
 // ── Fallback splash-screen removal (in case DOMContentLoaded handler fails) ──
 setTimeout(() => {
