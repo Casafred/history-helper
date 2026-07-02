@@ -157,5 +157,5 @@ WeasyPrint 根据 HTML 标题标签自动生成 PDF 书签层级：
 ## 6 当前说明书文件
 
 - **HTML 源文件**：`/workspace/user-manual-new.html`
-- **PDF 输出文件**：`/workspace/PatentLens-用户使用说明书-V0.3.0.pdf`
-- **当前版本**：V0.3.0
+- **PDF 输出文件**：`/workspace/PatentLens-用户使用说明书-V0.5.0.pdf`
+- **当前版本**：V0.5.0

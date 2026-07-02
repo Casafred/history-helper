@@ -332,8 +332,8 @@
   <div class="subtitle">PatentLens · 用户使用说明书</div>
   <div class="divider-line"></div>
   <div class="version-info">
-    版本 V0.4.0<br/>
-    2026 年 6 月
+    版本 V0.5.0<br/>
+    2026 年 7 月
   </div>
 </div>
 
@@ -373,6 +373,7 @@
     <li class="level2"><span>5.7 Word 导出</span></li>
     <li class="level2"><span>5.8 设置</span></li>
     <li class="level2"><span>5.9 合并导出 PDF</span></li>
+    <li class="level2"><span>5.10 专利原文查询</span></li>
     <li class="level1"><span>6 常见问题</span></li>
     <li class="level1"><span>7 附录</span></li>
   </ul>
@@ -416,6 +417,10 @@
 <div class="feature-card">
   <div class="card-title">审查时间线</div>
   <div class="card-desc">在概览标签页内以可视化时间轴展示审查历程中的关键事件，配有彩色标记区分不同事件类型，一目了然掌握审查进度。</div>
+</div>
+<div class="feature-card">
+  <div class="card-title">专利原文查询</div>
+  <div class="card-desc">点击专利号可直接查询 Google Patents 专利原文详情，支持 AI 问一问、网页翻译、Espacenet 查询、PDF 原文下载，引用文献一键复制全部公开号；右侧悬浮弹窗支持快速查阅多份专利。</div>
 </div>
 
 <h2>1.3 系统要求</h2>
@@ -950,6 +955,42 @@
   封面页的专利书目信息自动从概览标签页获取，无需手动输入。如信息不完整，请先在概览标签页确认数据是否加载成功。
 </div>
 
+<h2>5.10 专利原文查询</h2>
+<p>在审查文档界面中，所有出现专利号的位置均可点击查询该专利的原文详情，数据来源于 Google Patents。支持两种查看模式：全屏详情页和右侧悬浮弹窗。</p>
+
+<h3>5.10.1 打开方式</h3>
+<ul>
+  <li><strong>全屏详情页</strong> — 点击页面中任意可点击的专利号链接（按住 Ctrl 点击可直接在外部浏览器打开 Google Patents 页面），进入全屏专利原文详情页</li>
+  <li><strong>右侧悬浮弹窗</strong> — AI 审查梳理结果中的专利号引用，点击后在右侧弹出悬浮窗口查看，支持同时打开多个专利标签页快速切换</li>
+</ul>
+
+<h3>5.10.2 顶部功能按钮</h3>
+<p>详情页和弹窗顶部均提供统一的功能按钮栏，包含以下按钮：</p>
+<ul>
+  <li><strong>AI 问一问</strong> — 针对当前专利向 AI 提问，支持上下文连续对话</li>
+  <li><strong>网页翻译</strong> — 使用 Google 翻译一键翻译整个页面内容</li>
+  <li><strong>Google Patents</strong> — 在应用内打开 Google Patents 原始页面</li>
+  <li><strong>Espacenet</strong> — 在应用内打开欧洲专利局 Espacenet 页面查询该专利</li>
+  <li><strong>PDF 原文</strong> — 下载或查看专利的原始 PDF 文件（如有）</li>
+</ul>
+
+<h3>5.10.3 引用文献与一键复制</h3>
+<p>专利详情页的"引用文献"区域分为三个部分：<strong>引用专利</strong>（本专利引用的在先专利）、<strong>被引用专利</strong>（引用本专利的在后专利）、<strong>相似文档</strong>（相关相似专利）。每个部分标题右侧均提供 <strong>"复制全部公开号"</strong> 按钮，点击即可一键复制该列表下所有专利的公开号（每行一个号码），复制成功后按钮会短暂显示"✓ 已复制"反馈提示。</p>
+
+<h3>5.10.4 标签页切换</h3>
+<p>专利详情页和弹窗内同样采用标签页布局，支持切换查看：</p>
+<ul>
+  <li><strong>说明书</strong> — 专利说明书全文</li>
+  <li><strong>权利要求</strong> — 专利权利要求书</li>
+  <li><strong>引用文献</strong> — 引用、被引用和相似专利列表</li>
+  <li><strong>法律状态</strong> — 专利法律状态信息</li>
+</ul>
+
+<div class="tip-box">
+  <div class="tip-title">提示</div>
+  悬浮球仅在审查文档界面显示，在主页搜索状态和专利原文全屏详情页下会自动隐藏，避免干扰阅读。
+</div>
+
 <!-- ==================== 第6章 常见问题 ==================== -->
 <h1 class="page-break">6 常见问题</h1>
 
@@ -1073,6 +1114,15 @@
   <tr><td>影响章节</td><td>3.2、3.4、3.7、4.2、4.4、5.2、5.5、5.9、6</td></tr>
   <tr><td>变更说明</td><td>1. AI 分析标签页手动选择面板默认展开，支持搜索过滤和已选摘要；2. AI 分析选择状态自动记忆，切换标签页后保留；3. 合并导出 PDF 封面页增加专利书目信息；4. 品牌升级为 PatentLens，配色方案更新为绿色主题；5. 搜索栏改为自动识别专利局，移除专利局下拉框；6. 时间线整合到概览标签页；7. 新增 DE 专利支持；8. 按钮名称更新</td></tr>
   <tr><td>图示更新</td><td>更新 AI 分析相关图示，新增合并导出 PDF 图示</td></tr>
+</table>
+
+<h3>V0.5.0 (2026-07)</h3>
+<table>
+  <tr><th>字段</th><th>内容</th></tr>
+  <tr><td>变更类型</td><td>功能增强 + UI 优化</td></tr>
+  <tr><td>影响章节</td><td>1.2、3.3、5.10（新增）、6</td></tr>
+  <tr><td>变更说明</td><td>1. 首页 4 个 TAB 栏（概览/同族/审查看板/AI 分析）容器宽度固定，不再随栏目切换发生横向长度变化，移除外侧多余阴影框；2. 专利原文详情页（含右侧弹窗）顶部按钮（AI 问一问、网页翻译、Google Patents、Espacenet、PDF 原文）统一尺寸高度和间距，视觉更整齐；3. 专利详情页及弹窗的引用专利、被引用专利、相似文档三个列表均新增"复制全部公开号"按钮，点击可一键复制该列表所有号码；4. 右侧弹窗新增"网页翻译"按钮，与全屏详情页功能一致；5. 悬浮球优化：仅在审查文档界面显示，主页和专利原文界面自动隐藏；6. 新增第 5.10 节"专利原文查询"完整功能说明</td></tr>
+  <tr><td>图示更新</td><td>无（本次为功能补全和 UI 优化，无新图示）</td></tr>
 </table>
 
 </body>
