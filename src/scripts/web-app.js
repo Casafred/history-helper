@@ -759,11 +759,11 @@ function renderPatentDetail(data) {
   html += '<div class="pd-title">' + escapeHtml(data.title || "无标题") + '</div>';
   html += '<div class="pd-links">';
   html += '<button class="pd-ai-ask-btn" onclick="openPatentAsk(\'detail\')" title="针对本篇专利向 AI 提问">AI 问一问</button>';
-  html += '<button class="pd-gp-link" onclick="toggleGoogleTranslate()" title="使用 Google 翻译翻译整个页面" style="cursor:pointer;border:1px solid var(--accent);">网页翻译</button>';
-  html += '<button class="pd-gp-link" onclick="openInAppWebview(\'' + escapeHtml(data.url) + '\', \'Google Patents: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);" title="在应用内打开 Google Patents 页面">Google Patents</button>';
-  html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(data.patent_number) + '\', \'Espacenet: ' + escapeHtml(data.patent_number) + '\')" style="cursor:pointer;border:1px solid var(--accent);" title="在应用内打开 Espacenet 页面">Espacenet</button>';
+  html += '<button class="pd-gp-link" onclick="toggleGoogleTranslate()" title="使用 Google 翻译翻译整个页面">网页翻译</button>';
+  html += '<button class="pd-gp-link" onclick="openInAppWebview(\'' + escapeHtml(data.url) + '\', \'Google Patents: ' + escapeHtml(data.patent_number) + '\')" title="在应用内打开 Google Patents 页面">Google Patents</button>';
+  html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(data.patent_number) + '\', \'Espacenet: ' + escapeHtml(data.patent_number) + '\')" title="在应用内打开 Espacenet 页面">Espacenet</button>';
   if (data.pdf_link) {
-    html += '<a href="' + escapeHtml(data.pdf_link) + '" target="_blank" rel="noopener" class="pd-pdf-link">PDF</a>';
+    html += '<a href="' + escapeHtml(data.pdf_link) + '" target="_blank" rel="noopener" class="pd-pdf-link">PDF原文</a>';
   }
   if (data.external_links && Object.keys(data.external_links).length > 0) {
     html += '<span class="pd-external-links-sep">|</span>';
@@ -991,8 +991,9 @@ function renderPatentDetail(data) {
 
   // Patent citations
   if (data.patent_citations && data.patent_citations.length > 0) {
+    const _citeNums = data.patent_citations.map(c => c.patent_number).filter(Boolean);
     html += '<div class="pd-section">';
-    html += '<div class="pd-section-title">引用专利 (' + data.patent_citations.length + ')</div>';
+    html += '<div class="pd-section-title pd-section-title-with-action"><span>引用专利 (' + data.patent_citations.length + ')</span>' + _makeCopyNumsBtn(_citeNums) + '</div>';
     html += '<div class="pd-citation-table-wrap"><table class="pd-citation-table"><thead><tr>';
     html += '<th></th><th>专利号</th><th>标题</th><th>优先权日</th><th>公开日</th><th>权利人</th>';
     html += '</tr></thead><tbody>';
@@ -1019,8 +1020,9 @@ function renderPatentDetail(data) {
 
   // Cited by
   if (data.cited_by && data.cited_by.length > 0) {
+    const _citedNums = data.cited_by.map(c => c.patent_number).filter(Boolean);
     html += '<div class="pd-section">';
-    html += '<div class="pd-section-title">被引用专利 (' + data.cited_by.length + ')</div>';
+    html += '<div class="pd-section-title pd-section-title-with-action"><span>被引用专利 (' + data.cited_by.length + ')</span>' + _makeCopyNumsBtn(_citedNums) + '</div>';
     html += '<div class="pd-citation-table-wrap"><table class="pd-citation-table"><thead><tr>';
     html += '<th>专利号</th><th>标题</th><th>优先权日</th><th>公开日</th><th>权利人</th>';
     html += '</tr></thead><tbody>';
@@ -1040,8 +1042,9 @@ function renderPatentDetail(data) {
 
   // Similar documents
   if (data.similar_documents && data.similar_documents.length > 0) {
+    const _simNums = data.similar_documents.map(c => c.patent_number).filter(Boolean);
     html += '<div class="pd-section">';
-    html += '<div class="pd-section-title">相似文档 (' + data.similar_documents.length + ')</div>';
+    html += '<div class="pd-section-title pd-section-title-with-action"><span>相似文档 (' + data.similar_documents.length + ')</span>' + _makeCopyNumsBtn(_simNums) + '</div>';
     html += '<div class="pd-citation-table-wrap"><table class="pd-citation-table"><thead><tr>';
     html += '<th>专利号</th><th>标题</th><th>公开日</th>';
     html += '</tr></thead><tbody>';
@@ -1104,6 +1107,51 @@ function switchPatentTab(tabName) {
   if (!layout) return;
   layout.querySelectorAll('.pd-bookmark-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
   layout.querySelectorAll('.pd-tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === tabName));
+}
+
+// ── 复制到剪贴板 ──
+function copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).then(() => true).catch(() => {
+      return _fallbackCopy(text);
+    });
+  }
+  return Promise.resolve(_fallbackCopy(text));
+}
+function _fallbackCopy(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch(e) {}
+  document.body.removeChild(ta);
+  return ok;
+}
+
+// ── 引用文献复制按钮点击处理 ──
+function _handleCopyCitationNums(btn) {
+  const numsStr = btn.dataset.nums || "";
+  if (!numsStr) return;
+  const nums = numsStr.split(",").filter(n => n.trim());
+  if (nums.length === 0) return;
+  const text = nums.join("\n");
+  copyToClipboard(text).then(ok => {
+    if (ok) {
+      const orig = btn.textContent;
+      btn.textContent = "✓ 已复制";
+      btn.classList.add("copied");
+      setTimeout(() => { btn.textContent = orig; btn.classList.remove("copied"); }, 1500);
+    }
+  });
+}
+
+// ── 生成"复制全部公开号"按钮HTML ──
+function _makeCopyNumsBtn(nums) {
+  const numsStr = nums.map(n => escapeHtml(n)).join(",");
+  return '<button class="pd-copy-nums-btn" onclick="_handleCopyCitationNums(this)" data-nums="' + numsStr + '" title="复制列表中所有专利公开号">复制全部公开号</button>';
 }
 
 // Switch patent popup viewer tab (scoped to ppv-content)
@@ -1950,8 +1998,9 @@ function renderPatentPopupContent(data) {
 
   // Patent citations
   if (data.patent_citations && data.patent_citations.length > 0) {
+    const _citeNums = data.patent_citations.map(c => c.patent_number).filter(Boolean);
     html += '<div class="pd-section">';
-    html += '<div class="pd-section-title">引用专利 (' + data.patent_citations.length + ')</div>';
+    html += '<div class="pd-section-title pd-section-title-with-action"><span>引用专利 (' + data.patent_citations.length + ')</span>' + _makeCopyNumsBtn(_citeNums) + '</div>';
     html += '<div class="pd-citation-table-wrap"><table class="pd-citation-table"><thead><tr>';
     html += '<th></th><th>专利号</th><th>标题</th><th>优先权日</th><th>公开日</th><th>权利人</th>';
     html += '</tr></thead><tbody>';
@@ -1978,8 +2027,9 @@ function renderPatentPopupContent(data) {
 
   // Cited by
   if (data.cited_by && data.cited_by.length > 0) {
+    const _citedNums = data.cited_by.map(c => c.patent_number).filter(Boolean);
     html += '<div class="pd-section">';
-    html += '<div class="pd-section-title">被引用专利 (' + data.cited_by.length + ')</div>';
+    html += '<div class="pd-section-title pd-section-title-with-action"><span>被引用专利 (' + data.cited_by.length + ')</span>' + _makeCopyNumsBtn(_citedNums) + '</div>';
     html += '<div class="pd-citation-table-wrap"><table class="pd-citation-table"><thead><tr>';
     html += '<th>专利号</th><th>标题</th><th>优先权日</th><th>公开日</th><th>权利人</th>';
     html += '</tr></thead><tbody>';
@@ -1999,8 +2049,9 @@ function renderPatentPopupContent(data) {
 
   // Similar documents
   if (data.similar_documents && data.similar_documents.length > 0) {
+    const _simNums = data.similar_documents.map(c => c.patent_number).filter(Boolean);
     html += '<div class="pd-section">';
-    html += '<div class="pd-section-title">相似文档 (' + data.similar_documents.length + ')</div>';
+    html += '<div class="pd-section-title pd-section-title-with-action"><span>相似文档 (' + data.similar_documents.length + ')</span>' + _makeCopyNumsBtn(_simNums) + '</div>';
     html += '<div class="pd-citation-table-wrap"><table class="pd-citation-table"><thead><tr>';
     html += '<th>专利号</th><th>标题</th><th>公开日</th>';
     html += '</tr></thead><tbody>';
@@ -3886,6 +3937,9 @@ function _initPatentAskBindings() {
   // 弹窗头部 AI 问一问按钮（数据来自 window._patentPopupData，由 openPatentPopup/switchPpvPatent 同步）
   const ppvAskBtn = document.getElementById("ppv-ai-ask-btn");
   if (ppvAskBtn) ppvAskBtn.addEventListener("click", () => openPatentAsk("popup"));
+  // 弹窗头部网页翻译按钮
+  const ppvTranslateBtn = document.getElementById("ppv-translate-btn");
+  if (ppvTranslateBtn) ppvTranslateBtn.addEventListener("click", () => toggleGoogleTranslate());
 }
 _initPatentAskBindings();
 
