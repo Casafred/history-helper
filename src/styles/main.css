@@ -6137,6 +6137,31 @@ body {
   color: #fff;
   opacity: 1;
 }
+.pdt-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  margin-right: 6px;
+  font-size: 12px;
+  color: var(--text-secondary, #aaa);
+  background: transparent;
+  border: 1px solid var(--border-color, #2a2d3a);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  height: 28px;
+  align-self: center;
+  position: relative;
+  top: 0;
+}
+.pdt-back-btn:hover {
+  background: var(--accent, #4f8ff7);
+  color: #fff;
+  border-color: var(--accent, #4f8ff7);
+}
 
 /* ===== 页内查找工具栏 ===== */
 .patent-detail-find-bar {

@@ -21,8 +21,9 @@
     .po-btn:hover { background: #4f8ff7; color: #fff; border-color: #4f8ff7; }
     #po-container { width: 100%; height: calc(100vh - 49px); position: relative; background: #fff; }
     #po-container webview, #po-container iframe { width: 100%; height: 100%; border: none; }
-    .po-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #888; font-size: 14px; }
-    .po-fallback { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #888; font-size: 14px; padding: 24px; }
+    .po-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #888; font-size: 14px; text-align: center; }
+    .po-fallback { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #555; font-size: 14px; padding: 24px; max-width: 480px; line-height: 1.8; }
+    .po-fallback .po-btn { margin-top: 12px; }
   </style>
 </head>
 <body>
@@ -53,31 +54,123 @@
       var currentUrl = targetUrl;
       var isTranslated = false;
       var wv = null;
+      var loadAttempts = 0;
+      var MAX_AUTO_RETRY = 1;
+      var LOAD_TIMEOUT_MS = 30000;
+      var timeoutTimer = null;
 
-      function clearContainer() { container.innerHTML = ""; wv = null; }
+      // Network error codes (not X-Frame-Options / embed blocking)
+      var NETWORK_ERRORS = {
+        "-100": "ERR_CONNECTION_CLOSED",
+        "-101": "ERR_CONNECTION_RESET",
+        "-102": "ERR_CONNECTION_REFUSED",
+        "-105": "ERR_NAME_NOT_RESOLVED",
+        "-106": "ERR_INTERNET_DISCONNECTED",
+        "-109": "ERR_ADDRESS_UNREACHABLE",
+        "-118": "ERR_CONNECTION_TIMED_OUT",
+        "-21": "ERR_NETWORK_CHANGED",
+        "-324": "ERR_EMPTY_RESPONSE",
+        "-501": "ERR_INSECURE_RESPONSE",
+        "-137": "ERR_NAME_RESOLUTION_FAILED",
+      };
+      // X-Frame-Options / CSP blocking error codes
+      var BLOCKED_ERRORS = {
+        "-300": "ERR_INVALID_RESPONSE",
+        "-20": "ERR_BLOCKED_BY_CLIENT",
+        "-32": "ERR_INVALID_RESPONSE",
+      };
+
+      function classifyError(code) {
+        code = String(code);
+        if (NETWORK_ERRORS[code]) return "network";
+        if (BLOCKED_ERRORS[code]) return "blocked";
+        return "other";
+      }
+
+      function clearContainer() {
+        if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+        container.innerHTML = "";
+        wv = null;
+      }
+
+      function showLoading(msg) {
+        clearContainer();
+        var div = document.createElement("div");
+        div.className = "po-loading";
+        div.textContent = msg || "正在加载...";
+        container.appendChild(div);
+      }
+
+      function showFallback(reason, errorCode) {
+        clearContainer();
+        var div = document.createElement("div");
+        div.className = "po-fallback";
+        var errType = classifyError(errorCode);
+        var msg;
+        if (errType === "network") {
+          msg = "网络连接失败，无法加载页面。<br>可能是网络不稳定或目标站点暂时不可用。";
+        } else if (errType === "blocked") {
+          msg = "该站点禁止嵌入显示。<br>请点击「外部打开」在浏览器中查看。";
+        } else {
+          msg = "页面加载失败。<br>您可以点击「重试」或「外部打开」在浏览器中查看。";
+        }
+        if (reason) msg += "<br><br><span style='font-size:11px;color:#aaa'>原因：" + reason + "</span>";
+        div.innerHTML = msg;
+        var btnRow = document.createElement("div");
+        btnRow.style.marginTop = "16px";
+        var retryBtn = document.createElement("button");
+        retryBtn.className = "po-btn";
+        retryBtn.textContent = "重试";
+        retryBtn.style.marginRight = "8px";
+        retryBtn.addEventListener("click", function() { loadAttempts = 0; embed(); });
+        var extBtn = document.createElement("button");
+        extBtn.className = "po-btn";
+        extBtn.textContent = "外部打开";
+        extBtn.addEventListener("click", function() {
+          if (window.electronAPI) window.electronAPI.openExternal(currentUrl);
+          else window.open(currentUrl, "_blank");
+        });
+        btnRow.appendChild(retryBtn);
+        btnRow.appendChild(extBtn);
+        div.appendChild(btnRow);
+        container.appendChild(div);
+      }
 
       function embed() {
-        clearContainer();
-        console.log("[popout] embed, isElectron=" + isElectron + ", url=" + currentUrl);
+        showLoading("正在加载...");
+        console.log("[popout] embed, isElectron=" + isElectron + ", attempt=" + (loadAttempts+1) + ", url=" + currentUrl);
+        loadAttempts++;
         if (isElectron) {
           wv = document.createElement("webview");
           wv.setAttribute("src", currentUrl);
           wv.setAttribute("allowpopups", "");
+          // Use a standard Chrome user agent to avoid being blocked as Electron
+          wv.setAttribute("useragent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
           wv.style.width = "100%";
           wv.style.height = "100%";
           wv.style.border = "none";
           var _loaded = false;
+          var _failed = false;
+
           wv.addEventListener("did-start-loading", function () {
             console.log("[popout] webview did-start-loading");
           });
           wv.addEventListener("did-stop-loading", function () {
             console.log("[popout] webview did-stop-loading");
+            if (_failed) return;
             _loaded = true;
+            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
             var ld = container.querySelector(".po-loading");
             if (ld) ld.remove();
             try {
               if (wv.getURL) currentUrl = wv.getURL();
             } catch(e) {}
+          });
+          wv.addEventListener("did-finish-load", function() {
+            _loaded = true;
+            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+            var ld = container.querySelector(".po-loading");
+            if (ld) ld.remove();
           });
           wv.addEventListener("did-navigate", function (e) {
             if (e && e.url) currentUrl = e.url;
@@ -87,11 +180,20 @@
           });
           wv.addEventListener("did-fail-load", function (e) {
             console.log("[popout] webview did-fail-load", e && e.errorCode, e && e.errorDescription);
-            if (e && e.errorCode === -3) return;
-            _loaded = true;
-            showFallback(e && e.errorDescription);
+            if (e && e.errorCode === -3) return; // ERR_ABORTED (user navigation etc.)
+            // Ignore subresource failures (isMainFrame=false)
+            if (e && e.isMainFrame === false) return;
+            if (_loaded) return; // already loaded successfully before
+            _failed = true;
+            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+            // Auto-retry for network errors on first attempt
+            if (loadAttempts <= MAX_AUTO_RETRY && classifyError(e && e.errorCode) === "network") {
+              console.log("[popout] network error, auto-retrying...");
+              setTimeout(function() { embed(); }, 1500);
+              return;
+            }
+            showFallback(e && e.errorDescription, e && e.errorCode);
           });
-          // 阻止 webview 内的新窗口打开外部浏览器，改用应用内弹窗
           wv.addEventListener("new-window", function (e) {
             if (e && e.url) {
               e.preventDefault();
@@ -101,15 +203,20 @@
             }
           });
           container.appendChild(wv);
-          setTimeout(function () {
-            if (!_loaded) {
-              console.warn("[popout] webview 15s 超时仍未加载完成");
-              var ld = container.querySelector(".po-loading");
-              if (ld) {
-                ld.textContent = "页面加载较慢，请稍候…（若长期无响应可点击「外部打开」）";
+
+          // Timeout: after LOAD_TIMEOUT_MS, show timeout message with retry button
+          timeoutTimer = setTimeout(function () {
+            if (!_loaded && !_failed) {
+              console.warn("[popout] webview " + (LOAD_TIMEOUT_MS/1000) + "s timeout");
+              _failed = true;
+              if (loadAttempts <= MAX_AUTO_RETRY) {
+                console.log("[popout] timeout, auto-retrying...");
+                embed();
+                return;
               }
+              showFallback("加载超时（" + (LOAD_TIMEOUT_MS/1000) + "秒）", "-118");
             }
-          }, 15000);
+          }, LOAD_TIMEOUT_MS);
         } else {
           var ifr = document.createElement("iframe");
           ifr.src = currentUrl;
@@ -119,32 +226,23 @@
           ifr.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups");
           ifr.setAttribute("referrerpolicy", "no-referrer");
           ifr.onload = function () {
+            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
             var ld = container.querySelector(".po-loading");
             if (ld) ld.remove();
           };
           ifr.onerror = function () { showFallback(); };
           container.appendChild(ifr);
-          setTimeout(function () {
+          timeoutTimer = setTimeout(function () {
             var ld = container.querySelector(".po-loading");
             if (ld) {
               ifr.remove();
-              showFallback();
+              showFallback("加载超时", "-118");
             }
-          }, 8000);
+          }, 15000);
         }
       }
 
-      function showFallback(reason) {
-        clearContainer();
-        var div = document.createElement("div");
-        div.className = "po-fallback";
-        var msg = "该站点禁止嵌入显示。<br>请点击「外部打开」在浏览器中查看。";
-        if (reason) msg += "<br><br><span style='font-size:11px;color:#aaa'>原因：" + reason + "</span>";
-        div.innerHTML = msg;
-        container.appendChild(div);
-      }
-
-      function loadUrl(u) { currentUrl = u; embed(); }
+      function loadUrl(u) { currentUrl = u; loadAttempts = 0; embed(); }
 
       function translatePage() {
         if (isTranslated) {
@@ -180,12 +278,13 @@
       }
 
       function refreshPage() {
+        loadAttempts = 0;
         if (isElectron && wv) {
-          try { wv.reload(); } catch (e) { loadUrl(currentUrl); }
+          try { wv.reload(); } catch (e) { embed(); }
         } else {
           var ifr = container.querySelector("iframe");
           if (ifr) ifr.src = ifr.src;
-          else loadUrl(currentUrl);
+          else embed();
         }
       }
 

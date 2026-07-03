@@ -293,9 +293,7 @@ function extractPatentFromHtml(html, patentId) {
 
     // Strategy 1: Extract from <div class="claim..." num="N"> or <div num="N" class="claim...">
     function extractDivClaims(html) {
-      // First pass: collect all claim fragments, grouped by num
-      // wrapperType: 'independent' if inside <div class="claim">, 'dependent' if inside <div class="claim-dependent">, null if unknown
-      const claimMap = new Map(); // num -> { texts: [], wrapperType: null|'independent'|'dependent' }
+      const claimMap = new Map();
       const claimStartRegex = /<div([^>]*?)>/gi;
       let m;
       while ((m = claimStartRegex.exec(html)) !== null) {
@@ -304,57 +302,65 @@ function extractPatentFromHtml(html, patentId) {
         const numMatch = attrs.match(/num="(\d+)"/i);
         if (!classMatch || !numMatch) continue;
         const className = classMatch[1];
-        // Only match top-level claim divs: class contains "claim" or "claim-dependent" as standalone words
-        // Exclude sub-element classes: claim-text, claim-line, claim-ref, etc.
         const hasClaimClass = /(?:^|\s)claim(?:\s|$)/.test(className);
         const hasDependentClass = /(?:^|\s)claim-dependent(?:\s|$)/.test(className);
         if (!hasClaimClass && !hasDependentClass) continue;
         const claimNum = numMatch[1];
-        // Detect parent wrapper class: <div class="claim"> = independent, <div class="claim-dependent"> = dependent
-        // The outer wrapper is the MOST RELIABLE indicator of independent/dependent status.
-        // For Chinese patents: <div class="claim"><div num="1" class="claim"> = independent
-        //                      <div class="claim-dependent"><div num="2" class="claim"> = dependent
-        let wrapperType = null; // null = no wrapper info found
+        // Detect parent wrapper: look for unclosed <div class="claim..."> OR <li class="claim..."> before this position
+        let wrapperType = null;
         const beforeTag = html.substring(0, m.index);
-        // Find ALL <div ...> opening tags before current position and classify them.
-        // We distinguish wrappers (no num attribute) from inner claim divs (have num attribute).
-        let insideDependentWrapper = false;
-        let insideIndependentWrapper = false;
-        const allDivBefore = [...beforeTag.matchAll(/<div([^>]*?)>/gi)];
-        for (let di = allDivBefore.length - 1; di >= 0; di--) {
-          const divAttrs = allDivBefore[di][1];
-          const divClassMatch = divAttrs.match(/class="([^"]*)"/i);
-          if (!divClassMatch) continue;
-          const divClass = divClassMatch[1];
-          // Only consider divs that have "claim" or "claim-dependent" as standalone word in class
-          const hasClaimWord = /(?:^|\s)claim(?:\s|$)/.test(divClass);
-          const hasDependentWord = /(?:^|\s)claim-dependent(?:\s|$)/.test(divClass);
-          if (!hasClaimWord && !hasDependentWord) continue;
-          // Skip inner claim divs (they have num attribute; wrappers don't)
-          if (/num="/i.test(divAttrs)) continue;
-          // Check if this wrapper div is still open (unclosed)
-          const afterDiv = beforeTag.substring(allDivBefore[di].index + allDivBefore[di][0].length);
-          const openCount = (afterDiv.match(/<div[\s>]/gi) || []).length;
-          const closeCount = (afterDiv.match(/<\/div>/gi) || []).length;
-          if (openCount < closeCount) continue; // already closed
-          // Found an unclosed wrapper
-          if (hasDependentWord) {
-            insideDependentWrapper = true;
-            break;
-          } else if (hasClaimWord) {
-            insideIndependentWrapper = true;
+
+        // Check outer <li> wrappers (most reliable for new GP format: <li class="claim-dependent"><div num=N class="claim">)
+        const allLiBefore = [...beforeTag.matchAll(/<li([^>]*?)>/gi)];
+        for (let li = allLiBefore.length - 1; li >= 0; li--) {
+          const liAttrs = allLiBefore[li][1];
+          const liClassMatch = liAttrs.match(/class="([^"]*)"/i);
+          if (!liClassMatch) continue;
+          const liClass = liClassMatch[1];
+          const liHasClaim = /(?:^|\s)claim(?:\s|$)/.test(liClass);
+          const liHasDep = /(?:^|\s)claim-dependent(?:\s|$)/.test(liClass);
+          if (!liHasClaim && !liHasDep) continue;
+          if (/num="/i.test(liAttrs)) continue; // skip li with num (not a wrapper)
+          // Check if this li is still open
+          const afterLi = beforeTag.substring(allLiBefore[li].index + allLiBefore[li][0].length);
+          const liOpen = (afterLi.match(/<li[\s>]/gi) || []).length;
+          const liClose = (afterLi.match(/<\/li>/gi) || []).length;
+          if (liOpen >= liClose) {
+            wrapperType = liHasDep ? 'dependent' : 'independent';
             break;
           }
         }
-        if (insideDependentWrapper) wrapperType = 'dependent';
-        else if (insideIndependentWrapper) wrapperType = 'independent';
-        // Also check if the div itself has claim-dependent class
+
+        // Check outer <div> wrappers (if no li wrapper found)
+        if (!wrapperType) {
+          let insideDependentWrapper = false;
+          let insideIndependentWrapper = false;
+          const allDivBefore = [...beforeTag.matchAll(/<div([^>]*?)>/gi)];
+          for (let di = allDivBefore.length - 1; di >= 0; di--) {
+            const divAttrs = allDivBefore[di][1];
+            const divClassMatch = divAttrs.match(/class="([^"]*)"/i);
+            if (!divClassMatch) continue;
+            const divClass = divClassMatch[1];
+            const hasClaimWord = /(?:^|\s)claim(?:\s|$)/.test(divClass);
+            const hasDependentWord = /(?:^|\s)claim-dependent(?:\s|$)/.test(divClass);
+            if (!hasClaimWord && !hasDependentWord) continue;
+            if (/num="/i.test(divAttrs)) continue;
+            const afterDiv = beforeTag.substring(allDivBefore[di].index + allDivBefore[di][0].length);
+            const openCount = (afterDiv.match(/<div[\s>]/gi) || []).length;
+            const closeCount = (afterDiv.match(/<\/div>/gi) || []).length;
+            if (openCount < closeCount) continue;
+            if (hasDependentWord) { insideDependentWrapper = true; break; }
+            else if (hasClaimWord) { insideIndependentWrapper = true; break; }
+          }
+          if (insideDependentWrapper) wrapperType = 'dependent';
+          else if (insideIndependentWrapper) wrapperType = 'independent';
+        }
+
         if (hasDependentClass) wrapperType = 'dependent';
         const openTagEnd = m.index + m[0].length;
         const closeIdx = findMatchingCloseDiv(html, m.index);
         if (closeIdx === -1) continue;
         const claimBody = html.substring(openTagEnd, closeIdx);
-        // Clean HTML
         let claimText = claimBody
           .replace(/<br\s*\/?>/gi, " ")
           .replace(/<\/div>/gi, " ")
@@ -372,44 +378,66 @@ function extractPatentFromHtml(html, patentId) {
         }
         const entry = claimMap.get(claimNum);
         entry.texts.push(claimText);
-        // wrapperType: 'dependent' always wins; 'independent' only if not already set to 'dependent'
         if (wrapperType === 'dependent') entry.wrapperType = 'dependent';
         else if (wrapperType === 'independent' && entry.wrapperType !== 'dependent') entry.wrapperType = 'independent';
       }
-      // Second pass: merge fragments of the same claim number
       const claims = [];
       for (const [num, entry] of claimMap) {
         const fullText = entry.texts.join(" ").replace(/\s+/g, " ").trim();
         if (fullText.length < 3) continue;
-        // Determine dependent/independent:
-        // Priority 1: wrapper class (most reliable) — <div class="claim"> = independent, <div class="claim-dependent"> = dependent
-        // Priority 2: text-based detection (fallback when no wrapper info)
         let isDependent;
         if (entry.wrapperType === 'dependent') {
           isDependent = true;
         } else if (entry.wrapperType === 'independent') {
           isDependent = false;
         } else {
-          // No wrapper info, use text-based detection
           isDependent = /claim\s*\d+/i.test(fullText.substring(0, 200))
             || fullText.includes('根据权利要求')
             || fullText.includes('根據權利要求')
+            || /請求項\s*\d+/.test(fullText.substring(0, 200))
+            || /に記載/.test(fullText.substring(0, 200))
+            || /のいずれか/.test(fullText.substring(0, 200))
             || /所述的/.test(fullText.substring(0, 80));
         }
         claims.push({ num, text: fullText, type: isDependent ? "dependent" : "independent" });
       }
-      // Sort by claim number
       claims.sort((a, b) => parseInt(a.num) - parseInt(b.num));
       return claims;
     }
 
-    // Strategy 2: Extract from <li class="claim"> / <li class="claim-dependent">
+    // Strategy 2: Extract from <li class="claim"> / <li class="claim-dependent"> (using depth counting for nested tags)
     function extractLiClaims(html) {
       const claimMap = new Map();
-      const claimMatches = html.matchAll(/<li[^>]*class="claim(?:-dependent)?[^"]*"[^>]*>([\s\S]*?)<\/li>/gi);
-      for (const cm of claimMatches) {
-        const claimBody = cm[1];
-        const isDependent = cm[0].includes('claim-dependent');
+      // Find each <li ... class="claim..."> opening tag position
+      const liOpenRe = /<li\b([^>]*class="[^"]*claim[^"]*"[^>]*)>/gi;
+      let openMatch;
+      while ((openMatch = liOpenRe.exec(html)) !== null) {
+        const liAttrs = openMatch[1];
+        const liClassMatch = liAttrs.match(/class="([^"]*)"/i);
+        if (!liClassMatch) continue;
+        const liClass = liClassMatch[1];
+        const isDependent = /(?:^|\s)claim-dependent(?:\s|$)/.test(liClass);
+        const liStart = openMatch.index;
+        const openEnd = html.indexOf('>', liStart);
+        if (openEnd === -1) continue;
+        // Find matching </li> using depth counting
+        let depth = 1;
+        let pos = openEnd + 1;
+        let closePos = -1;
+        while (pos < html.length) {
+          const lt = html.indexOf('<', pos);
+          if (lt === -1) break;
+          const after = html.substr(lt);
+          if (/^<li\b/i.test(after)) { depth++; pos = lt + 3; }
+          else if (/^<\/li\s*>/i.test(after)) {
+            depth--;
+            if (depth === 0) { closePos = lt; break; }
+            pos = lt + 5;
+          } else { pos = lt + 1; }
+        }
+        if (closePos === -1) continue;
+        const fullLi = html.substring(liStart, closePos + 5);
+        const claimBody = html.substring(openEnd + 1, closePos);
         let claimText = claimBody
           .replace(/<br\s*\/?>/gi, " ")
           .replace(/<\/div>/gi, " ")
@@ -421,9 +449,12 @@ function extractPatentFromHtml(html, patentId) {
           .replace(/&gt;/gi, ">")
           .replace(/\s+/g, " ")
           .trim();
-        const numMatch = cm[0].match(/num="(\d+)"/);
-        const claimNum = numMatch ? numMatch[1] : "";
         if (claimText.length < 1) continue;
+        // Extract num: try li attrs first, then inner div num
+        let numMatch = liAttrs.match(/num="(\d+)"/i);
+        if (!numMatch) numMatch = fullLi.match(/<(?:div|li)[^>]*num="(\d+)"[^>]*class="[^"]*claim/i);
+        if (!numMatch) numMatch = fullLi.match(/num="(\d+)"/i);
+        const claimNum = numMatch ? numMatch[1] : "";
         if (!claimMap.has(claimNum)) {
           claimMap.set(claimNum, { texts: [], isDependentByClass: false });
         }
@@ -433,9 +464,16 @@ function extractPatentFromHtml(html, patentId) {
       }
       const claims = [];
       for (const [num, entry] of claimMap) {
+        if (!num) continue; // skip claims without number
         const fullText = entry.texts.join(" ").replace(/\s+/g, " ").trim();
         if (fullText.length < 3) continue;
-        const isDep = entry.isDependentByClass || /claim\s*\d+/i.test(fullText.substring(0, 200)) || fullText.includes('根据权利要求');
+        const isDep = entry.isDependentByClass
+          || /claim\s*\d+/i.test(fullText.substring(0, 200))
+          || fullText.includes('根据权利要求')
+          || fullText.includes('根據權利要求')
+          || /請求項\s*\d+/.test(fullText.substring(0, 200))
+          || /に記載/.test(fullText.substring(0, 200))
+          || /のいずれか/.test(fullText.substring(0, 200));
         claims.push({ num, text: fullText, type: isDep ? "dependent" : "independent" });
       }
       claims.sort((a, b) => parseInt(a.num) - parseInt(b.num));
@@ -445,29 +483,63 @@ function extractPatentFromHtml(html, patentId) {
     // Strategy 3: Extract from claim-text divs (some pages use <div class="claim-text">)
     function extractClaimTextDivs(html) {
       const claimMap = new Map();
-      const claimTextMatches = html.matchAll(/<div[^>]*class="claim-text"[^>]*>([\s\S]*?)<\/div>/gi);
-      for (const cm of claimTextMatches) {
-        let claimText = cm[1]
+      const claimTextMatches = [...html.matchAll(/<div[^>]*class="claim-text"[^>]*>/gi)];
+      for (let i = 0; i < claimTextMatches.length; i++) {
+        const cm = claimTextMatches[i];
+        const openEnd = html.indexOf('>', cm.index);
+        if (openEnd === -1) continue;
+        // Find matching </div> for this claim-text div
+        const closeIdx = findMatchingCloseDiv(html, cm.index);
+        if (closeIdx === -1) continue;
+        const bodyContent = html.substring(openEnd + 1, closeIdx);
+        let claimText = bodyContent
           .replace(/<br\s*\/?>/gi, " ")
           .replace(/<[^>]+>/g, "")
           .replace(/&nbsp;/gi, " ")
+          .replace(/&amp;/gi, "&")
+          .replace(/&lt;/gi, "<")
+          .replace(/&gt;/gi, ">")
           .replace(/\s+/g, " ")
           .trim();
-        // Try to find claim number from parent context
-        const parentContext = html.substring(Math.max(0, cm.index - 200), cm.index);
-        const numMatch = parentContext.match(/num="(\d+)"/);
-        const claimNum = numMatch ? numMatch[1] : "";
         if (claimText.length < 1) continue;
+        // Find the nearest preceding num="N" by walking backwards from cm.index
+        // Use the LAST (closest) num match, not the first
+        const beforeHtml = html.substring(0, cm.index);
+        const allNums = [...beforeHtml.matchAll(/num="(\d+)"/gi)];
+        // Only consider nums that are within claim wrapper divs/li (look for class="claim on same element or nearby)
+        let claimNum = "";
+        for (let j = allNums.length - 1; j >= 0; j--) {
+          const nm = allNums[j];
+          // Check that this num is on an element with class="claim...
+          const tagStart = beforeHtml.lastIndexOf('<', nm.index);
+          if (tagStart === -1) continue;
+          const tagEnd = beforeHtml.indexOf('>', tagStart);
+          if (tagEnd === -1 || tagEnd < nm.index) continue;
+          const tagStr = beforeHtml.substring(tagStart, tagEnd);
+          if (/class="[^"]*claim/i.test(tagStr)) {
+            claimNum = nm[1];
+            break;
+          }
+        }
+        if (!claimNum && allNums.length > 0) {
+          claimNum = allNums[allNums.length - 1][1];
+        }
         if (!claimMap.has(claimNum)) {
-          claimMap.set(claimNum, { texts: [] });
+          claimMap.set(claimNum, { texts: [], wrapperType: null });
         }
         claimMap.get(claimNum).texts.push(claimText);
       }
       const claims = [];
       for (const [num, entry] of claimMap) {
+        if (!num) continue;
         const fullText = entry.texts.join(" ").replace(/\s+/g, " ").trim();
         if (fullText.length < 3) continue;
-        const isDep = /claim\s*\d+/i.test(fullText.substring(0, 200)) || fullText.includes('根据权利要求');
+        const isDep = /claim\s*\d+/i.test(fullText.substring(0, 200))
+          || fullText.includes('根据权利要求')
+          || fullText.includes('根據權利要求')
+          || /請求項\s*\d+/.test(fullText.substring(0, 200))
+          || /に記載/.test(fullText.substring(0, 200))
+          || /のいずれか/.test(fullText.substring(0, 200));
         claims.push({ num, text: fullText, type: isDep ? "dependent" : "independent" });
       }
       claims.sort((a, b) => parseInt(a.num) - parseInt(b.num));
@@ -486,6 +558,21 @@ function extractPatentFromHtml(html, patentId) {
       return claims.reduce((sum, c) => sum + c.text.length, 0) / claims.length;
     }
 
+    function scoreClaims(cs) {
+      if (cs.length === 0) return 0;
+      // Higher score = better. Consider:
+      // - Number of claims (more is better, but not fragments)
+      // - Average text length (too short = fragments)
+      // - Presence of dependent claims (signals class-based detection is working)
+      // - Penalty for very short claims (fragments)
+      const avg = avgTextLength(cs);
+      const shortCount = cs.filter(c => c.text.length < 20).length;
+      const depCount = cs.filter(c => c.type === 'dependent').length;
+      const fragmentPenalty = shortCount * 50;
+      const depBonus = depCount > 0 ? 20 : 0; // strategies that detect deps are more reliable
+      return cs.length * 10 + avg + depBonus - fragmentPenalty;
+    }
+
     const candidates = [
       { claims: divClaims, name: 'divClaims' },
       { claims: liClaims, name: 'liClaims' },
@@ -493,8 +580,7 @@ function extractPatentFromHtml(html, patentId) {
     ].filter(c => c.claims.length > 0);
 
     if (candidates.length > 0) {
-      // Pick the candidate with highest average text length (most complete claims)
-      candidates.sort((a, b) => avgTextLength(b.claims) - avgTextLength(a.claims));
+      candidates.sort((a, b) => scoreClaims(b.claims) - scoreClaims(a.claims));
       htmlResult.claims = candidates[0].claims;
     }
 

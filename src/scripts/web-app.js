@@ -498,6 +498,16 @@ async function searchPatentDetail(input) {
   const appEl = document.getElementById("app");
   if (appEl && appEl.classList.contains("home-mode")) appEl.classList.remove("home-mode");
 
+  // Exit batch mode when doing a regular search
+  _pdBatchMode = false;
+  if (batchResultsSection) batchResultsSection.classList.add("hidden");
+  if (batchSearchPanel) batchSearchPanel.classList.add("hidden");
+  // Clear any batch-mode tabs
+  _pdOpenPatents.length = 0;
+  _pdActivePatent = null;
+  Object.keys(_pdPatentCache).forEach(k => delete _pdPatentCache[k]);
+  _renderPdTabs();
+
   const raw = input.trim().toUpperCase().replace(/[\s\/]/g, "");
   if (!raw) { showError("请输入专利号"); return; }
 
@@ -11151,10 +11161,13 @@ if (batchClearBtn) {
 // ── 批量返回搜索 ──
 if (batchBackBtn) {
   batchBackBtn.addEventListener("click", () => {
+    _pdBatchMode = false;
     batchResultsSection.classList.add("hidden");
     if (_pdOpenPatents.length === 0) {
       patentDetailSection.classList.add("hidden");
     }
+    // Show batch search input panel again
+    if (batchSearchPanel) batchSearchPanel.classList.remove("hidden");
   });
 }
 
@@ -11205,11 +11218,15 @@ if (batchSearchBtn) {
     }
 
     _pdBatchMode = true;
+    _pdOpenPatents.length = 0;
+    _pdActivePatent = null;
+    Object.keys(_pdPatentCache).forEach(k => delete _pdPatentCache[k]);
     batchSearchPanel.classList.add("hidden");
     batchResultsSection.classList.remove("hidden");
     patentDetailSection.classList.add("hidden");
     resultSection.classList.add("hidden");
     hideError();
+    _renderPdTabs();
 
     batchResultsGrid.innerHTML = "";
     const cards = {};
@@ -11356,6 +11373,13 @@ async function _retryBatchCard(pn, btnEl) {
 }
 
 // ── 标签页管理：打开/切换/关闭 ──
+function _returnToBatchResults() {
+  if (batchResultsSection) {
+    patentDetailSection.classList.add("hidden");
+    batchResultsSection.classList.remove("hidden");
+  }
+}
+
 function _renderPdTabs() {
   if (!pdTabsBar) return;
   const appEl = document.getElementById("app");
@@ -11374,6 +11398,17 @@ function _renderPdTabs() {
   }
   pdTabsBar.classList.remove("hidden");
   pdTabsBar.innerHTML = "";
+
+  // Add "返回批量结果" button when in batch mode
+  if (_pdBatchMode) {
+    const backBtn = document.createElement("button");
+    backBtn.className = "pdt-back-btn";
+    backBtn.innerHTML = "← 返回批量结果";
+    backBtn.title = "返回到批量查询结果列表";
+    backBtn.addEventListener("click", () => { _returnToBatchResults(); });
+    pdTabsBar.appendChild(backBtn);
+  }
+
   _pdOpenPatents.forEach(pn => {
     const tab = document.createElement("div");
     tab.className = "pdt-tab" + (pn === _pdActivePatent ? " active" : "");
@@ -11431,10 +11466,14 @@ function _closePdTab(pn) {
     }
   }
   _renderPdTabs();
-  if (_pdOpenPatents.length === 0 && _pdBatchMode && batchResultsSection && !batchResultsSection.classList.contains("hidden")) {
-    // stay on batch results
-  } else if (_pdOpenPatents.length === 0) {
-    patentDetailSection.classList.add("hidden");
+  if (_pdOpenPatents.length === 0) {
+    if (_pdBatchMode && batchResultsSection) {
+      // Return to batch results view
+      patentDetailSection.classList.add("hidden");
+      batchResultsSection.classList.remove("hidden");
+    } else {
+      patentDetailSection.classList.add("hidden");
+    }
   }
 }
 
@@ -11447,7 +11486,12 @@ function _openPdPatent(pn) {
   const appEl = document.getElementById("app");
   if (appEl && appEl.classList.contains("home-mode")) appEl.classList.remove("home-mode");
 
-  _pdBatchMode = false;
+  // When opening from batch results, stay in batch mode so user can return to results
+  // Only clear batch mode when opening from regular search
+  const cameFromBatch = _pdBatchMode && batchResultsSection && !batchResultsSection.classList.contains("hidden");
+  if (!cameFromBatch) {
+    _pdBatchMode = false;
+  }
   if (batchResultsSection) batchResultsSection.classList.add("hidden");
   patentDetailSection.classList.remove("hidden");
   resultSection.classList.add("hidden");
