@@ -66,8 +66,11 @@
       <div id="office-badge" class="office-badge hidden"></div>
       <div id="batch-search-panel" class="batch-search-panel hidden">
         <div class="batch-search-header">
-          <span class="batch-search-title">批量查询专利原文（最多 10 篇）</span>
-          <span id="batch-count" class="batch-count">0/10</span>
+          <div class="batch-search-header-left">
+            <span class="batch-search-title">批量查询专利原文（最多 10 篇）</span>
+            <span id="batch-count" class="batch-count">0/10</span>
+          </div>
+          <button id="batch-close-btn" class="batch-close-btn" title="收起"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
         </div>
         <textarea id="batch-input" class="batch-input" placeholder="每行输入一个专利号，例如：&#10;US12030161B2&#10;US17204063&#10;EP4252965A3&#10;..."></textarea>
         <div class="batch-search-actions">

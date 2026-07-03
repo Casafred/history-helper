@@ -619,6 +619,8 @@ async function searchPatentDetail(input) {
 
     renderPatentDetail(json.data);
     window._currentPatentData = json.data;
+    _pdPatentCache[raw] = json.data;
+    GPCache.set(raw, json.data);
     patentDetailSection.classList.remove("hidden");
 
     // 显示数据来源标识
@@ -2758,6 +2760,43 @@ const PatentCache = {
     } catch (e) {
       console.error("PatentCache restoreState failed:", e);
       return false;
+    }
+  },
+};
+
+// ── GPCache - localStorage cache for Google Patents (专利原文) data ──
+const GPCache = {
+  STORAGE_KEY: "patentlens-gp-cache",
+  MAX_ENTRIES: 50,
+
+  getAll() {
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  },
+
+  get(patentNumber) {
+    const all = this.getAll();
+    const entry = all[patentNumber];
+    if (!entry || !entry.data) return null;
+    return entry.data;
+  },
+
+  set(patentNumber, data) {
+    if (!data) return;
+    const all = this.getAll();
+    all[patentNumber] = { data, timestamp: Date.now() };
+    const keys = Object.keys(all);
+    if (keys.length > this.MAX_ENTRIES) {
+      keys.sort((a, b) => (all[a].timestamp || 0) - (all[b].timestamp || 0));
+      const toRemove = keys.slice(0, keys.length - this.MAX_ENTRIES);
+      toRemove.forEach(k => delete all[k]);
+    }
+    try {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+    } catch (e) {
+      console.warn("GPCache save failed:", e);
     }
   },
 };
@@ -11158,6 +11197,14 @@ if (batchClearBtn) {
   });
 }
 
+// ── 批量面板收起 ──
+const batchCloseBtn = document.getElementById("batch-close-btn");
+if (batchCloseBtn) {
+  batchCloseBtn.addEventListener("click", () => {
+    batchSearchPanel.classList.add("hidden");
+  });
+}
+
 // ── 批量返回搜索 ──
 if (batchBackBtn) {
   batchBackBtn.addEventListener("click", () => {
@@ -11218,9 +11265,14 @@ if (batchSearchBtn) {
     }
 
     _pdBatchMode = true;
+    // Don't clear _pdPatentCache - keep previously fetched data for reuse
+    // Only remove patents not in the current batch list
+    const batchSet = new Set(numbers);
+    Object.keys(_pdPatentCache).forEach(k => {
+      if (!batchSet.has(k)) delete _pdPatentCache[k];
+    });
     _pdOpenPatents.length = 0;
     _pdActivePatent = null;
-    Object.keys(_pdPatentCache).forEach(k => delete _pdPatentCache[k]);
     batchSearchPanel.classList.add("hidden");
     batchResultsSection.classList.remove("hidden");
     patentDetailSection.classList.add("hidden");
@@ -11232,39 +11284,74 @@ if (batchSearchBtn) {
     const cards = {};
     numbers.forEach(pn => {
       const card = document.createElement("div");
-      card.className = "batch-result-card loading";
-      card.dataset.pn = pn;
-      card.innerHTML = `
-        <div class="batch-card-thumb"><div class="batch-card-thumb-spinner"></div></div>
-        <div class="batch-card-body">
-          <div class="batch-card-pn">${escapeHtml(pn)} <span class="batch-card-status loading">查询中</span></div>
-          <div class="batch-card-links">
-            <a href="https://patents.google.com/patent/${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Google Patents</a>
-            <a href="https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Espacenet</a>
-          </div>
-        </div>`;
-      card.addEventListener("click", () => {
-        if (_pdPatentCache[pn]) {
-          _openPdPatent(pn);
+      // Check cache first - session cache or localStorage GP cache
+      const sessionCached = _pdPatentCache[pn];
+      const lsCached = GPCache.get(pn);
+
+      if (sessionCached || lsCached) {
+        // Cache hit - show done state immediately
+        const data = sessionCached || lsCached;
+        if (!sessionCached && lsCached) _pdPatentCache[pn] = lsCached;
+        card.className = "batch-result-card done cached";
+        card.dataset.pn = pn;
+        cards[pn] = card;
+        batchResultsGrid.appendChild(card);
+        _updateBatchCardDone(card, pn, data);
+        // Update "cached" badge
+        const statusEl = card.querySelector(".batch-card-status");
+        if (statusEl) {
+          statusEl.textContent = "缓存";
+          statusEl.className = "batch-card-status cached";
+          statusEl.style.background = "#e8f5e9";
+          statusEl.style.color = "#2e7d32";
         }
-      });
-      batchResultsGrid.appendChild(card);
-      cards[pn] = card;
+      } else {
+        card.className = "batch-result-card loading";
+        card.dataset.pn = pn;
+        card.innerHTML = `
+          <div class="batch-card-thumb"><div class="batch-card-thumb-spinner"></div></div>
+          <div class="batch-card-body">
+            <div class="batch-card-pn">${escapeHtml(pn)} <span class="batch-card-status loading">查询中</span></div>
+            <div class="batch-card-links">
+              <a href="https://patents.google.com/patent/${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">GP</a>
+              <a href="https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Espacenet</a>
+            </div>
+          </div>`;
+        card.addEventListener("click", () => {
+          if (_pdPatentCache[pn]) {
+            _openPdPatent(pn);
+          }
+        });
+        batchResultsGrid.appendChild(card);
+        cards[pn] = card;
+      }
     });
 
     let completed = 0;
     let succeeded = 0;
+    let fromCache = 0;
     const total = numbers.length;
 
     for (let i = 0; i < numbers.length; i++) {
       const pn = numbers[i];
       const card = cards[pn];
-      if (batchProgress) batchProgress.textContent = `进度: ${i}/${total} 完成 (${succeeded} 成功, ${i - succeeded} 失败)`;
+
+      // Skip if already loaded from cache
+      if (_pdPatentCache[pn]) {
+        completed++;
+        succeeded++;
+        fromCache++;
+        if (batchProgress) batchProgress.textContent = `进度: ${completed}/${total} 完成 (${succeeded} 成功, ${completed - succeeded} 失败, ${fromCache} 缓存命中)`;
+        continue;
+      }
+
+      if (batchProgress) batchProgress.textContent = `进度: ${i}/${total} 完成 (${succeeded} 成功, ${i - succeeded} 失败, ${fromCache} 缓存命中)`;
 
       try {
         const json = await fetchPatentWithRetry(pn, 2);
         if (json.data && json.data.data_source !== "Espacenet") {
           _pdPatentCache[pn] = json.data;
+          GPCache.set(pn, json.data);
         }
         succeeded++;
         _updateBatchCardDone(card, pn, json.data);
@@ -11272,9 +11359,9 @@ if (batchSearchBtn) {
         _updateBatchCardError(card, pn, err.message);
       }
       completed++;
-      if (batchProgress) batchProgress.textContent = `进度: ${completed}/${total} 完成 (${succeeded} 成功, ${completed - succeeded} 失败)`;
+      if (batchProgress) batchProgress.textContent = `进度: ${completed}/${total} 完成 (${succeeded} 成功, ${completed - succeeded} 失败, ${fromCache} 缓存命中)`;
 
-      if (i < numbers.length - 1) {
+      if (i < numbers.length - 1 && !_pdPatentCache[numbers[i+1]]) {
         await _delay(1200);
       }
     }
@@ -11302,7 +11389,7 @@ function _updateBatchCardDone(card, pn, data) {
     return;
   }
 
-  const thumb = data.thumbnails && data.thumbnails.length > 0 ? data.thumbnails[0] : null;
+  const thumb = (data.drawings && data.drawings.length > 0) ? data.drawings[0] : null;
   const abstract = (data.abstract || "").substring(0, 120) + (data.abstract && data.abstract.length > 120 ? "..." : "");
   const title = data.title || "无标题";
   const date = data.publication_date || data.application_date || "";
@@ -11508,6 +11595,21 @@ function _openPdPatent(pn) {
     window._currentPatentData = _pdPatentCache[raw];
     if (patentInput) patentInput.value = raw;
     _renderPdTabs();
+    showDataSourceBadge("本地缓存", "从本地缓存恢复，无需重新查询");
+    return;
+  }
+
+  // Check localStorage GP cache
+  const gpCached = GPCache.get(raw);
+  if (gpCached) {
+    _pdPatentCache[raw] = gpCached;
+    _pdOpenPatents.push(raw);
+    _pdActivePatent = raw;
+    renderPatentDetail(gpCached);
+    window._currentPatentData = gpCached;
+    if (patentInput) patentInput.value = raw;
+    _renderPdTabs();
+    showDataSourceBadge("本地缓存", "从本地缓存恢复，无需重新查询");
     return;
   }
 
@@ -11541,6 +11643,7 @@ function _openPdPatent(pn) {
     }
 
     _pdPatentCache[raw] = json.data;
+    GPCache.set(raw, json.data);
     renderPatentDetail(json.data);
     window._currentPatentData = json.data;
     if (patentInput) patentInput.value = raw;
@@ -11725,7 +11828,21 @@ function _scrollToCurrentMatch() {
     el.classList.toggle("current", i === _pdFindCurrentIdx);
   });
   if (_pdFindCurrentIdx >= 0 && _pdFindMatches[_pdFindCurrentIdx]) {
-    _pdFindMatches[_pdFindCurrentIdx].scrollIntoView({ behavior: "smooth", block: "center" });
+    const matchEl = _pdFindMatches[_pdFindCurrentIdx];
+    // Auto-switch to the tab panel containing this match if it's hidden
+    const panel = matchEl.closest(".pd-tab-panel");
+    if (panel && !panel.classList.contains("active") && panel.dataset.panel) {
+      switchPatentTab(panel.dataset.panel);
+    }
+    // Expand any collapsed ancestor blocks
+    const collapsedAncestor = matchEl.closest(".collapsed");
+    if (collapsedAncestor) {
+      collapsedAncestor.classList.remove("collapsed");
+    }
+    // Use requestAnimationFrame to ensure the tab switch has rendered before scrolling
+    requestAnimationFrame(() => {
+      matchEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   }
 }
 
