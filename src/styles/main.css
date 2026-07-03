@@ -4515,25 +4515,29 @@ body {
 .patent-detail-section {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 24px 20px;
+  padding: 16px;
+  width: 100%;
 }
-.patent-detail-tabs-bar:not(.hidden) + .patent-detail-find-bar:not(.hidden) {
-  border-top: none;
-}
-.patent-detail-tabs-bar:not(.hidden) ~ .patent-detail-content {
-  border-radius: 0 0 12px 12px;
-}
-.patent-detail-find-bar:not(.hidden) ~ .patent-detail-content {
-  border-radius: 0;
-}
-.patent-detail-tabs-bar:not(.hidden) + .patent-detail-find-bar:not(.hidden) ~ .patent-detail-content {
-  border-radius: 0 0 12px 12px;
+/* 当标签栏显示时，在wide-layout下占满宽度 */
+#app.wide-layout .patent-detail-section.has-tabs {
+  max-width: 100%;
+  padding: 0 32px 24px;
 }
 .patent-detail-content {
   background: var(--bg-secondary);
   border-radius: 12px;
   padding: 28px;
   box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  width: 100%;
+  box-sizing: border-box;
+}
+/* 标签页打开时，内容区与标签栏/查找栏连成整体 */
+.has-tabs .patent-detail-content {
+  border-radius: 0 0 12px 12px;
+  border: 1px solid var(--border-color, #2a2d3a);
+  border-top: none;
+  padding: 24px 36px;
+  box-shadow: none;
 }
 .pd-header {
   margin-bottom: 20px;
@@ -6064,75 +6068,93 @@ body {
 /* ===== 专利详情标签页管理（全屏模式） ===== */
 .patent-detail-tabs-bar {
   display: flex;
-  align-items: center;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color, #2a2d3a);
-  padding: 4px 12px 0;
-  gap: 2px;
+  align-items: flex-end;
+  background: var(--bg-primary, #0f1117);
+  padding: 6px 8px 0;
+  gap: 1px;
   overflow-x: auto;
-  min-height: 36px;
+  min-height: 40px;
   flex-shrink: 0;
   border-radius: 12px 12px 0 0;
+  border: 1px solid var(--border-color, #2a2d3a);
+  border-bottom: none;
+  width: 100%;
+  box-sizing: border-box;
 }
+.patent-detail-tabs-bar::-webkit-scrollbar { height: 0; }
 .pdt-tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 7px 14px;
   font-size: 12px;
   color: var(--text-secondary, #888);
-  border-radius: 6px 6px 0 0;
+  border-radius: 8px 8px 0 0;
   cursor: pointer;
   white-space: nowrap;
-  border: 1px solid transparent;
+  background: var(--bg-card, #1a1d27);
+  border: 1px solid var(--border-color, #2a2d3a);
   border-bottom: none;
-  max-width: 200px;
-  transition: all 0.15s;
-  background: transparent;
+  max-width: 220px;
+  transition: all 0.12s ease;
+  position: relative;
+  top: 1px;
 }
 .pdt-tab:hover {
-  background: var(--bg-card, #1a1d27);
+  background: var(--bg-secondary, #252830);
   color: var(--text-primary, #e0e0e0);
 }
 .pdt-tab.active {
-  background: var(--bg-primary, #0f1117);
+  background: var(--bg-secondary, #252830);
   color: var(--accent);
-  border-color: var(--border-color, #2a2d3a);
   font-weight: 600;
-  margin-bottom: -1px;
+  z-index: 1;
 }
 .pdt-tab-label {
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: "Consolas", monospace;
+  font-family: "Consolas", "SF Mono", monospace;
   font-size: 12px;
+  letter-spacing: 0.2px;
 }
 .pdt-tab-close {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
-  font-size: 14px;
+  border-radius: 50%;
+  font-size: 15px;
   line-height: 1;
   color: var(--text-muted, #666);
   flex-shrink: 0;
+  opacity: 0.6;
+  transition: all 0.12s;
 }
+.pdt-tab:hover .pdt-tab-close { opacity: 1; }
 .pdt-tab-close:hover {
-  background: var(--danger, #e53935);
+  background: rgba(229,57,53,0.9);
   color: #fff;
+  opacity: 1;
 }
 
 /* ===== 页内查找工具栏 ===== */
 .patent-detail-find-bar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  background: var(--bg-secondary);
+  gap: 6px;
+  background: var(--bg-card, #1a1d27);
   border-bottom: 1px solid var(--border-color, #2a2d3a);
-  padding: 6px 16px;
+  padding: 8px 20px;
   flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* 标签栏显示时，查找栏也加左右边框与标签栏对齐 */
+.has-tabs .patent-detail-find-bar {
+  border-left: 1px solid var(--border-color, #2a2d3a);
+  border-right: 1px solid var(--border-color, #2a2d3a);
+  background: var(--bg-secondary);
 }
 .pd-find-input {
   flex: 1;

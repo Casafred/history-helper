@@ -11157,6 +11157,16 @@ async function fetchPatentWithRetry(patentNumber, maxRetries = 2) {
         await new Promise(r => setTimeout(r, delay));
       }
       const resp = await fetch(gpApiUrl(raw));
+      if (!resp.ok) {
+        lastErr = new Error("HTTP " + resp.status);
+        continue;
+      }
+      const ct = resp.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        const text = await resp.text();
+        lastErr = new Error("服务器返回了非JSON响应（" + ct.substring(0, 50) + "）");
+        continue;
+      }
       const json = await resp.json();
       if (json.success) {
         return json;
@@ -11336,9 +11346,18 @@ async function _retryBatchCard(pn, btnEl) {
 // ── 标签页管理：打开/切换/关闭 ──
 function _renderPdTabs() {
   if (!pdTabsBar) return;
+  const appEl = document.getElementById("app");
+  if (patentDetailSection) {
+    patentDetailSection.classList.toggle("has-tabs", _pdOpenPatents.length > 0);
+  }
+  if (appEl) {
+    appEl.classList.toggle("wide-layout", _pdOpenPatents.length > 0);
+  }
   if (_pdOpenPatents.length === 0) {
     pdTabsBar.classList.add("hidden");
     pdTabsBar.innerHTML = "";
+    if (pdFindBar) pdFindBar.classList.add("hidden");
+    _clearFindHighlights();
     return;
   }
   pdTabsBar.classList.remove("hidden");
