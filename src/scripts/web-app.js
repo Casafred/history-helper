@@ -543,6 +543,12 @@ async function searchPatentDetail(input) {
 
   try {
     const resp = await fetch(gpApiUrl(raw));
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const ct = resp.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      await resp.text();
+      throw new Error("服务器返回了非JSON响应");
+    }
     const json = await resp.json();
 
     // 调试信息输出到开发者工具 console
@@ -2188,6 +2194,12 @@ async function openPatentPopup(patentNumber) {
 
   try {
     const resp = await fetch(gpApiUrl(raw));
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const ct = resp.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      await resp.text();
+      throw new Error("服务器返回了非JSON响应");
+    }
     const json = await resp.json();
 
     if (!json.success) {
