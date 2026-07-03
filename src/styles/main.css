@@ -4517,6 +4517,18 @@ body {
   margin: 0 auto;
   padding: 24px 20px;
 }
+.patent-detail-tabs-bar:not(.hidden) + .patent-detail-find-bar:not(.hidden) {
+  border-top: none;
+}
+.patent-detail-tabs-bar:not(.hidden) ~ .patent-detail-content {
+  border-radius: 0 0 12px 12px;
+}
+.patent-detail-find-bar:not(.hidden) ~ .patent-detail-content {
+  border-radius: 0;
+}
+.patent-detail-tabs-bar:not(.hidden) + .patent-detail-find-bar:not(.hidden) ~ .patent-detail-content {
+  border-radius: 0 0 12px 12px;
+}
 .patent-detail-content {
   background: var(--bg-secondary);
   border-radius: 12px;
@@ -5827,5 +5839,357 @@ body {
   color: var(--text-primary, #222);
 }
 .patent-ask-input:focus { outline: none; border-color: var(--accent); }
+
+/* ===== 批量查询面板 ===== */
+.batch-search-panel {
+  margin-top: 10px;
+  background: var(--bg-card, #1a1d27);
+  border: 1px solid var(--border-color, #2a2d3a);
+  border-radius: 10px;
+  padding: 14px 16px;
+  max-width: 960px;
+  width: 100%;
+}
+.batch-search-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.batch-search-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.batch-count {
+  font-size: 12px;
+  color: var(--text-secondary, #888);
+  background: var(--bg-secondary, #252830);
+  padding: 2px 10px;
+  border-radius: 10px;
+}
+.batch-input {
+  width: 100%;
+  min-height: 100px;
+  max-height: 200px;
+  background: var(--bg-primary, #0f1117);
+  border: 1px solid var(--border-color, #2a2d3a);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text-primary, #e0e0e0);
+  font-size: 13px;
+  font-family: "Consolas", "Courier New", monospace;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+.batch-input:focus {
+  border-color: var(--accent);
+}
+.batch-search-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  justify-content: flex-end;
+}
+
+/* ===== 批量查询结果 ===== */
+.batch-results-section {
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 0 40px;
+}
+.batch-results-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-color, #2a2d3a);
+  margin-bottom: 16px;
+}
+.batch-results-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+.batch-progress {
+  font-size: 12px;
+  color: var(--text-secondary, #888);
+  flex: 1;
+}
+.batch-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.batch-result-card {
+  background: var(--bg-card, #1a1d27);
+  border: 1px solid var(--border-color, #2a2d3a);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+}
+.batch-result-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 2px 12px rgba(76,175,80,0.15);
+  transform: translateY(-1px);
+}
+.batch-result-card.loading {
+  cursor: default;
+  opacity: 0.8;
+}
+.batch-result-card.error {
+  border-color: var(--danger, #e53935);
+  cursor: default;
+}
+.batch-card-thumb {
+  width: 100%;
+  height: 140px;
+  background: var(--bg-secondary, #252830);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+.batch-card-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.batch-card-thumb-placeholder {
+  font-size: 32px;
+  color: var(--text-muted, #555);
+}
+.batch-card-thumb-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border-color, #2a2d3a);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.batch-card-body {
+  padding: 10px 12px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.batch-card-pn {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: "Consolas", monospace;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.batch-card-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.batch-card-status.loading { background: #fff3e0; color: #e65100; }
+.batch-card-status.done { background: #e8f5e9; color: #2e7d32; }
+.batch-card-status.error { background: #ffebee; color: #c62828; }
+.batch-card-title {
+  font-size: 12px;
+  color: var(--text-primary, #e0e0e0);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.batch-card-meta {
+  font-size: 11px;
+  color: var(--text-secondary, #888);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.batch-card-abstract {
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.batch-card-links {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color, #2a2d3a);
+}
+.batch-card-links a, .batch-card-links button {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color, #2a2d3a);
+  background: transparent;
+  color: var(--text-secondary, #999);
+  cursor: pointer;
+  text-decoration: none;
+}
+.batch-card-links a:hover, .batch-card-links button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.batch-card-error {
+  font-size: 11px;
+  color: var(--danger, #e53935);
+  padding: 6px 0;
+}
+.batch-card-retry {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--danger, #e53935);
+  background: transparent;
+  color: var(--danger, #e53935);
+  cursor: pointer;
+  align-self: flex-start;
+}
+.batch-card-retry:hover { background: rgba(229,57,53,0.1); }
+
+/* ===== 专利详情标签页管理（全屏模式） ===== */
+.patent-detail-tabs-bar {
+  display: flex;
+  align-items: center;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color, #2a2d3a);
+  padding: 4px 12px 0;
+  gap: 2px;
+  overflow-x: auto;
+  min-height: 36px;
+  flex-shrink: 0;
+  border-radius: 12px 12px 0 0;
+}
+.pdt-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-secondary, #888);
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-bottom: none;
+  max-width: 200px;
+  transition: all 0.15s;
+  background: transparent;
+}
+.pdt-tab:hover {
+  background: var(--bg-card, #1a1d27);
+  color: var(--text-primary, #e0e0e0);
+}
+.pdt-tab.active {
+  background: var(--bg-primary, #0f1117);
+  color: var(--accent);
+  border-color: var(--border-color, #2a2d3a);
+  font-weight: 600;
+  margin-bottom: -1px;
+}
+.pdt-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: "Consolas", monospace;
+  font-size: 12px;
+}
+.pdt-tab-close {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted, #666);
+  flex-shrink: 0;
+}
+.pdt-tab-close:hover {
+  background: var(--danger, #e53935);
+  color: #fff;
+}
+
+/* ===== 页内查找工具栏 ===== */
+.patent-detail-find-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color, #2a2d3a);
+  padding: 6px 16px;
+  flex-shrink: 0;
+}
+.pd-find-input {
+  flex: 1;
+  max-width: 240px;
+  background: var(--bg-primary, #0f1117);
+  border: 1px solid var(--border-color, #2a2d3a);
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: var(--text-primary, #e0e0e0);
+  font-size: 12px;
+  outline: none;
+}
+.pd-find-input:focus { border-color: var(--accent); }
+.pd-find-btn {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+}
+.pd-find-btn:hover { background: var(--bg-card, #1a1d27); color: var(--accent); }
+.pd-find-btn:disabled { opacity: 0.4; cursor: default; }
+.pd-find-count {
+  font-size: 11px;
+  color: var(--text-secondary, #888);
+  min-width: 40px;
+  text-align: center;
+}
+.pd-find-close {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #888);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  margin-left: auto;
+}
+.pd-find-close:hover { background: var(--danger, #e53935); color: #fff; }
+
+/* 查找高亮标记 */
+.pd-find-highlight {
+  background: #ffeb3b;
+  color: #000;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.pd-find-highlight.current {
+  background: #ff9800;
+  color: #000;
+  outline: 1px solid #e65100;
+}
 
 

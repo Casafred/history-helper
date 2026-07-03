@@ -51,6 +51,7 @@
         </div>
         <input type="text" id="patent-input" placeholder="输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型" autocomplete="off">
         <button id="search-btn" class="btn-primary">查询</button>
+        <button id="batch-search-toggle-btn" class="btn-icon" title="批量查询（最多10篇）" style="display:none;"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button>
         <button id="theme-toggle-btn" class="btn-icon" title="切换亮色/暗色模式">
           <svg class="svg-icon theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
@@ -63,12 +64,41 @@
       </div>
       <div class="search-hint">支持 US / EP / JP / DE / CN 专利审查信息查询，US / EP / JP 支持文档原文下载与 AI 梳理（DE 需手动查阅）</div>
       <div id="office-badge" class="office-badge hidden"></div>
+      <div id="batch-search-panel" class="batch-search-panel hidden">
+        <div class="batch-search-header">
+          <span class="batch-search-title">批量查询专利原文（最多 10 篇）</span>
+          <span id="batch-count" class="batch-count">0/10</span>
+        </div>
+        <textarea id="batch-input" class="batch-input" placeholder="每行输入一个专利号，例如：&#10;US12030161B2&#10;US17204063&#10;EP4252965A3&#10;..."></textarea>
+        <div class="batch-search-actions">
+          <button id="batch-search-btn" class="btn-primary">开始批量查询</button>
+          <button id="batch-clear-btn" class="btn-secondary">清空</button>
+        </div>
+      </div>
     </section>
 
     <main class="app-main">
 
+      <!-- 批量查询结果视图 -->
+      <section id="batch-results-section" class="batch-results-section hidden">
+        <div class="batch-results-header">
+          <span class="batch-results-title">批量查询结果</span>
+          <span id="batch-progress" class="batch-progress"></span>
+          <button id="batch-back-btn" class="btn-secondary btn-small">返回搜索</button>
+        </div>
+        <div id="batch-results-grid" class="batch-results-grid"></div>
+      </section>
+
       <!-- 专利原文详情视图（Google Patents） -->
       <section id="patent-detail-section" class="patent-detail-section hidden">
+        <div id="patent-detail-tabs-bar" class="patent-detail-tabs-bar hidden"></div>
+        <div id="patent-detail-find-bar" class="patent-detail-find-bar hidden">
+          <input type="text" id="pd-find-input" class="pd-find-input" placeholder="在本页内查找...">
+          <button id="pd-find-prev" class="pd-find-btn" title="上一个匹配"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="18 15 12 9 6 15"/></svg></button>
+          <button id="pd-find-next" class="pd-find-btn" title="下一个匹配"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg></button>
+          <span id="pd-find-count" class="pd-find-count"></span>
+          <button id="pd-find-close" class="pd-find-close" title="关闭查找">&times;</button>
+        </div>
         <div id="patent-detail-content" class="patent-detail-content">
           <p class="placeholder">请输入专利号查询</p>
         </div>

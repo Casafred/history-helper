@@ -396,9 +396,9 @@ searchBtn.addEventListener("click", async () => {
   const input = patentInput.value.trim();
   if (!input) return;
 
-  // Patent detail mode - direct Google Patents search
+  // Patent detail mode - use tab system
   if (searchMode === "patent") {
-    searchPatentDetail(input);
+    _openPdPatent(input);
     return;
   }
 
@@ -465,11 +465,24 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
     if (searchMode === "patent") {
       patentInput.placeholder = "输入专利号查询原文信息（如 US12030161B2, EP4252965A3）";
       resultSection.classList.add("hidden");
-      // Restore patent detail if previously loaded
-      if (window._currentPatentData) patentDetailSection.classList.remove("hidden");
+      if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "";
+      if (_pdOpenPatents.length > 0 && _pdActivePatent && _pdPatentCache[_pdActivePatent]) {
+        patentDetailSection.classList.remove("hidden");
+        _renderPdTabs();
+        renderPatentDetail(_pdPatentCache[_pdActivePatent]);
+        window._currentPatentData = _pdPatentCache[_pdActivePatent];
+        if (patentInput) patentInput.value = _pdActivePatent;
+      } else if (window._currentPatentData) {
+        patentDetailSection.classList.remove("hidden");
+      }
     } else {
       patentInput.placeholder = "输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型";
       patentDetailSection.classList.add("hidden");
+      if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
+      if (batchSearchPanel) batchSearchPanel.classList.add("hidden");
+      if (batchResultsSection) batchResultsSection.classList.add("hidden");
+      if (pdFindBar) pdFindBar.classList.add("hidden");
+      _clearFindHighlights();
       // Restore result section if there's cached data
       if (currentData) resultSection.classList.remove("hidden");
     }
@@ -1077,8 +1090,7 @@ function renderPatentDetail(data) {
       e.preventDefault();
       const pn = link.dataset.patent;
       if (pn) {
-        patentInput.value = pn;
-        searchPatentDetail(pn);
+        _openPdPatent(pn);
       }
     });
   });
@@ -2988,7 +3000,8 @@ function refreshHistoryList() {
               document.querySelectorAll(".search-mode-btn").forEach(b => {
                 b.classList.toggle("active", b.dataset.mode === "patent");
               });
-              searchPatentDetail(patentNumber);
+              if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "";
+              _openPdPatent(patentNumber);
             } else {
               const isCached = item.dataset.cached === "1";
               if (isCached) {
@@ -11058,6 +11071,643 @@ setInterval(() => {
     refreshOpsQuota();
   }
 }, 20 * 60 * 1000);
+
+// ════════════════════════════════════════════════════════════════
+//  ① 批量查询 + 标签页管理 + ② 页内查找 （新增功能）
+// ════════════════════════════════════════════════════════════════
+
+// ── 全屏专利详情标签页状态（session 级，页面关闭即清除） ──
+const _pdOpenPatents = [];
+let _pdActivePatent = null;
+const _pdPatentCache = {};
+let _pdBatchMode = false;
+let _pdBatchController = null;
+
+// ── DOM 引用 ──
+const batchSearchToggleBtn = document.getElementById("batch-search-toggle-btn");
+const batchSearchPanel = document.getElementById("batch-search-panel");
+const batchInput = document.getElementById("batch-input");
+const batchCount = document.getElementById("batch-count");
+const batchSearchBtn = document.getElementById("batch-search-btn");
+const batchClearBtn = document.getElementById("batch-clear-btn");
+const batchResultsSection = document.getElementById("batch-results-section");
+const batchResultsGrid = document.getElementById("batch-results-grid");
+const batchProgress = document.getElementById("batch-progress");
+const batchBackBtn = document.getElementById("batch-back-btn");
+const pdTabsBar = document.getElementById("patent-detail-tabs-bar");
+const pdFindBar = document.getElementById("patent-detail-find-bar");
+const pdFindInput = document.getElementById("pd-find-input");
+const pdFindPrev = document.getElementById("pd-find-prev");
+const pdFindNext = document.getElementById("pd-find-next");
+const pdFindCount = document.getElementById("pd-find-count");
+const pdFindClose = document.getElementById("pd-find-close");
+
+// ── 批量查询面板切换 ──
+if (batchSearchToggleBtn) {
+  batchSearchToggleBtn.addEventListener("click", () => {
+    if (batchSearchPanel.classList.contains("hidden")) {
+      batchSearchPanel.classList.remove("hidden");
+      batchInput.focus();
+    } else {
+      batchSearchPanel.classList.add("hidden");
+    }
+  });
+}
+
+// ── 批量输入计数 ──
+if (batchInput) {
+  batchInput.addEventListener("input", () => {
+    const nums = batchInput.value.split("\n").map(s => s.trim()).filter(s => s.length > 0);
+    const count = Math.min(nums.length, 10);
+    if (batchCount) batchCount.textContent = count + "/10";
+    if (nums.length > 10) {
+      batchCount.style.color = "var(--danger)";
+    } else {
+      batchCount.style.color = "";
+    }
+  });
+}
+
+// ── 批量清空 ──
+if (batchClearBtn) {
+  batchClearBtn.addEventListener("click", () => {
+    if (batchInput) batchInput.value = "";
+    if (batchCount) batchCount.textContent = "0/10";
+  });
+}
+
+// ── 批量返回搜索 ──
+if (batchBackBtn) {
+  batchBackBtn.addEventListener("click", () => {
+    batchResultsSection.classList.add("hidden");
+    if (_pdOpenPatents.length === 0) {
+      patentDetailSection.classList.add("hidden");
+    }
+  });
+}
+
+// ── 带重试的 GP API 抓取（共享） ──
+async function fetchPatentWithRetry(patentNumber, maxRetries = 2) {
+  const raw = patentNumber.trim().toUpperCase().replace(/[\s\/]/g, "");
+  let lastErr = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
+        await new Promise(r => setTimeout(r, delay));
+      }
+      const resp = await fetch(gpApiUrl(raw));
+      const json = await resp.json();
+      if (json.success) {
+        return json;
+      }
+      lastErr = new Error(json.error || "未找到该专利");
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("查询失败");
+}
+
+// ── 限流延迟 ──
+function _delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── 批量查询执行 ──
+if (batchSearchBtn) {
+  batchSearchBtn.addEventListener("click", async () => {
+    const lines = batchInput.value.split("\n").map(s => s.trim()).filter(s => s.length > 0);
+    let numbers = [...new Set(lines.map(s => s.toUpperCase().replace(/[\s\/]/g, "")))].slice(0, 10);
+    if (numbers.length === 0) {
+      showError("请输入至少一个专利号");
+      return;
+    }
+
+    _pdBatchMode = true;
+    batchSearchPanel.classList.add("hidden");
+    batchResultsSection.classList.remove("hidden");
+    patentDetailSection.classList.add("hidden");
+    resultSection.classList.add("hidden");
+    hideError();
+
+    batchResultsGrid.innerHTML = "";
+    const cards = {};
+    numbers.forEach(pn => {
+      const card = document.createElement("div");
+      card.className = "batch-result-card loading";
+      card.dataset.pn = pn;
+      card.innerHTML = `
+        <div class="batch-card-thumb"><div class="batch-card-thumb-spinner"></div></div>
+        <div class="batch-card-body">
+          <div class="batch-card-pn">${escapeHtml(pn)} <span class="batch-card-status loading">查询中</span></div>
+          <div class="batch-card-links">
+            <a href="https://patents.google.com/patent/${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Google Patents</a>
+            <a href="https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Espacenet</a>
+          </div>
+        </div>`;
+      card.addEventListener("click", () => {
+        if (_pdPatentCache[pn]) {
+          _openPdPatent(pn);
+        }
+      });
+      batchResultsGrid.appendChild(card);
+      cards[pn] = card;
+    });
+
+    let completed = 0;
+    let succeeded = 0;
+    const total = numbers.length;
+
+    for (let i = 0; i < numbers.length; i++) {
+      const pn = numbers[i];
+      const card = cards[pn];
+      if (batchProgress) batchProgress.textContent = `进度: ${i}/${total} 完成 (${succeeded} 成功, ${i - succeeded} 失败)`;
+
+      try {
+        const json = await fetchPatentWithRetry(pn, 2);
+        if (json.data && json.data.data_source !== "Espacenet") {
+          _pdPatentCache[pn] = json.data;
+        }
+        succeeded++;
+        _updateBatchCardDone(card, pn, json.data);
+      } catch (err) {
+        _updateBatchCardError(card, pn, err.message);
+      }
+      completed++;
+      if (batchProgress) batchProgress.textContent = `进度: ${completed}/${total} 完成 (${succeeded} 成功, ${completed - succeeded} 失败)`;
+
+      if (i < numbers.length - 1) {
+        await _delay(1200);
+      }
+    }
+  });
+}
+
+function _updateBatchCardDone(card, pn, data) {
+  card.classList.remove("loading");
+  card.classList.add("done");
+
+  if (data && data.data_source === "Espacenet") {
+    card.innerHTML = `
+      <div class="batch-card-thumb"><div class="batch-card-thumb-placeholder">🌐</div></div>
+      <div class="batch-card-body">
+        <div class="batch-card-pn">${escapeHtml(pn)} <span class="batch-card-status" style="background:#e3f2fd;color:#1565c0">Espacenet</span></div>
+        <div class="batch-card-title" style="color:var(--text-secondary)">Google Patents 未收录，需在 Espacenet 中查看</div>
+        <div class="batch-card-links">
+          <a href="https://patents.google.com/patent/${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">GP</a>
+          <a href="https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Espacenet</a>
+          <button onclick="event.stopPropagation();openInAppWebview('https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(pn)}','Espacenet: ${escapeHtml(pn)}')">打开查看</button>
+        </div>
+      </div>`;
+    card.style.cursor = "pointer";
+    card.onclick = () => { openInAppWebview("https://worldwide.espacenet.com/patent/search?q=" + encodeURIComponent(pn), "Espacenet: " + pn); };
+    return;
+  }
+
+  const thumb = data.thumbnails && data.thumbnails.length > 0 ? data.thumbnails[0] : null;
+  const abstract = (data.abstract || "").substring(0, 120) + (data.abstract && data.abstract.length > 120 ? "..." : "");
+  const title = data.title || "无标题";
+  const date = data.publication_date || data.application_date || "";
+  const applicant = (data.assignees || []).join("; ") || "";
+
+  card.innerHTML = `
+    <div class="batch-card-thumb">
+      ${thumb ? `<img src="${escapeHtml(thumb)}" alt="附图" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="batch-card-thumb-placeholder" style="display:none">📄</div>` : `<div class="batch-card-thumb-placeholder">📄</div>`}
+    </div>
+    <div class="batch-card-body">
+      <div class="batch-card-pn">${escapeHtml(pn)} <span class="batch-card-status done">已获取</span></div>
+      <div class="batch-card-title">${escapeHtml(title)}</div>
+      <div class="batch-card-meta">
+        ${date ? `<span>${escapeHtml(date)}</span>` : ""}
+        ${applicant ? `<span>${escapeHtml(applicant.substring(0, 30))}${applicant.length > 30 ? "..." : ""}</span>` : ""}
+      </div>
+      ${abstract ? `<div class="batch-card-abstract">${escapeHtml(abstract)}</div>` : ""}
+      <div class="batch-card-links">
+        <a href="https://patents.google.com/patent/${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">GP</a>
+        <a href="https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Espacenet</a>
+        <button onclick="event.stopPropagation();_openPdPatent('${escapeHtml(pn)}')">打开详情</button>
+      </div>
+    </div>`;
+  card.style.cursor = "pointer";
+  card.onclick = () => { _openPdPatent(pn); };
+}
+
+function _updateBatchCardError(card, pn, errMsg) {
+  card.classList.remove("loading");
+  card.classList.add("error");
+  card.innerHTML = `
+    <div class="batch-card-thumb"><div class="batch-card-thumb-placeholder" style="color:var(--danger)">⚠</div></div>
+    <div class="batch-card-body">
+      <div class="batch-card-pn">${escapeHtml(pn)} <span class="batch-card-status error">失败</span></div>
+      <div class="batch-card-error">${escapeHtml(errMsg || "查询失败")}</div>
+      <div class="batch-card-links">
+        <a href="https://patents.google.com/patent/${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">GP</a>
+        <a href="https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Espacenet</a>
+        <button class="batch-card-retry" onclick="event.stopPropagation();_retryBatchCard('${escapeHtml(pn)}', this)">重试</button>
+      </div>
+    </div>`;
+  card.style.cursor = "default";
+  card.onclick = null;
+}
+
+async function _retryBatchCard(pn, btnEl) {
+  const card = btnEl.closest(".batch-result-card");
+  if (!card) return;
+  card.className = "batch-result-card loading";
+  card.innerHTML = `
+    <div class="batch-card-thumb"><div class="batch-card-thumb-spinner"></div></div>
+    <div class="batch-card-body">
+      <div class="batch-card-pn">${escapeHtml(pn)} <span class="batch-card-status loading">重试中</span></div>
+      <div class="batch-card-links">
+        <a href="https://patents.google.com/patent/${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Google Patents</a>
+        <a href="https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(pn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Espacenet</a>
+      </div>
+    </div>`;
+  card.onclick = null;
+
+  try {
+    const json = await fetchPatentWithRetry(pn, 2);
+    _pdPatentCache[pn] = json.data;
+    _updateBatchCardDone(card, pn, json.data);
+  } catch (err) {
+    _updateBatchCardError(card, pn, err.message);
+  }
+}
+
+// ── 标签页管理：打开/切换/关闭 ──
+function _renderPdTabs() {
+  if (!pdTabsBar) return;
+  if (_pdOpenPatents.length === 0) {
+    pdTabsBar.classList.add("hidden");
+    pdTabsBar.innerHTML = "";
+    return;
+  }
+  pdTabsBar.classList.remove("hidden");
+  pdTabsBar.innerHTML = "";
+  _pdOpenPatents.forEach(pn => {
+    const tab = document.createElement("div");
+    tab.className = "pdt-tab" + (pn === _pdActivePatent ? " active" : "");
+    tab.innerHTML = `<span class="pdt-tab-label">${escapeHtml(pn)}</span><span class="pdt-tab-close" title="关闭">&times;</span>`;
+    tab.addEventListener("click", (e) => {
+      if (e.target.classList.contains("pdt-tab-close")) {
+        e.stopPropagation();
+        _closePdTab(pn);
+      } else {
+        _switchPdTab(pn);
+      }
+    });
+    pdTabsBar.appendChild(tab);
+  });
+}
+
+function _switchPdTab(pn) {
+  if (_pdActivePatent === pn) return;
+  _pdActivePatent = pn;
+  _clearFindHighlights();
+  if (pdFindBar) pdFindBar.classList.add("hidden");
+  const data = _pdPatentCache[pn];
+  if (data) {
+    renderPatentDetail(data);
+    window._currentPatentData = data;
+    patentDetailSection.classList.remove("hidden");
+    if (patentInput) patentInput.value = pn;
+  }
+  _renderPdTabs();
+}
+
+function _closePdTab(pn) {
+  const idx = _pdOpenPatents.indexOf(pn);
+  if (idx === -1) return;
+  _pdOpenPatents.splice(idx, 1);
+  delete _pdPatentCache[pn];
+
+  if (_pdActivePatent === pn) {
+    if (_pdOpenPatents.length > 0) {
+      const newIdx = Math.min(idx, _pdOpenPatents.length - 1);
+      _pdActivePatent = _pdOpenPatents[newIdx];
+      const data = _pdPatentCache[_pdActivePatent];
+      if (data) {
+        renderPatentDetail(data);
+        window._currentPatentData = data;
+        if (patentInput) patentInput.value = _pdActivePatent;
+      }
+    } else {
+      _pdActivePatent = null;
+      window._currentPatentData = null;
+      patentDetailContent.innerHTML = '<p class="placeholder">请输入专利号查询</p>';
+      if (patentInput) patentInput.value = "";
+      _clearFindHighlights();
+      if (pdFindBar) pdFindBar.classList.add("hidden");
+    }
+  }
+  _renderPdTabs();
+  if (_pdOpenPatents.length === 0 && _pdBatchMode && batchResultsSection && !batchResultsSection.classList.contains("hidden")) {
+    // stay on batch results
+  } else if (_pdOpenPatents.length === 0) {
+    patentDetailSection.classList.add("hidden");
+  }
+}
+
+function _openPdPatent(pn) {
+  const raw = pn.trim().toUpperCase().replace(/[\s\/]/g, "");
+  if (!raw) return;
+
+  clearPrefetchCache();
+
+  const appEl = document.getElementById("app");
+  if (appEl && appEl.classList.contains("home-mode")) appEl.classList.remove("home-mode");
+
+  _pdBatchMode = false;
+  if (batchResultsSection) batchResultsSection.classList.add("hidden");
+  patentDetailSection.classList.remove("hidden");
+  resultSection.classList.add("hidden");
+
+  if (_pdOpenPatents.includes(raw)) {
+    _switchPdTab(raw);
+    return;
+  }
+
+  if (_pdPatentCache[raw]) {
+    _pdOpenPatents.push(raw);
+    _pdActivePatent = raw;
+    renderPatentDetail(_pdPatentCache[raw]);
+    window._currentPatentData = _pdPatentCache[raw];
+    if (patentInput) patentInput.value = raw;
+    _renderPdTabs();
+    return;
+  }
+
+  _pdOpenPatents.push(raw);
+  _pdActivePatent = raw;
+  patentDetailContent.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary)"><div style="display:inline-block;width:32px;height:32px;border:3px solid var(--border-color);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:12px"></div><div>正在加载 ' + escapeHtml(raw) + ' ...</div></div>';
+  _renderPdTabs();
+
+  fetchPatentWithRetry(raw, 2).then(json => {
+    if (_pdActivePatent !== raw) return;
+
+    if (json.data_source === "Espacenet" || (json.data && json.data.data_source === "Espacenet")) {
+      const espacenetUrl = json.espacenet_url || (json.data && json.data.espacenet_url) || "";
+      const idx = _pdOpenPatents.indexOf(raw);
+      if (idx !== -1) _pdOpenPatents.splice(idx, 1);
+      delete _pdPatentCache[raw];
+      if (_pdOpenPatents.length > 0) {
+        const newIdx = Math.min(idx, _pdOpenPatents.length - 1);
+        _pdActivePatent = _pdOpenPatents[newIdx];
+        const data = _pdPatentCache[_pdActivePatent];
+        if (data) { renderPatentDetail(data); window._currentPatentData = data; if (patentInput) patentInput.value = _pdActivePatent; }
+      } else {
+        _pdActivePatent = null;
+        window._currentPatentData = null;
+        patentDetailContent.innerHTML = '<p class="placeholder">请输入专利号查询</p>';
+        if (patentInput) patentInput.value = "";
+      }
+      _renderPdTabs();
+      openInAppWebview(espacenetUrl, "Espacenet: " + raw);
+      return;
+    }
+
+    _pdPatentCache[raw] = json.data;
+    renderPatentDetail(json.data);
+    window._currentPatentData = json.data;
+    if (patentInput) patentInput.value = raw;
+
+    if (json.data_source === "EPO OPS" || (json.data && json.data.data_source === "EPO OPS")) {
+      showDataSourceBadge("EPO OPS", "Google Patents 未找到该专利，数据来自 EPO OPS 降级查询");
+    } else {
+      showDataSourceBadge("Google Patents", null);
+    }
+    PatentCache.addPatentHistory(raw, {
+      applicantName: (json.data.assignees || []).join(", "),
+      title: json.data.title || "",
+    });
+    refreshHistoryList();
+  }).catch(err => {
+    if (_pdActivePatent !== raw) return;
+    const idx = _pdOpenPatents.indexOf(raw);
+    if (idx !== -1) _pdOpenPatents.splice(idx, 1);
+    delete _pdPatentCache[raw];
+    if (_pdOpenPatents.length > 0) {
+      const newIdx = Math.min(idx, _pdOpenPatents.length - 1);
+      _pdActivePatent = _pdOpenPatents[newIdx];
+      const data = _pdPatentCache[_pdActivePatent];
+      if (data) {
+        renderPatentDetail(data);
+        window._currentPatentData = data;
+      }
+    } else {
+      _pdActivePatent = null;
+      window._currentPatentData = null;
+      patentDetailContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">查询失败: ' + escapeHtml(err.message) + '</p>';
+    }
+    _renderPdTabs();
+    showError("查询 " + raw + " 失败: " + err.message);
+  });
+}
+
+// ── 在 renderPatentDetail 生成的 header 中注入"页内查找"按钮 ──
+// 通过 MutationObserver 监听 patentDetailContent 变化，在 pd-links 中添加查找按钮
+const _obsConfig = { childList: true, subtree: false };
+let _findBtnInjected = false;
+function _injectFindButton() {
+  if (!patentDetailContent) return;
+  const pdLinks = patentDetailContent.querySelector(".pd-links");
+  if (pdLinks && !pdLinks.querySelector(".pd-find-toggle-btn")) {
+    const findBtn = document.createElement("button");
+    findBtn.className = "pd-gp-link pd-find-toggle-btn";
+    findBtn.title = "在本页内查找 (Ctrl+F)";
+    findBtn.textContent = "页内查找";
+    findBtn.addEventListener("click", togglePdFindBar);
+    pdLinks.insertBefore(findBtn, pdLinks.firstChild);
+  }
+}
+const _pdObserver = new MutationObserver(() => { _injectFindButton(); });
+if (patentDetailContent) _pdObserver.observe(patentDetailContent, _obsConfig);
+
+// ════════════════════════════════════════════════════════════════
+//  ② 专利详情页内查找跳转功能
+// ════════════════════════════════════════════════════════════════
+
+let _pdFindMatches = [];
+let _pdFindCurrentIdx = -1;
+let _pdFindOriginalHTML = null;
+
+function togglePdFindBar() {
+  if (!pdFindBar) return;
+  if (pdFindBar.classList.contains("hidden")) {
+    pdFindBar.classList.remove("hidden");
+    pdFindInput.focus();
+    pdFindInput.select();
+  } else {
+    pdFindBar.classList.add("hidden");
+    _clearFindHighlights();
+  }
+}
+
+if (pdFindClose) {
+  pdFindClose.addEventListener("click", () => {
+    pdFindBar.classList.add("hidden");
+    _clearFindHighlights();
+  });
+}
+
+function _clearFindHighlights() {
+  if (!patentDetailContent) return;
+  const highlights = patentDetailContent.querySelectorAll(".pd-find-highlight");
+  highlights.forEach(h => {
+    const parent = h.parentNode;
+    parent.replaceChild(document.createTextNode(h.textContent), h);
+    parent.normalize();
+  });
+  _pdFindMatches = [];
+  _pdFindCurrentIdx = -1;
+  if (pdFindCount) pdFindCount.textContent = "";
+}
+
+function _doFind(term) {
+  if (!patentDetailContent || !term || term.trim().length === 0) {
+    _clearFindHighlights();
+    return;
+  }
+  term = term.trim();
+  if (term.length < 1) { _clearFindHighlights(); return; }
+
+  _clearFindHighlights();
+
+  const searchable = patentDetailContent.querySelectorAll(
+    ".pd-abstract, .pd-info-value, .pd-class-desc, .pd-claim-text, .pd-description-text, .pd-citation-title, .pd-family-title, .pd-ai-interpret-content p, .pd-event-desc, .pd-document-desc"
+  );
+
+  let matchIdx = 0;
+  const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+
+  function highlightTextNode(node) {
+    const text = node.textContent;
+    regex.lastIndex = 0;
+    let m;
+    const matches = [];
+    while ((m = regex.exec(text)) !== null) {
+      matches.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+      if (m.index === regex.lastIndex) regex.lastIndex++;
+    }
+    if (matches.length === 0) return 0;
+
+    const frag = document.createDocumentFragment();
+    let lastIdx = 0;
+    matches.forEach(match => {
+      if (match.start > lastIdx) {
+        frag.appendChild(document.createTextNode(text.substring(lastIdx, match.start)));
+      }
+      const mark = document.createElement("mark");
+      mark.className = "pd-find-highlight";
+      mark.dataset.matchIdx = matchIdx++;
+      mark.textContent = match.text;
+      frag.appendChild(mark);
+      lastIdx = match.end;
+    });
+    if (lastIdx < text.length) {
+      frag.appendChild(document.createTextNode(text.substring(lastIdx)));
+    }
+    node.parentNode.replaceChild(frag, node);
+    return matches.length;
+  }
+
+  function walkTextNodes(el) {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode: function(n) {
+        if (!n.textContent || n.textContent.trim().length === 0) return NodeFilter.FILTER_REJECT;
+        const p = n.parentElement;
+        if (!p) return NodeFilter.FILTER_REJECT;
+        if (p.closest("script, style, button, a, .pd-find-highlight")) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    const nodes = [];
+    let n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    nodes.forEach(highlightTextNode);
+  }
+
+  searchable.forEach(walkTextNodes);
+
+  _pdFindMatches = Array.from(patentDetailContent.querySelectorAll(".pd-find-highlight"));
+  _pdFindCurrentIdx = _pdFindMatches.length > 0 ? 0 : -1;
+  _updateFindCount();
+  _scrollToCurrentMatch();
+}
+
+function _updateFindCount() {
+  if (!pdFindCount) return;
+  if (_pdFindMatches.length === 0) {
+    pdFindCount.textContent = "无匹配";
+  } else {
+    pdFindCount.textContent = (_pdFindCurrentIdx + 1) + "/" + _pdFindMatches.length;
+  }
+  if (pdFindPrev) pdFindPrev.disabled = _pdFindMatches.length === 0;
+  if (pdFindNext) pdFindNext.disabled = _pdFindMatches.length === 0;
+}
+
+function _scrollToCurrentMatch() {
+  _pdFindMatches.forEach((el, i) => {
+    el.classList.toggle("current", i === _pdFindCurrentIdx);
+  });
+  if (_pdFindCurrentIdx >= 0 && _pdFindMatches[_pdFindCurrentIdx]) {
+    _pdFindMatches[_pdFindCurrentIdx].scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}
+
+function _findPrev() {
+  if (_pdFindMatches.length === 0) return;
+  _pdFindCurrentIdx = (_pdFindCurrentIdx - 1 + _pdFindMatches.length) % _pdFindMatches.length;
+  _updateFindCount();
+  _scrollToCurrentMatch();
+}
+
+function _findNext() {
+  if (_pdFindMatches.length === 0) return;
+  _pdFindCurrentIdx = (_pdFindCurrentIdx + 1) % _pdFindMatches.length;
+  _updateFindCount();
+  _scrollToCurrentMatch();
+}
+
+if (pdFindInput) {
+  let _findTimer = null;
+  pdFindInput.addEventListener("input", () => {
+    clearTimeout(_findTimer);
+    _findTimer = setTimeout(() => { _doFind(pdFindInput.value); }, 200);
+  });
+  pdFindInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (e.shiftKey) _findPrev(); else _findNext();
+    } else if (e.key === "Escape") {
+      pdFindBar.classList.add("hidden");
+      _clearFindHighlights();
+    }
+  });
+}
+
+if (pdFindPrev) pdFindPrev.addEventListener("click", _findPrev);
+if (pdFindNext) pdFindNext.addEventListener("click", _findNext);
+
+// ── Ctrl+F 在专利详情页激活查找栏 ──
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+    if (patentDetailSection && !patentDetailSection.classList.contains("hidden") && _pdActivePatent) {
+      e.preventDefault();
+      togglePdFindBar();
+    }
+  }
+  if (e.key === "Escape") {
+    if (pdFindBar && !pdFindBar.classList.contains("hidden")) {
+      pdFindBar.classList.add("hidden");
+      _clearFindHighlights();
+    }
+  }
+  // F3 下一个匹配
+  if (e.key === "F3" && pdFindBar && !pdFindBar.classList.contains("hidden")) {
+    e.preventDefault();
+    if (e.shiftKey) _findPrev(); else _findNext();
+  }
+});
 
 // ── Initialize history list on page load ──
 refreshHistoryList();
