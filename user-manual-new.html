@@ -332,7 +332,7 @@
   <div class="subtitle">PatentLens · 用户使用说明书</div>
   <div class="divider-line"></div>
   <div class="version-info">
-    版本 V0.5.0<br/>
+    版本 V0.5.1<br/>
     2026 年 7 月
   </div>
 </div>
@@ -858,20 +858,114 @@
 </ul>
 
 <h2>5.6 溯源对照阅读器</h2>
-<p>溯源对照阅读器是一个全屏模态窗口，用于对照查看原始文档和 AI 分析结果。</p>
+<p>溯源对照阅读器是一个全屏模态窗口，支持两种阅读模式：<strong>文本对照模式</strong>和<strong>PDF 原文模式</strong>，用于对照查看原始文档、PDF原文和 AI 分析结果。</p>
 
 <div class="diagram">
-  <img src="manual_images/diagram_12.png" width="480" height="260" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-6 溯源对照阅读器示意</div>
+  <svg width="520" height="280" viewBox="0 0 520 280" xmlns="http://www.w3.org/2000/svg">
+    <!-- 外框 -->
+    <rect x="10" y="10" width="500" height="260" rx="8" fill="#f5f5f5" stroke="#ddd" stroke-width="1.5"/>
+    <!-- 顶部工具栏 -->
+    <rect x="10" y="10" width="500" height="40" rx="8 8 0 0" fill="#e8f5e9" stroke="#ddd" stroke-width="1"/>
+    <text x="260" y="35" text-anchor="middle" font-size="12" fill="#1b5e20" font-weight="bold">阅读器工具栏（翻页/缩放/OCR/翻译/搜索/标注工具）</text>
+    <!-- 左侧PDF区 -->
+    <rect x="25" y="65" width="300" height="190" rx="4" fill="#fff" stroke="#a5d6a7" stroke-width="1.5"/>
+    <text x="175" y="85" text-anchor="middle" font-size="11" fill="#2e7d32" font-weight="bold">PDF 原文区</text>
+    <!-- 模拟标注 -->
+    <rect x="45" y="100" width="100" height="18" rx="2" fill="#ffeb3b" opacity="0.5"/>
+    <text x="95" y="113" text-anchor="middle" font-size="8" fill="#333">高亮区域</text>
+    <line x1="170" y1="130" x2="280" y2="130" stroke="#e53935" stroke-width="2"/>
+    <text x="225" y="148" text-anchor="middle" font-size="8" fill="#e53935">划线</text>
+    <line x1="50" y1="165" x2="150" y2="200" stroke="#1976d2" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <defs><marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#1976d2"/></marker></defs>
+    <rect x="180" y="165" width="80" height="30" rx="3" fill="#fff3e0" stroke="#ff9800" stroke-width="1"/>
+    <text x="220" y="184" text-anchor="middle" font-size="8" fill="#e65100">注释框</text>
+    <!-- 右侧面板标签 -->
+    <rect x="340" y="65" width="160" height="24" rx="4 4 0 0" fill="#fff" stroke="#ddd" stroke-width="1"/>
+    <text x="375" y="81" text-anchor="middle" font-size="9" fill="#666">提取内容</text>
+    <rect x="405" y="65" width="95" height="24" rx="4 4 0 0" fill="#4caf50"/>
+    <text x="452" y="81" text-anchor="middle" font-size="9" fill="#fff" font-weight="bold">对照翻译</text>
+    <!-- 右侧内容区 -->
+    <rect x="340" y="89" width="160" height="166" rx="0 0 4 4" fill="#fff" stroke="#ddd" stroke-width="1"/>
+    <text x="420" y="120" text-anchor="middle" font-size="10" fill="#2e7d32" font-weight="bold">AI / 翻译 / 对话区</text>
+    <line x1="355" y1="135" x2="485" y2="135" stroke="#e0e0e0" stroke-width="1"/>
+    <text x="420" y="155" text-anchor="middle" font-size="8" fill="#666">高亮引用自动</text>
+    <text x="420" y="170" text-anchor="middle" font-size="8" fill="#666">定位跳转对应段落</text>
+    <text x="420" y="195" text-anchor="middle" font-size="8" fill="#666">支持 AI 连续对话</text>
+    <text x="420" y="220" text-anchor="middle" font-size="8" fill="#666">选区翻译 / 全文翻译</text>
+  </svg>
+  <div class="diagram-caption">图 5-6 溯源对照阅读器（含 PDF 标注功能）示意</div>
 </div>
 
-<p>阅读器功能特点：</p>
+<h3>5.6.1 两种阅读模式</h3>
 <ul>
-  <li><strong>左右对照</strong> — 左侧显示原始文档文本，右侧显示 AI 分析或引用文献内容</li>
-  <li><strong>高亮引用</strong> — 原文中被引用的部分以高亮显示</li>
-  <li><strong>可点击链接</strong> — 点击原文中的引用链接，右侧自动滚动到对应的分析段落</li>
-  <li><strong>全屏显示</strong> — 阅读器占满整个屏幕，提供更好的阅读体验</li>
-  <li><strong>关闭按钮</strong> — 点击右上角关闭按钮退出阅读器</li>
+  <li><strong>文本对照模式</strong> — 左侧显示 OCR 提取的文档文本，右侧显示 AI 分析结果或翻译内容，原文中被引用的部分高亮显示，点击引用链接自动跳转对应段落</li>
+  <li><strong>PDF 原文模式</strong> — 左侧显示原始 PDF 文档，支持缩放、翻页、全文搜索，右侧面板可切换查看提取内容、对照翻译或 AI 对话</li>
+</ul>
+
+<h3>5.6.2 PDF 标注工具栏</h3>
+<p>在 PDF 原文模式下，阅读器顶部第二行工具栏提供完整的 PDF 标注功能：</p>
+
+<div class="diagram">
+  <svg width="500" height="100" viewBox="0 0 500 100" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="20" width="480" height="40" rx="6" fill="#f5f5f5" stroke="#ccc" stroke-width="1"/>
+    <!-- 工具组 -->
+    <rect x="20" y="28" width="50" height="24" rx="4" fill="#4caf50"/>
+    <text x="45" y="44" text-anchor="middle" font-size="9" fill="#fff">高亮</text>
+    <rect x="75" y="28" width="50" height="24" rx="4" fill="#fff" stroke="#ddd"/>
+    <text x="100" y="44" text-anchor="middle" font-size="9" fill="#333">划线</text>
+    <rect x="130" y="28" width="50" height="24" rx="4" fill="#fff" stroke="#ddd"/>
+    <text x="155" y="44" text-anchor="middle" font-size="9" fill="#333">箭头</text>
+    <rect x="185" y="28" width="50" height="24" rx="4" fill="#fff" stroke="#ddd"/>
+    <text x="210" y="44" text-anchor="middle" font-size="9" fill="#333">注释</text>
+    <!-- 分隔线 -->
+    <line x1="250" y1="28" x2="250" y2="52" stroke="#ddd" stroke-width="1"/>
+    <!-- 颜色样式 -->
+    <circle cx="270" cy="40" r="8" fill="#e53935"/>
+    <text x="270" y="43" text-anchor="middle" font-size="8" fill="#fff" font-weight="bold">A</text>
+    <circle cx="295" cy="40" r="8" fill="#1976d2"/>
+    <!-- 字号/线宽 -->
+    <rect x="310" y="32" width="40" height="16" rx="2" fill="#fff" stroke="#ddd"/>
+    <text x="330" y="44" text-anchor="middle" font-size="8" fill="#333">14px</text>
+    <rect x="355" y="32" width="40" height="16" rx="2" fill="#fff" stroke="#ddd"/>
+    <text x="375" y="44" text-anchor="middle" font-size="8" fill="#333">2px</text>
+    <!-- 操作按钮 -->
+    <rect x="405" y="28" width="40" height="24" rx="4" fill="#fff" stroke="#ddd"/>
+    <text x="425" y="44" text-anchor="middle" font-size="9" fill="#333">撤回</text>
+    <rect x="450" y="28" width="40" height="24" rx="4" fill="#d32f2f"/>
+    <text x="470" y="44" text-anchor="middle" font-size="9" fill="#fff">导出</text>
+  </svg>
+  <div class="diagram-caption">图 5-7 PDF 标注工具栏示意</div>
+</div>
+
+<table>
+  <tr><th>工具/功能</th><th>说明</th><th>快捷键</th></tr>
+  <tr><td><strong>高亮</strong></td><td>拖动选择矩形区域，生成半透明彩色高亮框，适合标记重要段落</td><td>—</td></tr>
+  <tr><td><strong>划线</strong></td><td>拖动绘制直线，可切换实线/虚线，适合画重点线</td><td>—</td></tr>
+  <tr><td><strong>箭头</strong></td><td>拖动绘制带箭头的直线，适合指向特定内容</td><td>—</td></tr>
+  <tr><td><strong>注释</strong></td><td>点击或拖动放置文字框，双击可输入批注文字</td><td>—</td></tr>
+  <tr><td><strong>颜色选择</strong></td><td>分别设置注释文字颜色和线条/高亮颜色，支持任意颜色</td><td>—</td></tr>
+  <tr><td><strong>字号/线宽</strong></td><td>注释文字大小（10-24px）和划线/箭头粗细（1-4px）可调</td><td>—</td></tr>
+  <tr><td><strong>撤回</strong></td><td>撤销上一步标注操作</td><td>Ctrl+Z</td></tr>
+  <tr><td><strong>重做</strong></td><td>恢复已撤销的标注操作</td><td>Ctrl+Y</td></tr>
+  <tr><td><strong>导出标注后文档</strong></td><td>将标注叠加到 PDF 原文上，导出为新的 PDF 文件保存</td><td>—</td></tr>
+  <tr><td><strong>清空</strong></td><td>清除当前文档的所有标注（不可恢复，请谨慎操作）</td><td>—</td></tr>
+</table>
+
+<div class="tip-box">
+  <div class="tip-title">提示</div>
+  标注数据临时保存在当前会话中，导出前请勿关闭阅读器。点击"导出标注后文档"按钮可将所有标注永久保存到新 PDF 文件中。标注支持拖动调整位置、拖动线条端点调整长度和角度。
+</div>
+
+<h3>5.6.3 其他阅读器功能</h3>
+<ul>
+  <li><strong>翻页导航</strong> — 上一页/下一页按钮，支持输入页码直接跳转</li>
+  <li><strong>缩放控制</strong> — 放大/缩小/适应宽度，支持 Ctrl++/- 快捷键</li>
+  <li><strong>OCR 文字提取</strong> — 点击 OCR 按钮提取当前文档文字，提取后可搜索和翻译</li>
+  <li><strong>全文翻译</strong> — 翻译整个文档（未 OCR 时自动先提取文字）</li>
+  <li><strong>选区翻译</strong> — 选中文本块后点击"译选"翻译选中部分</li>
+  <li><strong>全文搜索</strong> — 输入关键词搜索文档内容，支持上一个/下一个匹配定位</li>
+  <li><strong>隐藏/显示 OCR</strong> — 切换 OCR 文本层的显示/隐藏</li>
+  <li><strong>右侧面板多标签</strong> — 支持切换"提取内容"、"对照翻译"、"AI 对话"三个面板</li>
 </ul>
 
 <h2>5.7 Word 导出</h2>
@@ -879,7 +973,7 @@
 
 <div class="diagram">
   <img src="manual_images/diagram_13.png" width="480" height="80" alt="示意图" style="max-width:100%; height:auto;">
-  <div class="diagram-caption">图 5-7 Word 导出流程</div>
+  <div class="diagram-caption">图 5-8 Word 导出流程</div>
 </div>
 
 <p>Word 导出的格式处理：</p>
@@ -958,14 +1052,91 @@
 <h2>5.10 专利原文查询</h2>
 <p>在审查文档界面中，所有出现专利号的位置均可点击查询该专利的原文详情，数据来源于 Google Patents。支持两种查看模式：全屏详情页和右侧悬浮弹窗。</p>
 
+<div class="diagram">
+  <svg width="520" height="200" viewBox="0 0 520 200" xmlns="http://www.w3.org/2000/svg">
+    <!-- 审查文档主区域 -->
+    <rect x="20" y="20" width="320" height="160" rx="6" fill="#f5f5f5" stroke="#90caf9" stroke-width="1.5"/>
+    <text x="180" y="45" text-anchor="middle" font-size="12" fill="#1565c0" font-weight="bold">审查文档 / AI 分析界面</text>
+    <!-- 文本中的专利号 -->
+    <text x="50" y="80" font-size="10" fill="#333">例如：对比文件包括 </text>
+    <rect x="140" y="68" width="90" height="18" rx="3" fill="#e3f2fd" stroke="#2196f3" stroke-width="1"/>
+    <text x="185" y="81" text-anchor="middle" font-size="10" fill="#1565c0" font-weight="bold">US7456789B2</text>
+    <text x="240" y="80" font-size="10" fill="#333">，其公开了...</text>
+    <text x="50" y="110" font-size="10" fill="#333">以及 </text>
+    <rect x="75" y="98" width="80" height="18" rx="3" fill="#e3f2fd" stroke="#2196f3" stroke-width="1"/>
+    <text x="115" y="111" text-anchor="middle" font-size="10" fill="#1565c0" font-weight="bold">EP2056789B1</text>
+    <text x="165" y="110" font-size="10" fill="#333"> 的特征在于...</text>
+    <text x="50" y="140" font-size="9" fill="#888">（专利号为蓝色可点击链接）</text>
+    <text x="50" y="155" font-size="9" fill="#888">→ 点击：右侧悬浮弹窗查看</text>
+    <text x="50" y="170" font-size="9" fill="#888">→ Ctrl+点击：外部浏览器打开</text>
+    <!-- 箭头 -->
+    <line x1="350" y1="100" x2="390" y2="100" stroke="#4caf50" stroke-width="2" marker-end="url(#arrowgreen)"/>
+    <defs><marker id="arrowgreen" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4caf50"/></marker></defs>
+    <!-- 右侧弹窗 -->
+    <rect x="400" y="30" width="100" height="140" rx="6" fill="#fff" stroke="#a5d6a7" stroke-width="1.5"/>
+    <rect x="400" y="30" width="100" height="25" rx="6 6 0 0" fill="#4caf50"/>
+    <text x="450" y="47" text-anchor="middle" font-size="9" fill="#fff" font-weight="bold">专利详情弹窗</text>
+    <text x="450" y="70" text-anchor="middle" font-size="8" fill="#666">说明书</text>
+    <text x="450" y="85" text-anchor="middle" font-size="8" fill="#666">权利要求</text>
+    <text x="450" y="100" text-anchor="middle" font-size="8" fill="#666">引用文献</text>
+    <text x="450" y="115" text-anchor="middle" font-size="8" fill="#666">法律状态</text>
+    <rect x="410" y="125" width="80" height="35" rx="3" fill="#f5f5f5" stroke="#ddd"/>
+    <text x="450" y="145" text-anchor="middle" font-size="7" fill="#888">AI问一问/翻译</text>
+    <text x="450" y="155" text-anchor="middle" font-size="7" fill="#888">GP/Espacenet/PDF</text>
+  </svg>
+  <div class="diagram-caption">图 5-9 审查文档中专利号点击跳转交互示意</div>
+</div>
+
 <h3>5.10.1 打开方式</h3>
 <ul>
   <li><strong>全屏详情页</strong> — 点击页面中任意可点击的专利号链接（按住 Ctrl 点击可直接在外部浏览器打开 Google Patents 页面），进入全屏专利原文详情页</li>
   <li><strong>右侧悬浮弹窗</strong> — AI 审查梳理结果中的专利号引用，点击后在右侧弹出悬浮窗口查看，支持同时打开多个专利标签页快速切换</li>
 </ul>
 
+<div class="diagram">
+  <svg width="520" height="220" viewBox="0 0 520 220" xmlns="http://www.w3.org/2000/svg">
+    <!-- 顶部按钮栏 -->
+    <rect x="30" y="20" width="460" height="35" rx="6" fill="#f5f5f5" stroke="#ddd" stroke-width="1"/>
+    <rect x="40" y="28" width="70" height="20" rx="4" fill="#4caf50"/>
+    <text x="75" y="42" text-anchor="middle" font-size="8" fill="#fff">AI 问一问</text>
+    <rect x="115" y="28" width="60" height="20" rx="4" fill="#fff" stroke="#4caf50"/>
+    <text x="145" y="42" text-anchor="middle" font-size="8" fill="#4caf50">网页翻译</text>
+    <rect x="180" y="28" width="80" height="20" rx="4" fill="#fff" stroke="#4caf50"/>
+    <text x="220" y="42" text-anchor="middle" font-size="8" fill="#4caf50">Google Patents</text>
+    <rect x="265" y="28" width="70" height="20" rx="4" fill="#fff" stroke="#4caf50"/>
+    <text x="300" y="42" text-anchor="middle" font-size="8" fill="#4caf50">Espacenet</text>
+    <rect x="340" y="28" width="60" height="20" rx="4" fill="#fff" stroke="#d32f2f"/>
+    <text x="370" y="42" text-anchor="middle" font-size="8" fill="#d32f2f">PDF原文</text>
+    <!-- 专利标题区 -->
+    <rect x="30" y="65" width="460" height="40" rx="6" fill="#fff" stroke="#e0e0e0"/>
+    <text x="50" y="85" font-size="11" fill="#4caf50" font-weight="bold">US7456789B2</text>
+    <text x="50" y="100" font-size="9" fill="#333">专利标题：XXX 装置及方法</text>
+    <!-- Tab栏 -->
+    <rect x="30" y="115" width="460" height="25" rx="6" fill="#f5f5f5"/>
+    <rect x="40" y="120" width="70" height="15" rx="4" fill="#4caf50"/>
+    <text x="75" y="131" text-anchor="middle" font-size="8" fill="#fff">说明书</text>
+    <rect x="115" y="120" width="70" height="15" rx="4" fill="#e0e0e0"/>
+    <text x="150" y="131" text-anchor="middle" font-size="8" fill="#666">权利要求</text>
+    <rect x="190" y="120" width="80" height="15" rx="4" fill="#e0e0e0"/>
+    <text x="230" y="131" text-anchor="middle" font-size="8" fill="#666">引用文献</text>
+    <rect x="275" y="120" width="70" height="15" rx="4" fill="#e0e0e0"/>
+    <text x="310" y="131" text-anchor="middle" font-size="8" fill="#666">法律状态</text>
+    <!-- 内容区 -->
+    <rect x="30" y="150" width="460" height="55" rx="6" fill="#fff" stroke="#e0e0e0"/>
+    <!-- 引用文献部分示例 -->
+    <rect x="45" y="160" width="430" height="18" rx="2" fill="#fafafa" stroke="#eee"/>
+    <text x="55" y="173" font-size="9" fill="#333" font-weight="bold">引用专利 (12)</text>
+    <rect x="400" y="161" width="70" height="16" rx="3" fill="#f5f5f5" stroke="#ccc"/>
+    <text x="435" y="173" text-anchor="middle" font-size="7" fill="#666">复制全部公开号</text>
+    <!-- 列表 -->
+    <line x1="45" y1="185" x2="475" y2="185" stroke="#eee" stroke-width="1"/>
+    <text x="55" y="196" font-size="8" fill="#666">US5678123A ... | US6123456B1 ... | EP0987654B1 ...</text>
+  </svg>
+  <div class="diagram-caption">图 5-10 专利原文详情页（全屏/弹窗统一布局）示意</div>
+</div>
+
 <h3>5.10.2 顶部功能按钮</h3>
-<p>详情页和弹窗顶部均提供统一的功能按钮栏，包含以下按钮：</p>
+<p>详情页和弹窗顶部均提供统一的功能按钮栏，所有按钮尺寸、高度和间距已统一，包含以下按钮：</p>
 <ul>
   <li><strong>AI 问一问</strong> — 针对当前专利向 AI 提问，支持上下文连续对话</li>
   <li><strong>网页翻译</strong> — 使用 Google 翻译一键翻译整个页面内容</li>
@@ -988,7 +1159,7 @@
 
 <div class="tip-box">
   <div class="tip-title">提示</div>
-  悬浮球仅在审查文档界面显示，在主页搜索状态和专利原文全屏详情页下会自动隐藏，避免干扰阅读。
+  悬浮球仅在审查文档界面显示，在主页搜索状态和专利原文全屏详情页下会自动隐藏，避免干扰阅读。右侧弹窗支持多专利标签页，可以同时打开多份引用专利快速切换查阅，关闭弹窗时所有标签页一起关闭。
 </div>
 
 <!-- ==================== 第6章 常见问题 ==================== -->
@@ -1123,6 +1294,15 @@
   <tr><td>影响章节</td><td>1.2、3.3、5.10（新增）、6</td></tr>
   <tr><td>变更说明</td><td>1. 首页 4 个 TAB 栏（概览/同族/审查看板/AI 分析）容器宽度固定，不再随栏目切换发生横向长度变化，移除外侧多余阴影框；2. 专利原文详情页（含右侧弹窗）顶部按钮（AI 问一问、网页翻译、Google Patents、Espacenet、PDF 原文）统一尺寸高度和间距，视觉更整齐；3. 专利详情页及弹窗的引用专利、被引用专利、相似文档三个列表均新增"复制全部公开号"按钮，点击可一键复制该列表所有号码；4. 右侧弹窗新增"网页翻译"按钮，与全屏详情页功能一致；5. 悬浮球优化：仅在审查文档界面显示，主页和专利原文界面自动隐藏；6. 新增第 5.10 节"专利原文查询"完整功能说明</td></tr>
   <tr><td>图示更新</td><td>无（本次为功能补全和 UI 优化，无新图示）</td></tr>
+</table>
+
+<h3>V0.5.1 (2026-07)</h3>
+<table>
+  <tr><th>字段</th><th>内容</th></tr>
+  <tr><td>变更类型</td><td>文档补全 + 图示补充</td></tr>
+  <tr><td>影响章节</td><td>5.6、5.10</td></tr>
+  <tr><td>变更说明</td><td>1. 补充审查文档 PDF 标注功能完整说明，包括高亮、划线、箭头、文字注释四种标注工具，颜色/字号/线宽样式调整，撤回/重做快捷键操作，以及导出标注后 PDF 功能；2. 补充 PDF 阅读器其他功能说明（翻页、缩放、OCR、全文/选区翻译、全文搜索等）；3. 为专利原文查询模式新增图 5-9（号码点击跳转交互示意）和图 5-10（详情页布局示意）两张 SVG 简图；4. 更新图编号顺序；5. 5.6 节溯源对照阅读器重新组织为三种小节结构（两种阅读模式、PDF标注工具栏、其他功能）</td></tr>
+  <tr><td>图示更新</td><td>新增 3 张内嵌 SVG 简图（图 5-6 阅读器布局、图 5-7 标注工具栏、图 5-9 号码跳转、图 5-10 专利详情页）</td></tr>
 </table>
 
 </body>
