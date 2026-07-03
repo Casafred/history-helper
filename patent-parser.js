@@ -780,7 +780,9 @@ function extractPatentFromHtml(html, patentId) {
         const mainText = cleanText(mainContent);
         const indent = "  ".repeat(depth);
         const bullet = depth === 0 ? "• " : "◦ ";
-        const num = extractParaNum(liContent.substring(0, tagEnd - liStart));
+        // 完整li HTML（从<li到</li>），用于提取段落号
+        const fullLiHtml = listHtml.substring(liStart, liEnd + 5);
+        const num = extractParaNum(fullLiHtml);
         if (mainText) {
           items.push(indent + bullet + (num ? num + " " : "") + mainText);
         }
