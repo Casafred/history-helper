@@ -569,15 +569,70 @@ function extractPatentFromHtml(html, patentId) {
     || html.match(/<div[^>]*class="description"[^>]*>([\s\S]*?)<\/div>/i);
   if (descSection) {
     let descHtml = descSection[1];
-    // Try to extract from ul.description structure (Google Patents format)
-    // Actual GP structure:
-    //   <ul class="description">
-    //     <heading id="h-0001">TECHNICAL FIELD</heading>
-    //     <li> <para-num num="[0001]"> </para-num> <div class="description-line">text</div> </li>
-    //     <heading id="h-0002">BACKGROUND ART</heading>
-    //     <li>...</li>
-    //   </ul>
-    // Normalize a paragraph-number token to [NNNN] form (accepts "0006" or "[0006]")
+
+    // 辅助函数：找到html中从startIdx位置开始的标签的匹配闭合标签位置
+    // tagName: 如'div'，startIdx: 开始标签'<'的位置
+    // 返回闭合标签</tagName>之后的位置（即closeTagEnd），或-1
+    const findMatchingClose = (htmlStr, tagName, startIdx) => {
+      const openRe = new RegExp('^<' + tagName + '\\b', 'i');
+      const closeRe = new RegExp('^</' + tagName, 'i');
+      // 先找该标签的结束>
+      const openEnd = htmlStr.indexOf('>', startIdx);
+      if (openEnd === -1) return -1;
+      // 自闭合？
+      if (htmlStr[openEnd - 1] === '/') return openEnd + 1;
+      let depth = 1;
+      let pos = openEnd + 1;
+      while (pos < htmlStr.length) {
+        const lt = htmlStr.indexOf('<', pos);
+        if (lt === -1) return -1;
+        if (openRe.test(htmlStr.substr(lt))) {
+          depth++;
+          pos = lt + tagName.length + 1;
+        } else if (closeRe.test(htmlStr.substr(lt))) {
+          depth--;
+          if (depth === 0) {
+            return htmlStr.indexOf('>', lt) + 1;
+          }
+          pos = lt + tagName.length + 3;
+        } else {
+          pos = lt + 1;
+        }
+      }
+      return -1;
+    };
+
+    // 在descHtml中找到真正的description容器（div.class="description" 或 ul.class="description"），
+    // 处理嵌套标签（用深度计数找到正确的闭合标签）
+    const descContainerRe = /<(div|ul|ol)\b[^>]*class="[^"]*description[^"]*"[^>]*>/i;
+    const descContainerMatch = descHtml.match(descContainerRe);
+    if (descContainerMatch && descContainerMatch.index !== undefined) {
+      const containerTag = descContainerMatch[1].toLowerCase();
+      const matchStart = descContainerMatch.index;
+      const closeEnd = findMatchingClose(descHtml, containerTag, matchStart);
+      if (closeEnd !== -1) {
+        const openTagEnd = descHtml.indexOf('>', matchStart);
+        descHtml = descHtml.substring(openTagEnd + 1, closeEnd - ('</' + containerTag + '>').length);
+      }
+    }
+
+    // 文本清理工具
+    const cleanText = (frag) => frag
+      .replace(/<\/?figure-callout[^>]*>/gi, '')
+      .replace(/<\/?figref[^>]*>/gi, '')
+      .replace(/<\/?b[^>]*>/gi, '')
+      .replace(/<\/?i[^>]*>/gi, '')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#(\d+);/g, (m, code) => String.fromCharCode(parseInt(code, 10)))
+      .replace(/\s+/g, " ")
+      .trim();
+
     const normalizeParaNum = (raw) => {
       if (!raw) return "";
       const s = String(raw).trim();
@@ -585,155 +640,399 @@ function extractPatentFromHtml(html, patentId) {
       if (/^\[\d+\]$/.test(s)) return s;
       const m = s.match(/^\[(.+)\]$/);
       if (m && /^\d+$/.test(m[1])) return "[" + m[1] + "]";
-      if (/^\d+$/.test(s)) return "[" + s + "]";
+      if (/^\d+$/.test(s)) return "[" + s.padStart(4, '0') + "]";
       return "";
     };
 
-    // Clean inline HTML from a paragraph text fragment
-    const cleanParaText = (frag) => frag
-      .replace(/<\/?figure-callout[^>]*>/gi, '')
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/gi, " ")
-      .replace(/&amp;/gi, "&")
-      .replace(/&lt;/gi, "<")
-      .replace(/&gt;/gi, ">")
-      .replace(/\s+/g, " ")
-      .trim();
+    const extractParaNum = (content) => {
+      // 尝试从num属性获取（div.description-paragraph的num="0001"）
+      const numAttr = content.match(/\bnum="([^"]*)"/i);
+      if (numAttr) {
+        const n = normalizeParaNum(numAttr[1]);
+        if (n) return n;
+      }
+      // para-num标签
+      const pn = content.match(/<para-num[^>]*num="([^"]*)"[^>]*>/i);
+      if (pn) return normalizeParaNum(pn[1]);
+      return "";
+    };
 
-    // Walk <heading> and <li> elements across the ENTIRE description section in document
-    // order. We intentionally do NOT scope to a single <ul class="description">, because GP
-    // often splits the description across multiple lists (e.g. a separate definitions list),
-    // and scoping to the first <ul> would truncate everything after it.
-    const descContent = descHtml;
-
-    // Match <heading>...</heading> and <li ...>...</li> in document order. <li> in GP is
-    // always explicitly closed; if a stray unclosed <li> is encountered, the non-greedy
-    // match simply extends to the next </li>, which is acceptable.
-    const parts = [];
-    const elementRegex = /<(heading|li)\b[^>]*>([\s\S]*?)<\/\1>/gi;
-    let elemMatch;
-    while ((elemMatch = elementRegex.exec(descContent)) !== null) {
-      const tag = elemMatch[1].toLowerCase();
-      const content = elemMatch[2];
-      if (tag === 'heading') {
-        const headingText = content.replace(/<[^>]+>/g, "").trim();
-        if (headingText) parts.push('## ' + headingText);
-      } else if (tag === 'li') {
-        // Paragraph number: try <para-num num="...">, then <div class="description-line" num="...">,
-        // then <meta itemprop="num_attr" content="..."> (GP definitions format).
-        let paraNum = "";
-        const paraNumMatch = content.match(/<para-num[^>]*num="([^"]*)"[^>]*>/i);
-        if (paraNumMatch) paraNum = normalizeParaNum(paraNumMatch[1]);
-        if (!paraNum) {
-          const divNumMatch = content.match(/<div[^>]*class="description-line"[^>]*num="([^"]*)"[^>]*>/i)
-            || content.match(/<div[^>]*num="([^"]*)"[^>]*class="description-line"[^>]*>/i);
-          if (divNumMatch) paraNum = normalizeParaNum(divNumMatch[1]);
-        }
-        if (!paraNum) {
-          const metaNumMatch = content.match(/<meta[^>]*itemprop="num_attr"[^>]*content="([^"]*)"[^>]*>/i)
-            || content.match(/<meta[^>]*content="([^"]*)"[^>]*itemprop="num_attr"[^>]*>/i);
-          if (metaNumMatch) paraNum = normalizeParaNum(metaNumMatch[1]);
-        }
-        // Paragraph text: prefer <div class="description-line"> content; else for the GP
-        // definitions format combine <span itemprop="subject"> + <span itemprop="definition">;
-        // else strip tags from the whole <li> content.
-        let paraText = "";
-        const descLineMatch = content.match(/<div[^>]*class="description-line"[^>]*>([\s\S]*?)<\/div>/i);
-        if (descLineMatch) {
-          paraText = cleanParaText(descLineMatch[1]);
-        } else {
-          const subjectMatch = content.match(/<span[^>]*itemprop="subject"[^>]*>([\s\S]*?)<\/span>/i);
-          const definitionMatch = content.match(/<span[^>]*itemprop="definition"[^>]*>([\s\S]*?)<\/span>/i);
-          if (subjectMatch || definitionMatch) {
-            const subj = subjectMatch ? cleanParaText(subjectMatch[1]) : "";
-            const defn = definitionMatch ? cleanParaText(definitionMatch[1]) : "";
-            paraText = (subj + " " + defn).trim();
+    // 递归提取列表项（支持ul/ol嵌套），返回字符串数组（每项带缩进前缀）
+    // listText: <ul>...</ul> 的内部内容（不包含外层<ul>标签）
+    // depth: 当前嵌套深度（0=最外层列表项）
+    const extractListItems = (listHtml, depth) => {
+      const items = [];
+      // 匹配顶层li（非嵌套ul/ol内的li）
+      // 策略：找到每个 <li ...> 到对应 </li> 的范围，跟踪嵌套层级
+      let pos = 0;
+      const len = listHtml.length;
+      while (pos < len) {
+        // 找下一个 <li
+        const liStart = listHtml.indexOf('<li', pos);
+        if (liStart === -1) break;
+        // 找到 <li 标签的结束 >
+        const tagEnd = listHtml.indexOf('>', liStart);
+        if (tagEnd === -1) break;
+        // 从tagEnd+1开始，找匹配的 </li>，跟踪嵌套的ul/ol/li
+        let depth_count = 1;
+        let scanPos = tagEnd + 1;
+        let liEnd = -1;
+        while (scanPos < len) {
+          // 找下一个 < 来检测标签
+          const nextLt = listHtml.indexOf('<', scanPos);
+          if (nextLt === -1) break;
+          // 检查是什么标签
+          if (listHtml.substr(nextLt, 4) === '<li ' || listHtml.substr(nextLt, 3) === '<li>' || listHtml.substr(nextLt, 4) === '<li\n') {
+            // 只有当不在ul/ol内时才增加计数——但简化处理：只跟踪li深度
+            // 实际上这不对，因为li里的ul里面也有li。正确的做法是同时跟踪ul/ol层级。
+            // 让我重写：跟踪 li 和 ul/ol 的深度
+            // 先识别标签名
+            depth_count++;
+            scanPos = nextLt + 3;
+          } else if (listHtml.substr(nextLt, 5) === '</li>') {
+            depth_count--;
+            if (depth_count === 0) {
+              liEnd = nextLt;
+              break;
+            }
+            scanPos = nextLt + 5;
+          } else if (/^<(ul|ol|div)\b/i.test(listHtml.substr(nextLt))) {
+            // 进入子ul/ol/div，扫描到对应闭合标签，避免把内部</li>误匹配
+            const tagNameMatch = listHtml.substr(nextLt).match(/^<(ul|ol|div)\b/i);
+            if (tagNameMatch) {
+              const tagName = tagNameMatch[1].toLowerCase();
+              // 找匹配的闭合标签，需要跟踪嵌套
+              let innerDepth = 1;
+              let innerScan = listHtml.indexOf('>', nextLt) + 1;
+              while (innerScan < len && innerDepth > 0) {
+                const innerNext = listHtml.indexOf('<', innerScan);
+                if (innerNext === -1) break;
+                if (new RegExp('^<' + tagName + '\\b', 'i').test(listHtml.substr(innerNext))) {
+                  innerDepth++;
+                  innerScan = innerNext + tagName.length + 1;
+                } else if (new RegExp('^</' + tagName, 'i').test(listHtml.substr(innerNext))) {
+                  innerDepth--;
+                  innerScan = innerNext + tagName.length + 3;
+                } else {
+                  innerScan = innerNext + 1;
+                }
+              }
+              scanPos = innerScan;
+            } else {
+              scanPos = nextLt + 1;
+            }
           } else {
-            paraText = cleanParaText(content);
+            scanPos = nextLt + 1;
           }
         }
-        if (paraText) {
-          parts.push(paraNum ? paraNum + ' ' + paraText : paraText);
+        if (liEnd === -1) break;
+        const liContent = listHtml.substring(tagEnd + 1, liEnd);
+        // 提取li中的直接文本（不包含嵌套ul/ol的部分）
+        // 先把嵌套的ul/ol找出来递归处理，然后从liContent中移除它们得到主文本
+        const nestedLists = [];
+        let liText = liContent;
+        // 找li直接包含的嵌套ul/ol
+        const findNestedLists = (html, d) => {
+          const results = [];
+          let p = 0;
+          while (p < html.length) {
+            const ulStart = html.indexOf('<ul', p);
+            const olStart = html.indexOf('<ol', p);
+            let listStart = -1;
+            let listTag = 'ul';
+            if (ulStart !== -1 && (olStart === -1 || ulStart < olStart)) {
+              listStart = ulStart; listTag = 'ul';
+            } else if (olStart !== -1) {
+              listStart = olStart; listTag = 'ol';
+            }
+            if (listStart === -1) break;
+            const tagEnd2 = html.indexOf('>', listStart);
+            if (tagEnd2 === -1) break;
+            // 找匹配的</ul>或</ol>，跟踪嵌套
+            let innerD = 1;
+            let sp = tagEnd2 + 1;
+            let closePos = -1;
+            while (sp < html.length && innerD > 0) {
+              const nl = html.indexOf('<', sp);
+              if (nl === -1) break;
+              if (new RegExp('^<' + listTag + '\\b', 'i').test(html.substr(nl))) {
+                innerD++; sp = nl + listTag.length + 1;
+              } else if (new RegExp('^</' + listTag, 'i').test(html.substr(nl))) {
+                innerD--;
+                if (innerD === 0) { closePos = nl; break; }
+                sp = nl + listTag.length + 3;
+              } else { sp = nl + 1; }
+            }
+            if (closePos === -1) break;
+            const innerContent = html.substring(tagEnd2 + 1, closePos);
+            results.push({ start: listStart, end: closePos + listTag.length + 3, content: innerContent });
+            p = closePos + listTag.length + 3;
+          }
+          return results;
+        };
+        const nested = findNestedLists(liContent, depth);
+        // 从后往前移除嵌套列表内容，提取主文本
+        let mainContent = liContent;
+        for (let i = nested.length - 1; i >= 0; i--) {
+          mainContent = mainContent.substring(0, nested[i].start) + mainContent.substring(nested[i].end);
+          nestedLists.push(nested[i]);
         }
+        const mainText = cleanText(mainContent);
+        const indent = "  ".repeat(depth);
+        const bullet = depth === 0 ? "• " : "◦ ";
+        const num = extractParaNum(liContent.substring(0, tagEnd - liStart));
+        if (mainText) {
+          items.push(indent + bullet + (num ? num + " " : "") + mainText);
+        }
+        // 递归处理嵌套列表
+        // 如果当前li本身没有文本（只是包装器），嵌套列表继承当前depth而不是+1
+        const nestedDepth = mainText ? depth + 1 : depth;
+        for (const nl of nestedLists) {
+          const subItems = extractListItems(nl.content, nestedDepth);
+          items.push(...subItems);
+        }
+        pos = liEnd + 5; // 跳过 </li>
       }
+      return items;
+    };
+
+    // 主扫描：按文档顺序找 heading / div.description-paragraph / ul|ol
+    const parts = [];
+    let pos = 0;
+    const len = descHtml.length;
+
+    // 已知的语义自定义标签（这些标签的开始/结束会被跳过，其内部的heading正常处理）
+    const semanticTagNames = ['description-of-drawings', 'technical-field', 'background-art',
+      'disclosure', 'best-mode', 'mode-for-invention', 'embodiment',
+      'description-of-embodiments', 'industrial-applicability', 'sequence-list'];
+
+    while (pos < len) {
+      // 找下一个标签开始
+      const nextLt = descHtml.indexOf('<', pos);
+      if (nextLt === -1) break;
+
+      // 检查是什么标签
+      const peek = descHtml.substr(nextLt, 80).toLowerCase();
+
+      // heading 标签
+      if (peek.startsWith('<heading')) {
+        // 找闭合 </heading>
+        const closeIdx = descHtml.indexOf('</heading>', nextLt);
+        if (closeIdx === -1) { pos = nextLt + 1; continue; }
+        const openEnd = descHtml.indexOf('>', nextLt);
+        const headingText = cleanText(descHtml.substring(openEnd + 1, closeIdx));
+        if (headingText) parts.push('## ' + headingText);
+        pos = closeIdx + 10;
+        continue;
+      }
+
+      // div.description-paragraph
+      if (/^<div\b[^>]*class="[^"]*description-paragraph[^"]*"/i.test(peek) ||
+          /^<div\b[^>]*class="description-paragraph"/i.test(peek)) {
+        // 找匹配的 </div>（跟踪嵌套div）
+        const openEnd = descHtml.indexOf('>', nextLt);
+        if (openEnd === -1) { pos = nextLt + 1; continue; }
+        let d = 1;
+        let sp = openEnd + 1;
+        let closePos = -1;
+        while (sp < len && d > 0) {
+          const nl = descHtml.indexOf('<', sp);
+          if (nl === -1) break;
+          if (/^<div\b/i.test(descHtml.substr(nl))) { d++; sp = nl + 4; }
+          else if (/^<\/div/i.test(descHtml.substr(nl))) {
+            d--;
+            if (d === 0) { closePos = nl; break; }
+            sp = nl + 6;
+          } else { sp = nl + 1; }
+        }
+        if (closePos === -1) { pos = openEnd + 1; continue; }
+        const content = descHtml.substring(openEnd + 1, closePos);
+        const num = extractParaNum(descHtml.substring(nextLt, openEnd + 1));
+        const text = cleanText(content);
+        if (text) {
+          parts.push((num ? num + " " : "") + text);
+        }
+        pos = closePos + 6;
+        continue;
+      }
+
+      // li 标签（旧格式：在ul.description容器内直接作为段落）
+      // 注意：嵌套列表内的li由extractListItems处理，主扫描只处理顶层li（不在ul/ol内的li是旧格式段落）
+      if (/^<li\b/i.test(peek)) {
+        const openEnd = descHtml.indexOf('>', nextLt);
+        if (openEnd === -1) { pos = nextLt + 1; continue; }
+        // 找匹配的 </li>（跟踪嵌套的li/ul/ol/div）
+        let d = 1;
+        let sp = openEnd + 1;
+        let closePos = -1;
+        while (sp < len && d > 0) {
+          const nl = descHtml.indexOf('<', sp);
+          if (nl === -1) break;
+          if (/^<li\b/i.test(descHtml.substr(nl))) { d++; sp = nl + 3; }
+          else if (/^<\/li/i.test(descHtml.substr(nl))) {
+            d--;
+            if (d === 0) { closePos = nl; break; }
+            sp = nl + 5;
+          } else if (/^<(ul|ol|div)\b/i.test(descHtml.substr(nl))) {
+            // 跳过嵌套的ul/ol/div，避免误匹配内部</li>
+            const tm = descHtml.substr(nl).match(/^<(ul|ol|div)\b/i);
+            if (tm) {
+              const tName = tm[1].toLowerCase();
+              const innerOpenEnd = descHtml.indexOf('>', nl);
+              if (innerOpenEnd !== -1) {
+                let iDepth = 1;
+                let isp = innerOpenEnd + 1;
+                while (isp < len && iDepth > 0) {
+                  const inl = descHtml.indexOf('<', isp);
+                  if (inl === -1) break;
+                  if (new RegExp('^<' + tName + '\\b', 'i').test(descHtml.substr(inl))) { iDepth++; isp = inl + tName.length + 1; }
+                  else if (new RegExp('^</' + tName, 'i').test(descHtml.substr(inl))) {
+                    iDepth--; isp = inl + tName.length + 3;
+                  } else { isp = inl + 1; }
+                }
+                sp = isp;
+              } else { sp = nl + 1; }
+            } else { sp = nl + 1; }
+          } else { sp = nl + 1; }
+        }
+        if (closePos === -1) { pos = openEnd + 1; continue; }
+        const liContent = descHtml.substring(openEnd + 1, closePos);
+        const fullLi = descHtml.substring(nextLt, closePos + 5);
+        const num = extractParaNum(fullLi);
+        // 段落文本：优先description-line，然后清理
+        const descLineMatch = liContent.match(/<div[^>]*class="description-line"[^>]*>([\s\S]*?)<\/div>/i);
+        let paraText;
+        if (descLineMatch) paraText = cleanText(descLineMatch[1]);
+        else {
+          // 移除嵌套ul/ol后取文本
+          let cleaned = liContent.replace(/<(ul|ol)\b[\s\S]*?<\/\1>/gi, '');
+          paraText = cleanText(cleaned);
+        }
+        if (paraText) {
+          parts.push((num ? num + " " : "") + paraText);
+        }
+        // 处理li内的嵌套列表
+        const nestedLists = [];
+        let lp = 0;
+        while (lp < liContent.length) {
+          const ulS = liContent.indexOf('<ul', lp);
+          const olS = liContent.indexOf('<ol', lp);
+          let ls = -1, lt = 'ul';
+          if (ulS !== -1 && (olS === -1 || ulS < olS)) { ls = ulS; lt = 'ul'; }
+          else if (olS !== -1) { ls = olS; lt = 'ol'; }
+          if (ls === -1) break;
+          const ltEnd = liContent.indexOf('>', ls);
+          if (ltEnd === -1) break;
+          let iD = 1, isp = ltEnd + 1, lc = -1;
+          while (isp < liContent.length && iD > 0) {
+            const inl = liContent.indexOf('<', isp);
+            if (inl === -1) break;
+            if (new RegExp('^<' + lt + '\\b', 'i').test(liContent.substr(inl))) { iD++; isp = inl + lt.length + 1; }
+            else if (new RegExp('^</' + lt, 'i').test(liContent.substr(inl))) {
+              iD--;
+              if (iD === 0) { lc = inl; break; }
+              isp = inl + lt.length + 3;
+            } else { isp = inl + 1; }
+          }
+          if (lc === -1) break;
+          const lContent = liContent.substring(ltEnd + 1, lc);
+          nestedLists.push(lContent);
+          lp = lc + lt.length + 3;
+        }
+        for (const nc of nestedLists) {
+          const subItems = extractListItems(nc, 1);
+          parts.push(...subItems);
+        }
+        pos = closePos + 5;
+        continue;
+      }
+
+      // 旧格式兼容：当扫描完整个descHtml没找到任何div.description-paragraph/ul/heading时，
+      // （parts.length === 0且是li开头）已经在上面的li分支处理了
+      // （移除了之前的旧格式整块回退，避免干扰正常扫描）
+
+      // ul 或 ol 列表
+      if (/^<(ul|ol)\b/i.test(peek)) {
+        const listMatch = peek.match(/^<(ul|ol)\b/i);
+        const listTag = listMatch[1].toLowerCase();
+        const openEnd = descHtml.indexOf('>', nextLt);
+        if (openEnd === -1) { pos = nextLt + 1; continue; }
+        // 找匹配的闭合
+        let d = 1;
+        let sp = openEnd + 1;
+        let closePos = -1;
+        while (sp < len && d > 0) {
+          const nl = descHtml.indexOf('<', sp);
+          if (nl === -1) break;
+          if (new RegExp('^<' + listTag + '\\b', 'i').test(descHtml.substr(nl))) {
+            d++; sp = nl + listTag.length + 1;
+          } else if (new RegExp('^</' + listTag, 'i').test(descHtml.substr(nl))) {
+            d--;
+            if (d === 0) { closePos = nl; break; }
+            sp = nl + listTag.length + 3;
+          } else { sp = nl + 1; }
+        }
+        if (closePos === -1) { pos = openEnd + 1; continue; }
+        const listContent = descHtml.substring(openEnd + 1, closePos);
+        const items = extractListItems(listContent, 0);
+        parts.push(...items);
+        pos = closePos + listTag.length + 3;
+        continue;
+      }
+
+      // 跳过其他标签（包括自定义语义标签、div包装器、h2等）
+      // 对于闭合标签直接跳过
+      if (peek.startsWith('</')) {
+        const end = descHtml.indexOf('>', nextLt);
+        pos = end !== -1 ? end + 1 : nextLt + 1;
+        continue;
+      }
+      // 对于自闭合标签或其他开始标签，跳过整个标签
+      const tagEnd = descHtml.indexOf('>', nextLt);
+      if (tagEnd === -1) { pos = nextLt + 1; continue; }
+      // 检查是否是自闭合标签
+      if (descHtml[tagEnd - 1] === '/') {
+        pos = tagEnd + 1;
+        continue;
+      }
+      // 对于语义自定义标签，跳过开始标签（内部内容会被正常扫描）
+      const tagNameMatch = peek.match(/^<([a-z][a-z0-9-]*)/i);
+      if (tagNameMatch && semanticTagNames.includes(tagNameMatch[1].toLowerCase())) {
+        pos = tagEnd + 1;
+        continue;
+      }
+      // 对于div（非description-paragraph）、meta、span等，跳过开始标签继续扫描内部
+      pos = tagEnd + 1;
     }
 
     if (parts.length > 0) {
-      htmlResult.description = parts.join('\n\n');
-    } else {
-      // Try description-paragraph divs
-      // Semantic HTML tags (<technical-field>, <background-art>, <disclosure>, etc.) are the
-      // most reliable section boundary markers. We extract each semantic tag's content
-      // and process its paragraphs, marking the first one as a ## heading.
-      const semanticTags = [
-        'technical-field', 'background-art', 'disclosure',
-        'description-of-drawings', 'best-mode', 'mode-for-invention',
-        'embodiment', 'description-of-embodiments',
-        'industrial-applicability', 'sequence-list',
+      // 后处理：检测常见章节标题模式，未加##的自动加
+      const sectionHeadingPatterns = [
+        /^技术领域$/, /^背景技术$/, /^发明内容$/, /^附图说明$/,
+        /^具体实施方式$/, /^具体实施例$/, /^实施方式$/, /^实施例$/, /^工业应用性$/,
+        /^TECHNICAL FIELD$/i, /^BACKGROUND$/i, /^BACKGROUND OF THE INVENTION$/i,
+        /^SUMMARY$/i, /^SUMMARY OF THE INVENTION$/i,
+        /^DETAILED DESCRIPTION$/i, /^DETAILED DESCRIPTION OF(?: THE)? (?:PREFERRED)?(?: EMBODIMENTS?)?$/i,
+        /^DRAWINGS$/i, /^BRIEF DESCRIPTION OF (?:THE )?DRAWINGS$/i,
+        /^EMBODIMENTS?$/i, /^DESCRIPTION OF EMBODIMENTS?$/i,
+        /^CROSS-REFERENCE TO RELATED APPLICATIONS?$/i,
+        /^BRIEF SUMMARY$/i,
       ];
-
-      // Build ranges [start, end) in descHtml for each semantic tag occurrence
-      const semanticRanges = [];
-      for (const tag of semanticTags) {
-        const tagRegex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'gi');
-        let tagMatch;
-        while ((tagMatch = tagRegex.exec(descHtml)) !== null) {
-          // tagMatch.index is the start of the opening tag
-          // The content starts after the opening tag
-          const contentStart = tagMatch.index + tagMatch[0].indexOf('>') + 1;
-          const contentEnd = tagMatch.index + tagMatch[0].length - (`</${tag}>`).length;
-          semanticRanges.push({ start: tagMatch.index, contentStart, contentEnd, end: tagMatch.index + tagMatch[0].length, tag });
+      const processed = parts.map(p => {
+        if (p.startsWith('## ')) return p;
+        if (p.startsWith('•') || p.startsWith('◦')) return p;
+        const plain = p.replace(/^\[\d+\]\s*/, '').trim();
+        for (const pat of sectionHeadingPatterns) {
+          if (pat.test(plain)) return '## ' + p;
         }
-      }
-
-      const paraMatches = [...descHtml.matchAll(/<div[^>]*class="description-paragraph"[^>]*>([\s\S]*?)<\/div>/gi)];
-
-      // For each semantic tag, find which paragraph is the first one inside it
-      const firstParaInSemantic = new Set(); // stores pm.index values
-      for (const range of semanticRanges) {
-        for (const pm of paraMatches) {
-          // pm.index is the start of the <div> opening tag
-          if (pm.index >= range.contentStart && pm.index < range.contentEnd) {
-            firstParaInSemantic.add(pm.index);
-            break; // only the first paragraph in each semantic tag
-          }
-        }
-      }
-
-      const paragraphs = [];
-      for (const pm of paraMatches) {
-        let pText = pm[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-        if (!pText) continue;
-        // If this paragraph is the first one inside a semantic tag, mark it as a heading
-        if (firstParaInSemantic.has(pm.index)) {
-          if (!pText.startsWith('## ')) pText = '## ' + pText;
-        }
-        paragraphs.push(pText);
-      }
-      if (paragraphs.length > 0) {
-        // Fallback: detect common Chinese/English section heading patterns in paragraph text
-        // and prefix them with ## if not already marked. This catches headings that don't
-        // have semantic tag wrappers (e.g., some Google Patents formats).
-        const sectionHeadingPatterns = [
-          /^技术领域$/, /^背景技术$/, /^发明内容$/, /^附图说明$/,
-          /^具体实施方式$/, /^具体实施例$/, /^实施方式$/, /^实施例$/, /^工业应用性$/,
-          /^TECHNICAL FIELD$/i, /^BACKGROUND$/i, /^BACKGROUND OF THE INVENTION$/i,
-          /^SUMMARY$/i, /^SUMMARY OF THE INVENTION$/i,
-          /^DETAILED DESCRIPTION$/i, /^DETAILED DESCRIPTION OF(?: THE)? (?:PREFERRED)?(?: EMBODIMENTS?)?$/i,
-          /^DRAWINGS$/i, /^BRIEF DESCRIPTION OF (?:THE )?DRAWINGS$/i,
-          /^EMBODIMENTS?$/i, /^DESCRIPTION OF EMBODIMENTS?$/i,
-        ];
-        const processedParagraphs = paragraphs.map(p => {
-          if (p.startsWith('## ')) return p;
-          for (const pattern of sectionHeadingPatterns) {
-            if (pattern.test(p)) return '## ' + p;
-          }
-          return p;
-        });
-        htmlResult.description = processedParagraphs.join('\n\n');
-      } else {
-        htmlResult.description = descHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      }
+        return p;
+      });
+      // 合并相邻空行，去除空part
+      const filtered = processed.filter(p => p && p.trim());
+      htmlResult.description = filtered.join('\n\n');
+    } else {
+      // 最后兜底：直接strip所有标签
+      htmlResult.description = descHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     }
   }
 
