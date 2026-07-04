@@ -752,32 +752,57 @@ function openInAppWebview(url, title) {
   }
 
   function loadUrl(targetUrl) {
-    const container = document.getElementById("pd-inapp-webview-container");
-    if (!container) return;
-    const ifr = container.querySelector("iframe");
+    _currentWebviewUrl = targetUrl;
+    const ifr = document.getElementById("pd-wv-iframe");
     if (ifr) ifr.src = targetUrl;
   }
 
   function refreshWebview() {
-    const container = document.getElementById("pd-inapp-webview-container");
-    if (!container) return;
-    const ifr = container.querySelector("iframe");
+    const ifr = document.getElementById("pd-wv-iframe");
     if (ifr) ifr.src = ifr.src;
   }
 
   const btnStyle = "cursor:pointer;border:1px solid #bbb;background:#fff;color:#333;font-size:12px;padding:2px 10px;border-radius:4px;transition:all 0.2s;";
+  const findBtnStyle = "cursor:pointer;border:1px solid #bbb;background:#fff;color:#333;font-size:12px;padding:2px 8px;border-radius:4px;transition:all 0.2s;width:28px;height:26px;display:inline-flex;align-items:center;justify-content:center;";
+  
+  const isJplatpat = url.includes("j-platpat.inpit.go.jp");
+  let jpInfoBar = "";
+  if (isJplatpat) {
+    const jpMatch = url.match(/JP-(\d{4})-(\d+)/);
+    const jpYear = jpMatch ? jpMatch[1] : "";
+    const jpNum = jpMatch ? jpMatch[2] : "";
+    const jpDisplayNum = jpYear && jpNum ? jpYear + "-" + jpNum : "";
+    const opdUrl = "https://www.j-platpat.inpit.go.jp/p0000";
+    jpInfoBar = '<div id="pd-wv-jp-bar" style="display:flex;align-items:center;gap:8px;background:#fff3cd;border-bottom:1px solid #ffc107;padding:6px 14px;font-size:12px;color:#856404;flex-shrink:0;">' +
+      '<span style="font-weight:bold;">🇯🇵 J-PlatPat</span>' +
+      (jpDisplayNum ? '<span>番号: ' + escapeHtml(jpDisplayNum) + '</span>' : '') +
+      '<span style="flex:1;color:#a08030;">如果页面未自动加载文献，请点击「番号照会」或使用下方链接手动查找</span>' +
+      '<button id="pd-wv-jp-opd-btn" style="' + btnStyle + '" title="打开番号照会页面">番号照会(OPD)</button>' +
+      '<button id="pd-wv-jp-ext-btn" style="' + btnStyle + '" title="外部打开">外部打开</button>' +
+      '<button id="pd-wv-jp-close" style="' + findBtnStyle + '" title="关闭提示">✕</button>' +
+      '</div>';
+  }
   let webviewHtml = `
     <div class="pd-header" style="position:relative;">
       <div class="pd-title" style="font-size:14px;">${escapeHtml(title || url)}</div>
       <div class="pd-links" style="position:absolute;right:0;top:50%;transform:translateY(-50%);display:flex;gap:6px;align-items:center;">
+        <button id="pd-wv-find-toggle-btn" style="${btnStyle}" title="在页面内查找 (Ctrl+F)">查找</button>
         <button id="pd-wv-translate-btn" style="${btnStyle}" title="通过 Google 翻译翻译此页面内容">翻译</button>
         <button id="pd-wv-refresh-btn" style="${btnStyle}" title="刷新当前页面">刷新</button>
         <button id="pd-wv-external-btn" style="${btnStyle}" title="在外部浏览器打开">外部浏览器打开</button>
         <button id="pd-wv-close-btn" style="${btnStyle}" title="关闭">✕ 关闭</button>
       </div>
     </div>
-    <div id="pd-inapp-webview-container" style="width:100%;height:calc(100vh - 160px);border:none;position:relative;">
-      <iframe src="${escapeHtml(url)}" style="width:100%;height:100%;border:1px solid #ddd;border-radius:8px;"
+    ${jpInfoBar}
+    <div id="pd-wv-find-bar" style="display:none;align-items:center;gap:6px;background:#f5f5f5;border-bottom:1px solid #ddd;padding:6px 12px;flex-shrink:0;">
+      <input type="text" id="pd-wv-find-input" placeholder="在页面内查找..." style="flex:1;max-width:240px;background:#fff;border:1px solid #ccc;border-radius:4px;padding:4px 8px;font-size:12px;outline:none;">
+      <button id="pd-wv-find-prev" style="${findBtnStyle}" title="上一个匹配 (Shift+Enter)">▲</button>
+      <button id="pd-wv-find-next" style="${findBtnStyle}" title="下一个匹配 (Enter)">▼</button>
+      <span id="pd-wv-find-count" style="font-size:11px;color:#888;min-width:50px;text-align:center;"></span>
+      <button id="pd-wv-find-close" style="${findBtnStyle}" title="关闭查找 (Esc)">✕</button>
+    </div>
+    <div id="pd-inapp-webview-container" style="width:100%;height:calc(100vh - 120px);border:none;position:relative;">
+      <iframe id="pd-wv-iframe" src="${escapeHtml(url)}" style="width:100%;height:100%;border:1px solid #ddd;border-radius:8px;"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
               allow="clipboard-read; clipboard-write"
               referrerpolicy="no-referrer">
@@ -821,6 +846,158 @@ function openInAppWebview(url, title) {
       window.open(_currentWebviewUrl, "_blank");
     });
     bindBtnHover(externalBtn);
+  }
+
+  // ── Webview find-in-page ──
+  const wvFindToggleBtn = document.getElementById("pd-wv-find-toggle-btn");
+  const wvFindBar = document.getElementById("pd-wv-find-bar");
+  const wvFindInput = document.getElementById("pd-wv-find-input");
+  const wvFindPrevBtn = document.getElementById("pd-wv-find-prev");
+  const wvFindNextBtn = document.getElementById("pd-wv-find-next");
+  const wvFindCount = document.getElementById("pd-wv-find-count");
+  const wvFindCloseBtn = document.getElementById("pd-wv-find-close");
+  const wvIframe = document.getElementById("pd-wv-iframe");
+
+  function wvAdjustContainerHeight() {
+    const container = document.getElementById("pd-inapp-webview-container");
+    if (!container) return;
+    const findBarH = wvFindBar && wvFindBar.style.display !== "none" ? 38 : 0;
+    const jpBar = document.getElementById("pd-wv-jp-bar");
+    const jpBarH = jpBar && jpBar.style.display !== "none" ? 36 : 0;
+    const offset = 120 + findBarH + jpBarH;
+    container.style.height = "calc(100vh - " + offset + "px)";
+  }
+
+  function doWvFindNext() {
+    if (!wvFindInput) return;
+    const term = wvFindInput.value;
+    if (!term || term.length < 1) return;
+    try {
+      const win = wvIframe.contentWindow;
+      const found = win.find(term, false, false, false, false, true);
+      wvFindCount.textContent = found ? "" : "无匹配";
+    } catch (e) {
+      wvFindCount.textContent = "受限";
+    }
+  }
+
+  function doWvFindPrev() {
+    if (!wvFindInput) return;
+    const term = wvFindInput.value;
+    if (!term || term.length < 1) return;
+    try {
+      const win = wvIframe.contentWindow;
+      win.find(term, false, true, false, false, true);
+    } catch (e) {}
+  }
+
+  if (wvFindToggleBtn) {
+    bindBtnHover(wvFindToggleBtn);
+    wvFindToggleBtn.addEventListener("click", function() {
+      if (!wvFindBar) return;
+      const showing = wvFindBar.style.display !== "none";
+      wvFindBar.style.display = showing ? "none" : "flex";
+      wvAdjustContainerHeight();
+      if (!showing && wvFindInput) {
+        wvFindInput.focus();
+        try {
+          if (wvIframe && wvIframe.contentWindow) {
+            wvIframe.contentWindow.find("", false, false, true);
+          }
+        } catch (e) {}
+        setTimeout(() => doWvFindNext(), 50);
+      }
+    });
+  }
+  if (wvFindInput) {
+    wvFindInput.addEventListener("input", function() {
+      try { if (wvIframe && wvIframe.contentWindow) wvIframe.contentWindow.find("", false, false, true); } catch (e) {}
+      if (wvFindInput.value.length > 0) setTimeout(() => doWvFindNext(), 50);
+      else if (wvFindCount) wvFindCount.textContent = "";
+    });
+    wvFindInput.addEventListener("keydown", function(e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (e.shiftKey) doWvFindPrev(); else doWvFindNext();
+      } else if (e.key === "Escape") {
+        if (wvFindBar) wvFindBar.style.display = "none";
+        try { if (wvIframe && wvIframe.contentWindow) wvIframe.contentWindow.find("", false, false, true); } catch (e) {}
+        wvAdjustContainerHeight();
+      }
+    });
+  }
+  if (wvFindPrevBtn) {
+    bindBtnHover(wvFindPrevBtn);
+    wvFindPrevBtn.addEventListener("click", doWvFindPrev);
+  }
+  if (wvFindNextBtn) {
+    bindBtnHover(wvFindNextBtn);
+    wvFindNextBtn.addEventListener("click", doWvFindNext);
+  }
+  if (wvFindCloseBtn) {
+    bindBtnHover(wvFindCloseBtn);
+    wvFindCloseBtn.addEventListener("click", function() {
+      if (wvFindBar) wvFindBar.style.display = "none";
+      try { if (wvIframe && wvIframe.contentWindow) wvIframe.contentWindow.find("", false, false, true); } catch (e) {}
+      wvAdjustContainerHeight();
+    });
+  }
+
+  // J-PlatPat info bar buttons
+  const wvJpOpdBtn = document.getElementById("pd-wv-jp-opd-btn");
+  const wvJpExtBtn = document.getElementById("pd-wv-jp-ext-btn");
+  const wvJpCloseBtn = document.getElementById("pd-wv-jp-close");
+  if (wvJpOpdBtn) {
+    bindBtnHover(wvJpOpdBtn);
+    wvJpOpdBtn.addEventListener("click", function() {
+      loadUrl("https://www.j-platpat.inpit.go.jp/p0000");
+    });
+  }
+  if (wvJpExtBtn) {
+    bindBtnHover(wvJpExtBtn);
+    wvJpExtBtn.addEventListener("click", function() {
+      window.open(_currentWebviewUrl, "_blank");
+    });
+  }
+  if (wvJpCloseBtn) {
+    bindBtnHover(wvJpCloseBtn);
+    wvJpCloseBtn.addEventListener("click", function() {
+      const jpBar = document.getElementById("pd-wv-jp-bar");
+      if (jpBar) {
+        jpBar.style.display = "none";
+        wvAdjustContainerHeight();
+      }
+    });
+  }
+
+  wvAdjustContainerHeight();
+
+  // Ctrl+F within the webview overlay
+  if (overlay) {
+    overlay.addEventListener("keydown", function(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        if (wvFindBar) {
+          wvFindBar.style.display = "flex";
+          wvAdjustContainerHeight();
+          if (wvFindInput) wvFindInput.focus();
+        }
+      }
+      if (e.key === "Escape" && wvFindBar && wvFindBar.style.display !== "none") {
+        e.preventDefault();
+        wvFindBar.style.display = "none";
+        try { if (wvIframe && wvIframe.contentWindow) wvIframe.contentWindow.find("", false, false, true); } catch (e) {}
+        wvAdjustContainerHeight();
+      }
+      if (e.key === "F3") {
+        e.preventDefault();
+        if (wvFindBar && wvFindBar.style.display === "none") {
+          wvFindBar.style.display = "flex";
+          wvAdjustContainerHeight();
+        }
+        if (e.shiftKey) doWvFindPrev(); else doWvFindNext();
+      }
+    });
   }
 }
 
@@ -867,6 +1044,10 @@ function renderPatentDetail(data) {
   html += '<button class="pd-ai-ask-btn" onclick="openPatentAsk(\'detail\')" title="针对本篇专利向 AI 提问">AI 问一问</button>';
   html += '<button class="pd-gp-link" onclick="toggleGoogleTranslate()" title="使用 Google 翻译翻译整个页面">网页翻译</button>';
   html += '<button class="pd-gp-link" onclick="openInAppWebview(\'' + escapeHtml(data.url) + '\', \'Google Patents: ' + escapeHtml(data.patent_number) + '\')" title="在应用内打开 Google Patents 页面">Google Patents</button>';
+  if (isJPPatent(data.patent_number)) {
+    const jpUrl = jplatpatDocUrl(data.patent_number);
+    html += '<button class="pd-gp-link" onclick="openInAppWebview(\'' + jpUrl + '\', \'J-PlatPat: ' + escapeHtml(data.patent_number) + '\')" title="在 J-PlatPat（日本专利局）查看" style="background:#e74c3c;color:#fff;border-color:#c0392b;">J-PlatPat</button>';
+  }
   html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(data.patent_number) + '\', \'Espacenet: ' + escapeHtml(data.patent_number) + '\')" title="在应用内打开 Espacenet 页面">Espacenet</button>';
   if (data.pdf_link) {
     html += '<a href="' + escapeHtml(data.pdf_link) + '" target="_blank" rel="noopener" class="pd-pdf-link">PDF原文</a>';
@@ -1111,7 +1292,7 @@ function renderPatentDetail(data) {
       }
       html += '</td>';
       html += '<td class="pd-ct-num"><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" title="在应用内打开 Google Patents">GP</button>';
+      html += patentLinkButtons(c.patent_number);
       html += '</td>';
       html += '<td class="pd-ct-title">' + (c.title ? escapeHtml(c.title) : '') + '</td>';
       html += '<td class="pd-ct-date">' + (c.priority_date ? escapeHtml(c.priority_date) : '') + '</td>';
@@ -1135,7 +1316,7 @@ function renderPatentDetail(data) {
     data.cited_by.forEach(c => {
       html += '<tr>';
       html += '<td class="pd-ct-num"><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" title="在应用内打开 Google Patents">GP</button>';
+      html += patentLinkButtons(c.patent_number);
       html += '</td>';
       html += '<td class="pd-ct-title">' + (c.title ? escapeHtml(c.title) : '') + '</td>';
       html += '<td class="pd-ct-date">' + (c.priority_date ? escapeHtml(c.priority_date) : '') + '</td>';
@@ -1157,7 +1338,7 @@ function renderPatentDetail(data) {
     data.similar_documents.forEach(c => {
       html += '<tr>';
       html += '<td class="pd-ct-num"><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" title="在应用内打开 Google Patents">GP</button>';
+      html += patentLinkButtons(c.patent_number);
       html += '</td>';
       html += '<td class="pd-ct-title">' + (c.title ? escapeHtml(c.title) : '') + '</td>';
       html += '<td class="pd-ct-date">' + (c.publication_date ? escapeHtml(c.publication_date) : '') + '</td>';
@@ -1828,7 +2009,11 @@ document.addEventListener("click", (e) => {
     if (pn) {
       // Ctrl/Cmd+Click: open in app webview
       if (e.ctrlKey || e.metaKey) {
-        openInAppWebview("https://patents.google.com/patent/" + encodeURIComponent(pn), "Google Patents: " + pn);
+        if (isJPPatent(pn)) {
+          openInAppWebview(jplatpatDocUrl(pn), "J-PlatPat: " + pn);
+        } else {
+          openInAppWebview("https://patents.google.com/patent/" + encodeURIComponent(pn), "Google Patents: " + pn);
+        }
         return;
       }
       // Normal click: open patent popup viewer
@@ -2117,7 +2302,7 @@ function renderPatentPopupContent(data) {
       }
       html += '</td>';
       html += '<td class="pd-ct-num"><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" title="在应用内打开 Google Patents">GP</button>';
+      html += patentLinkButtons(c.patent_number);
       html += '</td>';
       html += '<td class="pd-ct-title">' + (c.title ? escapeHtml(c.title) : '') + '</td>';
       html += '<td class="pd-ct-date">' + (c.priority_date ? escapeHtml(c.priority_date) : '') + '</td>';
@@ -2141,7 +2326,7 @@ function renderPatentPopupContent(data) {
     data.cited_by.forEach(c => {
       html += '<tr>';
       html += '<td class="pd-ct-num"><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" title="在应用内打开 Google Patents">GP</button>';
+      html += patentLinkButtons(c.patent_number);
       html += '</td>';
       html += '<td class="pd-ct-title">' + (c.title ? escapeHtml(c.title) : '') + '</td>';
       html += '<td class="pd-ct-date">' + (c.priority_date ? escapeHtml(c.priority_date) : '') + '</td>';
@@ -2163,7 +2348,7 @@ function renderPatentPopupContent(data) {
     data.similar_documents.forEach(c => {
       html += '<tr>';
       html += '<td class="pd-ct-num"><a class="pd-patent-link" data-patent="' + escapeHtml(c.patent_number) + '">' + escapeHtml(c.patent_number) + '</a>';
-      html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(c.patent_number) + '\', \'Google Patents: ' + escapeHtml(c.patent_number) + '\')" title="在应用内打开 Google Patents">GP</button>';
+      html += patentLinkButtons(c.patent_number);
       html += '</td>';
       html += '<td class="pd-ct-title">' + (c.title ? escapeHtml(c.title) : '') + '</td>';
       html += '<td class="pd-ct-date">' + (c.publication_date ? escapeHtml(c.publication_date) : '') + '</td>';
@@ -2198,6 +2383,11 @@ async function openPatentPopup(patentNumber) {
   if (!viewer) return;
 
   const raw = patentNumber.trim().toUpperCase().replace(/[\s\/]/g, "");
+
+  if (isJPPatent(raw)) {
+    openInAppWebview(jplatpatDocUrl(raw), "J-PlatPat: " + raw);
+    return;
+  }
 
   // If already open, just switch to it
   const existing = _ppvOpenPatents.find(e => e.patentNumber === raw);

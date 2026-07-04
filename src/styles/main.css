@@ -6132,6 +6132,9 @@ body {
   border-bottom: none;
   width: 100%;
   box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 .patent-detail-tabs-bar::-webkit-scrollbar { height: 0; }
 .pdt-tab {
@@ -6226,12 +6229,16 @@ body {
   flex-shrink: 0;
   width: 100%;
   box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  z-index: 99;
 }
 /* 标签栏显示时，查找栏也加左右边框与标签栏对齐 */
 .has-tabs .patent-detail-find-bar {
   border-left: 1px solid var(--border-color, #2a2d3a);
   border-right: 1px solid var(--border-color, #2a2d3a);
   background: var(--bg-secondary);
+  top: 40px;
 }
 .pd-find-input {
   flex: 1;
