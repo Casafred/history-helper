@@ -2601,6 +2601,21 @@ async function doSearch(input) {
   const pn = parsePatentNumber(input);
   if (!pn) { showError("无法识别专利号格式: " + input); return; }
 
+  // JP专利: 审查文档模式也直接打开J-PlatPat（Global Dossier对JP支持有限）
+  const rawPn = pn.raw || input.trim().toUpperCase().replace(/[\s\/]/g, "");
+  if (isJPPatent(rawPn)) {
+    searchBtn.disabled = false;
+    loading.classList.add("hidden");
+    if (patentInput) patentInput.value = rawPn;
+    const jpUrl = jplatpatDocUrl(rawPn);
+    const parsed = parseJPPatentNo(rawPn);
+    const title = "J-PlatPat: " + rawPn + (parsed ? " (" + parsed.docdbFormat + ")" : "");
+    openInAppWebview(jpUrl, title);
+    PatentCache.addPatentHistory(rawPn, { title: "J-PlatPat: " + (parsed ? parsed.docdbFormat : rawPn) });
+    refreshHistoryList();
+    return;
+  }
+
   searchBtn.disabled = true;
   loadingText.textContent = "正在查询专利信息...";
   loading.classList.remove("hidden");

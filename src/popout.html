@@ -7,6 +7,7 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #fff; }
+    body { display: flex; flex-direction: column; }
     #po-header {
       display: flex; align-items: center; gap: 8px;
       padding: 8px 12px; background: #f5f7fa; border-bottom: 1px solid #d8dce6;
@@ -19,7 +20,26 @@
       white-space: nowrap; text-decoration: none; display: inline-block;
     }
     .po-btn:hover { background: #4f8ff7; color: #fff; border-color: #4f8ff7; }
-    #po-container { width: 100%; height: calc(100vh - 49px); position: relative; background: #fff; }
+    .po-btn-find { width: 28px; height: 26px; padding: 2px 0; display: inline-flex; align-items: center; justify-content: center; }
+    #po-jp-bar {
+      display: none; align-items: center; gap: 8px;
+      background: #fff3cd; border-bottom: 1px solid #ffc107;
+      padding: 6px 14px; font-size: 12px; color: #856404; flex-shrink: 0;
+    }
+    #po-jp-bar .po-jp-label { font-weight: bold; }
+    #po-jp-bar .po-jp-hint { flex: 1; color: #a08030; }
+    #po-find-bar {
+      display: none; align-items: center; gap: 6px;
+      background: #f5f5f5; border-bottom: 1px solid #ddd;
+      padding: 6px 12px; flex-shrink: 0;
+    }
+    #po-find-input {
+      flex: 1; max-width: 240px; background: #fff; border: 1px solid #ccc;
+      border-radius: 4px; padding: 4px 8px; font-size: 12px; outline: none;
+    }
+    #po-find-input:focus { border-color: #4f8ff7; }
+    #po-find-count { font-size: 11px; color: #888; min-width: 80px; text-align: center; }
+    #po-container { width: 100%; flex: 1; position: relative; background: #fff; min-height: 0; }
     #po-container webview, #po-container iframe { width: 100%; height: 100%; border: none; }
     .po-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #888; font-size: 14px; text-align: center; }
     .po-fallback { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #555; font-size: 14px; padding: 24px; max-width: 480px; line-height: 1.8; }
@@ -29,10 +49,26 @@
 <body>
   <div id="po-header">
     <div id="po-title"></div>
+    <button id="po-find-toggle" class="po-btn po-btn-find" title="在页面内查找 (Ctrl+F)">🔍</button>
     <button id="po-translate" class="po-btn" title="通过 Google 翻译翻译此页面">翻译</button>
     <button id="po-refresh" class="po-btn" title="刷新当前页面">刷新</button>
     <button id="po-external" class="po-btn" title="在外部浏览器打开">外部打开</button>
     <button id="po-close" class="po-btn" title="关闭窗口">关闭</button>
+  </div>
+  <div id="po-jp-bar">
+    <span class="po-jp-label">🇯🇵 J-PlatPat</span>
+    <span id="po-jp-num"></span>
+    <span class="po-jp-hint">如果页面未自动加载文献，请点击「番号照会」或使用下方链接手动查找</span>
+    <button id="po-jp-opd" class="po-btn" title="打开番号照会页面">番号照会(OPD)</button>
+    <button id="po-jp-ext" class="po-btn" title="外部打开">外部打开</button>
+    <button id="po-jp-close" class="po-btn po-btn-find" title="关闭提示">✕</button>
+  </div>
+  <div id="po-find-bar">
+    <input type="text" id="po-find-input" placeholder="在页面内查找...">
+    <button id="po-find-prev" class="po-btn po-btn-find" title="上一个匹配 (Shift+Enter)">▲</button>
+    <button id="po-find-next" class="po-btn po-btn-find" title="下一个匹配 (Enter)">▼</button>
+    <span id="po-find-count"></span>
+    <button id="po-find-close" class="po-btn po-btn-find" title="关闭查找 (Esc)">✕</button>
   </div>
   <div id="po-container">
     <div class="po-loading">正在加载...</div>
@@ -41,7 +77,7 @@
     (function () {
       var params = new URLSearchParams(location.search);
       var targetUrl = params.get("url") || "";
-      var title = params.get("title") || targetUrl || "专利原文";
+      var title = params.get("title") || targetUrl || "专利原文查看";
       var isElectron = !!window.electronAPI;
       var container = document.getElementById("po-container");
       var translateBtn = document.getElementById("po-translate");
@@ -49,6 +85,18 @@
       var closeBtn = document.getElementById("po-close");
       var externalBtn = document.getElementById("po-external");
       var titleEl = document.getElementById("po-title");
+      var findToggleBtn = document.getElementById("po-find-toggle");
+      var findBar = document.getElementById("po-find-bar");
+      var findInput = document.getElementById("po-find-input");
+      var findPrevBtn = document.getElementById("po-find-prev");
+      var findNextBtn = document.getElementById("po-find-next");
+      var findCountEl = document.getElementById("po-find-count");
+      var findCloseBtn = document.getElementById("po-find-close");
+      var jpBar = document.getElementById("po-jp-bar");
+      var jpNumEl = document.getElementById("po-jp-num");
+      var jpOpdBtn = document.getElementById("po-jp-opd");
+      var jpExtBtn = document.getElementById("po-jp-ext");
+      var jpCloseBtn = document.getElementById("po-jp-close");
       titleEl.textContent = decodeURIComponent(title);
 
       var currentUrl = targetUrl;
@@ -58,27 +106,182 @@
       var MAX_AUTO_RETRY = 1;
       var LOAD_TIMEOUT_MS = 30000;
       var timeoutTimer = null;
+      var findActive = false;
+      var findTerm = "";
 
-      // Network error codes (not X-Frame-Options / embed blocking)
+      // Detect J-PlatPat URL and show info bar
+      var isJplatpat = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
+      if (isJplatpat) {
+        var jpMatch = currentUrl.match(/JP-(\d{4})-(\d+)/);
+        if (jpMatch) {
+          jpNumEl.textContent = "番号: " + jpMatch[1] + "-" + jpMatch[2];
+        }
+        jpBar.style.display = "flex";
+      }
+
+      function adjustContainerHeight() {
+        // Container uses flex:1, no manual height adjustment needed in flex layout
+      }
+
+      // ── Find-in-page ──
+      function openFindBar() {
+        findBar.style.display = "flex";
+        findInput.focus();
+        findInput.select();
+      }
+
+      function closeFindBar() {
+        findBar.style.display = "none";
+        findCountEl.textContent = "";
+        if (isElectron && wv && wv.stopFindInPage) {
+          try { wv.stopFindInPage("clearSelection"); } catch(e) {}
+        } else {
+          try {
+            var iframe = container.querySelector("iframe");
+            if (iframe && iframe.contentWindow) iframe.contentWindow.find("", false, false, true);
+          } catch(e) {}
+        }
+        findActive = false;
+      }
+
+      function doFindNext() {
+        var term = findInput.value;
+        if (!term || term.length < 1) return;
+        findTerm = term;
+        findActive = true;
+        if (isElectron && wv && wv.findInPage) {
+          try {
+            wv.findInPage(term, { forward: true, findNext: true });
+          } catch(e) { findCountEl.textContent = "受限"; }
+        } else {
+          try {
+            var iframe = container.querySelector("iframe");
+            if (iframe && iframe.contentWindow) {
+              var found = iframe.contentWindow.find(term, false, false, false, false, true);
+              findCountEl.textContent = found ? "" : "无匹配";
+            }
+          } catch(e) { findCountEl.textContent = "受限"; }
+        }
+      }
+
+      function doFindPrev() {
+        var term = findInput.value;
+        if (!term || term.length < 1) return;
+        findTerm = term;
+        findActive = true;
+        if (isElectron && wv && wv.findInPage) {
+          try {
+            wv.findInPage(term, { forward: false, findNext: true });
+          } catch(e) { findCountEl.textContent = "受限"; }
+        } else {
+          try {
+            var iframe = container.querySelector("iframe");
+            if (iframe && iframe.contentWindow) {
+              iframe.contentWindow.find(term, false, true, false, false, true);
+            }
+          } catch(e) {}
+        }
+      }
+
+      function startNewFind() {
+        var term = findInput.value;
+        if (!term || term.length < 1) { findCountEl.textContent = ""; return; }
+        findTerm = term;
+        findActive = true;
+        if (isElectron && wv && wv.findInPage) {
+          try {
+            wv.findInPage(term, { forward: true, findNext: false });
+          } catch(e) { findCountEl.textContent = "受限"; }
+        } else {
+          try {
+            var iframe = container.querySelector("iframe");
+            if (iframe && iframe.contentWindow) {
+              iframe.contentWindow.find("", false, false, true);
+              setTimeout(function() { doFindNext(); }, 50);
+            }
+          } catch(e) { findCountEl.textContent = "受限"; }
+        }
+      }
+
+      if (findToggleBtn) {
+        findToggleBtn.addEventListener("click", function() {
+          if (findBar.style.display === "none" || !findBar.style.display) {
+            openFindBar();
+          } else {
+            closeFindBar();
+          }
+        });
+      }
+      if (findInput) {
+        findInput.addEventListener("input", function() {
+          startNewFind();
+        });
+        findInput.addEventListener("keydown", function(e) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (e.shiftKey) doFindPrev(); else doFindNext();
+          } else if (e.key === "Escape") {
+            closeFindBar();
+          }
+        });
+      }
+      if (findPrevBtn) findPrevBtn.addEventListener("click", doFindPrev);
+      if (findNextBtn) findNextBtn.addEventListener("click", doFindNext);
+      if (findCloseBtn) findCloseBtn.addEventListener("click", closeFindBar);
+
+      // Electron webview found-in-page event
+      document.addEventListener("did-find-in-page", function(e) {
+        // Webview fires this on its own element, not document
+      });
+
+      // J-PlatPat bar buttons
+      if (jpOpdBtn) {
+        jpOpdBtn.addEventListener("click", function() {
+          loadUrl("https://www.j-platpat.inpit.go.jp/p0000");
+        });
+      }
+      if (jpExtBtn) {
+        jpExtBtn.addEventListener("click", function() {
+          if (window.electronAPI) window.electronAPI.openExternal(currentUrl);
+          else window.open(currentUrl, "_blank");
+        });
+      }
+      if (jpCloseBtn) {
+        jpCloseBtn.addEventListener("click", function() {
+          jpBar.style.display = "none";
+        });
+      }
+
+      // Keyboard shortcuts
+      document.addEventListener("keydown", function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+          e.preventDefault();
+          openFindBar();
+        }
+        if (e.key === "Escape") {
+          if (findBar.style.display !== "none" && findBar.style.display) {
+            e.preventDefault();
+            closeFindBar();
+          }
+        }
+        if (e.key === "F3") {
+          e.preventDefault();
+          if (findBar.style.display === "none" || !findBar.style.display) {
+            openFindBar();
+            setTimeout(function() { if (!findInput.value) return; if (e.shiftKey) doFindPrev(); else doFindNext(); }, 50);
+          } else {
+            if (e.shiftKey) doFindPrev(); else doFindNext();
+          }
+        }
+      });
+
       var NETWORK_ERRORS = {
-        "-100": "ERR_CONNECTION_CLOSED",
-        "-101": "ERR_CONNECTION_RESET",
-        "-102": "ERR_CONNECTION_REFUSED",
-        "-105": "ERR_NAME_NOT_RESOLVED",
-        "-106": "ERR_INTERNET_DISCONNECTED",
-        "-109": "ERR_ADDRESS_UNREACHABLE",
-        "-118": "ERR_CONNECTION_TIMED_OUT",
-        "-21": "ERR_NETWORK_CHANGED",
-        "-324": "ERR_EMPTY_RESPONSE",
-        "-501": "ERR_INSECURE_RESPONSE",
-        "-137": "ERR_NAME_RESOLUTION_FAILED",
+        "-100": "ERR_CONNECTION_CLOSED", "-101": "ERR_CONNECTION_RESET", "-102": "ERR_CONNECTION_REFUSED",
+        "-105": "ERR_NAME_NOT_RESOLVED", "-106": "ERR_INTERNET_DISCONNECTED", "-109": "ERR_ADDRESS_UNREACHABLE",
+        "-118": "ERR_CONNECTION_TIMED_OUT", "-21": "ERR_NETWORK_CHANGED", "-324": "ERR_EMPTY_RESPONSE",
+        "-501": "ERR_INSECURE_RESPONSE", "-137": "ERR_NAME_RESOLUTION_FAILED",
       };
-      // X-Frame-Options / CSP blocking error codes
-      var BLOCKED_ERRORS = {
-        "-300": "ERR_INVALID_RESPONSE",
-        "-20": "ERR_BLOCKED_BY_CLIENT",
-        "-32": "ERR_INVALID_RESPONSE",
-      };
+      var BLOCKED_ERRORS = { "-300": "ERR_INVALID_RESPONSE", "-20": "ERR_BLOCKED_BY_CLIENT", "-32": "ERR_INVALID_RESPONSE" };
 
       function classifyError(code) {
         code = String(code);
@@ -144,13 +347,25 @@
           wv = document.createElement("webview");
           wv.setAttribute("src", currentUrl);
           wv.setAttribute("allowpopups", "");
-          // Use a standard Chrome user agent to avoid being blocked as Electron
           wv.setAttribute("useragent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
           wv.style.width = "100%";
           wv.style.height = "100%";
           wv.style.border = "none";
           var _loaded = false;
           var _failed = false;
+
+          // Listen for found-in-page results
+          wv.addEventListener("found-in-page", function(e) {
+            if (e.result) {
+              if (e.result.matchCount === 0) {
+                findCountEl.textContent = "无匹配";
+              } else if (e.result.activeMatchOrdinal !== undefined) {
+                findCountEl.textContent = e.result.activeMatchOrdinal + "/" + e.result.matchCount;
+              } else {
+                findCountEl.textContent = e.result.matchCount + " 个匹配";
+              }
+            }
+          });
 
           wv.addEventListener("did-start-loading", function () {
             console.log("[popout] webview did-start-loading");
@@ -165,6 +380,12 @@
             try {
               if (wv.getURL) currentUrl = wv.getURL();
             } catch(e) {}
+            // Re-trigger find if bar was active
+            if (findActive && findTerm) {
+              setTimeout(function() {
+                try { wv.findInPage(findTerm, { forward: true, findNext: false }); } catch(e) {}
+              }, 300);
+            }
           });
           wv.addEventListener("did-finish-load", function() {
             _loaded = true;
@@ -180,13 +401,11 @@
           });
           wv.addEventListener("did-fail-load", function (e) {
             console.log("[popout] webview did-fail-load", e && e.errorCode, e && e.errorDescription);
-            if (e && e.errorCode === -3) return; // ERR_ABORTED (user navigation etc.)
-            // Ignore subresource failures (isMainFrame=false)
+            if (e && e.errorCode === -3) return;
             if (e && e.isMainFrame === false) return;
-            if (_loaded) return; // already loaded successfully before
+            if (_loaded) return;
             _failed = true;
             if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-            // Auto-retry for network errors on first attempt
             if (loadAttempts <= MAX_AUTO_RETRY && classifyError(e && e.errorCode) === "network") {
               console.log("[popout] network error, auto-retrying...");
               setTimeout(function() { embed(); }, 1500);
@@ -204,7 +423,6 @@
           });
           container.appendChild(wv);
 
-          // Timeout: after LOAD_TIMEOUT_MS, show timeout message with retry button
           timeoutTimer = setTimeout(function () {
             if (!_loaded && !_failed) {
               console.warn("[popout] webview " + (LOAD_TIMEOUT_MS/1000) + "s timeout");
@@ -242,7 +460,7 @@
         }
       }
 
-      function loadUrl(u) { currentUrl = u; loadAttempts = 0; embed(); }
+      function loadUrl(u) { currentUrl = u; loadAttempts = 0; isJplatpat = u.indexOf("j-platpat.inpit.go.jp") !== -1; if (isJplatpat) { var jm = u.match(/JP-(\d{4})-(\d+)/); if (jm) jpNumEl.textContent = "番号: " + jm[1] + "-" + jm[2]; jpBar.style.display = "flex"; } embed(); }
 
       function translatePage() {
         if (isTranslated) {
@@ -282,8 +500,8 @@
         if (isElectron && wv) {
           try { wv.reload(); } catch (e) { embed(); }
         } else {
-          var ifr = container.querySelector("iframe");
-          if (ifr) ifr.src = ifr.src;
+          var iframe = container.querySelector("iframe");
+          if (iframe) iframe.src = iframe.src;
           else embed();
         }
       }
