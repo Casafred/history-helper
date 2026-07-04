@@ -146,6 +146,67 @@ function gpApiUrl(patentNumber) {
   return url;
 }
 
+// ── J-PlatPat URL construction for JP patents ──
+function isJPPatent(patentNo) {
+  return /^JP\d+/i.test(patentNo);
+}
+
+function parseJPPatentNo(patentNo) {
+  const m = patentNo.toUpperCase().match(/^JP(\d{2,4})(\d+)([A-Z]?\d*)?$/);
+  if (!m) return null;
+  let yearPart = m[1];
+  const serial = m[2];
+  const kind = m[3] || "";
+
+  let gregorianYear;
+  if (yearPart.length === 2) {
+    const n = parseInt(yearPart, 10);
+    if (n <= 26) {
+      gregorianYear = 2000 + n;
+    } else {
+      gregorianYear = 1900 + n;
+    }
+  } else if (yearPart.length === 4) {
+    gregorianYear = parseInt(yearPart, 10);
+  } else {
+    return null;
+  }
+
+  const serialPadded = serial.padStart(6, "0");
+  const numFormatted = gregorianYear + "-" + serialPadded;
+
+  return {
+    year: String(gregorianYear),
+    serial: serialPadded,
+    kind: kind,
+    numFormatted: numFormatted,
+    docdbFormat: "JP," + numFormatted + (kind ? "," + kind : ",A"),
+  };
+}
+
+function jplatpatDocUrl(patentNo) {
+  const parsed = parseJPPatentNo(patentNo);
+  if (!parsed) return "https://www.j-platpat.inpit.go.jp/p0000";
+  const kind = parsed.kind.toUpperCase();
+  let docType;
+  if (kind.startsWith("B") || kind.startsWith("C")) {
+    docType = "PB";
+  } else {
+    docType = "PU";
+  }
+  const jpNum = "JP-" + parsed.numFormatted;
+  return "https://www.j-platpat.inpit.go.jp/c1801/" + docType + "/" + encodeURIComponent(jpNum) + "/01/ja";
+}
+
+function patentLinkButtons(patentNo) {
+  let btns = '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(patentNo) + '\', \'Google Patents: ' + escapeHtml(patentNo) + '\')" title="在应用内打开 Google Patents">GP</button>';
+  if (isJPPatent(patentNo)) {
+    const jpUrl = jplatpatDocUrl(patentNo);
+    btns += '<button class="pd-gp-link" onclick="openInAppWebview(\'' + jpUrl + '\', \'J-PlatPat: ' + escapeHtml(patentNo) + '\')" title="在 J-PlatPat（日本专利局）查看" style="background:#e74c3c;color:#fff;border-color:#c0392b;font-size:10px;padding:1px 5px;">JP</button>';
+  }
+  return btns;
+}
+
 // EPO OPS 配置读取（从 AI 配置中获取 ops 字段）
 function getOpsSettings() {
   const config = window.AI.loadAIConfig();
@@ -510,6 +571,20 @@ async function searchPatentDetail(input) {
 
   const raw = input.trim().toUpperCase().replace(/[\s\/]/g, "");
   if (!raw) { showError("请输入专利号"); return; }
+
+  // JP专利: 直接打开J-PlatPat
+  if (isJPPatent(raw)) {
+    searchBtn.disabled = false;
+    loading.classList.add("hidden");
+    if (patentInput) patentInput.value = raw;
+    const jpUrl = jplatpatDocUrl(raw);
+    const parsed = parseJPPatentNo(raw);
+    const title = "J-PlatPat: " + raw + (parsed ? " (" + parsed.docdbFormat + ")" : "");
+    openInAppWebview(jpUrl, title);
+    PatentCache.addPatentHistory(raw, { title: "J-PlatPat: " + (parsed ? parsed.docdbFormat : raw) });
+    refreshHistoryList();
+    return;
+  }
 
   // 审查文档模式下的缓存恢复（专利原文模式不应恢复 kanbanState 缓存，否则拦截了 GP 查询）
   const cachedEntry = PatentCache.get(raw);
@@ -11567,6 +11642,14 @@ function _closePdTab(pn) {
 function _openPdPatent(pn) {
   const raw = pn.trim().toUpperCase().replace(/[\s\/]/g, "");
   if (!raw) return;
+
+  if (isJPPatent(raw)) {
+    if (patentInput) patentInput.value = raw;
+    openInAppWebview(jplatpatDocUrl(raw), "J-PlatPat: " + raw);
+    PatentCache.addPatentHistory(raw, { title: "J-PlatPat: " + (parseJPPatentNo(raw)?.docdbFormat || raw) });
+    refreshHistoryList();
+    return;
+  }
 
   clearPrefetchCache();
 
