@@ -385,8 +385,29 @@
         "      var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;",
         "      setter.call(el, val);",
         "    } catch(e) { el.value = val; }",
-        "    el.dispatchEvent(new Event('input', { bubbles: true }));",
-        "    el.dispatchEvent(new Event('change', { bubbles: true }));",
+        "    try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch(e) {}",
+        "    try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}",
+        "  }",
+        "  // Angular/React friendly value setter that simulates real user typing",
+        "  function setInputValueRobust(el, val) {",
+        "    try { el.focus(); } catch(e) {}",
+        "    try { el.select(); } catch(e) {}",
+        "    // Clear existing value",
+        "    nativeSetValue(el, '');",
+        "    // Set the new value using native setter",
+        "    try {",
+        "      var proto = el.tagName.toLowerCase() === 'textarea' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;",
+        "      var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;",
+        "      setter.call(el, val);",
+        "    } catch(e) { el.value = val; }",
+        "    // Dispatch events Angular/React listen for",
+        "    try {",
+        "      el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: val }));",
+        "    } catch(e) {",
+        "      try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch(e2) {}",
+        "    }",
+        "    try { el.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', bubbles: true })); } catch(e) {}",
+        "    try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}",
         "  }",
         "",
         "  // Collect all interesting elements using TreeWalker (efficient)",
@@ -547,65 +568,116 @@
         "    return actions;",
         "  }",
         "",
-        "  // Auto-fill search number if provided (for J-PlatPat s0100 page)",
+        "  // Auto-fill search number if provided (for J-PlatPat s0100/p0000 pages)",
         "  function tryAutoFill(searchNum) {",
         "    if (!searchNum) return { filled: false };",
         "    var attempts = 0;",
-        "    function tryNow() {",
-        "      attempts++;",
-        "      if (attempts > 20) return;",
+        "    var MAX_ATTEMPTS = 30;",
+        "    function findSearchInput() {",
         "      var inputs = document.querySelectorAll('input[type=\"text\"], input:not([type]), input[type=\"search\"]');",
-        "      var searchInput = null;",
-        "      // Priority 1: semantic keywords",
+        "      // Priority 1: search input by name/id/placeholder semantic match",
         "      for (var i = 0; i < inputs.length; i++) {",
         "        var inp = inputs[i];",
         "        if (inp.offsetParent === null) continue;",
         "        var ph = (inp.placeholder || '').toLowerCase();",
         "        var idn = (inp.id || '').toLowerCase();",
+        "        var nm = (inp.name || '').toLowerCase();",
         "        var cls = (inp.className || '').toLowerCase();",
         "        var ariaLabel = (inp.getAttribute('aria-label') || '').toLowerCase();",
-        "        if (ph.indexOf('検索') !== -1 || ph.indexOf('番号') !== -1 || ph.indexOf('特許') !== -1 || idn.indexOf('search') !== -1 || cls.indexOf('search') !== -1 || ariaLabel.indexOf('検索') !== -1) { searchInput = inp; break; }",
+        "        // On J-PlatPat s0100, the search input for patent numbers often has id/name containing 'sQuery' or placeholder with 番号/例",
+        "        if (ph.indexOf('番号') !== -1 || ph.indexOf('例') !== -1 && /\\d/.test(inp.placeholder || '')) return inp;",
+        "        if (idn.indexOf('squery') !== -1 || nm.indexOf('squery') !== -1 || idn.indexOf('search') !== -1 || cls.indexOf('search') !== -1) return inp;",
         "      }",
-        "      // Priority 2: placeholder with example marker",
-        "      if (!searchInput) {",
-        "        for (var i2 = 0; i2 < inputs.length; i2++) {",
-        "          if (inputs[i2].offsetParent === null) continue;",
-        "          var ph2 = inputs[i2].placeholder || '';",
-        "          if (ph2.indexOf('例') !== -1 && /\\d/.test(ph2)) { searchInput = inputs[i2]; break; }",
-        "        }",
+        "      // Priority 2: visible inputs with placeholder containing 検索",
+        "      for (var i2 = 0; i2 < inputs.length; i2++) {",
+        "        if (inputs[i2].offsetParent === null) continue;",
+        "        var ph2 = (inputs[i2].placeholder || '').toLowerCase();",
+        "        if (ph2.indexOf('検索') !== -1 || ph2.indexOf('特許') !== -1) return inputs[i2];",
         "      }",
-        "      // Priority 3: widest visible text input",
-        "      if (!searchInput) {",
-        "        var best = null, bestW = 0;",
-        "        for (var i3 = 0; i3 < inputs.length; i3++) {",
-        "          var inp3 = inputs[i3];",
-        "          if (inp3.offsetParent !== null && inp3.offsetWidth > bestW && inp3.offsetWidth > 100) { best = inp3; bestW = inp3.offsetWidth; }",
-        "        }",
-        "        searchInput = best;",
+        "      // Priority 3: widest visible text input that is in the upper portion of the page (search is usually at top)",
+        "      var best = null, bestScore = 0;",
+        "      for (var i3 = 0; i3 < inputs.length; i3++) {",
+        "        var inp3 = inputs[i3];",
+        "        if (inp3.offsetParent === null) continue;",
+        "        var rect = inp3.getBoundingClientRect();",
+        "        if (rect.width < 100 || rect.top > window.innerHeight * 0.5) continue;",
+        "        var score = rect.width - Math.abs(rect.top - 100);",
+        "        if (score > bestScore) { bestScore = score; best = inp3; }",
         "      }",
-        "      if (!searchInput) { setTimeout(tryNow, 500); return; }",
-        "      nativeSetValue(searchInput, searchNum);",
-        "      setTimeout(function() {",
-        "        var btns = document.querySelectorAll('button, input[type=\"submit\"], a[role=\"button\"], a');",
-        "        var clicked = false;",
-        "        for (var j = 0; j < btns.length; j++) {",
-        "          var btn = btns[j];",
-        "          if (btn.offsetParent !== null) {",
-        "            var txt = (btn.textContent || btn.value || '').trim();",
-        "            if (txt === '検索' || txt.indexOf('検索') === 0) { btn.click(); clicked = true; break; }",
-        "          }",
-        "        }",
-        "        if (!clicked) {",
-        "          var form = searchInput.closest ? searchInput.closest('form') : null;",
-        "          if (form) { form.submit(); }",
-        "          else {",
-        "            searchInput.focus();",
-        "            searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));",
-        "          }",
-        "        }",
-        "      }, 500);",
+        "      return best;",
         "    }",
-        "    setTimeout(tryNow, 800);",
+        "    function findSearchButton(searchInput) {",
+        "      // Look in the same form/container as the input for a search button",
+        "      var container = searchInput;",
+        "      for (var p = 0; p < 5 && container; p++) {",
+        "        container = container.parentElement;",
+        "        if (!container) break;",
+        "        var btns = container.querySelectorAll('button, input[type=\"submit\"], a[role=\"button\"]');",
+        "        for (var b = 0; b < btns.length; b++) {",
+        "          var btn = btns[b];",
+        "          if (btn.offsetParent === null) continue;",
+        "          var txt = (btn.textContent || btn.value || '').trim();",
+        "          if (txt === '検索' || txt.indexOf('検索') === 0) return btn;",
+        "        }",
+        "      }",
+        "      // Fallback: any visible search button on page",
+        "      var allBtns = document.querySelectorAll('button, input[type=\"submit\"]');",
+        "      for (var b2 = 0; b2 < allBtns.length; b2++) {",
+        "        var btn2 = allBtns[b2];",
+        "        if (btn2.offsetParent === null) continue;",
+        "        var txt2 = (btn2.textContent || btn2.value || '').trim();",
+        "        if (txt2 === '検索' || txt2 === 'Search') return btn2;",
+        "      }",
+        "      return null;",
+        "    }",
+        "    function doSearch(searchInput) {",
+        "      var btn = findSearchButton(searchInput);",
+        "      if (btn) {",
+        "        try { btn.click(); return true; } catch(e) {}",
+        "      }",
+        "      // Try form submit",
+        "      try {",
+        "        var form = searchInput.closest ? searchInput.closest('form') : null;",
+        "        if (form) { form.submit(); return true; }",
+        "      } catch(e) {}",
+        "      // Try Enter key",
+        "      try {",
+        "        searchInput.focus();",
+        "        searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));",
+        "        searchInput.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));",
+        "        searchInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, which: 13, bubbles: true }));",
+        "        return true;",
+        "      } catch(e) { return false; }",
+        "    }",
+        "    function tryNow() {",
+        "      attempts++;",
+        "      if (attempts > MAX_ATTEMPTS) return;",
+        "      try {",
+        "        var searchInput = findSearchInput();",
+        "        if (!searchInput) { setTimeout(tryNow, 400); return; }",
+        "        // Check if already filled correctly",
+        "        if (searchInput.value === searchNum) {",
+        "          // Already filled, trigger search if still on search input page (not yet on results/detail)",
+        "          var path = location.pathname;",
+        "          if (path.indexOf('/s0300') === -1 && path.indexOf('/c0') === -1 && path.indexOf('/c1') === -1) {",
+        "            setTimeout(function() { doSearch(searchInput); }, 300);",
+        "          }",
+        "          return;",
+        "        }",
+        "        setInputValueRobust(searchInput, searchNum);",
+        "        // Verify value stuck; if not, retry",
+        "        setTimeout(function() {",
+        "          if (searchInput.value !== searchNum) {",
+        "            // Value didn't stick - try again",
+        "            setTimeout(tryNow, 300);",
+        "            return;",
+        "          }",
+        "          // Value is set, trigger search",
+        "          setTimeout(function() { doSearch(searchInput); }, 400);",
+        "        }, 200);",
+        "      } catch(e) { setTimeout(tryNow, 500); }",
+        "    }",
+        "    setTimeout(tryNow, 500);",
         "    return { filled: true };",
         "  }",
         "",
@@ -940,12 +1012,39 @@
           wv.addEventListener("new-window", function (e) {
             if (e && e.url) {
               e.preventDefault();
+              var newUrl = e.url;
+              // Block non-http URLs (javascript:, mailto:, blob:, etc.)
+              if (newUrl.indexOf("http") !== 0) return;
+              // J-PlatPat PDF downloads: open in external browser
+              if (newUrl.indexOf(".pdf") !== -1 || newUrl.toLowerCase().indexOf("pdf") !== -1) {
+                if (window.electronAPI && window.electronAPI.openExternal) {
+                  window.electronAPI.openExternal(newUrl);
+                } else {
+                  window.open(newUrl, "_blank");
+                }
+                return;
+              }
+              // J-PlatPat help/small popup windows (often have 'help' or specific features): open externally
+              // Navigate within same webview if same host; otherwise open as new popout
+              try {
+                var newHost = new URL(newUrl).hostname;
+                var curHost = location.hostname;
+                if (newHost && newHost === curHost && newUrl.indexOf("help") === -1 && newUrl.indexOf("faq") === -1) {
+                  // Same-domain content page: load in same webview instead of opening new window
+                  wv.loadURL(newUrl);
+                  return;
+                }
+              } catch(uE) {}
+              // External domain: open as new popout window (with toolbar)
               if (window.electronAPI && typeof window.electronAPI.openPopoutWindow === "function") {
-                window.electronAPI.openPopoutWindow(e.url, "专利原文查看");
+                window.electronAPI.openPopoutWindow(newUrl, "专利原文查看");
+              } else {
+                window.open(newUrl, "_blank");
               }
             }
           });
           container.appendChild(wv);
+          setupWebviewContextMenu();
 
           timeoutTimer = setTimeout(function () {
             if (!_loaded && !_failed) {
@@ -1055,6 +1154,128 @@
           window.open(currentUrl, "_blank");
         }
       });
+
+      // ========== Right-click selection translation menu (for webview) ==========
+      var ctxMenuEl = document.createElement("div");
+      ctxMenuEl.id = "po-ctx-menu";
+      ctxMenuEl.style.cssText = "display:none;position:fixed;z-index:99999;background:#fff;border:1px solid #d0d7de;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:4px 0;min-width:160px;font-size:13px;";
+      document.body.appendChild(ctxMenuEl);
+      var ctxSelection = "";
+      var ctxSelectionRect = null;
+      function hideCtxMenu() { ctxMenuEl.style.display = "none"; ctxSelection = ""; }
+      document.addEventListener("click", hideCtxMenu);
+      document.addEventListener("scroll", hideCtxMenu, true);
+      function addCtxItem(label, onClick) {
+        var it = document.createElement("div");
+        it.textContent = label;
+        it.style.cssText = "padding:6px 14px;cursor:pointer;color:#24292f;";
+        it.onmouseenter = function() { it.style.background = "#f3f4f6"; };
+        it.onmouseleave = function() { it.style.background = ""; };
+        it.onclick = function(e) { e.stopPropagation(); hideCtxMenu(); try { onClick(); } catch(err) {} };
+        ctxMenuEl.appendChild(it);
+        return it;
+      }
+      var ctxTranslateItem = addCtxItem("🔤 翻译选中文本", function() {
+        if (!ctxSelection) return;
+        var url = "https://translate.google.com/?sl=auto&tl=zh-CN&text=" + encodeURIComponent(ctxSelection) + "&op=translate";
+        if (window.electronAPI && window.electronAPI.openExternal) {
+          window.electronAPI.openExternal(url);
+        } else {
+          window.open(url, "_blank");
+        }
+        // Also inject Google Translate inline popup on the page if possible
+        try {
+          showFloatingTranslation(ctxSelection);
+        } catch(e) {}
+      });
+      var ctxCopyItem = addCtxItem("📋 复制选中文本", function() {
+        if (ctxSelection) {
+          try { navigator.clipboard.writeText(ctxSelection); } catch(e) {
+            var ta = document.createElement("textarea");
+            ta.value = ctxSelection; document.body.appendChild(ta); ta.select();
+            document.execCommand("copy"); document.body.removeChild(ta);
+          }
+        }
+      });
+      var ctxSearchItem = addCtxItem("🔎 在主应用中查找", function() {
+        if (ctxSelection) {
+          var url = window.location.origin + window.location.pathname + "#q=" + encodeURIComponent(ctxSelection);
+          if (window.electronAPI && window.electronAPI.openExternal) {
+            window.electronAPI.openExternal(url);
+          }
+        }
+      });
+      addCtxItem("🌐 打开Google翻译页", function() {
+        if (ctxSelection) {
+          window.electronAPI && window.electronAPI.openExternal && window.electronAPI.openExternal("https://translate.google.com/?sl=auto&tl=zh-CN&text=" + encodeURIComponent(ctxSelection) + "&op=translate");
+        }
+      });
+
+      // Floating translation bubble inside webview
+      function showFloatingTranslation(text) {
+        if (!isElectron || !wv) return;
+        // Inject a translation bar into the webview page via Google Translate element
+        var script = [
+          "(function(){",
+          "  if (document.getElementById('__pt_trans_bar')) return;",
+          "  var bar = document.createElement('div');",
+          "  bar.id = '__pt_trans_bar';",
+          "  bar.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;background:#fff;border:1px solid #d0d7de;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.18);padding:10px 14px;max-width:360px;font-size:13px;font-family:sans-serif;';",
+          "  bar.innerHTML = '<div style=\"display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;\"><b>选中文本翻译</b><span id=\"__pt_trans_close\" style=\"cursor:pointer;color:#888;font-size:16px;\">×</span></div><div id=\"__pt_trans_src\" style=\"color:#57606a;margin-bottom:6px;border-bottom:1px solid #eaecef;padding-bottom:6px;white-space:pre-wrap;word-break:break-word;\"></div><div id=\"__pt_trans_dst\" style=\"color:#24292f;white-space:pre-wrap;word-break:break-word;\">正在翻译...</div>';",
+          "  document.body.appendChild(bar);",
+          "  document.getElementById('__pt_trans_close').onclick = function(){ bar.remove(); };",
+          "  document.getElementById('__pt_trans_src').textContent = " + JSON.stringify(text) + ";",
+          "  // Use Google Translate free API",
+          "  var src = encodeURIComponent(" + JSON.stringify(text) + ");",
+          "  fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=' + src)",
+          "    .then(function(r){ return r.json(); })",
+          "    .then(function(d){",
+          "      var dst = '';",
+          "      try { for (var i=0;i<d[0].length;i++) dst += d[0][i][0]; } catch(e) {}",
+          "      document.getElementById('__pt_trans_dst').textContent = dst || '(翻译失败)';",
+          "    })",
+          "    .catch(function(){ document.getElementById('__pt_trans_dst').textContent = '(网络错误，可使用右键菜单中Google翻译)'; });",
+          "})();"
+        ].join("");
+        try { wv.executeJavaScript(script); } catch(e) {}
+      }
+
+      // Listen for contextmenu events inside webview
+      function setupWebviewContextMenu() {
+        if (!wv) return;
+        // The webview 'contextmenu' event fires with screen coords in e.params
+        wv.addEventListener("contextmenu", function(e) {
+          try {
+            var getSelScript = "(function(){var s=window.getSelection();var t=s?s.toString():'';var r=null;try{if(s&&s.rangeCount>0){var rr=s.getRangeAt(0).getBoundingClientRect();r={x:rr.left,y:rr.top,w:rr.width,h:rr.height};}}catch(e){}return{text:t,rect:r};})();";
+            var handleSel = function(result) {
+              if (result && result.text && result.text.trim()) {
+                ctxSelection = result.text.trim();
+                // Convert screen coords to window-relative coords
+                var sx = (e.params && typeof e.params.x === 'number') ? e.params.x : 0;
+                var sy = (e.params && typeof e.params.y === 'number') ? e.params.y : 0;
+                var px = sx - window.screenX;
+                var py = sy - window.screenY;
+                var vw = window.innerWidth, vh = window.innerHeight;
+                px = Math.min(Math.max(px, 5), vw - 200);
+                py = Math.min(Math.max(py, 5), vh - 160);
+                ctxMenuEl.style.left = px + "px";
+                ctxMenuEl.style.top = py + "px";
+                ctxMenuEl.style.display = "block";
+                e.preventDefault();
+              } else {
+                hideCtxMenu();
+              }
+            };
+            // executeJavaScript returns a Promise in modern Electron; callback form in older
+            var p = wv.executeJavaScript(getSelScript);
+            if (p && typeof p.then === 'function') {
+              p.then(handleSel).catch(function(){ hideCtxMenu(); });
+            }
+          } catch(err) { hideCtxMenu(); }
+        });
+        wv.addEventListener("did-navigate", hideCtxMenu);
+        wv.addEventListener("did-navigate-in-page", hideCtxMenu);
+      }
 
       if (targetUrl) embed(); else showFallback();
     })();
