@@ -392,11 +392,15 @@
         "  // Collect all interesting elements using TreeWalker (efficient)",
         "  function collectElements() {",
         "    var SKIP_TAGS = {SCRIPT:1, STYLE:1, NOSCRIPT:1, TEMPLATE:1, HEAD:1, META:1, LINK:1, TITLE:1, SVG:1, PATH:1};",
-        "    var walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_ELEMENT, {",
+        "    var root = document.body || document.documentElement;",
+        "    if (!root) return { interactive: [], pdfLinks: [] };",
+        "    var walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {",
         "      acceptNode: function(n) {",
-        "        if (SKIP_TAGS[n.tagName]) return NodeFilter.FILTER_REJECT;",
-        "        if (n.closest && n.closest('.po-probe-ignore')) return NodeFilter.FILTER_REJECT;",
-        "        return isInteractive(n) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;",
+        "        try {",
+        "          if (SKIP_TAGS[n.tagName]) return NodeFilter.FILTER_REJECT;",
+        "          if (n.closest && n.closest('.po-probe-ignore')) return NodeFilter.FILTER_REJECT;",
+        "        } catch(nf) { return NodeFilter.FILTER_SKIP; }",
+        "        try { return isInteractive(n) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP; } catch(iv) { return NodeFilter.FILTER_SKIP; }",
         "      }",
         "    });",
         "    var elements = [];",
@@ -415,10 +419,9 @@
         "      if (tag === 'a') rec.href = n.href || '';",
         "      rec.role = attr(n, 'role');",
         "      rec.title = attr(n, 'title');",
-        "      rec.w = Math.round(n.getBoundingClientRect().width);",
-        "      rec.h = Math.round(n.getBoundingClientRect().height);",
+        "      try { rec.w = Math.round(n.getBoundingClientRect().width); rec.h = Math.round(n.getBoundingClientRect().height); } catch(re) { rec.w = 0; rec.h = 0; }",
         "      // Data attribute reference for clicking (stashed on element)",
-        "      if (!n.__probeIdx) n.__probeIdx = rec.i;",
+        "      try { if (!n.__probeIdx) n.__probeIdx = rec.i; } catch(ie) {} ",
         "      elements.push(rec);",
         "    }",
         "    // Also collect all links even if invisible-ish (for PDF detection)",
@@ -488,13 +491,8 @@
         "    var jpMatch = bodyText.match(/特許番号[^\\d]{0,10}(\\d{4}[\\-]?\\d{6})/);",
         "    if (jpMatch) meta.jpNumber = jpMatch[1];",
         "    // Look for title (common J-PlatPat pattern: 発明の名称)",
-        "    var titleEl = document.querySelector('[class*=\"title\"], [id*=\"title\"], th:contains(\"発明の名称\") + td, th:contains(\"Title\") + td');",
-        "    if (titleEl) meta.title = textOf(titleEl, 200);",
-        "    // Try h1/h2/h3",
-        "    if (!meta.title) {",
-        "      var h = document.querySelector('h1, h2, h3');",
-        "      if (h && isVisible(h)) meta.title = textOf(h, 200);",
-        "    }",
+        "    var titleEl = document.querySelector('[class*=\"title\"], [id*=\"title\"], h1, h2, h3');",
+        "    if (titleEl && isVisible(titleEl)) meta.title = textOf(titleEl, 200);",
         "    return meta;",
         "  }",
         "",
@@ -632,14 +630,21 @@
         "  window.__probeOpenHref = function(href) { window.open(href, '_blank'); };",
         "",
         "  // Run analysis",
-        "  if (autoFillNum) tryAutoFill(autoFillNum);",
-        "  var collected = collectElements();",
-        "  // Check for 経過 info markers",
-        "  collected._hasKeika = !!(document.querySelector('a[href*=\"keika\"], [class*=\"keika\"], [id*=\"keika\"]') || document.body.innerText.indexOf('経過情報') !== -1);",
-        "  var pageInfo = classifyPage(location.href, collected);",
-        "  var meta = extractMetadata(collected, pageInfo);",
-          "  var actions = buildActions(collected, pageInfo, meta);",
-          "  return { pageInfo: pageInfo, meta: meta, actions: actions, url: location.href, interactiveCount: collected.interactive.length, pdfCount: collected.pdfLinks.length };",
+        "  try {",
+        "    if (autoFillNum) tryAutoFill(autoFillNum);",
+        "    var collected = collectElements();",
+        "    // Check for 経過 info markers",
+        "    try {",
+        "      collected._hasKeika = !!(document.body && document.body.innerText && document.body.innerText.indexOf('経過情報') !== -1);",
+        "      if (!collected._hasKeika) collected._hasKeika = !!document.querySelector('a[href*=\"keika\"], [class*=\"keika\"], [id*=\"keika\"]');",
+        "    } catch(ke) { collected._hasKeika = false; }",
+        "    var pageInfo = classifyPage(location.href, collected);",
+        "    var meta = extractMetadata(collected, pageInfo);",
+        "    var actions = buildActions(collected, pageInfo, meta);",
+        "    return { pageInfo: pageInfo, meta: meta, actions: actions, url: location.href, interactiveCount: collected.interactive.length, pdfCount: collected.pdfLinks.length };",
+        "  } catch(runErr) {",
+        "    return { __error: (runErr && runErr.message) ? runErr.message : String(runErr), url: location.href, pageInfo: { pageType: 'error', label: 'Probe Error' }, meta: {}, actions: [] };",
+        "  }",
           "})(" + optsJson + ");"
         ].join("\n");
       }
@@ -656,10 +661,14 @@
         if (!result || !result.pageInfo) { hideSmartBar(); return; }
         var pi = result.pageInfo;
         var actions = result.actions || [];
-        // Only show bar if we have meaningful page type or actions
+        // Show bar on J-PlatPat domain even without concrete actions so user knows it's working
+        var onJp = (result.url || "").indexOf("j-platpat") !== -1 || (pi.host && pi.host.indexOf("j-platpat") !== -1);
         var isKnownPage = pi.pageType && pi.pageType !== 'unknown';
         var hasActions = actions && actions.some(function(a) { return !a.passive; });
-        if (!isKnownPage && !hasActions) { hideSmartBar(); return; }
+        if (!isKnownPage && !hasActions && !onJp && pi.pageType !== 'error') { hideSmartBar(); return; }
+        if (result.__error) {
+          actions = actions.concat([{ type: 'info', label: '⚠️ ' + result.__error.substring(0, 80), passive: true }]);
+        }
 
         smartLabel.textContent = pi.label || "🤖 智能识别";
         var infoParts = [];
@@ -713,19 +722,33 @@
         }
       }
       function runDomProbe(opts) {
-        if (!isElectron || !wv || !wv.executeJavaScript) return;
-        var delay = (opts && opts.delay) || 800;
+        if (!isElectron || !wv) return;
+        var delay = (opts && opts.delay) != null ? (opts && opts.delay) : 800;
         var fillNum = (opts && opts.autoFillNum) || "";
-        setTimeout(function() {
+        function doExec() {
           try {
             var script = buildProbeScript({ autoFillNum: fillNum });
-            wv.executeJavaScript(script).then(function(result) {
-              if (result) renderSmartBar(result);
-            }).catch(function(e) {
-              console.warn("[popout] probe failed:", e);
-            });
+            if (typeof wv.executeJavaScript !== "function") { console.warn("[popout] executeJavaScript not available"); return; }
+            var prom;
+            try { prom = wv.executeJavaScript(script); } catch(syncE) { prom = null; console.warn("[popout] exec sync err:", syncE); }
+            if (prom && typeof prom.then === "function") {
+              prom.then(function(result) {
+                if (result) renderSmartBar(result);
+                else console.warn("[popout] probe returned null/undefined");
+              }).catch(function(e) {
+                console.warn("[popout] probe failed:", e);
+                renderSmartBar({ pageInfo: { pageType: "jplatpat_other", label: "J-PlatPat" }, meta: {}, actions: [] });
+              });
+            } else {
+              try {
+                wv.executeJavaScript(script, function(result) {
+                  if (result) renderSmartBar(result);
+                });
+              } catch(cbE) { console.warn("[popout] cb exec err:", cbE); }
+            }
           } catch(e) { console.warn("[popout] probe error:", e); }
-        }, delay);
+        }
+        if (delay > 0) setTimeout(doExec, delay); else doExec();
       }
 
       // Keyboard shortcuts
@@ -877,7 +900,9 @@
               fillNum = jplatpatSearchNum;
               jplatpatSearchNum = "";
             }
-            runDomProbe({ autoFillNum: fillNum, delay: 1000 });
+            runDomProbe({ autoFillNum: fillNum, delay: 800 });
+            // Second probe for Angular/SPA pages that render after load
+            setTimeout(function() { runDomProbe({ delay: 0 }); }, 3500);
           });
           wv.addEventListener("did-finish-load", function() {
             _loaded = true;

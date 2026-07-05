@@ -203,9 +203,13 @@ function jplatpatSimpleSearchUrl() {
 }
 
 function jplatpatSearchNumber(patentNo) {
-  const parsed = parseJPPatentNo(patentNo);
-  if (!parsed) return "";
-  return parsed.year + parsed.serial;
+  const raw = (patentNo || "").trim().toUpperCase().replace(/[\s\/-]/g, "");
+  const m = raw.match(/^JP(\d+)[A-Z]?\d*$/);
+  if (!m) {
+    const m2 = raw.match(/^JP(\d+)/);
+    return m2 ? m2[1] : "";
+  }
+  return m[1];
 }
 
 function openJPlatPat(patentNo, title) {
