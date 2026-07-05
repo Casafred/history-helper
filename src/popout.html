@@ -568,116 +568,251 @@
         "    return actions;",
         "  }",
         "",
-        "  // Auto-fill search number if provided (for J-PlatPat s0100/p0000 pages)",
+        "  // Auto-fill search number if provided (for J-PlatPat pages)",
         "  function tryAutoFill(searchNum) {",
         "    if (!searchNum) return { filled: false };",
         "    var attempts = 0;",
-        "    var MAX_ATTEMPTS = 30;",
+        "    var MAX_ATTEMPTS = 50;",
+        "    var guardTimer = null;",
+        "    var GUARD_DURATION = 8000; // protect the value for 8s after setting",
+        "    var searchTriggered = false;",
+        "    var guardedInput = null;",
+        "    ",
+        "    // Framework-aware value setter: works for Angular, React, Vue, jQuery",
+        "    function setFrameworkValue(el, val) {",
+        "      // Strategy 1: focus + select + native setter + full event chain",
+        "      try { el.focus(); } catch(e) {}",
+        "      try { el.select && el.select(); } catch(e) {}",
+        "      // Clear first",
+        "      try {",
+        "        var proto = el.tagName.toLowerCase() === 'textarea' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;",
+        "        var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;",
+        "        setter.call(el, '');",
+        "        el.dispatchEvent(new Event('input', { bubbles: true }));",
+        "      } catch(e) {}",
+        "      // Now set the value using native descriptor",
+        "      var valueSet = false;",
+        "      try {",
+        "        var proto2 = el.tagName.toLowerCase() === 'textarea' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;",
+        "        var setter2 = Object.getOwnPropertyDescriptor(proto2, 'value').set;",
+        "        setter2.call(el, val);",
+        "        valueSet = true;",
+        "      } catch(e) { el.value = val; valueSet = true; }",
+        "      // Dispatch events in order Angular expects: keydown(type char) -> input -> keyup -> change",
+        "      try { el.dispatchEvent(new KeyboardEvent('keydown', { key: val.charAt(0), code: 'Key' + val.charAt(0).toUpperCase(), bubbles: true, cancelable: true })); } catch(e) {}",
+        "      try {",
+        "        var ie = new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: val, isComposing: false });",
+        "        el.dispatchEvent(ie);",
+        "      } catch(e) {",
+        "        try { el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true })); } catch(e2) {}",
+        "      }",
+        "      try { el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true })); } catch(e) {}",
+        "      try { el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true })); } catch(e) {}",
+        "      // Trigger Angular ngModel two-way binding: dispatch 'blur' after small delay to commit",
+        "      setTimeout(function() {",
+        "        try { el.dispatchEvent(new Event('blur', { bubbles: true })); } catch(e) {}",
+        "        try { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); } catch(e) {}",
+        "      }, 100);",
+        "      return valueSet;",
+        "    }",
+        "    ",
+        "    // Set up a value guard: if Angular clears the input after we set it, re-set it",
+        "    function guardValue(el, expectedVal) {",
+        "      guardedInput = el;",
+        "      if (guardTimer) clearInterval(guardTimer);",
+        "      var startTime = Date.now();",
+        "      var reapplyCount = 0;",
+        "      guardTimer = setInterval(function() {",
+        "        if (Date.now() - startTime > GUARD_DURATION) { clearInterval(guardTimer); guardTimer = null; return; }",
+        "        try {",
+        "          if (el && el.offsetParent === null) return; // element no longer visible",
+        "          if (el.value !== expectedVal) {",
+        "            reapplyCount++;",
+        "            if (reapplyCount > 20) { clearInterval(guardTimer); guardTimer = null; return; }",
+        "            // Re-apply value without triggering too many events",
+        "            try {",
+        "              var proto = el.tagName.toLowerCase() === 'textarea' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;",
+        "              Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, expectedVal);",
+        "            } catch(e) { el.value = expectedVal; }",
+        "            try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch(e) {}",
+        "            // After re-applying, try search again if not already triggered",
+        "            if (!searchTriggered) {",
+        "              setTimeout(function() { triggerSearch(el); }, 200);",
+        "            }",
+        "          }",
+        "        } catch(e) {}",
+        "      }, 150);",
+        "    }",
+        "    ",
         "    function findSearchInput() {",
         "      var inputs = document.querySelectorAll('input[type=\"text\"], input:not([type]), input[type=\"search\"]');",
-        "      // Priority 1: search input by name/id/placeholder semantic match",
+        "      // Priority 1: explicit search/patent-number input by attributes",
         "      for (var i = 0; i < inputs.length; i++) {",
         "        var inp = inputs[i];",
         "        if (inp.offsetParent === null) continue;",
+        "        if (inp.disabled || inp.readOnly) continue;",
         "        var ph = (inp.placeholder || '').toLowerCase();",
         "        var idn = (inp.id || '').toLowerCase();",
         "        var nm = (inp.name || '').toLowerCase();",
         "        var cls = (inp.className || '').toLowerCase();",
         "        var ariaLabel = (inp.getAttribute('aria-label') || '').toLowerCase();",
-        "        // On J-PlatPat s0100, the search input for patent numbers often has id/name containing 'sQuery' or placeholder with 番号/例",
-        "        if (ph.indexOf('番号') !== -1 || ph.indexOf('例') !== -1 && /\\d/.test(inp.placeholder || '')) return inp;",
-        "        if (idn.indexOf('squery') !== -1 || nm.indexOf('squery') !== -1 || idn.indexOf('search') !== -1 || cls.indexOf('search') !== -1) return inp;",
+        "        var dataBind = (inp.getAttribute('ng-reflect-name') || inp.getAttribute('ng-reflect-model') || inp.getAttribute('formcontrolname') || '').toLowerCase();",
+        "        // Matches for J-PlatPat: placeholder with 番号/例/特許, name/id with sQuery/query",
+        "        if (ph.indexOf('番号') !== -1) return inp;",
+        "        if (ph.indexOf('例') !== -1 && /\\d/.test(inp.placeholder || '')) return inp;",
+        "        if (dataBind.indexOf('query') !== -1 || dataBind.indexOf('squery') !== -1 || dataBind.indexOf('search') !== -1) return inp;",
+        "        if (idn.indexOf('squery') !== -1 || nm.indexOf('squery') !== -1) return inp;",
+        "        if (idn === 'query' || nm === 'query') return inp;",
         "      }",
-        "      // Priority 2: visible inputs with placeholder containing 検索",
+        "      // Priority 2: placeholder containing 検索 keyword",
         "      for (var i2 = 0; i2 < inputs.length; i2++) {",
-        "        if (inputs[i2].offsetParent === null) continue;",
-        "        var ph2 = (inputs[i2].placeholder || '').toLowerCase();",
-        "        if (ph2.indexOf('検索') !== -1 || ph2.indexOf('特許') !== -1) return inputs[i2];",
+        "        var inp2 = inputs[i2];",
+        "        if (inp2.offsetParent === null || inp2.disabled || inp2.readOnly) continue;",
+        "        var ph2 = (inp2.placeholder || '').toLowerCase();",
+        "        if (ph2.indexOf('検索') !== -1 && ph2.indexOf('メニュー') === -1) return inp2;",
+        "        if (ph2.indexOf('特許') !== -1) return inp2;",
         "      }",
-        "      // Priority 3: widest visible text input that is in the upper portion of the page (search is usually at top)",
+        "      // Priority 3: widest visible text input in upper half of page",
         "      var best = null, bestScore = 0;",
         "      for (var i3 = 0; i3 < inputs.length; i3++) {",
         "        var inp3 = inputs[i3];",
-        "        if (inp3.offsetParent === null) continue;",
+        "        if (inp3.offsetParent === null || inp3.disabled || inp3.readOnly) continue;",
         "        var rect = inp3.getBoundingClientRect();",
-        "        if (rect.width < 100 || rect.top > window.innerHeight * 0.5) continue;",
-        "        var score = rect.width - Math.abs(rect.top - 100);",
+        "        if (rect.width < 80 || rect.top > window.innerHeight * 0.6) continue;",
+        "        var score = rect.width - Math.abs(rect.top - 80);",
         "        if (score > bestScore) { bestScore = score; best = inp3; }",
         "      }",
         "      return best;",
         "    }",
         "    function findSearchButton(searchInput) {",
-        "      // Look in the same form/container as the input for a search button",
+        "      // Strategy 1: look in parent form/container",
         "      var container = searchInput;",
-        "      for (var p = 0; p < 5 && container; p++) {",
+        "      for (var p = 0; p < 6 && container; p++) {",
         "        container = container.parentElement;",
         "        if (!container) break;",
-        "        var btns = container.querySelectorAll('button, input[type=\"submit\"], a[role=\"button\"]');",
+        "        var btns = container.querySelectorAll('button, input[type=\"submit\"], a[role=\"button\"], span[role=\"button\"]');",
         "        for (var b = 0; b < btns.length; b++) {",
         "          var btn = btns[b];",
         "          if (btn.offsetParent === null) continue;",
-        "          var txt = (btn.textContent || btn.value || '').trim();",
-        "          if (txt === '検索' || txt.indexOf('検索') === 0) return btn;",
+        "          var txt = ((btn.textContent || btn.value || btn.getAttribute('aria-label') || '')).trim();",
+        "          if (txt === '検索' || txt === '検索する' || txt.indexOf('この条件で検索') !== -1) return btn;",
         "        }",
         "      }",
-        "      // Fallback: any visible search button on page",
-        "      var allBtns = document.querySelectorAll('button, input[type=\"submit\"]');",
+        "      // Strategy 2: any submit-type button in the same form",
+        "      try {",
+        "        var form = searchInput.closest ? searchInput.closest('form') : null;",
+        "        if (form) {",
+        "          var submits = form.querySelectorAll('button[type=\"submit\"], input[type=\"submit\"]');",
+        "          for (var s = 0; s < submits.length; s++) {",
+        "            if (submits[s].offsetParent !== null) return submits[s];",
+        "          }",
+        "          // Search for buttons with 検索 in form even without type=submit",
+        "          var formBtns = form.querySelectorAll('button, input[type=\"button\"]');",
+        "          for (var fb = 0; fb < formBtns.length; fb++) {",
+        "            var ftxt = ((formBtns[fb].textContent || formBtns[fb].value || '')).trim();",
+        "            if (formBtns[fb].offsetParent !== null && ftxt.indexOf('検索') !== -1) return formBtns[fb];",
+        "          }",
+        "        }",
+        "      } catch(e) {}",
+        "      // Strategy 3: visible button with 検索 text in top portion",
+        "      var allBtns = document.querySelectorAll('button, input[type=\"submit\"], a[role=\"button\"]');",
+        "      var btnCandidates = [];",
         "      for (var b2 = 0; b2 < allBtns.length; b2++) {",
         "        var btn2 = allBtns[b2];",
         "        if (btn2.offsetParent === null) continue;",
-        "        var txt2 = (btn2.textContent || btn2.value || '').trim();",
-        "        if (txt2 === '検索' || txt2 === 'Search') return btn2;",
+        "        var txt2 = ((btn2.textContent || btn2.value || '')).trim();",
+        "        if (txt2 === '検索' || txt2 === 'Search') {",
+        "          var r2 = btn2.getBoundingClientRect();",
+        "          btnCandidates.push({ btn: btn2, dist: Math.abs(r2.top - 100) });",
+        "        }",
+        "      }",
+        "      if (btnCandidates.length > 0) {",
+        "        btnCandidates.sort(function(a,b){ return a.dist - b.dist; });",
+        "        return btnCandidates[0].btn;",
         "      }",
         "      return null;",
         "    }",
-        "    function doSearch(searchInput) {",
+        "    function triggerSearch(searchInput) {",
+        "      searchTriggered = true;",
+        "      if (guardTimer) { clearInterval(guardTimer); guardTimer = null; }",
         "      var btn = findSearchButton(searchInput);",
         "      if (btn) {",
         "        try { btn.click(); return true; } catch(e) {}",
+        "        // Try mousedown/mouseup/click sequence",
+        "        try {",
+        "          btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));",
+        "          btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));",
+        "          btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));",
+        "          return true;",
+        "        } catch(e) {}",
         "      }",
-        "      // Try form submit",
+        "      // Try HTMLFormElement.submit() (may skip validation but works for many)",
         "      try {",
-        "        var form = searchInput.closest ? searchInput.closest('form') : null;",
-        "        if (form) { form.submit(); return true; }",
+        "        var form = searchInput.form || (searchInput.closest ? searchInput.closest('form') : null);",
+        "        if (form) {",
+        "          // Fire submit event first to trigger Angular submit handler",
+        "          var submitEvent = new Event('submit', { bubbles: true, cancelable: true });",
+        "          var defaultPrevented = !form.dispatchEvent(submitEvent);",
+        "          if (!defaultPrevented) { form.submit(); }",
+        "          return true;",
+        "        }",
         "      } catch(e) {}",
-        "      // Try Enter key",
+        "      // Try Enter key (full sequence)",
         "      try {",
         "        searchInput.focus();",
-        "        searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));",
-        "        searchInput.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));",
-        "        searchInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, which: 13, bubbles: true }));",
+        "        searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));",
+        "        searchInput.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));",
+        "        searchInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));",
         "        return true;",
         "      } catch(e) { return false; }",
         "    }",
+        "    function isOnResultsPage() {",
+        "      var path = location.pathname;",
+        "      // s0300 = results list; c0/c1 = detail pages",
+        "      if (path.indexOf('/s0300') !== -1) return true;",
+        "      if (path.indexOf('/c0100') !== -1) return true;",
+        "      if (path.indexOf('/c0200') !== -1) return true;",
+        "      return false;",
+        "    }",
         "    function tryNow() {",
         "      attempts++;",
-        "      if (attempts > MAX_ATTEMPTS) return;",
+        "      if (attempts > MAX_ATTEMPTS) {",
+        "        // Even after max attempts, if we have a guarded input still visible, keep guard a bit longer",
+        "        return;",
+        "      }",
         "      try {",
+        "        // If we're already on results/detail page, stop trying",
+        "        if (isOnResultsPage() && searchTriggered) return;",
         "        var searchInput = findSearchInput();",
-        "        if (!searchInput) { setTimeout(tryNow, 400); return; }",
-        "        // Check if already filled correctly",
+        "        if (!searchInput) { setTimeout(tryNow, 300); return; }",
+        "        // Already filled with correct value?",
         "        if (searchInput.value === searchNum) {",
-        "          // Already filled, trigger search if still on search input page (not yet on results/detail)",
-        "          var path = location.pathname;",
-        "          if (path.indexOf('/s0300') === -1 && path.indexOf('/c0') === -1 && path.indexOf('/c1') === -1) {",
-        "            setTimeout(function() { doSearch(searchInput); }, 300);",
+        "          if (!isOnResultsPage() && !searchTriggered) {",
+        "            // Value present but search not triggered yet",
+        "            guardValue(searchInput, searchNum);",
+        "            setTimeout(function() { triggerSearch(searchInput); }, 300);",
         "          }",
         "          return;",
         "        }",
-        "        setInputValueRobust(searchInput, searchNum);",
-        "        // Verify value stuck; if not, retry",
+        "        // Set the value with framework awareness",
+        "        setFrameworkValue(searchInput, searchNum);",
+        "        // Set up guard immediately to prevent clearing",
+        "        guardValue(searchInput, searchNum);",
+        "        // Verify and trigger search after delay for framework to process",
         "        setTimeout(function() {",
-        "          if (searchInput.value !== searchNum) {",
-        "            // Value didn't stick - try again",
-        "            setTimeout(tryNow, 300);",
-        "            return;",
+        "          if (searchInput.value === searchNum) {",
+        "            if (!isOnResultsPage() && !searchTriggered) {",
+        "              setTimeout(function() { triggerSearch(searchInput); }, 300);",
+        "            }",
+        "          } else {",
+        "            // Value didn't stick - schedule retry (guard will also re-apply)",
+        "            setTimeout(tryNow, 400);",
         "          }",
-        "          // Value is set, trigger search",
-        "          setTimeout(function() { doSearch(searchInput); }, 400);",
-        "        }, 200);",
+        "        }, 500);",
         "      } catch(e) { setTimeout(tryNow, 500); }",
         "    }",
-        "    setTimeout(tryNow, 500);",
+        "    // Initial delay: wait for Angular to bootstrap",
+        "    setTimeout(tryNow, 800);",
         "    return { filled: true };",
         "  }",
         "",
@@ -1016,7 +1151,7 @@
               // Block non-http URLs (javascript:, mailto:, blob:, etc.)
               if (newUrl.indexOf("http") !== 0) return;
               // J-PlatPat PDF downloads: open in external browser
-              if (newUrl.indexOf(".pdf") !== -1 || newUrl.toLowerCase().indexOf("pdf") !== -1) {
+              if (newUrl.indexOf(".pdf") !== -1) {
                 if (window.electronAPI && window.electronAPI.openExternal) {
                   window.electronAPI.openExternal(newUrl);
                 } else {
@@ -1024,13 +1159,21 @@
                 }
                 return;
               }
-              // J-PlatPat help/small popup windows (often have 'help' or specific features): open externally
-              // Navigate within same webview if same host; otherwise open as new popout
+              // Help/FAQ/print popup pages: open externally (these are small utility popups)
+              var lowerUrl = newUrl.toLowerCase();
+              if (lowerUrl.indexOf("/help") !== -1 || lowerUrl.indexOf("/faq") !== -1 || lowerUrl.indexOf("/print") !== -1) {
+                if (window.electronAPI && window.electronAPI.openExternal) {
+                  window.electronAPI.openExternal(newUrl);
+                }
+                return;
+              }
+              // Same-host navigation (e.g. J-PlatPat detail links): load in same webview
               try {
                 var newHost = new URL(newUrl).hostname;
-                var curHost = location.hostname;
-                if (newHost && newHost === curHost && newUrl.indexOf("help") === -1 && newUrl.indexOf("faq") === -1) {
-                  // Same-domain content page: load in same webview instead of opening new window
+                var curHost = new URL(currentUrl).hostname;
+                if (newHost && curHost && newHost === curHost) {
+                  // Same domain → navigate within same webview, no new window
+                  currentUrl = newUrl;
                   wv.loadURL(newUrl);
                   return;
                 }
@@ -1045,6 +1188,97 @@
           });
           container.appendChild(wv);
           setupWebviewContextMenu();
+
+          // On webview dom-ready, inject a script to override window.open and intercept link clicks
+          // so same-domain navigation stays in the webview instead of popping new windows
+          wv.addEventListener("dom-ready", function() {
+            try {
+              // Also set window open handler on the guest webContents if available
+              try {
+                var guestWc = wv.getWebContents();
+                if (guestWc && guestWc.setWindowOpenHandler) {
+                  guestWc.setWindowOpenHandler(function(details) {
+                    var newUrl = details.url;
+                    if (!newUrl || newUrl.indexOf("http") !== 0) return { action: "deny" };
+                    // Same host: navigate in place
+                    try {
+                      var newHost = new URL(newUrl).hostname;
+                      var curHost = new URL(currentUrl).hostname;
+                      if (newHost && curHost && newHost === curHost) {
+                        var isHelp = newUrl.toLowerCase().indexOf("/help") !== -1 || newUrl.toLowerCase().indexOf("/faq") !== -1;
+                        var isPdf = newUrl.toLowerCase().indexOf(".pdf") !== -1;
+                        if (isPdf) {
+                          if (window.electronAPI && window.electronAPI.openExternal) window.electronAPI.openExternal(newUrl);
+                        } else if (isHelp) {
+                          if (window.electronAPI && window.electronAPI.openExternal) window.electronAPI.openExternal(newUrl);
+                        } else {
+                          currentUrl = newUrl;
+                          wv.loadURL(newUrl);
+                        }
+                        return { action: "deny" };
+                      }
+                    } catch(ue) {}
+                    // External: open as popout
+                    if (window.electronAPI && window.electronAPI.openPopoutWindow) {
+                      window.electronAPI.openPopoutWindow(newUrl, "专利原文查看");
+                    } else {
+                      if (window.electronAPI && window.electronAPI.openExternal) window.electronAPI.openExternal(newUrl);
+                    }
+                    return { action: "deny" };
+                  });
+                }
+              } catch(wcErr) { console.warn("[popout] setWindowOpenHandler on guest failed", wcErr); }
+
+              // Inject override script into the page
+              var overrideScript = [
+                "(function(){",
+                "  if (window.__popoutInjected) return;",
+                "  window.__popoutInjected = true;",
+                "  // Override window.open to navigate same-host URLs in place",
+                "  var _origOpen = window.open;",
+                "  window.open = function(url, target, features) {",
+                "    try {",
+                "      var href = String(url || '');",
+                "      if (href && href.indexOf('http') === 0) {",
+                "        var linkHost = new URL(href).hostname;",
+                "        if (linkHost === location.hostname) {",
+                "          var lowHref = href.toLowerCase();",
+                "          if (lowHref.indexOf('.pdf') !== -1 || lowHref.indexOf('/help') !== -1 || lowHref.indexOf('/faq') !== -1 || lowHref.indexOf('/print') !== -1) {",
+                "            return _origOpen.call(window, url, target, features);",
+                "          }",
+                "          location.href = href;",
+                "          return null;",
+                "        }",
+                "      }",
+                "    } catch(e) {}",
+                "    return _origOpen.call(window, url, target, features);",
+                "  };",
+                "  // Intercept clicks on <a target=_blank> links for same-host",
+                "  document.addEventListener('click', function(e) {",
+                "    var a = e.target.closest ? e.target.closest('a') : null;",
+                "    if (!a) return;",
+                "    var href = a.href || '';",
+                "    var tgt = (a.target || '').toLowerCase();",
+                "    if (!href || href.indexOf('http') !== 0) return;",
+                "    try {",
+                "      var linkHost = new URL(href).hostname;",
+                "      if (linkHost === location.hostname) {",
+                "        var lowHref = href.toLowerCase();",
+                "        if (lowHref.indexOf('.pdf') === -1 && lowHref.indexOf('/help') === -1 && lowHref.indexOf('/faq') === -1 && lowHref.indexOf('/print') === -1) {",
+                "          // Same-host content link: navigate normally, remove target=_blank",
+                "          if (tgt === '_blank' || tgt === '_new') {",
+                "            e.preventDefault();",
+                "            location.href = href;",
+                "          }",
+                "        }",
+                "      }",
+                "    } catch(e2) {}",
+                "  }, true);",
+                "})();"
+              ].join("");
+              wv.executeJavaScript(overrideScript);
+            } catch(injErr) { console.warn("[popout] inject override failed", injErr); }
+          });
 
           timeoutTimer = setTimeout(function () {
             if (!_loaded && !_failed) {
