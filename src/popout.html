@@ -108,13 +108,19 @@
       var timeoutTimer = null;
       var findActive = false;
       var findTerm = "";
+      var findDebounceTimer = null;
+      var findRequestId = 0;
+      var jplatpatSearchNum = params.get("jpn") || "";
 
-      // Detect J-PlatPat URL and show info bar
       var isJplatpat = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
       if (isJplatpat) {
-        var jpMatch = currentUrl.match(/JP-(\d{4})-(\d+)/);
-        if (jpMatch) {
-          jpNumEl.textContent = "番号: " + jpMatch[1] + "-" + jpMatch[2];
+        if (jplatpatSearchNum) {
+          jpNumEl.textContent = "番号: " + jplatpatSearchNum;
+        } else {
+          var jpMatch = currentUrl.match(/JP-(\d{4})-(\d+)/);
+          if (jpMatch) {
+            jpNumEl.textContent = "番号: " + jpMatch[1] + "-" + jpMatch[2];
+          }
         }
         jpBar.style.display = "flex";
       }
@@ -133,15 +139,17 @@
       function closeFindBar() {
         findBar.style.display = "none";
         findCountEl.textContent = "";
+        if (findDebounceTimer) { clearTimeout(findDebounceTimer); findDebounceTimer = null; }
         if (isElectron && wv && wv.stopFindInPage) {
           try { wv.stopFindInPage("clearSelection"); } catch(e) {}
         } else {
           try {
             var iframe = container.querySelector("iframe");
-            if (iframe && iframe.contentWindow) iframe.contentWindow.find("", false, false, true);
+            if (iframe && iframe.contentWindow) iframe.contentWindow.find("", false, false, false);
           } catch(e) {}
         }
         findActive = false;
+        findTerm = "";
       }
 
       function doFindNext() {
@@ -151,6 +159,7 @@
         findActive = true;
         if (isElectron && wv && wv.findInPage) {
           try {
+            var reqId = ++findRequestId;
             wv.findInPage(term, { forward: true, findNext: true });
           } catch(e) { findCountEl.textContent = "受限"; }
         } else {
@@ -183,24 +192,37 @@
         }
       }
 
-      function startNewFind() {
+      function startNewSearchFromBeginning() {
         var term = findInput.value;
         if (!term || term.length < 1) { findCountEl.textContent = ""; return; }
         findTerm = term;
         findActive = true;
         if (isElectron && wv && wv.findInPage) {
           try {
+            if (wv.stopFindInPage) { try { wv.stopFindInPage("clearSelection"); } catch(e) {} }
+            var reqId = ++findRequestId;
             wv.findInPage(term, { forward: true, findNext: false });
           } catch(e) { findCountEl.textContent = "受限"; }
         } else {
           try {
             var iframe = container.querySelector("iframe");
             if (iframe && iframe.contentWindow) {
-              iframe.contentWindow.find("", false, false, true);
-              setTimeout(function() { doFindNext(); }, 50);
+              iframe.contentWindow.find("", false, false, false);
+              setTimeout(function() {
+                var found = iframe.contentWindow.find(term, false, false, false, false, true);
+                findCountEl.textContent = found ? "" : "无匹配";
+              }, 30);
             }
           } catch(e) { findCountEl.textContent = "受限"; }
         }
+      }
+
+      function debouncedFind() {
+        if (findDebounceTimer) clearTimeout(findDebounceTimer);
+        findDebounceTimer = setTimeout(function() {
+          findDebounceTimer = null;
+          startNewSearchFromBeginning();
+        }, 300);
       }
 
       if (findToggleBtn) {
@@ -214,11 +236,27 @@
       }
       if (findInput) {
         findInput.addEventListener("input", function() {
-          startNewFind();
+          if (findInput.value.length < 1) {
+            if (findDebounceTimer) { clearTimeout(findDebounceTimer); findDebounceTimer = null; }
+            findCountEl.textContent = "";
+            if (isElectron && wv && wv.stopFindInPage) {
+              try { wv.stopFindInPage("clearSelection"); } catch(e) {}
+            } else {
+              try {
+                var iframe = container.querySelector("iframe");
+                if (iframe && iframe.contentWindow) iframe.contentWindow.find("", false, false, false);
+              } catch(e) {}
+            }
+            findActive = false;
+            findTerm = "";
+            return;
+          }
+          debouncedFind();
         });
         findInput.addEventListener("keydown", function(e) {
           if (e.key === "Enter") {
             e.preventDefault();
+            if (findDebounceTimer) { clearTimeout(findDebounceTimer); findDebounceTimer = null; }
             if (e.shiftKey) doFindPrev(); else doFindNext();
           } else if (e.key === "Escape") {
             closeFindBar();
@@ -266,6 +304,7 @@
         }
         if (e.key === "F3") {
           e.preventDefault();
+          if (findDebounceTimer) { clearTimeout(findDebounceTimer); findDebounceTimer = null; }
           if (findBar.style.display === "none" || !findBar.style.display) {
             openFindBar();
             setTimeout(function() { if (!findInput.value) return; if (e.shiftKey) doFindPrev(); else doFindNext(); }, 50);
@@ -355,8 +394,10 @@
           var _failed = false;
 
           // Listen for found-in-page results
+          var currentFindReqId = 0;
           wv.addEventListener("found-in-page", function(e) {
-            if (e.result) {
+            currentFindReqId = findRequestId;
+            if (e.result && e.result.finalUpdate !== false) {
               if (e.result.matchCount === 0) {
                 findCountEl.textContent = "无匹配";
               } else if (e.result.activeMatchOrdinal !== undefined) {
@@ -380,11 +421,93 @@
             try {
               if (wv.getURL) currentUrl = wv.getURL();
             } catch(e) {}
-            // Re-trigger find if bar was active
-            if (findActive && findTerm) {
+
+            if (jplatpatSearchNum && wv.getURL && wv.getURL().indexOf("j-platpat.inpit.go.jp") !== -1) {
+              var injectNum = jplatpatSearchNum;
+              jplatpatSearchNum = "";
               setTimeout(function() {
-                try { wv.findInPage(findTerm, { forward: true, findNext: false }); } catch(e) {}
-              }, 300);
+                var fillCode = [
+                  "(function(searchNum) {",
+                  "  var attempts = 0;",
+                  "  function tryFill() {",
+                  "    attempts++;",
+                  "    if (attempts > 20) return;",
+                  "    var inputs = document.querySelectorAll('input[type=\"text\"], input:not([type]), input[type=\"search\"]');",
+                  "    var searchInput = null;",
+                  "    // Priority 1: input with search-related keywords in placeholder/id/class/aria-label",
+                  "    for (var i = 0; i < inputs.length; i++) {",
+                  "      var inp = inputs[i];",
+                  "      if (inp.offsetParent === null) continue;",
+                  "      var ph = (inp.placeholder || '').toLowerCase();",
+                  "      var idn = (inp.id || '').toLowerCase();",
+                  "      var cls = (inp.className || '').toLowerCase();",
+                  "      var ariaLabel = (inp.getAttribute('aria-label') || '').toLowerCase();",
+                  "      if (ph.indexOf('検索') !== -1 || ph.indexOf('番号') !== -1 || ph.indexOf('特許') !== -1 ||",
+                  "          idn.indexOf('search') !== -1 || cls.indexOf('search') !== -1 || ariaLabel.indexOf('検索') !== -1) {",
+                  "        searchInput = inp;",
+                  "        break;",
+                  "      }",
+                  "    }",
+                  "    // Priority 2: input whose placeholder looks like a patent number example (contains 例 + digits)",
+                  "    if (!searchInput) {",
+                  "      for (var i = 0; i < inputs.length; i++) {",
+                  "        if (inputs[i].offsetParent === null) continue;",
+                  "        var ph2 = inputs[i].placeholder || '';",
+                  "        if (ph2.indexOf('例') !== -1 && /\\d/.test(ph2)) {",
+                  "          searchInput = inputs[i];",
+                  "          break;",
+                  "        }",
+                  "      }",
+                  "    }",
+                  "    // Priority 3: the widest visible text input (likely the main search box)",
+                  "    if (!searchInput) {",
+                  "      var best = null, bestW = 0;",
+                  "      for (var i = 0; i < inputs.length; i++) {",
+                  "        var inp2 = inputs[i];",
+                  "        if (inp2.offsetParent !== null && inp2.offsetWidth > bestW && inp2.offsetWidth > 100) {",
+                  "          best = inp2; bestW = inp2.offsetWidth;",
+                  "        }",
+                  "      }",
+                  "      searchInput = best;",
+                  "    }",
+                  "    if (!searchInput) { setTimeout(tryFill, 500); return; }",
+                  "    try {",
+                  "      var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;",
+                  "      nativeSetter.call(searchInput, searchNum);",
+                  "      searchInput.dispatchEvent(new Event('input', { bubbles: true }));",
+                  "      searchInput.dispatchEvent(new Event('change', { bubbles: true }));",
+                  "    } catch(e) { searchInput.value = searchNum; }",
+                  "    setTimeout(function() {",
+                  "      var btns = document.querySelectorAll('button, input[type=\"submit\"], a[role=\"button\"], a');",
+                  "      var clicked = false;",
+                  "      for (var j = 0; j < btns.length; j++) {",
+                  "        var btn = btns[j];",
+                  "        if (btn.offsetParent !== null) {",
+                  "          var txt = (btn.textContent || btn.value || '').trim();",
+                  "          if (txt === '検索' || txt.indexOf('検索') === 0) {",
+                  "            btn.click();",
+                  "            clicked = true;",
+                  "            break;",
+                  "          }",
+                  "        }",
+                  "      }",
+                  "      if (!clicked) {",
+                  "        var form = searchInput.closest ? searchInput.closest('form') : null;",
+                  "        if (form) { form.submit(); }",
+                  "        else {",
+                  "          searchInput.focus();",
+                  "          searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));",
+                  "          searchInput.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', keyCode: 13, bubbles: true }));",
+                  "          searchInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));",
+                  "        }",
+                  "      }",
+                  "    }, 500);",
+                  "  }",
+                  "  setTimeout(tryFill, 800);",
+                  "})(" + JSON.stringify(injectNum) + ");"
+                ].join("");
+                try { wv.executeJavaScript(fillCode); } catch(e) { console.warn("J-PlatPat inject failed:", e); }
+              }, 1000);
             }
           });
           wv.addEventListener("did-finish-load", function() {
@@ -460,7 +583,21 @@
         }
       }
 
-      function loadUrl(u) { currentUrl = u; loadAttempts = 0; isJplatpat = u.indexOf("j-platpat.inpit.go.jp") !== -1; if (isJplatpat) { var jm = u.match(/JP-(\d{4})-(\d+)/); if (jm) jpNumEl.textContent = "番号: " + jm[1] + "-" + jm[2]; jpBar.style.display = "flex"; } embed(); }
+      function loadUrl(u) {
+        currentUrl = u;
+        loadAttempts = 0;
+        jplatpatSearchNum = "";
+        isJplatpat = u.indexOf("j-platpat.inpit.go.jp") !== -1;
+        if (isJplatpat) {
+          var jm = u.match(/JP-(\d{4})-(\d+)/);
+          if (jm) jpNumEl.textContent = "番号: " + jm[1] + "-" + jm[2];
+          else jpNumEl.textContent = "";
+          jpBar.style.display = "flex";
+        } else {
+          jpBar.style.display = "none";
+        }
+        embed();
+      }
 
       function translatePage() {
         if (isTranslated) {

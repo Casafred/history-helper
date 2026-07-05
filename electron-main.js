@@ -1349,9 +1349,12 @@ function createWindow(port) {
 
 // 弹出独立窗口：用于 GP / espacenet 原文对照查看
 // 通过本地 HTTP 服务器加载 popout.html（webview 标签需要 http:// 源，data: URL 不支持）
-function createPopoutWindow(targetUrl, title, port) {
+function createPopoutWindow(targetUrl, title, port, opts) {
   console.log("[Electron] createPopoutWindow targetUrl=" + targetUrl + ", title=" + title + ", port=" + port);
-  const popoutUrl = `http://127.0.0.1:${port}/popout.html?url=${encodeURIComponent(targetUrl)}&title=${encodeURIComponent(title || targetUrl)}`;
+  let popoutUrl = `http://127.0.0.1:${port}/popout.html?url=${encodeURIComponent(targetUrl)}&title=${encodeURIComponent(title || targetUrl)}`;
+  if (opts && opts.jpn) {
+    popoutUrl += "&jpn=" + encodeURIComponent(opts.jpn);
+  }
   const win = new BrowserWindow({
     width: 1100,
     height: 800,
@@ -1396,9 +1399,9 @@ app.whenReady().then(async () => {
   });
 
   // IPC: 渲染进程请求创建弹出窗口（直连，不依赖 window.open → setWindowOpenHandler 链路）
-  ipcMain.on("open-popout-window", (_event, targetUrl, title) => {
+  ipcMain.on("open-popout-window", (_event, targetUrl, title, opts) => {
     if (typeof targetUrl === "string" && _serverPort) {
-      createPopoutWindow(targetUrl, title, _serverPort);
+      createPopoutWindow(targetUrl, title, _serverPort, opts || null);
     }
   });
 
