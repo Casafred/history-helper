@@ -213,14 +213,10 @@ function jplatpatSearchNumber(patentNo) {
 }
 
 function openJPlatPat(patentNo, title) {
-  const isElectron = !!(window.electronAPI);
-  const docUrl = jplatpatDocUrl(patentNo);
-  if (isElectron) {
-    // Try direct document URL first (most reliable, no form filling needed)
-    openInAppWebview(docUrl, title || ("J-PlatPat: " + patentNo));
-  } else {
-    openInAppWebview(docUrl, title || ("J-PlatPat: " + patentNo));
-  }
+  const searchNum = jplatpatSearchNumber(patentNo);
+  const url = jplatpatSimpleSearchUrl();
+  const fullTitle = title || ("J-PlatPat: " + patentNo);
+  openInAppWebview(url, fullTitle, { jpn: searchNum });
 }
 
 function patentLinkButtons(patentNo) {

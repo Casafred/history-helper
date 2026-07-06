@@ -67,11 +67,11 @@
 <body>
   <div id="po-header">
     <div id="po-title"></div>
-    <button id="po-find-toggle" class="po-btn po-btn-find" title="Find in page (Ctrl+F)">🔍</button>
-    <button id="po-translate" class="po-btn" title="Translate this page via Google Translate">Translate</button>
-    <button id="po-refresh" class="po-btn" title="Refresh page">Refresh</button>
-    <button id="po-external" class="po-btn" title="Open in external browser">Open External</button>
-    <button id="po-close" class="po-btn" title="Close window">Close</button>
+    <button id="po-find-toggle" class="po-btn po-btn-find" title="在页面内查找 (Ctrl+F)">🔍</button>
+    <button id="po-translate" class="po-btn" title="通过 Google 翻译翻译此页面">翻译</button>
+    <button id="po-refresh" class="po-btn" title="刷新当前页面">刷新</button>
+    <button id="po-external" class="po-btn" title="在外部浏览器打开">外部打开</button>
+    <button id="po-close" class="po-btn" title="关闭窗口">关闭</button>
   </div>
   <div id="po-jp-bar">
     <span class="po-jp-label">🇯🇵 J-PlatPat</span>
@@ -695,7 +695,7 @@
         "          var btn = btns[b];",
         "          if (btn.offsetParent === null) continue;",
         "          var txt = ((btn.textContent || btn.value || btn.getAttribute('aria-label') || '')).trim();",
-        "          if (txt === '検索' || txt === '検索する' || txt.indexOf('この条件で検索') !== -1) return btn;",
+        "          if (txt === '検索' || txt === '検索する' || txt.indexOf('この条件で検索') !== -1 || txt === 'Search' || txt === 'SEARCH' || txt.indexOf('Search') === 0) return btn;",
         "        }",
         "      }",
         "      // Strategy 2: any submit-type button in the same form",
@@ -706,11 +706,11 @@
         "          for (var s = 0; s < submits.length; s++) {",
         "            if (submits[s].offsetParent !== null) return submits[s];",
         "          }",
-        "          // Search for buttons with 検索 in form even without type=submit",
+        "          // Search for buttons with 検索/Search in form even without type=submit",
         "          var formBtns = form.querySelectorAll('button, input[type=\"button\"]');",
         "          for (var fb = 0; fb < formBtns.length; fb++) {",
         "            var ftxt = ((formBtns[fb].textContent || formBtns[fb].value || '')).trim();",
-        "            if (formBtns[fb].offsetParent !== null && ftxt.indexOf('検索') !== -1) return formBtns[fb];",
+        "            if (formBtns[fb].offsetParent !== null && (ftxt.indexOf('検索') !== -1 || ftxt.indexOf('Search') !== -1)) return formBtns[fb];",
         "          }",
         "        }",
         "      } catch(e) {}",
@@ -774,13 +774,61 @@
         "      if (path.indexOf('/c0200') !== -1) return true;",
         "      return false;",
         "    }",
+        "    function isEnglishMode() {",
+        "      try {",
+        "        var allEls = document.querySelectorAll('button, a, input[type=button], span, div');",
+        "        var hasSearchEn = false, hasEnglishBtn = false, hasJapaneseBtn = false;",
+        "        for (var bi = 0; bi < allEls.length; bi++) {",
+        "          var b = allEls[bi];",
+        "          if (b.offsetParent === null) continue;",
+        "          var bt = (b.textContent || b.value || '').trim();",
+        "          if (bt === 'Search' || bt === 'SEARCH') hasSearchEn = true;",
+        "          if (bt === 'English' || bt === 'ENGLISH') hasEnglishBtn = true;",
+        "          if (bt === 'Japanese' || bt === '日本語' || bt === 'JAPANESE') hasJapaneseBtn = true;",
+        "        }",
+        "        if (hasJapaneseBtn) return true;",
+        "        if (hasEnglishBtn && !hasSearchEn) return false;",
+        "        if (hasSearchEn) return true;",
+        "        if (location.pathname.indexOf('/en/') !== -1) return true;",
+        "        return false;",
+        "      } catch(e) { return false; }",
+        "    }",
+        "    function clickEnglishButton() {",
+        "      try {",
+        "        var links = document.querySelectorAll('a, button, input[type=button], span, div');",
+        "        for (var i = 0; i < links.length; i++) {",
+        "          var el = links[i];",
+        "          var txt = (el.textContent || el.value || '').trim();",
+        "          if ((txt === 'English' || txt === 'ENGLISH' || txt === 'english') && el.offsetParent !== null) {",
+        "            console.log('[J-PlatPat] Clicking English button to switch language');",
+        "            el.click();",
+        "            return true;",
+        "          }",
+        "        }",
+        "        var langLinks = document.querySelectorAll('a[href*=\"lang\"], a[href*=\"locale\"], a[href*=\"english\"]');",
+        "        for (var j = 0; j < langLinks.length; j++) {",
+        "          var ltxt = (langLinks[j].textContent || '').trim().toLowerCase();",
+        "          if (ltxt.indexOf('english') !== -1 || ltxt === 'en') {",
+        "            langLinks[j].click();",
+        "            return true;",
+        "          }",
+        "        }",
+        "      } catch(e) { console.log('[J-PlatPat] clickEnglish error:', e); }",
+        "      return false;",
+        "    }",
         "    function tryNow() {",
         "      attempts++;",
         "      if (attempts > MAX_ATTEMPTS) {",
-        "        // Even after max attempts, if we have a guarded input still visible, keep guard a bit longer",
         "        return;",
         "      }",
         "      try {",
+        "        if (location.hostname.indexOf('j-platpat') !== -1 && !isEnglishMode()) {",
+        "          if (clickEnglishButton()) {",
+        "            console.log('[J-PlatPat] English clicked, waiting for page reload...');",
+        "            setTimeout(tryNow, 1500);",
+        "            return;",
+        "          }",
+        "        }",
         "        // If we're already on results/detail page, stop trying",
         "        if (isOnResultsPage() && searchTriggered) return;",
         "        var searchInput = findSearchInput();",
