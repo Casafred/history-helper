@@ -214,11 +214,12 @@ function jplatpatSearchNumber(patentNo) {
 
 function openJPlatPat(patentNo, title) {
   const isElectron = !!(window.electronAPI);
+  const docUrl = jplatpatDocUrl(patentNo);
   if (isElectron) {
-    const searchNum = jplatpatSearchNumber(patentNo);
-    openInAppWebview(jplatpatSimpleSearchUrl(), title || ("J-PlatPat: " + patentNo), { jpn: searchNum });
+    // Try direct document URL first (most reliable, no form filling needed)
+    openInAppWebview(docUrl, title || ("J-PlatPat: " + patentNo));
   } else {
-    openInAppWebview(jplatpatDocUrl(patentNo), title || ("J-PlatPat: " + patentNo));
+    openInAppWebview(docUrl, title || ("J-PlatPat: " + patentNo));
   }
 }
 
@@ -595,18 +596,8 @@ async function searchPatentDetail(input) {
   const raw = input.trim().toUpperCase().replace(/[\s\/]/g, "");
   if (!raw) { showError("请输入专利号"); return; }
 
-  // JP专利: 直接打开J-PlatPat
-  if (isJPPatent(raw)) {
-    searchBtn.disabled = false;
-    loading.classList.add("hidden");
-    if (patentInput) patentInput.value = raw;
-    const parsed = parseJPPatentNo(raw);
-    const title = "J-PlatPat: " + raw + (parsed ? " (" + parsed.docdbFormat + ")" : "");
-    openJPlatPat(raw, title);
-    PatentCache.addPatentHistory(raw, { title: "J-PlatPat: " + (parsed ? parsed.docdbFormat : raw) });
-    refreshHistoryList();
-    return;
-  }
+  // JP专利在专利原文模式下和其他国家一样走GP流程
+  // (移除了直接打开J-PlatPat的跳转，J-PlatPat仅用于审查文档模式)
 
   // 审查文档模式下的缓存恢复（专利原文模式不应恢复 kanbanState 缓存，否则拦截了 GP 查询）
   const cachedEntry = PatentCache.get(raw);
@@ -2073,13 +2064,9 @@ document.addEventListener("click", (e) => {
     e.preventDefault();
     const pn = link.dataset.patent;
     if (pn) {
-      // Ctrl/Cmd+Click: open in app webview
+      // Ctrl/Cmd+Click: open in app webview (Google Patents for all, JP button available separately)
       if (e.ctrlKey || e.metaKey) {
-        if (isJPPatent(pn)) {
-          openJPlatPat(pn);
-        } else {
-          openInAppWebview("https://patents.google.com/patent/" + encodeURIComponent(pn), "Google Patents: " + pn);
-        }
+        openInAppWebview("https://patents.google.com/patent/" + encodeURIComponent(pn), "Google Patents: " + pn);
         return;
       }
       // Normal click: open patent popup viewer
@@ -2450,10 +2437,9 @@ async function openPatentPopup(patentNumber) {
 
   const raw = patentNumber.trim().toUpperCase().replace(/[\s\/]/g, "");
 
-  if (isJPPatent(raw)) {
-    openJPlatPat(raw);
-    return;
-  }
+  // JP专利在专利原文模式(patent mode)下和其他国家一样走GP弹窗
+  // 仅在审查文档模式(dossier mode)下由doSearch特殊处理
+  // (此处移除了强制openJPlatPat的跳转)
 
   // If already open, just switch to it
   const existing = _ppvOpenPatents.find(e => e.patentNumber === raw);
@@ -2676,7 +2662,7 @@ async function doSearch(input) {
     const parsed = parseJPPatentNo(rawPn);
     const title = "J-PlatPat: " + rawPn + (parsed ? " (" + parsed.docdbFormat + ")" : "");
     openJPlatPat(rawPn, title);
-    PatentCache.addPatentHistory(rawPn, { title: "J-PlatPat: " + (parsed ? parsed.docdbFormat : rawPn) });
+    PatentCache.addPatentHistory(rawPn, { title: "J-PlatPat: " + (parsed ? parsed.docdbFormat : rawPn), source: "jplatpat" });
     refreshHistoryList();
     return;
   }
@@ -2873,6 +2859,7 @@ const PatentCache = {
       timestamp: Date.now(),
       applicantName: (extra && extra.applicantName) || "",
       title: (extra && extra.title) || "",
+      source: (extra && extra.source) || "gp",
     };
     try {
       localStorage.setItem(this.PATENT_HISTORY_KEY, JSON.stringify(all));
@@ -3318,7 +3305,7 @@ function refreshHistoryList() {
         if (!unifiedEntries.find(e => e.patentNumber === pn)) {
           unifiedEntries.push({
             patentNumber: pn,
-            office: "GP",
+            office: item.source === "jplatpat" ? "JP" : "GP",
             timestamp: item.timestamp,
             isCached: false,
             hasOCR: false,
@@ -3326,6 +3313,7 @@ function refreshHistoryList() {
             hasCitedRefs: false,
             applicantName: item.applicantName || "",
             title: item.title || "",
+            source: item.source || "gp",
             _type: "patent",
           });
         }
@@ -3342,7 +3330,11 @@ function refreshHistoryList() {
         const isActive = e.patentNumber === currentPatent;
         let badges = "";
         if (e._type === "patent") {
-          badges += '<span class="history-badge" style="background:var(--accent);color:#fff;">GP原文</span>';
+          if (e.source === "jplatpat") {
+            badges += '<span class="history-badge" style="background:#c0392b;color:#fff;">J-PlatPat</span>';
+          } else {
+            badges += '<span class="history-badge" style="background:var(--accent);color:#fff;">GP原文</span>';
+          }
         } else {
           if (!e.isCached) badges += '<span class="history-badge" style="background:var(--bg-hover);color:var(--text-muted);">仅记录</span>';
           if (e.hasOCR) badges += '<span class="history-badge badge-ocr">OCR</span>';
@@ -3352,11 +3344,11 @@ function refreshHistoryList() {
         const titleHtml = e.title ? '<div class="history-item-title">' + escapeHtml(e.title.length > 30 ? e.title.substring(0, 30) + '...' : e.title) + '</div>' : '';
         const applicantHtml = e.applicantName ? '<div class="history-item-applicant">申请人: ' + escapeHtml(e.applicantName.length > 20 ? e.applicantName.substring(0, 20) + '...' : e.applicantName) + '</div>' : '';
         const officeBadge = e._type === "patent"
-          ? '<span style="color:var(--accent);margin-right:4px;">GP</span>'
+          ? (e.source === "jplatpat" ? '<span style="color:#c0392b;margin-right:4px;">JP</span>' : '<span style="color:var(--accent);margin-right:4px;">GP</span>')
           : (e.office ? '<span style="color:var(--accent);margin-right:4px;">' + escapeHtml(e.office) + '</span>' : '');
         const checkboxHtml = isSelectMode ? '<input type="checkbox" class="history-item-checkbox" data-patent="' + escapeHtml(e.patentNumber) + '" data-type="' + e._type + '" style="margin-right:6px;flex-shrink:0;">' : '';
         const deleteBtnHtml = isSelectMode ? '' : '<button class="history-item-delete-btn" data-patent="' + escapeHtml(e.patentNumber) + '" data-type="' + e._type + '" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>';
-        return `<div class="history-item${isActive ? ' active' : ''}${isSelectMode ? ' select-mode' : ''}" data-patent="${escapeHtml(e.patentNumber)}" data-type="${e._type}" data-cached="${e.isCached ? '1' : '0'}" data-timestamp="${e.timestamp || 0}">
+        return `<div class="history-item${isActive ? ' active' : ''}${isSelectMode ? ' select-mode' : ''}" data-patent="${escapeHtml(e.patentNumber)}" data-type="${e._type}" data-source="${e.source || ''}" data-cached="${e.isCached ? '1' : '0'}" data-timestamp="${e.timestamp || 0}">
           <div class="history-item-row" style="display:flex;align-items:center;">
             ${checkboxHtml}
             <div class="history-item-main" style="flex:1;min-width:0;">
@@ -3401,7 +3393,13 @@ function refreshHistoryList() {
           item.addEventListener("click", () => {
             const patentNumber = item.dataset.patent;
             const type = item.dataset.type;
+            const source = item.dataset.source;
             if (type === "patent") {
+              if (source === "jplatpat") {
+                if (patentInput) patentInput.value = patentNumber;
+                openJPlatPat(patentNumber);
+                return;
+              }
               searchMode = "patent";
               document.querySelectorAll(".search-mode-btn").forEach(b => {
                 b.classList.toggle("active", b.dataset.mode === "patent");
@@ -4819,7 +4817,7 @@ if (translateSaveBtn) {
     config.translate.provider = translateProviderSelect ? translateProviderSelect.value : "";
     config.translate.apiKey = translateApiKeyInput ? translateApiKeyInput.value.trim() : "";
     config.translate.model = translateModelSelect ? translateModelSelect.value : "";
-    config.translate.defaultLang = translateDefaultLang ? translateDefaultLang.value : "zh";
+    config.translate.defaultLang = translateDefaultLang ? translateDefaultLang.value : "en";
     window.AI.saveAIConfig(config);
     aiSettingsModal.classList.add("hidden");
   });
@@ -4963,7 +4961,7 @@ function loadAISettingsToForm() {
     }
   }
   if (translateApiKeyInput) translateApiKeyInput.value = translate.apiKey || "";
-  if (translateDefaultLang) translateDefaultLang.value = translate.defaultLang || "zh";
+  if (translateDefaultLang) translateDefaultLang.value = translate.defaultLang || "en";
 
   // Load custom prompts
   const promptKeys = [
@@ -11913,13 +11911,8 @@ function _openPdPatent(pn) {
   const raw = pn.trim().toUpperCase().replace(/[\s\/]/g, "");
   if (!raw) return;
 
-  if (isJPPatent(raw)) {
-    if (patentInput) patentInput.value = raw;
-    openJPlatPat(raw);
-    PatentCache.addPatentHistory(raw, { title: "J-PlatPat: " + (parseJPPatentNo(raw)?.docdbFormat || raw) });
-    refreshHistoryList();
-    return;
-  }
+  // JP patents in patent-detail mode go through normal GP flow (same as other countries)
+  // Only dossier mode (doSearch) redirects JP to J-PlatPat
 
   clearPrefetchCache();
 

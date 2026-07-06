@@ -67,11 +67,11 @@
 <body>
   <div id="po-header">
     <div id="po-title"></div>
-    <button id="po-find-toggle" class="po-btn po-btn-find" title="在页面内查找 (Ctrl+F)">🔍</button>
-    <button id="po-translate" class="po-btn" title="通过 Google 翻译翻译此页面">翻译</button>
-    <button id="po-refresh" class="po-btn" title="刷新当前页面">刷新</button>
-    <button id="po-external" class="po-btn" title="在外部浏览器打开">外部打开</button>
-    <button id="po-close" class="po-btn" title="关闭窗口">关闭</button>
+    <button id="po-find-toggle" class="po-btn po-btn-find" title="Find in page (Ctrl+F)">🔍</button>
+    <button id="po-translate" class="po-btn" title="Translate this page via Google Translate">Translate</button>
+    <button id="po-refresh" class="po-btn" title="Refresh page">Refresh</button>
+    <button id="po-external" class="po-btn" title="Open in external browser">Open External</button>
+    <button id="po-close" class="po-btn" title="Close window">Close</button>
   </div>
   <div id="po-jp-bar">
     <span class="po-jp-label">🇯🇵 J-PlatPat</span>
@@ -475,7 +475,7 @@
         "      } else if (path.indexOf('/s0300') !== -1) {",
         "        pageInfo.pageType = 'jplatpat_result_list';",
         "        pageInfo.label = '検索結果一覧';",
-        "      } else if (path.indexOf('/c0100') !== -1 || path.indexOf('/c0200') !== -1 || path.indexOf('/c0300') !== -1) {",
+        "      } else if (path.indexOf('/c0100') !== -1 || path.indexOf('/c0200') !== -1 || path.indexOf('/c0300') !== -1 || path.indexOf('/c1801') !== -1) {",
         "        pageInfo.pageType = 'jplatpat_detail';",
         "        pageInfo.label = '特許文献詳細';",
         "      } else if (path.indexOf('/p0000') !== -1 || path.indexOf('/p0100') !== -1) {",
@@ -1193,59 +1193,34 @@
           // so same-domain navigation stays in the webview instead of popping new windows
           wv.addEventListener("dom-ready", function() {
             try {
-              // Also set window open handler on the guest webContents if available
+              // Ask main process to set window open handler on this webview's guest webContents
+              // (wv.getWebContents() is not available in renderer process)
               try {
-                var guestWc = wv.getWebContents();
-                if (guestWc && guestWc.setWindowOpenHandler) {
-                  guestWc.setWindowOpenHandler(function(details) {
-                    var newUrl = details.url;
-                    if (!newUrl || newUrl.indexOf("http") !== 0) return { action: "deny" };
-                    // Same host: navigate in place
-                    try {
-                      var newHost = new URL(newUrl).hostname;
-                      var curHost = new URL(currentUrl).hostname;
-                      if (newHost && curHost && newHost === curHost) {
-                        var isHelp = newUrl.toLowerCase().indexOf("/help") !== -1 || newUrl.toLowerCase().indexOf("/faq") !== -1;
-                        var isPdf = newUrl.toLowerCase().indexOf(".pdf") !== -1;
-                        if (isPdf) {
-                          if (window.electronAPI && window.electronAPI.openExternal) window.electronAPI.openExternal(newUrl);
-                        } else if (isHelp) {
-                          if (window.electronAPI && window.electronAPI.openExternal) window.electronAPI.openExternal(newUrl);
-                        } else {
-                          currentUrl = newUrl;
-                          wv.loadURL(newUrl);
-                        }
-                        return { action: "deny" };
-                      }
-                    } catch(ue) {}
-                    // External: open as popout
-                    if (window.electronAPI && window.electronAPI.openPopoutWindow) {
-                      window.electronAPI.openPopoutWindow(newUrl, "专利原文查看");
-                    } else {
-                      if (window.electronAPI && window.electronAPI.openExternal) window.electronAPI.openExternal(newUrl);
-                    }
-                    return { action: "deny" };
-                  });
+                if (window.electronAPI && typeof window.electronAPI.setWebviewOpenHandler === "function") {
+                  window.electronAPI.setWebviewOpenHandler(wv.getWebContentsId ? wv.getWebContentsId() : null);
                 }
-              } catch(wcErr) { console.warn("[popout] setWindowOpenHandler on guest failed", wcErr); }
+              } catch(ipcErr) { /* ignore, injected script will handle most cases */ }
 
-              // Inject override script into the page
+              // Inject override script into the page (same-domain link interception)
               var overrideScript = [
                 "(function(){",
                 "  if (window.__popoutInjected) return;",
                 "  window.__popoutInjected = true;",
-                "  // Override window.open to navigate same-host URLs in place",
+                "  // Override window.open to send same-host URLs back to popout for in-place navigation",
                 "  var _origOpen = window.open;",
                 "  window.open = function(url, target, features) {",
                 "    try {",
                 "      var href = String(url || '');",
                 "      if (href && href.indexOf('http') === 0) {",
-                "        var linkHost = new URL(href).hostname;",
+                "        var linkHost = '';",
+                "        try { linkHost = new URL(href).hostname; } catch(e) {}",
                 "        if (linkHost === location.hostname) {",
                 "          var lowHref = href.toLowerCase();",
                 "          if (lowHref.indexOf('.pdf') !== -1 || lowHref.indexOf('/help') !== -1 || lowHref.indexOf('/faq') !== -1 || lowHref.indexOf('/print') !== -1) {",
+                "            // PDF/help/print: let Electron's new-window handler deal with it via _origOpen",
                 "            return _origOpen.call(window, url, target, features);",
                 "          }",
+                "          // Same-host content page: navigate in place",
                 "          location.href = href;",
                 "          return null;",
                 "        }",
@@ -1253,31 +1228,49 @@
                 "    } catch(e) {}",
                 "    return _origOpen.call(window, url, target, features);",
                 "  };",
-                "  // Intercept clicks on <a target=_blank> links for same-host",
+                "  // Capture-phase click interceptor to neutralize target=_blank on same-host links",
                 "  document.addEventListener('click', function(e) {",
-                "    var a = e.target.closest ? e.target.closest('a') : null;",
+                "    var a = null;",
+                "    try { a = e.target && e.target.closest ? e.target.closest('a') : null; } catch(ex) {}",
                 "    if (!a) return;",
                 "    var href = a.href || '';",
-                "    var tgt = (a.target || '').toLowerCase();",
                 "    if (!href || href.indexOf('http') !== 0) return;",
                 "    try {",
                 "      var linkHost = new URL(href).hostname;",
                 "      if (linkHost === location.hostname) {",
                 "        var lowHref = href.toLowerCase();",
                 "        if (lowHref.indexOf('.pdf') === -1 && lowHref.indexOf('/help') === -1 && lowHref.indexOf('/faq') === -1 && lowHref.indexOf('/print') === -1) {",
-                "          // Same-host content link: navigate normally, remove target=_blank",
-                "          if (tgt === '_blank' || tgt === '_new') {",
-                "            e.preventDefault();",
-                "            location.href = href;",
+                "          // Same-host content link: strip target=_blank so it navigates normally",
+                "          if (a.target && a.target.toLowerCase() !== '_self') {",
+                "            a.removeAttribute('target');",
                 "          }",
                 "        }",
                 "      }",
                 "    } catch(e2) {}",
                 "  }, true);",
+                "  // Also override form submission targets",
+                "  document.addEventListener('submit', function(e) {",
+                "    try {",
+                "      var form = e.target;",
+                "      if (form && form.tagName === 'FORM' && form.target && form.target.toLowerCase() === '_blank') {",
+                "        var action = form.action || '';",
+                "        try {",
+                "          if (new URL(action, location.href).hostname === location.hostname) {",
+                "            form.removeAttribute('target');",
+                "          }",
+                "        } catch(e) {}",
+                "      }",
+                "    } catch(e) {}",
+                "  }, true);",
                 "})();"
               ].join("");
-              wv.executeJavaScript(overrideScript);
-            } catch(injErr) { console.warn("[popout] inject override failed", injErr); }
+              try {
+                var p = wv.executeJavaScript(overrideScript);
+                if (p && typeof p.catch === 'function') {
+                  p.catch(function(err) { /* script may fail if page navigates away, ignore */ });
+                }
+              } catch(execErr) { /* ignore */ }
+            } catch(injErr) { console.warn("[popout] dom-ready inject failed", injErr); }
           });
 
           timeoutTimer = setTimeout(function () {
@@ -1360,9 +1353,9 @@
             "})();"
           ].join("");
           try { wv.executeJavaScript(injectCode); }
-          catch (e) { loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(currentUrl)); }
+          catch (e) { loadUrl("https://translate.google.com/translate?sl=auto&tl=en&u=" + encodeURIComponent(currentUrl)); }
         } else {
-          loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(currentUrl));
+          loadUrl("https://translate.google.com/translate?sl=auto&tl=en&u=" + encodeURIComponent(currentUrl));
         }
       }
 
@@ -1409,20 +1402,19 @@
         ctxMenuEl.appendChild(it);
         return it;
       }
-      var ctxTranslateItem = addCtxItem("🔤 翻译选中文本", function() {
+      var ctxTranslateItem = addCtxItem("🔤 Translate selection", function() {
         if (!ctxSelection) return;
-        var url = "https://translate.google.com/?sl=auto&tl=zh-CN&text=" + encodeURIComponent(ctxSelection) + "&op=translate";
+        var url = "https://translate.google.com/?sl=auto&tl=en&text=" + encodeURIComponent(ctxSelection) + "&op=translate";
         if (window.electronAPI && window.electronAPI.openExternal) {
           window.electronAPI.openExternal(url);
         } else {
           window.open(url, "_blank");
         }
-        // Also inject Google Translate inline popup on the page if possible
         try {
           showFloatingTranslation(ctxSelection);
         } catch(e) {}
       });
-      var ctxCopyItem = addCtxItem("📋 复制选中文本", function() {
+      var ctxCopyItem = addCtxItem("📋 Copy selection", function() {
         if (ctxSelection) {
           try { navigator.clipboard.writeText(ctxSelection); } catch(e) {
             var ta = document.createElement("textarea");
@@ -1431,7 +1423,7 @@
           }
         }
       });
-      var ctxSearchItem = addCtxItem("🔎 在主应用中查找", function() {
+      var ctxSearchItem = addCtxItem("🔎 Search in app", function() {
         if (ctxSelection) {
           var url = window.location.origin + window.location.pathname + "#q=" + encodeURIComponent(ctxSelection);
           if (window.electronAPI && window.electronAPI.openExternal) {
@@ -1439,36 +1431,34 @@
           }
         }
       });
-      addCtxItem("🌐 打开Google翻译页", function() {
+      addCtxItem("🌐 Open Google Translate", function() {
         if (ctxSelection) {
-          window.electronAPI && window.electronAPI.openExternal && window.electronAPI.openExternal("https://translate.google.com/?sl=auto&tl=zh-CN&text=" + encodeURIComponent(ctxSelection) + "&op=translate");
+          window.electronAPI && window.electronAPI.openExternal && window.electronAPI.openExternal("https://translate.google.com/?sl=auto&tl=en&text=" + encodeURIComponent(ctxSelection) + "&op=translate");
         }
       });
 
       // Floating translation bubble inside webview
       function showFloatingTranslation(text) {
         if (!isElectron || !wv) return;
-        // Inject a translation bar into the webview page via Google Translate element
         var script = [
           "(function(){",
           "  if (document.getElementById('__pt_trans_bar')) return;",
           "  var bar = document.createElement('div');",
           "  bar.id = '__pt_trans_bar';",
           "  bar.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;background:#fff;border:1px solid #d0d7de;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.18);padding:10px 14px;max-width:360px;font-size:13px;font-family:sans-serif;';",
-          "  bar.innerHTML = '<div style=\"display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;\"><b>选中文本翻译</b><span id=\"__pt_trans_close\" style=\"cursor:pointer;color:#888;font-size:16px;\">×</span></div><div id=\"__pt_trans_src\" style=\"color:#57606a;margin-bottom:6px;border-bottom:1px solid #eaecef;padding-bottom:6px;white-space:pre-wrap;word-break:break-word;\"></div><div id=\"__pt_trans_dst\" style=\"color:#24292f;white-space:pre-wrap;word-break:break-word;\">正在翻译...</div>';",
+          "  bar.innerHTML = '<div style=\"display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;\"><b>Translation</b><span id=\"__pt_trans_close\" style=\"cursor:pointer;color:#888;font-size:16px;\">×</span></div><div id=\"__pt_trans_src\" style=\"color:#57606a;margin-bottom:6px;border-bottom:1px solid #eaecef;padding-bottom:6px;white-space:pre-wrap;word-break:break-word;\"></div><div id=\"__pt_trans_dst\" style=\"color:#24292f;white-space:pre-wrap;word-break:break-word;\">Translating...</div>';",
           "  document.body.appendChild(bar);",
           "  document.getElementById('__pt_trans_close').onclick = function(){ bar.remove(); };",
           "  document.getElementById('__pt_trans_src').textContent = " + JSON.stringify(text) + ";",
-          "  // Use Google Translate free API",
           "  var src = encodeURIComponent(" + JSON.stringify(text) + ");",
-          "  fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=' + src)",
+          "  fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=' + src)",
           "    .then(function(r){ return r.json(); })",
           "    .then(function(d){",
           "      var dst = '';",
           "      try { for (var i=0;i<d[0].length;i++) dst += d[0][i][0]; } catch(e) {}",
-          "      document.getElementById('__pt_trans_dst').textContent = dst || '(翻译失败)';",
+          "      document.getElementById('__pt_trans_dst').textContent = dst || '(Translation failed)';",
           "    })",
-          "    .catch(function(){ document.getElementById('__pt_trans_dst').textContent = '(网络错误，可使用右键菜单中Google翻译)'; });",
+          "    .catch(function(){ document.getElementById('__pt_trans_dst').textContent = '(Network error, use Google Translate from context menu)'; });",
           "})();"
         ].join("");
         try { wv.executeJavaScript(script); } catch(e) {}

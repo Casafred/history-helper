@@ -1376,6 +1376,36 @@ function createPopoutWindow(targetUrl, title, port, opts) {
     createPopoutWindow(url, "专利原文查看", port);
     return { action: "deny" };
   });
+  // 拦截 webview 内 guest webContents 的新窗口请求
+  // 同域链接在当前 webview 内导航（通过 executeJavaScript 重定向），外部链接开带工具栏的新弹窗
+  win.webContents.on("did-attach-webview", (_event, guestWebContents) => {
+    console.log("[Electron] popout webview attached");
+    guestWebContents.setWindowOpenHandler(({ url }) => {
+      console.log("[Electron] webview guest setWindowOpenHandler url=" + url);
+      if (!url || !url.startsWith("http")) return { action: "deny" };
+      // Determine if same-host by checking the guest's current URL
+      try {
+        var newHost = new URL(url).hostname;
+        var curUrl = guestWebContents.getURL();
+        var curHost = curUrl ? new URL(curUrl).hostname : "";
+        var lowUrl = url.toLowerCase();
+        var isPdf = lowUrl.indexOf(".pdf") !== -1;
+        var isHelp = lowUrl.indexOf("/help") !== -1 || lowUrl.indexOf("/faq") !== -1 || lowUrl.indexOf("/print") !== -1;
+        if (newHost && curHost && newHost === curHost && !isPdf && !isHelp) {
+          // Same host content page: navigate within the webview
+          guestWebContents.loadURL(url);
+          return { action: "deny" };
+        }
+        if (isPdf || isHelp) {
+          shell.openExternal(url);
+          return { action: "deny" };
+        }
+      } catch(e) {}
+      // External domain: open as a new popout with toolbar
+      createPopoutWindow(url, "专利原文查看", port);
+      return { action: "deny" };
+    });
+  });
   win.webContents.on("did-fail-load", (_e, errorCode, errorDescription) => {
     console.error("[Electron] popout did-fail-load", errorCode, errorDescription, "url=" + popoutUrl);
   });
