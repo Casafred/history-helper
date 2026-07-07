@@ -468,12 +468,15 @@
         "    var allLinks = document.querySelectorAll('a[href]');",
         "    var pdfLinks = [];",
         "    var pdfHrefs = {};",
-        "    function addPdfLink(href, text, visible) {",
-        "      if (!href) return;",
-        "      var key = href;",
+        "    function addPdfLink(href, text, visible, method, elIdx) {",
+        "      var key;",
+        "      if (method === 'click') { key = '_click_' + (elIdx != null ? elIdx : text); }",
+        "      else { key = href; if (!key) return; }",
         "      if (pdfHrefs[key]) return;",
         "      pdfHrefs[key] = true;",
-        "      pdfLinks.push({ href: href, text: text || 'PDF', visible: !!visible });",
+        "      var entry = { href: href || '', text: text || 'PDF', visible: !!visible, method: method || 'external' };",
+        "      if (elIdx != null) entry.elIdx = elIdx;",
+        "      pdfLinks.push(entry);",
         "    }",
         "    for (var li = 0; li < allLinks.length; li++) {",
         "      var a = allLinks[li];",
@@ -491,7 +494,8 @@
         "      if (onclickAttr) {",
         "        var ocl = onclickAttr.toLowerCase();",
         "        if (ocl.indexOf('pdf') !== -1 || ocl.indexOf('download') !== -1 || onclickAttr.indexOf('公報') !== -1 || onclickAttr.indexOf('明細書') !== -1) {",
-        "          addPdfLink(href || ('javascript:' + (linkText || 'onclick')), linkText + ' [点击]', isVisible(a));",
+        "          var aIdx = a.__probeIdx;",
+        "          addPdfLink(href || '', linkText + ' [点击]', isVisible(a), 'click', aIdx);",
         "        }",
         "      }",
         "      // J-PlatPat: links to document/gazette pages",
@@ -499,16 +503,22 @@
         "        addPdfLink(href, linkText || '文献', isVisible(a));",
         "      }",
         "    }",
-        "    // Also find buttons/elements that look like document/PDF actions in J-PlatPat detail pages",
-        "    if (location.hostname.indexOf('j-platpat') !== -1) {",
-        "      var docBtns = document.querySelectorAll('button, a, [role=\"button\"], span[class*=\"download\"], a[class*=\"pdf\"], a[class*=\"download\"]');",
-        "      for (var di = 0; di < docBtns.length; di++) {",
-        "        var db = docBtns[di];",
-        "        var dbText = textOf(db, 30);",
-        "        var dbLow = (dbText || '').toLowerCase();",
-        "        var dbHref = db.href || '';",
-        "        if (dbLow.indexOf('pdf') !== -1 || dbLow.indexOf('download') !== -1 || dbLow.indexOf('公報') !== -1 || dbLow.indexOf('明細書') !== -1 || dbLow.indexOf('図面') !== -1 || dbLow.indexOf('請求の範囲') !== -1 || dbLow.indexOf('特許公報') !== -1) {",
-        "          addPdfLink(dbHref || ('javascript:' + dbText), dbText, isVisible(db));",
+        "    // Find buttons/elements that look like PDF/download actions on ALL sites",
+        "    var docBtns = document.querySelectorAll('button, a[role=\"button\"], [role=\"button\"], span[class*=\"download\"], a[class*=\"pdf\"], a[class*=\"download\"], div[class*=\"download\"]');",
+        "    for (var di = 0; di < docBtns.length; di++) {",
+        "      var db = docBtns[di];",
+        "      var dbText = textOf(db, 40);",
+        "      if (!dbText) continue;",
+        "      var dbLow = (dbText || '').toLowerCase();",
+        "      var dbHref = db.href || db.getAttribute('href') || '';",
+        "      var dbIsPdfBtn = (dbLow.indexOf('pdf') !== -1 || dbLow.indexOf('download') !== -1 || dbLow.indexOf('entire') !== -1 || dbLow.indexOf('full document') !== -1 || dbLow.indexOf('公報') !== -1 || dbLow.indexOf('明細書') !== -1 || dbLow.indexOf('図面') !== -1 || dbLow.indexOf('請求の範囲') !== -1 || dbLow.indexOf('特許公報') !== -1 || dbLow.indexOf('全文') !== -1 || dbLow.indexOf('下载') !== -1);",
+        "      if (dbIsPdfBtn) {",
+        "        var isDirectLink = dbHref && (dbHref.toLowerCase().indexOf('.pdf') !== -1 || dbHref.toLowerCase().indexOf('download') !== -1);",
+        "        var dbIdx = db.__probeIdx;",
+        "        if (isDirectLink) {",
+        "          addPdfLink(dbHref, dbText, isVisible(db), 'external');",
+        "        } else {",
+        "          addPdfLink(dbHref || '', dbText, isVisible(db), 'click', dbIdx);",
         "        }",
         "      }",
         "    }",
@@ -573,10 +583,14 @@
         "  // Build action list for the current page",
         "  function buildActions(collected, pageInfo, meta) {",
         "    var actions = [];",
-        "    // PDF downloads",
+        "    // PDF downloads and document buttons",
         "    if (collected.pdfLinks && collected.pdfLinks.length > 0) {",
-        "      collected.pdfLinks.slice(0, 5).forEach(function(p, i) {",
-        "        actions.push({ type: 'pdf', label: '📄 ' + (p.text || 'PDF') + (i === 0 ? '' : ' (' + (i+1) + ')'), href: p.href, visible: p.visible });",
+        "      collected.pdfLinks.slice(0, 6).forEach(function(p, i) {",
+        "        if (p.method === 'click') {",
+        "          actions.push({ type: 'click', label: '📎 ' + (p.text || 'PDF') + (i === 0 ? '' : ' (' + (i+1) + ')'), targetIdx: p.elIdx, _pdfClick: true, href: p.href, visible: p.visible });",
+        "        } else {",
+        "          actions.push({ type: 'pdf', label: '📄 ' + (p.text || 'PDF') + (i === 0 ? '' : ' (' + (i+1) + ')'), href: p.href, visible: p.visible });",
+        "        }",
         "      });",
         "    }",
         "    // J-PlatPat specific tabs",
@@ -928,10 +942,29 @@
         "",
         "  // Click element matching text (fallback)",
         "  window.__probeClickText = function(txt) {",
-        "    var all = document.querySelectorAll('a, button, [role=\"tab\"], [role=\"button\"]');",
-        "    for (var i = 0; i < all.length; i++) {",
-        "      if (all[i].textContent.trim().indexOf(txt) !== -1 && isVisible(all[i])) { all[i].click(); return true; }",
+        "    var selectors = ['a', 'button', '[role=\"tab\"]', '[role=\"button\"]', '[role=\"link\"]', 'div[onclick]', 'span[onclick]', '.download-button', '[class*=\"download\"]', '[class*=\"pdf\"]'];",
+        "    for (var s = 0; s < selectors.length; s++) {",
+        "      try {",
+        "        var els = document.querySelectorAll(selectors[s]);",
+        "        for (var i = 0; i < els.length; i++) {",
+        "          var elText = (els[i].textContent || '').trim();",
+        "          if (elText.toLowerCase().indexOf(txt.toLowerCase()) !== -1 && isVisible(els[i])) { els[i].click(); return true; }",
+        "        }",
+        "      } catch(se) {}",
         "    }",
+        "    // Last resort: search all visible elements for matching text with click handlers or button-like appearance",
+        "    try {",
+        "      var all = document.querySelectorAll('*');",
+        "      for (var j = 0; j < all.length; j++) {",
+        "        var el = all[j];",
+        "        if (!isVisible(el)) continue;",
+        "        var et = (el.textContent || '').trim();",
+        "        if (et.length > 80 || et.length < txt.length) continue;",
+        "        if (et.toLowerCase().indexOf(txt.toLowerCase()) === -1) continue;",
+        "        var cursor = window.getComputedStyle(el).cursor;",
+        "        if (el.onclick || el.getAttribute('onclick') || cursor === 'pointer') { el.click(); return true; }",
+        "      }",
+        "    } catch(re) {}",
         "    return false;",
         "  };",
         "",
@@ -1008,24 +1041,34 @@
       }
       function handleSmartAction(act) {
         if (!isElectron || !wv) return;
-        if (act.type === "pdf" && act.href) {
-          // Open PDF in external browser (reliable for download)
+        if (act.type === "pdf" && act.href && act.href.indexOf("http") === 0) {
           if (window.electronAPI) window.electronAPI.openExternal(act.href);
           else window.open(act.href, "_blank");
           return;
         }
         if (act.type === "click") {
-          // Use text-based click first (more reliable across page re-renders), then fall back to idx
           var clickScript = "(function(){";
-          if (act._text === "keika") clickScript += "if(window.__probeClickText) return window.__probeClickText('経過情報');";
-          else if (act._text === "bunken") clickScript += "if(window.__probeClickText) return window.__probeClickText('文献単位');";
+          if (act._text === "keika") {
+            clickScript += "if(window.__probeClickText) return window.__probeClickText('経過情報');";
+          } else if (act._text === "bunken") {
+            clickScript += "if(window.__probeClickText) return window.__probeClickText('文献単位');";
+          }
+          if (act._pdfClick) {
+            var cleanLabel = (act.label || '').replace(/^[📎📄]\s*/, '').replace(/\s*\(\d+\)\s*$/, '').replace(/\s*\[点击\]\s*$/, '').trim();
+            if (cleanLabel) {
+              clickScript += "if(window.__probeClickText) { var r = window.__probeClickText(" + JSON.stringify(cleanLabel) + "); if(r) return true; }";
+            }
+            if (act.href && act.href.indexOf("http") === 0) {
+              clickScript += "window.location.href = " + JSON.stringify(act.href) + "; return true;";
+            }
+          }
           if (typeof act.targetIdx === "number" && act.targetIdx >= 0) {
             clickScript += "if(window.__probeClick) return window.__probeClick(" + act.targetIdx + ");";
           }
           clickScript += "return false;})()";
           try { wv.executeJavaScript(clickScript); } catch(e) { console.warn("click failed:", e); }
-          // Re-probe after a short delay for new page state
-          setTimeout(function() { runDomProbe(); }, 1500);
+          setTimeout(function() { runDomProbe({ delay: 800 }); }, 1500);
+          setTimeout(function() { runDomProbe({ delay: 0 }); }, 3000);
           return;
         }
       }
@@ -1211,6 +1254,8 @@
 
             updateJpBar();
             updateNavButtons();
+            setTimeout(updateNavButtons, 300);
+            setTimeout(updateNavButtons, 800);
 
             var curIsJp = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
             var fillNum = "";
@@ -1238,8 +1283,10 @@
               currentUrl = e.url;
               hideSmartBar();
               stopPeriodicProbe();
-              updateNavButtons();
               updateJpBar();
+              // Delay nav button updates to avoid flashing during navigation commit
+              setTimeout(updateNavButtons, 150);
+              setTimeout(updateNavButtons, 500);
               if (isTranslated) {
                 isTranslated = false;
                 translateBtn.textContent = "翻译";
@@ -1250,8 +1297,9 @@
           wv.addEventListener("did-navigate-in-page", function (e) {
             if (e && e.url) {
               currentUrl = e.url;
-              updateNavButtons();
               updateJpBar();
+              setTimeout(updateNavButtons, 100);
+              setTimeout(updateNavButtons, 400);
               setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
               setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
             }
@@ -1298,9 +1346,23 @@
                 var newHost = new URL(newUrl).hostname;
                 var curHost = new URL(currentUrl).hostname;
                 if (newHost && curHost && newHost === curHost) {
-                  // Same domain → navigate within same webview, no new window
+                  // Same domain → navigate within same webview, preserving history for back/forward
                   currentUrl = newUrl;
+                  _loaded = false;
+                  _failed = false;
+                  loadAttempts = 0;
+                  showLoading("正在加载...");
+                  hideSmartBar();
+                  stopPeriodicProbe();
+                  if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
                   wv.loadURL(newUrl);
+                  timeoutTimer = setTimeout(function() {
+                    if (!_loaded && !_failed) {
+                      console.warn("[popout] same-host navigation timeout");
+                      _failed = true;
+                      showFallback("加载超时（" + (LOAD_TIMEOUT_MS/1000) + "秒）", "-118");
+                    }
+                  }, LOAD_TIMEOUT_MS);
                   return;
                 }
               } catch(uE) {}
@@ -1752,7 +1814,9 @@
         try {
           if (wv.canGoBack()) {
             wv.goBack();
-            setTimeout(updateNavButtons, 300);
+            setTimeout(updateNavButtons, 150);
+            setTimeout(updateNavButtons, 500);
+            setTimeout(updateNavButtons, 1000);
           }
         } catch(e) {}
       }
@@ -1762,7 +1826,9 @@
         try {
           if (wv.canGoForward()) {
             wv.goForward();
-            setTimeout(updateNavButtons, 300);
+            setTimeout(updateNavButtons, 150);
+            setTimeout(updateNavButtons, 500);
+            setTimeout(updateNavButtons, 1000);
           }
         } catch(e) {}
       }
