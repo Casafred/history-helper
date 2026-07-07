@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, dialog, session } = require("electron");
 const http = require("http");
 const https = require("https");
 const fs = require("fs");
@@ -1319,6 +1319,9 @@ function createWindow(port) {
   // 窗口打开处理：本地同域请求允许；外部链接统一通过 createPopoutWindow 创建带工具栏的弹窗
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     console.log("[Electron] mainWindow setWindowOpenHandler url=" + url);
+    if (url.startsWith("chrome-extension://")) {
+      return { action: "allow" };
+    }
     if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
       return { action: "allow" };
     }
@@ -1370,6 +1373,9 @@ function createPopoutWindow(targetUrl, title, port, opts) {
   // 弹窗中点击外部链接时，同样创建带工具栏的弹窗（而不是裸窗口）
   win.webContents.setWindowOpenHandler(({ url }) => {
     console.log("[Electron] popout setWindowOpenHandler url=" + url);
+    if (url.startsWith("chrome-extension://")) {
+      return { action: "allow" };
+    }
     if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
       return { action: "allow" };
     }
@@ -1382,7 +1388,12 @@ function createPopoutWindow(targetUrl, title, port, opts) {
     console.log("[Electron] popout webview attached");
     guestWebContents.setWindowOpenHandler(({ url }) => {
       console.log("[Electron] webview guest setWindowOpenHandler url=" + url);
-      if (!url || !url.startsWith("http")) return { action: "deny" };
+      if (!url) return { action: "deny" };
+      // 允许 chrome-extension:// 页面（沉浸式翻译设置页等）在新窗口打开
+      if (url.startsWith("chrome-extension://")) {
+        return { action: "allow" };
+      }
+      if (!url.startsWith("http")) return { action: "deny" };
       // Determine if same-host by checking the guest's current URL
       try {
         var newHost = new URL(url).hostname;
@@ -1415,7 +1426,140 @@ function createPopoutWindow(targetUrl, title, port, opts) {
 // 渲染进程同步的"是否存在未导出 PDF 标注"标志位，供 mainWindow.on('close') 确认
 let hasUnsavedAnnotations = false;
 
+// ── 沉浸式翻译 Chrome 扩展自动加载 ──
+const IMMERSIVE_TRANSLATE_URL = "https://download.immersivetranslate.com/latest/chrome-immersive-translate.zip";
+const IMMERSIVE_TRANSLATE_DIR_NAME = "immersive-translate-extension";
+
+async function downloadFile(url, destPath, proxyUrl) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const lib = urlObj.protocol === "https:" ? https : http;
+    const options = {
+      hostname: urlObj.hostname,
+      port: urlObj.port || (urlObj.protocol === "https:" ? 443 : 80),
+      path: urlObj.pathname + urlObj.search,
+      method: "GET",
+      timeout: 60000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+      },
+    };
+    // If proxy is configured, use it
+    // (simple proxy not implemented here to keep things lightweight; direct download attempted first)
+    const req = lib.request(options, (resp) => {
+      if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
+        let loc = resp.headers.location;
+        if (loc.startsWith("/")) loc = urlObj.origin + loc;
+        downloadFile(loc, destPath, proxyUrl).then(resolve).catch(reject);
+        return;
+      }
+      if (resp.statusCode !== 200) {
+        reject(new Error(`HTTP ${resp.statusCode}`));
+        return;
+      }
+      const file = fs.createWriteStream(destPath);
+      resp.pipe(file);
+      file.on("finish", () => { file.close(); resolve(); });
+      file.on("error", reject);
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("Download timeout")); });
+    req.end();
+  });
+}
+
+async function extractZip(zipPath, destDir) {
+  return new Promise((resolve, reject) => {
+    fs.mkdirSync(destDir, { recursive: true });
+    const { execFile } = require("child_process");
+    if (process.platform === "win32") {
+      // Use PowerShell Expand-Archive on Windows
+      execFile("powershell", ["-Command", `Expand-Archive -Path '${zipPath}' -DestinationPath '${destDir}' -Force`], (err) => {
+        if (err) { reject(err); return; }
+        resolve();
+      });
+    } else {
+      execFile("unzip", ["-o", zipPath, "-d", destDir], (err) => {
+        if (err) { reject(err); return; }
+        resolve();
+      });
+    }
+  });
+}
+
+function findExtensionDir(baseDir) {
+  // The zip might contain a single subfolder or files directly. Look for manifest.json
+  try {
+    const entries = fs.readdirSync(baseDir);
+    if (entries.includes("manifest.json")) return baseDir;
+    // Check one level deeper
+    for (const entry of entries) {
+      const sub = path.join(baseDir, entry);
+      try {
+        const stat = fs.statSync(sub);
+        if (stat.isDirectory()) {
+          const subEntries = fs.readdirSync(sub);
+          if (subEntries.includes("manifest.json")) return sub;
+        }
+      } catch(e) {}
+    }
+  } catch(e) {}
+  return null;
+}
+
+async function loadImmersiveTranslate() {
+  try {
+    const userDataPath = app.getPath("userData");
+    const extDir = path.join(userDataPath, IMMERSIVE_TRANSLATE_DIR_NAME);
+    const zipPath = path.join(userDataPath, "immersive-translate.zip");
+
+    let extRoot = findExtensionDir(extDir);
+    if (!extRoot) {
+      console.log("[Extension] 沉浸式翻译扩展未安装，正在下载...");
+      try {
+        if (fs.existsSync(extDir)) fs.rmSync(extDir, { recursive: true, force: true });
+        await downloadFile(IMMERSIVE_TRANSLATE_URL, zipPath);
+        console.log("[Extension] 下载完成，正在解压...");
+        await extractZip(zipPath, extDir);
+        try { fs.unlinkSync(zipPath); } catch(e) {}
+        extRoot = findExtensionDir(extDir);
+        if (!extRoot) {
+          console.warn("[Extension] 解压后未找到 manifest.json");
+          return;
+        }
+        console.log("[Extension] 沉浸式翻译扩展已解压到:", extRoot);
+      } catch(dlErr) {
+        console.warn("[Extension] 下载/解压失败（可能需要代理），扩展将不可用:", dlErr.message);
+        try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch(e) {}
+        return;
+      }
+    } else {
+      console.log("[Extension] 沉浸式翻译扩展已存在:", extRoot);
+    }
+
+    // Load the extension into the default session
+    const ses = session.defaultSession;
+    try {
+      const result = await ses.loadExtension(extRoot, { allowFileAccess: true });
+      console.log("[Extension] 沉浸式翻译扩展加载成功:", result.name);
+    } catch(loadErr) {
+      console.warn("[Extension] loadExtension 失败:", loadErr.message);
+    }
+  } catch(e) {
+    console.warn("[Extension] 加载过程出错:", e.message);
+  }
+}
+
 app.whenReady().then(async () => {
+  // 配置默认会话以支持 Chrome 扩展
+  const ses = session.defaultSession;
+  ses.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(true);
+  });
+
+  // 先加载沉浸式翻译扩展（异步，不阻塞窗口创建）
+  loadImmersiveTranslate();
   // IPC: 渲染进程请求在系统浏览器中打开外部链接
   ipcMain.on("open-external", (_event, url) => {
     if (typeof url === "string" && (url.startsWith("http://") || url.startsWith("https://"))) {
