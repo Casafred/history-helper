@@ -73,7 +73,19 @@
     <button id="po-back" class="po-btn po-btn-nav" title="后退 (Alt+←)" disabled>←</button>
     <button id="po-forward" class="po-btn po-btn-nav" title="前进 (Alt+→)" disabled>→</button>
     <button id="po-find-toggle" class="po-btn po-btn-find" title="在页面内查找 (Ctrl+F)">🔍</button>
-    <button id="po-translate" class="po-btn" title="双语对照翻译（类似沉浸式翻译）">翻译</button>
+    <div class="po-translate-wrap" style="position:relative;display:inline-block;">
+      <button id="po-translate" class="po-btn" title="翻译选项">翻译 ▾</button>
+      <div id="po-translate-menu" style="display:none;position:absolute;top:100%;left:0;margin-top:2px;background:#fff;border:1px solid #d0d7de;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:4px 0;min-width:200px;z-index:99999;font-size:13px;">
+        <div class="po-tm-item" data-action="bilingual" style="padding:8px 14px;cursor:pointer;color:#24292f;white-space:nowrap;border-bottom:1px solid #f0f0f0;">
+          <div style="font-weight:500;">📝 双语对照翻译</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:2px;">沉浸式显示原文+译文</div>
+        </div>
+        <div class="po-tm-item" data-action="google" style="padding:8px 14px;cursor:pointer;color:#24292f;white-space:nowrap;">
+          <div style="font-weight:500;">🌐 Google整页翻译</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:2px;">经典Google翻译工具栏</div>
+        </div>
+      </div>
+    </div>
     <button id="po-refresh" class="po-btn" title="刷新当前页面">刷新</button>
     <button id="po-external" class="po-btn" title="在外部浏览器打开">外部打开</button>
     <button id="po-close" class="po-btn" title="关闭窗口">关闭</button>
@@ -137,7 +149,11 @@
 
       var currentUrl = targetUrl;
       var isTranslated = false;
+      var translateMode = "none";
       var wv = null;
+      var _wvLoaded = false;
+      var _wvFailed = false;
+      var _wvEventsBound = false;
       var loadAttempts = 0;
       var MAX_AUTO_RETRY = 1;
       var LOAD_TIMEOUT_MS = 30000;
@@ -1206,274 +1222,311 @@
         container.appendChild(div);
       }
 
+      function startNavTimeout() {
+        if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+        timeoutTimer = setTimeout(function () {
+          if (!_wvLoaded && !_wvFailed) {
+            console.warn("[popout] webview " + (LOAD_TIMEOUT_MS/1000) + "s timeout");
+            _wvFailed = true;
+            if (loadAttempts <= MAX_AUTO_RETRY) {
+              console.log("[popout] timeout, auto-retrying...");
+              _recreateWebview();
+              return;
+            }
+            showFallback("加载超时（" + (LOAD_TIMEOUT_MS/1000) + "秒）", "-118");
+          }
+        }, LOAD_TIMEOUT_MS);
+      }
+
+      function _bindWebviewEvents() {
+        if (_wvEventsBound || !wv) return;
+        _wvEventsBound = true;
+
+        wv.addEventListener("found-in-page", function(e) {
+          if (e.result && e.result.finalUpdate !== false) {
+            if (e.result.matchCount === 0) {
+              findCountEl.textContent = "无匹配";
+            } else if (e.result.activeMatchOrdinal !== undefined) {
+              findCountEl.textContent = e.result.activeMatchOrdinal + "/" + e.result.matchCount;
+            } else {
+              findCountEl.textContent = e.result.matchCount + " 个匹配";
+            }
+          }
+        });
+
+        wv.addEventListener("did-start-loading", function () {
+          console.log("[popout] webview did-start-loading");
+          _wvLoaded = false;
+          hideSmartBar();
+          stopPeriodicProbe();
+        });
+
+        wv.addEventListener("did-stop-loading", function () {
+          console.log("[popout] webview did-stop-loading");
+          if (_wvFailed) return;
+          _wvLoaded = true;
+          if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+          var ld = container.querySelector(".po-loading");
+          if (ld) ld.remove();
+          try {
+            if (wv.getURL) currentUrl = wv.getURL();
+          } catch(e) {}
+
+          updateJpBar();
+          updateNavButtons();
+          setTimeout(updateNavButtons, 200);
+          setTimeout(updateNavButtons, 500);
+          setTimeout(updateNavButtons, 1000);
+          setTimeout(updateNavButtons, 1500);
+
+          var curIsJp = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
+          var fillNum = "";
+          if (jplatpatSearchNum && curIsJp) {
+            fillNum = jplatpatSearchNum;
+            jplatpatSearchNum = "";
+          }
+          runDomProbe({ autoFillNum: fillNum, delay: 800 });
+          setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
+          setTimeout(function() { runDomProbe({ delay: 0 }); }, 5000);
+          if (curIsJp) {
+            startPeriodicProbe(10000);
+          } else {
+            stopPeriodicProbe();
+          }
+        });
+
+        wv.addEventListener("did-finish-load", function() {
+          _wvLoaded = true;
+          if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+          var ld = container.querySelector(".po-loading");
+          if (ld) ld.remove();
+        });
+
+        wv.addEventListener("did-navigate", function (e) {
+          if (e && e.url) {
+            currentUrl = e.url;
+            hideSmartBar();
+            stopPeriodicProbe();
+            updateJpBar();
+            setTimeout(updateNavButtons, 150);
+            setTimeout(updateNavButtons, 500);
+            setTimeout(updateNavButtons, 1000);
+            var isOnGoogleTranslate = currentUrl.indexOf("translate.google.com/translate") !== -1;
+            if (!isOnGoogleTranslate && translateMode !== "bilingual") {
+              isTranslated = false;
+              translateMode = "none";
+              translateBtn.textContent = "翻译 ▾";
+              translateBtn.title = "翻译选项";
+            } else if (isOnGoogleTranslate) {
+              translateMode = "google";
+              isTranslated = true;
+              translateBtn.textContent = "翻译中 ▾";
+              translateBtn.title = "Google整页翻译中";
+            }
+          }
+        });
+
+        wv.addEventListener("did-navigate-in-page", function (e) {
+          if (e && e.url) {
+            currentUrl = e.url;
+            updateJpBar();
+            setTimeout(updateNavButtons, 100);
+            setTimeout(updateNavButtons, 400);
+            setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
+            setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
+          }
+        });
+
+        wv.addEventListener("did-fail-load", function (e) {
+          console.log("[popout] webview did-fail-load", e && e.errorCode, e && e.errorDescription);
+          if (e && e.errorCode === -3) return;
+          if (e && e.isMainFrame === false) return;
+          if (_wvLoaded) return;
+          _wvFailed = true;
+          if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+          if (loadAttempts <= MAX_AUTO_RETRY && classifyError(e && e.errorCode) === "network") {
+            console.log("[popout] network error, auto-retrying...");
+            setTimeout(function() { _recreateWebview(); }, 1500);
+            return;
+          }
+          showFallback(e && e.errorDescription, e && e.errorCode);
+        });
+
+        wv.addEventListener("new-window", function (e) {
+          if (e && e.url) {
+            e.preventDefault();
+            var newUrl = e.url;
+            if (newUrl.indexOf("http") !== 0) return;
+            if (newUrl.indexOf(".pdf") !== -1) {
+              if (window.electronAPI && window.electronAPI.openExternal) {
+                window.electronAPI.openExternal(newUrl);
+              } else {
+                window.open(newUrl, "_blank");
+              }
+              return;
+            }
+            var lowerUrl = newUrl.toLowerCase();
+            if (lowerUrl.indexOf("/help") !== -1 || lowerUrl.indexOf("/faq") !== -1 || lowerUrl.indexOf("/print") !== -1) {
+              if (window.electronAPI && window.electronAPI.openExternal) {
+                window.electronAPI.openExternal(newUrl);
+              }
+              return;
+            }
+            try {
+              var newHost = new URL(newUrl).hostname;
+              var curHost = new URL(currentUrl).hostname;
+              if (newHost && curHost && newHost === curHost) {
+                _navigateInWebview(newUrl);
+                return;
+              }
+            } catch(uE) {}
+            if (window.electronAPI && typeof window.electronAPI.openPopoutWindow === "function") {
+              window.electronAPI.openPopoutWindow(newUrl, "专利原文查看");
+            } else {
+              window.open(newUrl, "_blank");
+            }
+          }
+        });
+
+        var overrideScript = [
+          "(function(){",
+          "  if (window.__popoutInjected) return;",
+          "  window.__popoutInjected = true;",
+          "  var _origOpen = window.open;",
+          "  window.open = function(url, target, features) {",
+          "    try {",
+          "      var href = String(url || '');",
+          "      if (href && href.indexOf('http') === 0) {",
+          "        var linkHost = '';",
+          "        try { linkHost = new URL(href).hostname; } catch(e) {}",
+          "        if (linkHost === location.hostname) {",
+          "          var lowHref = href.toLowerCase();",
+          "          if (lowHref.indexOf('.pdf') !== -1 || lowHref.indexOf('/help') !== -1 || lowHref.indexOf('/faq') !== -1 || lowHref.indexOf('/print') !== -1) {",
+          "            return _origOpen.call(window, url, target, features);",
+          "          }",
+          "          location.href = href;",
+          "          return null;",
+          "        }",
+          "      }",
+          "    } catch(e) {}",
+          "    return _origOpen.call(window, url, target, features);",
+          "  };",
+          "  document.addEventListener('click', function(e) {",
+          "    var a = null;",
+          "    try { a = e.target && e.target.closest ? e.target.closest('a') : null; } catch(ex) {}",
+          "    if (!a) return;",
+          "    var href = a.href || '';",
+          "    if (!href || href.indexOf('http') !== 0) return;",
+          "    try {",
+          "      var linkHost = new URL(href).hostname;",
+          "      if (linkHost === location.hostname) {",
+          "        var lowHref = href.toLowerCase();",
+          "        if (lowHref.indexOf('.pdf') === -1 && lowHref.indexOf('/help') === -1 && lowHref.indexOf('/faq') === -1 && lowHref.indexOf('/print') === -1) {",
+          "          if (a.target && a.target.toLowerCase() !== '_self') {",
+          "            a.removeAttribute('target');",
+          "          }",
+          "        }",
+          "      }",
+          "    } catch(e2) {}",
+          "  }, true);",
+          "  document.addEventListener('submit', function(e) {",
+          "    try {",
+          "      var form = e.target;",
+          "      if (form && form.tagName === 'FORM' && form.target && form.target.toLowerCase() === '_blank') {",
+          "        var action = form.action || '';",
+          "        try {",
+          "          if (new URL(action, location.href).hostname === location.hostname) {",
+          "            form.removeAttribute('target');",
+          "          }",
+          "        } catch(e) {}",
+          "      }",
+          "    } catch(e) {}",
+          "  }, true);",
+          "})();"
+        ].join("");
+
+        wv.addEventListener("dom-ready", function() {
+          try {
+            try {
+              if (window.electronAPI && typeof window.electronAPI.setWebviewOpenHandler === "function") {
+                window.electronAPI.setWebviewOpenHandler(wv.getWebContentsId ? wv.getWebContentsId() : null);
+              }
+            } catch(ipcErr) {}
+            try {
+              var p = wv.executeJavaScript(overrideScript);
+              if (p && typeof p.catch === 'function') {
+                p.catch(function(err) {});
+              }
+            } catch(execErr) {}
+          } catch(injErr) { console.warn("[popout] dom-ready inject failed", injErr); }
+        });
+
+        setupWebviewContextMenu();
+      }
+
+      function _removeOldWebviews() {
+        var oldWvs = container.querySelectorAll("webview, iframe");
+        oldWvs.forEach(function(el) {
+          try { el.remove(); } catch(e) {}
+        });
+      }
+
+      function _createWebview() {
+        _removeOldWebviews();
+        _wvEventsBound = false;
+        wv = document.createElement("webview");
+        wv.setAttribute("allowpopups", "");
+        wv.setAttribute("useragent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        wv.style.width = "100%";
+        wv.style.height = "100%";
+        wv.style.border = "none";
+        _bindWebviewEvents();
+        container.appendChild(wv);
+      }
+
+      function _navigateInWebview(url) {
+        currentUrl = url;
+        _wvLoaded = false;
+        _wvFailed = false;
+        loadAttempts = 0;
+        showLoading("正在加载...");
+        hideSmartBar();
+        stopPeriodicProbe();
+        if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+        try {
+          wv.loadURL(url);
+        } catch(e) {
+          console.warn("[popout] loadURL failed, recreating webview", e);
+          _createWebview();
+          wv.setAttribute("src", url);
+        }
+        startNavTimeout();
+      }
+
+      function _recreateWebview() {
+        loadAttempts++;
+        _createWebview();
+        showLoading("正在加载...");
+        _wvLoaded = false;
+        _wvFailed = false;
+        wv.setAttribute("src", currentUrl);
+        startNavTimeout();
+      }
+
       function embed() {
         showLoading("正在加载...");
         console.log("[popout] embed, isElectron=" + isElectron + ", attempt=" + (loadAttempts+1) + ", url=" + currentUrl);
         loadAttempts++;
         if (isElectron) {
-          wv = document.createElement("webview");
+          if (!wv) {
+            _createWebview();
+          }
+          _wvLoaded = false;
+          _wvFailed = false;
           wv.setAttribute("src", currentUrl);
-          wv.setAttribute("allowpopups", "");
-          wv.setAttribute("useragent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-          wv.style.width = "100%";
-          wv.style.height = "100%";
-          wv.style.border = "none";
-          var _loaded = false;
-          var _failed = false;
-
-          // Listen for found-in-page results
-          var currentFindReqId = 0;
-          wv.addEventListener("found-in-page", function(e) {
-            currentFindReqId = findRequestId;
-            if (e.result && e.result.finalUpdate !== false) {
-              if (e.result.matchCount === 0) {
-                findCountEl.textContent = "无匹配";
-              } else if (e.result.activeMatchOrdinal !== undefined) {
-                findCountEl.textContent = e.result.activeMatchOrdinal + "/" + e.result.matchCount;
-              } else {
-                findCountEl.textContent = e.result.matchCount + " 个匹配";
-              }
-            }
-          });
-
-          wv.addEventListener("did-start-loading", function () {
-            console.log("[popout] webview did-start-loading");
-            hideSmartBar();
-            stopPeriodicProbe();
-          });
-          wv.addEventListener("did-stop-loading", function () {
-            console.log("[popout] webview did-stop-loading");
-            if (_failed) return;
-            _loaded = true;
-            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-            var ld = container.querySelector(".po-loading");
-            if (ld) ld.remove();
-            try {
-              if (wv.getURL) currentUrl = wv.getURL();
-            } catch(e) {}
-
-            updateJpBar();
-            updateNavButtons();
-            setTimeout(updateNavButtons, 300);
-            setTimeout(updateNavButtons, 800);
-
-            var curIsJp = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
-            var fillNum = "";
-            if (jplatpatSearchNum && curIsJp) {
-              fillNum = jplatpatSearchNum;
-              jplatpatSearchNum = "";
-            }
-            runDomProbe({ autoFillNum: fillNum, delay: 800 });
-            setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
-            setTimeout(function() { runDomProbe({ delay: 0 }); }, 5000);
-            if (curIsJp) {
-              startPeriodicProbe(10000);
-            } else {
-              stopPeriodicProbe();
-            }
-          });
-          wv.addEventListener("did-finish-load", function() {
-            _loaded = true;
-            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-            var ld = container.querySelector(".po-loading");
-            if (ld) ld.remove();
-          });
-          wv.addEventListener("did-navigate", function (e) {
-            if (e && e.url) {
-              currentUrl = e.url;
-              hideSmartBar();
-              stopPeriodicProbe();
-              updateJpBar();
-              // Delay nav button updates to avoid flashing during navigation commit
-              setTimeout(updateNavButtons, 150);
-              setTimeout(updateNavButtons, 500);
-              if (isTranslated) {
-                isTranslated = false;
-                translateBtn.textContent = "翻译";
-                translateBtn.title = "双语对照翻译（类似沉浸式翻译）";
-              }
-            }
-          });
-          wv.addEventListener("did-navigate-in-page", function (e) {
-            if (e && e.url) {
-              currentUrl = e.url;
-              updateJpBar();
-              setTimeout(updateNavButtons, 100);
-              setTimeout(updateNavButtons, 400);
-              setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
-              setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
-            }
-          });
-          wv.addEventListener("did-fail-load", function (e) {
-            console.log("[popout] webview did-fail-load", e && e.errorCode, e && e.errorDescription);
-            if (e && e.errorCode === -3) return;
-            if (e && e.isMainFrame === false) return;
-            if (_loaded) return;
-            _failed = true;
-            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-            if (loadAttempts <= MAX_AUTO_RETRY && classifyError(e && e.errorCode) === "network") {
-              console.log("[popout] network error, auto-retrying...");
-              setTimeout(function() { embed(); }, 1500);
-              return;
-            }
-            showFallback(e && e.errorDescription, e && e.errorCode);
-          });
-          wv.addEventListener("new-window", function (e) {
-            if (e && e.url) {
-              e.preventDefault();
-              var newUrl = e.url;
-              // Block non-http URLs (javascript:, mailto:, blob:, etc.)
-              if (newUrl.indexOf("http") !== 0) return;
-              // J-PlatPat PDF downloads: open in external browser
-              if (newUrl.indexOf(".pdf") !== -1) {
-                if (window.electronAPI && window.electronAPI.openExternal) {
-                  window.electronAPI.openExternal(newUrl);
-                } else {
-                  window.open(newUrl, "_blank");
-                }
-                return;
-              }
-              // Help/FAQ/print popup pages: open externally (these are small utility popups)
-              var lowerUrl = newUrl.toLowerCase();
-              if (lowerUrl.indexOf("/help") !== -1 || lowerUrl.indexOf("/faq") !== -1 || lowerUrl.indexOf("/print") !== -1) {
-                if (window.electronAPI && window.electronAPI.openExternal) {
-                  window.electronAPI.openExternal(newUrl);
-                }
-                return;
-              }
-              // Same-host navigation (e.g. J-PlatPat detail links): load in same webview
-              try {
-                var newHost = new URL(newUrl).hostname;
-                var curHost = new URL(currentUrl).hostname;
-                if (newHost && curHost && newHost === curHost) {
-                  // Same domain → navigate within same webview, preserving history for back/forward
-                  currentUrl = newUrl;
-                  _loaded = false;
-                  _failed = false;
-                  loadAttempts = 0;
-                  showLoading("正在加载...");
-                  hideSmartBar();
-                  stopPeriodicProbe();
-                  if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-                  wv.loadURL(newUrl);
-                  timeoutTimer = setTimeout(function() {
-                    if (!_loaded && !_failed) {
-                      console.warn("[popout] same-host navigation timeout");
-                      _failed = true;
-                      showFallback("加载超时（" + (LOAD_TIMEOUT_MS/1000) + "秒）", "-118");
-                    }
-                  }, LOAD_TIMEOUT_MS);
-                  return;
-                }
-              } catch(uE) {}
-              // External domain: open as new popout window (with toolbar)
-              if (window.electronAPI && typeof window.electronAPI.openPopoutWindow === "function") {
-                window.electronAPI.openPopoutWindow(newUrl, "专利原文查看");
-              } else {
-                window.open(newUrl, "_blank");
-              }
-            }
-          });
-          container.appendChild(wv);
-          setupWebviewContextMenu();
-
-          // On webview dom-ready, inject a script to override window.open and intercept link clicks
-          // so same-domain navigation stays in the webview instead of popping new windows
-          wv.addEventListener("dom-ready", function() {
-            try {
-              // Ask main process to set window open handler on this webview's guest webContents
-              // (wv.getWebContents() is not available in renderer process)
-              try {
-                if (window.electronAPI && typeof window.electronAPI.setWebviewOpenHandler === "function") {
-                  window.electronAPI.setWebviewOpenHandler(wv.getWebContentsId ? wv.getWebContentsId() : null);
-                }
-              } catch(ipcErr) { /* ignore, injected script will handle most cases */ }
-
-              // Inject override script into the page (same-domain link interception)
-              var overrideScript = [
-                "(function(){",
-                "  if (window.__popoutInjected) return;",
-                "  window.__popoutInjected = true;",
-                "  // Override window.open to send same-host URLs back to popout for in-place navigation",
-                "  var _origOpen = window.open;",
-                "  window.open = function(url, target, features) {",
-                "    try {",
-                "      var href = String(url || '');",
-                "      if (href && href.indexOf('http') === 0) {",
-                "        var linkHost = '';",
-                "        try { linkHost = new URL(href).hostname; } catch(e) {}",
-                "        if (linkHost === location.hostname) {",
-                "          var lowHref = href.toLowerCase();",
-                "          if (lowHref.indexOf('.pdf') !== -1 || lowHref.indexOf('/help') !== -1 || lowHref.indexOf('/faq') !== -1 || lowHref.indexOf('/print') !== -1) {",
-                "            // PDF/help/print: let Electron's new-window handler deal with it via _origOpen",
-                "            return _origOpen.call(window, url, target, features);",
-                "          }",
-                "          // Same-host content page: navigate in place",
-                "          location.href = href;",
-                "          return null;",
-                "        }",
-                "      }",
-                "    } catch(e) {}",
-                "    return _origOpen.call(window, url, target, features);",
-                "  };",
-                "  // Capture-phase click interceptor to neutralize target=_blank on same-host links",
-                "  document.addEventListener('click', function(e) {",
-                "    var a = null;",
-                "    try { a = e.target && e.target.closest ? e.target.closest('a') : null; } catch(ex) {}",
-                "    if (!a) return;",
-                "    var href = a.href || '';",
-                "    if (!href || href.indexOf('http') !== 0) return;",
-                "    try {",
-                "      var linkHost = new URL(href).hostname;",
-                "      if (linkHost === location.hostname) {",
-                "        var lowHref = href.toLowerCase();",
-                "        if (lowHref.indexOf('.pdf') === -1 && lowHref.indexOf('/help') === -1 && lowHref.indexOf('/faq') === -1 && lowHref.indexOf('/print') === -1) {",
-                "          // Same-host content link: strip target=_blank so it navigates normally",
-                "          if (a.target && a.target.toLowerCase() !== '_self') {",
-                "            a.removeAttribute('target');",
-                "          }",
-                "        }",
-                "      }",
-                "    } catch(e2) {}",
-                "  }, true);",
-                "  // Also override form submission targets",
-                "  document.addEventListener('submit', function(e) {",
-                "    try {",
-                "      var form = e.target;",
-                "      if (form && form.tagName === 'FORM' && form.target && form.target.toLowerCase() === '_blank') {",
-                "        var action = form.action || '';",
-                "        try {",
-                "          if (new URL(action, location.href).hostname === location.hostname) {",
-                "            form.removeAttribute('target');",
-                "          }",
-                "        } catch(e) {}",
-                "      }",
-                "    } catch(e) {}",
-                "  }, true);",
-                "})();"
-              ].join("");
-              try {
-                var p = wv.executeJavaScript(overrideScript);
-                if (p && typeof p.catch === 'function') {
-                  p.catch(function(err) { /* script may fail if page navigates away, ignore */ });
-                }
-              } catch(execErr) { /* ignore */ }
-            } catch(injErr) { console.warn("[popout] dom-ready inject failed", injErr); }
-          });
-
-          timeoutTimer = setTimeout(function () {
-            if (!_loaded && !_failed) {
-              console.warn("[popout] webview " + (LOAD_TIMEOUT_MS/1000) + "s timeout");
-              _failed = true;
-              if (loadAttempts <= MAX_AUTO_RETRY) {
-                console.log("[popout] timeout, auto-retrying...");
-                embed();
-                return;
-              }
-              showFallback("加载超时（" + (LOAD_TIMEOUT_MS/1000) + "秒）", "-118");
-            }
-          }, LOAD_TIMEOUT_MS);
+          startNavTimeout();
         } else {
+          _removeOldWebviews();
           var ifr = document.createElement("iframe");
           ifr.src = currentUrl;
           ifr.style.width = "100%";
@@ -1511,21 +1564,22 @@
         } else {
           jpBar.style.display = "none";
         }
-        embed();
+        if (isElectron && wv) {
+          _navigateInWebview(u);
+        } else {
+          embed();
+        }
       }
 
       function translatePage() {
-        if (isTranslated) {
-          removeBilingualTranslation();
-          return;
-        }
         startBilingualTranslation();
       }
 
       function removeBilingualTranslation() {
         isTranslated = false;
-        translateBtn.textContent = "翻译";
-        translateBtn.title = "双语对照翻译（类似沉浸式翻译）";
+        translateMode = "none";
+        translateBtn.textContent = "翻译 ▾";
+        translateBtn.title = "翻译选项";
         if (isElectron && wv) {
           try {
             wv.executeJavaScript(
@@ -1542,6 +1596,7 @@
               "    n.style.display='';" +
               "  });" +
               "  if(window.__btransObserver){window.__btransObserver.disconnect();window.__btransObserver=null;}" +
+              "  window.__btransActive=false;" +
               "  return true;" +
               "})()"
             );
@@ -1550,11 +1605,16 @@
       }
 
       function startBilingualTranslation() {
+        if (translateMode === "bilingual") {
+          removeBilingualTranslation();
+          return;
+        }
         isTranslated = true;
-        translateBtn.textContent = "关闭翻译";
-        translateBtn.title = "关闭双语翻译";
+        translateMode = "bilingual";
+        translateBtn.textContent = "关闭翻译 ▾";
+        translateBtn.title = "关闭双语对照翻译";
         if (!isElectron || !wv) {
-          loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(currentUrl));
+          googleTranslatePage();
           return;
         }
 
@@ -1786,7 +1846,13 @@
       function refreshPage() {
         loadAttempts = 0;
         if (isElectron && wv) {
-          try { wv.reload(); } catch (e) { embed(); }
+          _wvLoaded = false;
+          _wvFailed = false;
+          showLoading("正在加载...");
+          hideSmartBar();
+          if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+          try { wv.reload(); } catch (e) { _recreateWebview(); }
+          startNavTimeout();
         } else {
           var iframe = container.querySelector("iframe");
           if (iframe) iframe.src = iframe.src;
@@ -1813,10 +1879,17 @@
         if (!isElectron || !wv) return;
         try {
           if (wv.canGoBack()) {
+            _wvLoaded = false;
+            _wvFailed = false;
+            showLoading("正在加载...");
+            hideSmartBar();
+            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
             wv.goBack();
-            setTimeout(updateNavButtons, 150);
-            setTimeout(updateNavButtons, 500);
-            setTimeout(updateNavButtons, 1000);
+            startNavTimeout();
+            setTimeout(updateNavButtons, 100);
+            setTimeout(updateNavButtons, 300);
+            setTimeout(updateNavButtons, 700);
+            setTimeout(updateNavButtons, 1200);
           }
         } catch(e) {}
       }
@@ -1825,10 +1898,17 @@
         if (!isElectron || !wv) return;
         try {
           if (wv.canGoForward()) {
+            _wvLoaded = false;
+            _wvFailed = false;
+            showLoading("正在加载...");
+            hideSmartBar();
+            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
             wv.goForward();
-            setTimeout(updateNavButtons, 150);
-            setTimeout(updateNavButtons, 500);
-            setTimeout(updateNavButtons, 1000);
+            startNavTimeout();
+            setTimeout(updateNavButtons, 100);
+            setTimeout(updateNavButtons, 300);
+            setTimeout(updateNavButtons, 700);
+            setTimeout(updateNavButtons, 1200);
           }
         } catch(e) {}
       }
@@ -1847,7 +1927,92 @@
         }
       });
 
-      translateBtn.addEventListener("click", translatePage);
+      // Translate dropdown menu
+      var translateMenu = document.getElementById("po-translate-menu");
+      function hideTranslateMenu() { if (translateMenu) translateMenu.style.display = "none"; }
+      translateBtn.addEventListener("click", function(e) {
+        e.stopPropagation();
+        if (translateMenu) {
+          translateMenu.style.display = translateMenu.style.display === "block" ? "none" : "block";
+          updateTranslateMenuItems();
+        }
+      });
+      document.addEventListener("click", function(e) {
+        if (translateMenu && !e.target.closest(".po-translate-wrap")) {
+          hideTranslateMenu();
+        }
+      });
+      function updateTranslateMenuItems() {
+        var items = translateMenu.querySelectorAll(".po-tm-item");
+        items.forEach(function(item) {
+          var action = item.getAttribute("data-action");
+          var mainDiv = item.querySelector("div:first-child");
+          var subDiv = item.querySelector("div:last-child");
+          if (action === "bilingual") {
+            if (translateMode === "bilingual") {
+              mainDiv.textContent = "📝 关闭双语翻译";
+              subDiv.textContent = "点击关闭沉浸式对照翻译";
+              item.style.background = "#eff6ff";
+            } else {
+              mainDiv.textContent = "📝 双语对照翻译";
+              subDiv.textContent = "沉浸式显示原文+译文";
+              item.style.background = "";
+            }
+          } else if (action === "google") {
+            var isOnGoogleTranslate = currentUrl && currentUrl.indexOf("translate.google.com/translate") !== -1;
+            if (isOnGoogleTranslate || translateMode === "google") {
+              mainDiv.textContent = "🌐 返回原文页面";
+              subDiv.textContent = "退出Google整页翻译";
+              item.style.background = "#eff6ff";
+            } else {
+              mainDiv.textContent = "🌐 Google整页翻译";
+              subDiv.textContent = "经典Google翻译工具栏";
+              item.style.background = "";
+            }
+          }
+        });
+      }
+      var tmItems = document.querySelectorAll(".po-tm-item");
+      tmItems.forEach(function(item) {
+        item.addEventListener("mouseenter", function() {
+          if (item.style.background !== "rgb(239, 246, 255)" && item.style.background !== "#eff6ff") {
+            item.style.background = "#f3f4f6";
+          }
+        });
+        item.addEventListener("mouseleave", function() {
+          updateTranslateMenuItems();
+        });
+        item.addEventListener("click", function(e) {
+          e.stopPropagation();
+          hideTranslateMenu();
+          var action = item.getAttribute("data-action");
+          if (action === "bilingual") {
+            translatePage();
+          } else if (action === "google") {
+            googleTranslatePage();
+          }
+        });
+      });
+
+      function googleTranslatePage() {
+        var urlToTranslate = currentUrl;
+        var isOnGoogleTranslate = urlToTranslate.indexOf("translate.google.com/translate") !== -1;
+        if (isOnGoogleTranslate) {
+          goBack();
+          return;
+        }
+        var gtUrl = "https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(urlToTranslate);
+        if (isElectron && wv) {
+          translateMode = "google";
+          isTranslated = true;
+          translateBtn.textContent = "翻译中 ▾";
+          translateBtn.title = "Google整页翻译中（点击后退返回原文）";
+          _navigateInWebview(gtUrl);
+        } else {
+          window.open(gtUrl, "_blank");
+        }
+      }
+
       refreshBtn.addEventListener("click", refreshPage);
       closeBtn.addEventListener("click", function () { window.close(); });
       externalBtn.addEventListener("click", function (e) {
@@ -1866,7 +2031,8 @@
       document.body.appendChild(ctxMenuEl);
       var ctxSelection = "";
       var ctxSelectionRect = null;
-      function hideCtxMenu() { ctxMenuEl.style.display = "none"; ctxSelection = ""; }
+      var ctxWebviewBounds = null;
+      function hideCtxMenu() { ctxMenuEl.style.display = "none"; ctxSelection = ""; ctxSelectionRect = null; }
       document.addEventListener("click", hideCtxMenu);
       document.addEventListener("scroll", hideCtxMenu, true);
       function addCtxItem(label, onClick) {
@@ -1879,19 +2045,13 @@
         ctxMenuEl.appendChild(it);
         return it;
       }
-      var ctxTranslateItem = addCtxItem("🔤 Translate selection", function() {
+      var ctxTranslateItem = addCtxItem("🔤 翻译选中文本", function() {
         if (!ctxSelection) return;
-        var url = "https://translate.google.com/?sl=auto&tl=en&text=" + encodeURIComponent(ctxSelection) + "&op=translate";
-        if (window.electronAPI && window.electronAPI.openExternal) {
-          window.electronAPI.openExternal(url);
-        } else {
-          window.open(url, "_blank");
-        }
         try {
-          showFloatingTranslation(ctxSelection);
+          showFloatingTranslation(ctxSelection, ctxSelectionRect, ctxWebviewBounds);
         } catch(e) {}
       });
-      var ctxCopyItem = addCtxItem("📋 Copy selection", function() {
+      var ctxCopyItem = addCtxItem("📋 复制选中文本", function() {
         if (ctxSelection) {
           try { navigator.clipboard.writeText(ctxSelection); } catch(e) {
             var ta = document.createElement("textarea");
@@ -1900,42 +2060,64 @@
           }
         }
       });
-      var ctxSearchItem = addCtxItem("🔎 Search in app", function() {
+      addCtxItem("🌐 在Google翻译中打开", function() {
         if (ctxSelection) {
-          var url = window.location.origin + window.location.pathname + "#q=" + encodeURIComponent(ctxSelection);
+          var url = "https://translate.google.com/?sl=auto&tl=zh-CN&text=" + encodeURIComponent(ctxSelection) + "&op=translate";
           if (window.electronAPI && window.electronAPI.openExternal) {
             window.electronAPI.openExternal(url);
+          } else {
+            window.open(url, "_blank");
           }
         }
       });
-      addCtxItem("🌐 Open Google Translate", function() {
-        if (ctxSelection) {
-          window.electronAPI && window.electronAPI.openExternal && window.electronAPI.openExternal("https://translate.google.com/?sl=auto&tl=en&text=" + encodeURIComponent(ctxSelection) + "&op=translate");
-        }
-      });
 
-      // Floating translation bubble inside webview
-      function showFloatingTranslation(text) {
+      function showFloatingTranslation(text, selRect, wvBounds) {
         if (!isElectron || !wv) return;
+        var rectJson = JSON.stringify(selRect || null);
         var script = [
           "(function(){",
-          "  if (document.getElementById('__pt_trans_bar')) return;",
+          "  var old = document.getElementById('__pt_trans_bar');",
+          "  if (old) old.remove();",
           "  var bar = document.createElement('div');",
           "  bar.id = '__pt_trans_bar';",
-          "  bar.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;background:#fff;border:1px solid #d0d7de;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.18);padding:10px 14px;max-width:360px;font-size:13px;font-family:sans-serif;';",
-          "  bar.innerHTML = '<div style=\"display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;\"><b>Translation</b><span id=\"__pt_trans_close\" style=\"cursor:pointer;color:#888;font-size:16px;\">×</span></div><div id=\"__pt_trans_src\" style=\"color:#57606a;margin-bottom:6px;border-bottom:1px solid #eaecef;padding-bottom:6px;white-space:pre-wrap;word-break:break-word;\"></div><div id=\"__pt_trans_dst\" style=\"color:#24292f;white-space:pre-wrap;word-break:break-word;\">Translating...</div>';",
+          "  var selRect = " + rectJson + ";",
+          "  var topPos = '10px', rightPos = '10px', leftPos = '', bottomPos = '';",
+          "  if (selRect) {",
+          "    var spaceBelow = window.innerHeight - selRect.bottom;",
+          "    var spaceAbove = selRect.top;",
+          "    var barHeight = 200;",
+          "    if (spaceBelow < barHeight && spaceAbove > spaceBelow) {",
+          "      bottomPos = (window.innerHeight - selRect.top + 8) + 'px';",
+          "      topPos = '';",
+          "    } else {",
+          "      topPos = (selRect.bottom + 8) + 'px';",
+          "    }",
+          "    var barWidth = 360;",
+          "    var left = selRect.left;",
+          "    if (left + barWidth > window.innerWidth - 10) left = window.innerWidth - barWidth - 10;",
+          "    if (left < 10) left = 10;",
+          "    leftPos = left + 'px';",
+          "    rightPos = '';",
+          "  }",
+          "  bar.style.cssText = 'position:fixed;' + (topPos ? 'top:' + topPos + ';' : '') + (bottomPos ? 'bottom:' + bottomPos + ';' : '') + (leftPos ? 'left:' + leftPos + ';' : '') + (rightPos ? 'right:' + rightPos + ';' : '') + 'z-index:2147483647;background:#fff;border:1px solid #d0d7de;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.18);padding:0;max-width:400px;min-width:280px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;';",
+          "  bar.innerHTML = '<div style=\"display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #eaecef;background:#f6f8fa;border-radius:10px 10px 0 0;\"><b style=\"color:#24292f;font-size:13px;\">🌐 翻译对照</b><span id=\"__pt_trans_close\" style=\"cursor:pointer;color:#888;font-size:18px;line-height:1;padding:2px 6px;border-radius:4px;\">×</span></div>' +",
+          "    '<div style=\"padding:10px 14px;\"><div style=\"color:#57606a;font-size:11px;margin-bottom:4px;font-weight:500;\">原文</div><div id=\"__pt_trans_src\" style=\"color:#24292e;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #eaecef;white-space:pre-wrap;word-break:break-word;line-height:1.5;\"></div>' +",
+          "    '<div style=\"color:#1a73e8;font-size:11px;margin-bottom:4px;font-weight:500;\">译文</div><div id=\"__pt_trans_dst\" style=\"color:#1a73e8;white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:14px;\">正在翻译...</div></div>';",
           "  document.body.appendChild(bar);",
+          "  document.getElementById('__pt_trans_close').onmouseover = function(){this.style.background='#e5e7eb';};",
+          "  document.getElementById('__pt_trans_close').onmouseout = function(){this.style.background='';};",
           "  document.getElementById('__pt_trans_close').onclick = function(){ bar.remove(); };",
           "  document.getElementById('__pt_trans_src').textContent = " + JSON.stringify(text) + ";",
           "  var src = encodeURIComponent(" + JSON.stringify(text) + ");",
-          "  fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=' + src)",
+          "  fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=' + src)",
           "    .then(function(r){ return r.json(); })",
           "    .then(function(d){",
           "      var dst = '';",
           "      try { for (var i=0;i<d[0].length;i++) dst += d[0][i][0]; } catch(e) {}",
-          "      document.getElementById('__pt_trans_dst').textContent = dst || '(Translation failed)';",
+          "      var el = document.getElementById('__pt_trans_dst');",
+          "      if (el) el.textContent = dst || '翻译失败';",
           "    })",
-          "    .catch(function(){ document.getElementById('__pt_trans_dst').textContent = '(Network error, use Google Translate from context menu)'; });",
+          "    .catch(function(){ var el = document.getElementById('__pt_trans_dst'); if(el) el.textContent='网络错误，请稍后重试'; });",
           "})();"
         ].join("");
         try { wv.executeJavaScript(script); } catch(e) {}
@@ -1947,10 +2129,12 @@
         // The webview 'contextmenu' event fires with screen coords in e.params
         wv.addEventListener("contextmenu", function(e) {
           try {
-            var getSelScript = "(function(){var s=window.getSelection();var t=s?s.toString():'';var r=null;try{if(s&&s.rangeCount>0){var rr=s.getRangeAt(0).getBoundingClientRect();r={x:rr.left,y:rr.top,w:rr.width,h:rr.height};}}catch(e){}return{text:t,rect:r};})();";
+            var getSelScript = "(function(){var s=window.getSelection();var t=s?s.toString():'';var r=null;try{if(s&&s.rangeCount>0){var rr=s.getRangeAt(0).getBoundingClientRect();r={x:rr.left,y:rr.top,w:rr.width,h:rr.height,bottom:rr.bottom,right:rr.right};}}catch(e){}return{text:t,rect:r};})();";
             var handleSel = function(result) {
               if (result && result.text && result.text.trim()) {
                 ctxSelection = result.text.trim();
+                ctxSelectionRect = result.rect || null;
+                ctxWebviewBounds = wv.getBoundingClientRect ? wv.getBoundingClientRect() : null;
                 // Convert screen coords to window-relative coords
                 var sx = (e.params && typeof e.params.x === 'number') ? e.params.x : 0;
                 var sy = (e.params && typeof e.params.y === 'number') ? e.params.y : 0;
