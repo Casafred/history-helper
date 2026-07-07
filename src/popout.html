@@ -114,6 +114,7 @@
   <div id="po-container">
     <div class="po-loading">正在加载...</div>
   </div>
+  <script src="scripts/web-ai.js"></script>
   <script>
     (function () {
       var params = new URLSearchParams(location.search);
@@ -146,6 +147,12 @@
       var smartActions = document.getElementById("po-smart-actions");
       var smartCloseBtn = document.getElementById("po-smart-close");
       titleEl.textContent = decodeURIComponent(title);
+
+      function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+      }
 
       var currentUrl = targetUrl;
       var isTranslated = false;
@@ -1165,6 +1172,7 @@
         "-501": "ERR_INSECURE_RESPONSE", "-137": "ERR_NAME_RESOLUTION_FAILED",
       };
       var BLOCKED_ERRORS = { "-300": "ERR_INVALID_RESPONSE", "-20": "ERR_BLOCKED_BY_CLIENT", "-32": "ERR_INVALID_RESPONSE" };
+      var _loadingSafeTimer = null;
 
       function classifyError(code) {
         code = String(code);
@@ -1173,22 +1181,44 @@
         return "other";
       }
 
+      function hideLoading() {
+        if (_loadingSafeTimer) { clearTimeout(_loadingSafeTimer); _loadingSafeTimer = null; }
+        var ld = container.querySelector(".po-loading");
+        if (ld) ld.remove();
+      }
+
       function clearContainer() {
         if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+        hideLoading();
+        var oldFallback = container.querySelector(".po-fallback");
+        if (oldFallback) oldFallback.remove();
+      }
+
+      function resetContainer() {
+        if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+        hideLoading();
         container.innerHTML = "";
         wv = null;
+        _wvEventsBound = false;
       }
 
       function showLoading(msg) {
-        clearContainer();
+        var oldLoading = container.querySelector(".po-loading");
+        if (oldLoading) oldLoading.remove();
+        if (_loadingSafeTimer) { clearTimeout(_loadingSafeTimer); _loadingSafeTimer = null; }
         var div = document.createElement("div");
         div.className = "po-loading";
+        div.style.cssText = "position:absolute;top:0;left:0;right:0;bottom:0;z-index:9999;background:rgba(255,255,255,0.85);display:flex;align-items:center;justify-content:center;color:#666;font-size:14px;pointer-events:auto;";
         div.textContent = msg || "正在加载...";
         container.appendChild(div);
+        _loadingSafeTimer = setTimeout(function() {
+          var ld2 = container.querySelector(".po-loading");
+          if (ld2) ld2.remove();
+        }, 5000);
       }
 
       function showFallback(reason, errorCode) {
-        clearContainer();
+        resetContainer();
         var div = document.createElement("div");
         div.className = "po-fallback";
         var errType = classifyError(errorCode);
@@ -1305,6 +1335,7 @@
         wv.addEventListener("did-navigate", function (e) {
           if (e && e.url) {
             currentUrl = e.url;
+            hideLoading();
             hideSmartBar();
             stopPeriodicProbe();
             updateJpBar();
@@ -1329,6 +1360,7 @@
         wv.addEventListener("did-navigate-in-page", function (e) {
           if (e && e.url) {
             currentUrl = e.url;
+            hideLoading();
             updateJpBar();
             setTimeout(updateNavButtons, 100);
             setTimeout(updateNavButtons, 400);
@@ -1339,17 +1371,20 @@
 
         wv.addEventListener("did-fail-load", function (e) {
           console.log("[popout] webview did-fail-load", e && e.errorCode, e && e.errorDescription);
+          hideLoading();
           if (e && e.errorCode === -3) return;
           if (e && e.isMainFrame === false) return;
-          if (_wvLoaded) return;
+          if (e && e.errorCode === -3) return;
           _wvFailed = true;
           if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-          if (loadAttempts <= MAX_AUTO_RETRY && classifyError(e && e.errorCode) === "network") {
+          if (!_wvLoaded && loadAttempts <= MAX_AUTO_RETRY && classifyError(e && e.errorCode) === "network") {
             console.log("[popout] network error, auto-retrying...");
             setTimeout(function() { _recreateWebview(); }, 1500);
             return;
           }
-          showFallback(e && e.errorDescription, e && e.errorCode);
+          if (!_wvLoaded) {
+            showFallback(e && e.errorDescription, e && e.errorCode);
+          }
         });
 
         wv.addEventListener("new-window", function (e) {
@@ -1442,10 +1477,60 @@
           "      }",
           "    } catch(e) {}",
           "  }, true);",
+          "  document.addEventListener('contextmenu', function(e) {",
+          "    var sel = window.getSelection();",
+          "    var selText = sel ? sel.toString().trim() : '';",
+          "    if (selText) {",
+          "      e.preventDefault();",
+          "      var rect = null;",
+          "      try {",
+          "        var range = sel.getRangeAt(0);",
+          "        rect = range.getBoundingClientRect();",
+          "      } catch(re) {}",
+          "      console.log('__POPOUT_CTX__:' + JSON.stringify({",
+          "        text: selText,",
+          "        x: e.clientX,",
+          "        y: e.clientY,",
+          "        selX: rect ? rect.left : e.clientX,",
+          "        selY: rect ? rect.bottom : e.clientY",
+          "      }));",
+          "    }",
+          "  }, true);",
           "})();"
         ].join("");
 
+        wv.addEventListener("console-message", function(e) {
+          try {
+            var msg = e.message || "";
+            if (msg.indexOf("__POPOUT_CTX__:") === 0) {
+              e.preventDefault();
+              try {
+                var data = JSON.parse(msg.substring("__POPOUT_CTX__:".length));
+                if (data && data.text && data.text.trim()) {
+                  ctxSelection = data.text.trim();
+                  var wvRect = wv.getBoundingClientRect();
+                  var px = wvRect.left + (data.x || 0);
+                  var py = wvRect.top + (data.y || 0) + 8;
+                  var vw = window.innerWidth, vh = window.innerHeight;
+                  px = Math.min(Math.max(px, 5), vw - 220);
+                  py = Math.min(Math.max(py, 5), vh - 160);
+                  ctxClientX = px;
+                  ctxClientY = py;
+                  ctxMenuEl.style.left = px + "px";
+                  ctxMenuEl.style.top = py + "px";
+                  ctxMenuEl.style.display = "block";
+                }
+              } catch(parseErr) { console.warn("ctx parse error:", parseErr); }
+            }
+          } catch(cmErr) {}
+        });
+
+        wv.addEventListener("page-title-updated", function() {
+          hideLoading();
+        });
+
         wv.addEventListener("dom-ready", function() {
+          hideLoading();
           try {
             try {
               if (window.electronAPI && typeof window.electronAPI.setWebviewOpenHandler === "function") {
@@ -1486,7 +1571,6 @@
 
       function _navigateInWebview(url) {
         currentUrl = url;
-        _wvLoaded = false;
         _wvFailed = false;
         loadAttempts = 0;
         showLoading("正在加载...");
@@ -1500,17 +1584,17 @@
           _createWebview();
           wv.setAttribute("src", url);
         }
-        startNavTimeout();
+        setTimeout(function() { hideLoading(); updateNavButtons(); }, 3000);
       }
 
       function _recreateWebview() {
         loadAttempts++;
         _createWebview();
         showLoading("正在加载...");
-        _wvLoaded = false;
         _wvFailed = false;
         wv.setAttribute("src", currentUrl);
         startNavTimeout();
+        setTimeout(function() { hideLoading(); updateNavButtons(); }, 3000);
       }
 
       function embed() {
@@ -1521,10 +1605,10 @@
           if (!wv) {
             _createWebview();
           }
-          _wvLoaded = false;
           _wvFailed = false;
           wv.setAttribute("src", currentUrl);
           startNavTimeout();
+          setTimeout(function() { hideLoading(); updateNavButtons(); }, 3000);
         } else {
           _removeOldWebviews();
           var ifr = document.createElement("iframe");
@@ -1846,13 +1930,13 @@
       function refreshPage() {
         loadAttempts = 0;
         if (isElectron && wv) {
-          _wvLoaded = false;
           _wvFailed = false;
           showLoading("正在加载...");
           hideSmartBar();
+          stopPeriodicProbe();
           if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-          try { wv.reload(); } catch (e) { _recreateWebview(); }
-          startNavTimeout();
+          try { wv.reload(); } catch (e) { console.warn("reload failed:", e); _recreateWebview(); }
+          setTimeout(function() { hideLoading(); updateNavButtons(); }, 2000);
         } else {
           var iframe = container.querySelector("iframe");
           if (iframe) iframe.src = iframe.src;
@@ -1879,38 +1963,42 @@
         if (!isElectron || !wv) return;
         try {
           if (wv.canGoBack()) {
-            _wvLoaded = false;
             _wvFailed = false;
+            loadAttempts = 0;
             showLoading("正在加载...");
             hideSmartBar();
+            stopPeriodicProbe();
             if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-            wv.goBack();
-            startNavTimeout();
+            try { wv.goBack(); } catch(navErr) { console.warn("goBack failed:", navErr); hideLoading(); }
+            setTimeout(function() { hideLoading(); updateNavButtons(); }, 1500);
             setTimeout(updateNavButtons, 100);
             setTimeout(updateNavButtons, 300);
             setTimeout(updateNavButtons, 700);
             setTimeout(updateNavButtons, 1200);
+            setTimeout(updateNavButtons, 2000);
           }
-        } catch(e) {}
+        } catch(e) { console.warn("goBack error:", e); hideLoading(); }
       }
 
       function goForward() {
         if (!isElectron || !wv) return;
         try {
           if (wv.canGoForward()) {
-            _wvLoaded = false;
             _wvFailed = false;
+            loadAttempts = 0;
             showLoading("正在加载...");
             hideSmartBar();
+            stopPeriodicProbe();
             if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-            wv.goForward();
-            startNavTimeout();
+            try { wv.goForward(); } catch(navErr) { console.warn("goForward failed:", navErr); hideLoading(); }
+            setTimeout(function() { hideLoading(); updateNavButtons(); }, 1500);
             setTimeout(updateNavButtons, 100);
             setTimeout(updateNavButtons, 300);
             setTimeout(updateNavButtons, 700);
             setTimeout(updateNavButtons, 1200);
+            setTimeout(updateNavButtons, 2000);
           }
-        } catch(e) {}
+        } catch(e) { console.warn("goForward error:", e); hideLoading(); }
       }
 
       if (backBtn) backBtn.addEventListener("click", goBack);
@@ -2030,9 +2118,9 @@
       ctxMenuEl.style.cssText = "display:none;position:fixed;z-index:99999;background:#fff;border:1px solid #d0d7de;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:4px 0;min-width:160px;font-size:13px;";
       document.body.appendChild(ctxMenuEl);
       var ctxSelection = "";
-      var ctxSelectionRect = null;
-      var ctxWebviewBounds = null;
-      function hideCtxMenu() { ctxMenuEl.style.display = "none"; ctxSelection = ""; ctxSelectionRect = null; }
+      var ctxClientX = 0;
+      var ctxClientY = 0;
+      function hideCtxMenu() { ctxMenuEl.style.display = "none"; ctxSelection = ""; }
       document.addEventListener("click", hideCtxMenu);
       document.addEventListener("scroll", hideCtxMenu, true);
       function addCtxItem(label, onClick) {
@@ -2045,11 +2133,11 @@
         ctxMenuEl.appendChild(it);
         return it;
       }
-      var ctxTranslateItem = addCtxItem("🔤 翻译选中文本", function() {
+      var ctxTranslateItem = addCtxItem("🔤 AI翻译选中文本", function() {
         if (!ctxSelection) return;
         try {
-          showFloatingTranslation(ctxSelection, ctxSelectionRect, ctxWebviewBounds);
-        } catch(e) {}
+          translateSelectedTextInPopup(ctxSelection, ctxClientX, ctxClientY);
+        } catch(e) { console.warn("translate error:", e); }
       });
       var ctxCopyItem = addCtxItem("📋 复制选中文本", function() {
         if (ctxSelection) {
@@ -2071,95 +2159,146 @@
         }
       });
 
-      function showFloatingTranslation(text, selRect, wvBounds) {
-        if (!isElectron || !wv) return;
-        var rectJson = JSON.stringify(selRect || null);
-        var script = [
-          "(function(){",
-          "  var old = document.getElementById('__pt_trans_bar');",
-          "  if (old) old.remove();",
-          "  var bar = document.createElement('div');",
-          "  bar.id = '__pt_trans_bar';",
-          "  var selRect = " + rectJson + ";",
-          "  var topPos = '10px', rightPos = '10px', leftPos = '', bottomPos = '';",
-          "  if (selRect) {",
-          "    var spaceBelow = window.innerHeight - selRect.bottom;",
-          "    var spaceAbove = selRect.top;",
-          "    var barHeight = 200;",
-          "    if (spaceBelow < barHeight && spaceAbove > spaceBelow) {",
-          "      bottomPos = (window.innerHeight - selRect.top + 8) + 'px';",
-          "      topPos = '';",
-          "    } else {",
-          "      topPos = (selRect.bottom + 8) + 'px';",
-          "    }",
-          "    var barWidth = 360;",
-          "    var left = selRect.left;",
-          "    if (left + barWidth > window.innerWidth - 10) left = window.innerWidth - barWidth - 10;",
-          "    if (left < 10) left = 10;",
-          "    leftPos = left + 'px';",
-          "    rightPos = '';",
-          "  }",
-          "  bar.style.cssText = 'position:fixed;' + (topPos ? 'top:' + topPos + ';' : '') + (bottomPos ? 'bottom:' + bottomPos + ';' : '') + (leftPos ? 'left:' + leftPos + ';' : '') + (rightPos ? 'right:' + rightPos + ';' : '') + 'z-index:2147483647;background:#fff;border:1px solid #d0d7de;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.18);padding:0;max-width:400px;min-width:280px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;';",
-          "  bar.innerHTML = '<div style=\"display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #eaecef;background:#f6f8fa;border-radius:10px 10px 0 0;\"><b style=\"color:#24292f;font-size:13px;\">🌐 翻译对照</b><span id=\"__pt_trans_close\" style=\"cursor:pointer;color:#888;font-size:18px;line-height:1;padding:2px 6px;border-radius:4px;\">×</span></div>' +",
-          "    '<div style=\"padding:10px 14px;\"><div style=\"color:#57606a;font-size:11px;margin-bottom:4px;font-weight:500;\">原文</div><div id=\"__pt_trans_src\" style=\"color:#24292e;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #eaecef;white-space:pre-wrap;word-break:break-word;line-height:1.5;\"></div>' +",
-          "    '<div style=\"color:#1a73e8;font-size:11px;margin-bottom:4px;font-weight:500;\">译文</div><div id=\"__pt_trans_dst\" style=\"color:#1a73e8;white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:14px;\">正在翻译...</div></div>';",
-          "  document.body.appendChild(bar);",
-          "  document.getElementById('__pt_trans_close').onmouseover = function(){this.style.background='#e5e7eb';};",
-          "  document.getElementById('__pt_trans_close').onmouseout = function(){this.style.background='';};",
-          "  document.getElementById('__pt_trans_close').onclick = function(){ bar.remove(); };",
-          "  document.getElementById('__pt_trans_src').textContent = " + JSON.stringify(text) + ";",
-          "  var src = encodeURIComponent(" + JSON.stringify(text) + ");",
-          "  fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=' + src)",
-          "    .then(function(r){ return r.json(); })",
-          "    .then(function(d){",
-          "      var dst = '';",
-          "      try { for (var i=0;i<d[0].length;i++) dst += d[0][i][0]; } catch(e) {}",
-          "      var el = document.getElementById('__pt_trans_dst');",
-          "      if (el) el.textContent = dst || '翻译失败';",
-          "    })",
-          "    .catch(function(){ var el = document.getElementById('__pt_trans_dst'); if(el) el.textContent='网络错误，请稍后重试'; });",
-          "})();"
-        ].join("");
-        try { wv.executeJavaScript(script); } catch(e) {}
+      async function translateSelectedTextInPopup(text, clientX, clientY) {
+        var existingPopup = document.getElementById("po-selected-translation-popup");
+        if (existingPopup) existingPopup.remove();
+
+        var config;
+        var translateProvider = null;
+        try {
+          config = window.AI.loadAIConfig();
+          translateProvider = window.AI.getTranslateProvider(config);
+        } catch(e) { console.warn("AI config not available:", e); }
+
+        var posX = clientX;
+        var posY = clientY + 8;
+
+        var popup = document.createElement('div');
+        popup.id = "po-selected-translation-popup";
+        popup.style.cssText = 'position:fixed;left:' + posX + 'px;top:' + posY + 'px;z-index:100010;max-width:420px;min-width:200px;padding:10px 14px;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.18);border:1px solid #e0e0e0;font-size:13px;color:#333;line-height:1.6;';
+        
+        if (!translateProvider || !translateProvider.apiKey) {
+          popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:11px;color:#888;">翻译提示</span><button id="po-trans-popup-close" style="border:none;background:transparent;cursor:pointer;font-size:16px;color:#999;padding:0 4px;line-height:1;">&times;</button></div><div style="color:#e65100;font-size:12px;">请先在主页面 AI 设置中配置 API Key 以使用AI翻译<br><br>正在使用Google翻译作为备选...</div>';
+          document.body.appendChild(popup);
+          var closeBtn = document.getElementById("po-trans-popup-close");
+          if (closeBtn) closeBtn.addEventListener("click", function() { popup.remove(); });
+          requestAnimationFrame(function() {
+            var r = popup.getBoundingClientRect();
+            if (r.right > window.innerWidth - 10) popup.style.left = Math.max(10, window.innerWidth - r.width - 10) + 'px';
+            if (r.bottom > window.innerHeight - 10) popup.style.top = Math.max(10, posY - r.height - 16) + 'px';
+          });
+          try {
+            var src = encodeURIComponent(text);
+            fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=' + src)
+              .then(function(r){ return r.json(); })
+              .then(function(d){
+                var dst = '';
+                try { for (var i=0;i<d[0].length;i++) dst += d[0][i][0]; } catch(e) {}
+                var body = document.getElementById("po-trans-body");
+                if (body) {
+                  body.innerHTML = '<div style="color:#57606a;font-size:11px;margin-bottom:4px;font-weight:500;">原文</div><div style="color:#24292e;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #eaecef;white-space:pre-wrap;word-break:break-word;line-height:1.5;">' + escapeHtml(text) + '</div>' +
+                    '<div style="color:#1a73e8;font-size:11px;margin-bottom:4px;font-weight:500;">Google译文</div><div style="color:#1a73e8;white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:14px;">' + escapeHtml(dst || '翻译失败') + '</div>';
+                }
+                popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:11px;color:#888;">翻译结果</span><button id="po-trans-popup-close" style="border:none;background:transparent;cursor:pointer;font-size:16px;color:#999;padding:0 4px;line-height:1;">&times;</button></div><div id="po-trans-body"></div>';
+                var body2 = document.getElementById("po-trans-body");
+                if (body2) body2.innerHTML = '<div style="color:#57606a;font-size:11px;margin-bottom:4px;font-weight:500;">原文</div><div style="color:#24292e;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #eaecef;white-space:pre-wrap;word-break:break-word;line-height:1.5;">' + escapeHtml(text) + '</div>' +
+                  '<div style="color:#1a73e8;font-size:11px;margin-bottom:4px;font-weight:500;">Google译文</div><div style="color:#1a73e8;white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:14px;">' + escapeHtml(dst || '翻译失败') + '</div>';
+                var closeBtn2 = document.getElementById("po-trans-popup-close");
+                if (closeBtn2) closeBtn2.addEventListener("click", function() { popup.remove(); });
+                requestAnimationFrame(function() {
+                  var r = popup.getBoundingClientRect();
+                  if (r.right > window.innerWidth - 10) popup.style.left = Math.max(10, window.innerWidth - r.width - 10) + 'px';
+                  if (r.bottom > window.innerHeight - 10) popup.style.top = Math.max(10, posY - r.height - 16) + 'px';
+                });
+              })
+              .catch(function(){
+                var body = document.getElementById("po-trans-body");
+                if (body) body.innerHTML = '<span style="color:#d32f2f;">网络错误，请稍后重试</span>';
+              });
+          } catch(e) {}
+          return;
+        }
+
+        popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:11px;color:#888;">AI 翻译</span><button id="po-trans-popup-close" style="border:none;background:transparent;cursor:pointer;font-size:16px;color:#999;padding:0 4px;line-height:1;">&times;</button></div><div id="po-trans-body"><div style="display:flex;align-items:center;gap:8px;"><div style="width:14px;height:14px;border:2px solid #e0e0e0;border-top-color:#1a73e8;border-radius:50%;animation:po-spin 0.8s linear infinite;"></div><span style="font-size:12px;color:#888;">翻译中...</span></div></div>';
+        var styleEl = document.getElementById('po-spinner-style');
+        if (!styleEl) {
+          styleEl = document.createElement('style');
+          styleEl.id = 'po-spinner-style';
+          styleEl.textContent = '@keyframes po-spin { to { transform: rotate(360deg); } }';
+          document.head.appendChild(styleEl);
+        }
+        document.body.appendChild(popup);
+        var closeBtn = document.getElementById("po-trans-popup-close");
+        if (closeBtn) closeBtn.addEventListener("click", function() { popup.remove(); });
+        requestAnimationFrame(function() {
+          var r = popup.getBoundingClientRect();
+          if (r.right > window.innerWidth - 10) popup.style.left = Math.max(10, window.innerWidth - r.width - 10) + 'px';
+          if (r.bottom > window.innerHeight - 10) popup.style.top = Math.max(10, posY - r.height - 16) + 'px';
+        });
+
+        var bodyEl = document.getElementById("po-trans-body");
+        try {
+          var fullResponse = "";
+          var _rafPending = false;
+          var stream = window.AI.streamChat(translateProvider.type, translateProvider.apiKey, translateProvider.baseUrl, {
+            model: translateProvider.model,
+            messages: [
+              { role: "system", content: "你是一位专业的专利文献翻译专家。请将以下文本翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。" },
+              { role: "user", content: text }
+            ],
+            temperature: 0.3,
+            maxTokens: 4096,
+          });
+
+          for await (var chunk of stream) {
+            if (chunk.content) {
+              fullResponse += chunk.content;
+              if (!_rafPending) {
+                _rafPending = true;
+                requestAnimationFrame(function() {
+                  if (bodyEl) bodyEl.innerHTML = '<div style="color:#57606a;font-size:11px;margin-bottom:4px;font-weight:500;">原文</div><div style="color:#24292e;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #eaecef;white-space:pre-wrap;word-break:break-word;line-height:1.5;">' + escapeHtml(text) + '</div>' +
+                    '<div style="color:#1a73e8;font-size:11px;margin-bottom:4px;font-weight:500;">AI译文</div><div style="color:#1a73e8;white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:14px;">' + escapeHtml(fullResponse).replace(/\n/g, '<br>') + '</div>';
+                  _rafPending = false;
+                  requestAnimationFrame(function() {
+                    var r = popup.getBoundingClientRect();
+                    if (r.right > window.innerWidth - 10) popup.style.left = Math.max(10, window.innerWidth - r.width - 10) + 'px';
+                    if (r.bottom > window.innerHeight - 10) popup.style.top = Math.max(10, posY - r.height - 16) + 'px';
+                  });
+                });
+              }
+            }
+          }
+          if (bodyEl) bodyEl.innerHTML = '<div style="color:#57606a;font-size:11px;margin-bottom:4px;font-weight:500;">原文</div><div style="color:#24292e;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #eaecef;white-space:pre-wrap;word-break:break-word;line-height:1.5;">' + escapeHtml(text) + '</div>' +
+            '<div style="color:#1a73e8;font-size:11px;margin-bottom:4px;font-weight:500;">AI译文</div><div style="color:#1a73e8;white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:14px;">' + escapeHtml(fullResponse).replace(/\n/g, '<br>') + '</div>';
+        } catch (e) {
+          console.warn("AI translate failed, falling back to Google:", e);
+          if (bodyEl) bodyEl.innerHTML = '<div style="color:#57606a;font-size:11px;margin-bottom:4px;">AI翻译失败: ' + escapeHtml(e.message) + '，尝试Google翻译...</div>';
+          try {
+            var src2 = encodeURIComponent(text);
+            fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=' + src2)
+              .then(function(r){ return r.json(); })
+              .then(function(d){
+                var dst = '';
+                try { for (var i=0;i<d[0].length;i++) dst += d[0][i][0]; } catch(e2) {}
+                if (bodyEl) bodyEl.innerHTML = '<div style="color:#57606a;font-size:11px;margin-bottom:4px;font-weight:500;">原文</div><div style="color:#24292e;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #eaecef;white-space:pre-wrap;word-break:break-word;line-height:1.5;">' + escapeHtml(text) + '</div>' +
+                  '<div style="color:#1a73e8;font-size:11px;margin-bottom:4px;font-weight:500;">Google译文</div><div style="color:#1a73e8;white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:14px;">' + escapeHtml(dst || '翻译失败') + '</div>';
+              })
+              .catch(function(){
+                if (bodyEl) bodyEl.innerHTML = '<span style="color:#d32f2f;">翻译失败</span>';
+              });
+          } catch(e2) {}
+        }
       }
 
-      // Listen for contextmenu events inside webview
+      function showFloatingTranslation(text, selRect, wvBounds) {
+        translateSelectedTextInPopup(text, ctxClientX || 100, ctxClientY || 100);
+      }
+
       function setupWebviewContextMenu() {
         if (!wv) return;
-        // The webview 'contextmenu' event fires with screen coords in e.params
-        wv.addEventListener("contextmenu", function(e) {
-          try {
-            var getSelScript = "(function(){var s=window.getSelection();var t=s?s.toString():'';var r=null;try{if(s&&s.rangeCount>0){var rr=s.getRangeAt(0).getBoundingClientRect();r={x:rr.left,y:rr.top,w:rr.width,h:rr.height,bottom:rr.bottom,right:rr.right};}}catch(e){}return{text:t,rect:r};})();";
-            var handleSel = function(result) {
-              if (result && result.text && result.text.trim()) {
-                ctxSelection = result.text.trim();
-                ctxSelectionRect = result.rect || null;
-                ctxWebviewBounds = wv.getBoundingClientRect ? wv.getBoundingClientRect() : null;
-                // Convert screen coords to window-relative coords
-                var sx = (e.params && typeof e.params.x === 'number') ? e.params.x : 0;
-                var sy = (e.params && typeof e.params.y === 'number') ? e.params.y : 0;
-                var px = sx - window.screenX;
-                var py = sy - window.screenY;
-                var vw = window.innerWidth, vh = window.innerHeight;
-                px = Math.min(Math.max(px, 5), vw - 200);
-                py = Math.min(Math.max(py, 5), vh - 160);
-                ctxMenuEl.style.left = px + "px";
-                ctxMenuEl.style.top = py + "px";
-                ctxMenuEl.style.display = "block";
-                e.preventDefault();
-              } else {
-                hideCtxMenu();
-              }
-            };
-            // executeJavaScript returns a Promise in modern Electron; callback form in older
-            var p = wv.executeJavaScript(getSelScript);
-            if (p && typeof p.then === 'function') {
-              p.then(handleSel).catch(function(){ hideCtxMenu(); });
-            }
-          } catch(err) { hideCtxMenu(); }
-        });
         wv.addEventListener("did-navigate", hideCtxMenu);
         wv.addEventListener("did-navigate-in-page", hideCtxMenu);
+        wv.addEventListener("did-start-loading", hideCtxMenu);
       }
 
       if (targetUrl) embed(); else showFallback();
