@@ -6751,9 +6751,6 @@ function selectReaderDoc(idx) {
   chatHistory = [];
   if (chatMessages) chatMessages.innerHTML = "";
 
-  // Hide any OCR progress overlay from previous document
-  hideOcrProgressOverlay();
-
   const items = kanbanState.documents;
   const it = items.find(d => d.idx === idx);
   if (!it) return;
@@ -6773,6 +6770,9 @@ function selectReaderDoc(idx) {
   pdfViewState.searchCurrentIdx = -1;
   const searchInfo = document.getElementById("pdf-search-info");
   if (searchInfo) searchInfo.textContent = "";
+
+  // 切换文档时：如果上一个文档正在OCR，后台默默继续；显示当前文档的OCR进度
+  restoreOcrProgressForDoc(idx);
 
   // Reset OCR/search state for new document
   const ext = kanbanState.extractions[idx];
@@ -6866,10 +6866,25 @@ function togglePdfView(skipRender) {
   }
 }
 
-function showOcrProgressOverlay(statusText, progress) {
+// ── 每个文档独立的 OCR 任务状态，切换文档时后台继续但不干扰当前视图 ──
+// ocrJobs[idx] = { status: 'running'|'done'|'error', progress: 0-100, statusText: '...' }
+const ocrJobs = {};
+let _currentOcrJobIdx = null; // 当前正在显示进度的文档 idx
+
+function showOcrProgressOverlay(statusText, progress, forIdx) {
+  // 如果指定了文档idx且不是当前显示的文档，只更新后台状态，不显示UI
+  const targetIdx = (forIdx != null) ? forIdx : _currentOcrJobIdx;
+  if (targetIdx != null) {
+    if (!ocrJobs[targetIdx]) ocrJobs[targetIdx] = {};
+    ocrJobs[targetIdx].status = 'running';
+    ocrJobs[targetIdx].progress = (typeof progress === 'number') ? progress : ocrJobs[targetIdx].progress || 0;
+    ocrJobs[targetIdx].statusText = statusText || ocrJobs[targetIdx].statusText || '';
+    // 如果不是当前正在查看的文档，不更新UI进度条（后台默默进行）
+    if (targetIdx !== pdfViewState.currentDocIdx) return;
+  }
+
   const existing = document.getElementById("ocr-progress-overlay");
   if (existing) {
-    // Update existing overlay
     const textEl = existing.querySelector(".ocr-progress-label");
     const fillEl = existing.querySelector(".ocr-progress-fill");
     const pctEl = existing.querySelector(".ocr-progress-pct");
@@ -6881,6 +6896,9 @@ function showOcrProgressOverlay(statusText, progress) {
     if (pctEl && typeof progress === "number") pctEl.textContent = Math.round(progress) + "%";
     return;
   }
+  // 只有在查看对应文档时才创建UI进度条
+  if (targetIdx != null && targetIdx !== pdfViewState.currentDocIdx) return;
+
   const overlay = document.createElement("div");
   overlay.id = "ocr-progress-overlay";
   overlay.style.cssText = "position:sticky;top:0;z-index:50;padding:10px 16px 12px;background:var(--accent-dim);border-bottom:2px solid var(--accent);font-size:13px;color:var(--accent);";
@@ -6894,12 +6912,31 @@ function showOcrProgressOverlay(statusText, progress) {
     <div class="ocr-progress-bar" style="width:100%;height:4px;background:rgba(79,143,247,0.15);border-radius:2px;overflow:hidden;">
       <div class="ocr-progress-fill ${isIndeterminate ? "ocr-progress-indeterminate" : ""}" style="height:100%;background:var(--accent);border-radius:2px;transition:width 0.3s ease;${typeof progress === "number" ? "width:" + progress + "%;" : ""}"></div>
     </div>`;
-  readerPdfContainer.prepend(overlay);
+  if (readerPdfContainer) {
+    readerPdfContainer.prepend(overlay);
+  }
 }
 
-function hideOcrProgressOverlay() {
+function hideOcrProgressOverlay(forIdx) {
+  const targetIdx = (forIdx != null) ? forIdx : _currentOcrJobIdx;
+  if (targetIdx != null) {
+    if (ocrJobs[targetIdx]) {
+      ocrJobs[targetIdx].status = 'done';
+    }
+    if (targetIdx !== pdfViewState.currentDocIdx) return; // 后台完成不影响UI
+  }
   const existing = document.getElementById("ocr-progress-overlay");
   if (existing) existing.remove();
+  _currentOcrJobIdx = null;
+}
+
+// 切换到某个文档时，恢复该文档的OCR进度显示（如果正在进行）
+function restoreOcrProgressForDoc(idx) {
+  hideOcrProgressOverlay();
+  if (idx != null && ocrJobs[idx] && ocrJobs[idx].status === 'running') {
+    _currentOcrJobIdx = idx;
+    showOcrProgressOverlay(ocrJobs[idx].statusText, ocrJobs[idx].progress, idx);
+  }
 }
 
 async function renderPdfView(idx) {
@@ -7063,9 +7100,15 @@ async function renderPdfView(idx) {
       const ocrConfig = window.AI.getOCRConfig(config);
       if (ocrConfig.autoOcr !== false) {
         // Show OCR progress overlay on top of the already-rendered PDF
-        showOcrProgressOverlay("正在自动 OCR 识别中，PDF 已可浏览...");
+        _currentOcrJobIdx = idx;
+        ocrJobs[idx] = { status: 'running', progress: 0, statusText: "正在自动 OCR 识别中，PDF 已可浏览..." };
+        showOcrProgressOverlay("正在自动 OCR 识别中，PDF 已可浏览...", null, idx);
         ocrPdf(); // fire-and-forget, will re-render on completion
       }
+    } else if (ocrJobs[idx] && ocrJobs[idx].status === 'running') {
+      // 该文档正在后台 OCR，恢复显示进度条
+      _currentOcrJobIdx = idx;
+      showOcrProgressOverlay(ocrJobs[idx].statusText, ocrJobs[idx].progress, idx);
     }
     // Clear trace jump flag after renderPdfView has processed it
     if (pdfViewState.traceJumpPending && blocks.length > 0) {
@@ -8769,8 +8812,12 @@ async function ocrPdf() {
 
   const totalPages = it.numberOfPages ? parseInt(it.numberOfPages) : 0;
 
+  // 标记该文档正在 OCR，设置当前显示的 OCR 任务
+  _currentOcrJobIdx = idx;
+  ocrJobs[idx] = { status: 'running', progress: 5, statusText: "正在下载 PDF 文档..." };
+
   // Show progress overlay with phase indicators
-  showOcrProgressOverlay("正在下载 PDF 文档...", 5);
+  showOcrProgressOverlay("正在下载 PDF 文档...", 5, idx);
 
   // Simulate download phase progress
   let downloadTimer = null;
@@ -8779,7 +8826,7 @@ async function ocrPdf() {
     downloadTimer = setInterval(() => {
       if (downloadProgress < 30) {
         downloadProgress += 3;
-        showOcrProgressOverlay("正在下载 PDF 文档...", downloadProgress);
+        showOcrProgressOverlay("正在下载 PDF 文档...", downloadProgress, idx);
       }
     }, 500);
   }
@@ -8791,7 +8838,7 @@ async function ocrPdf() {
     try {
       // Update progress to OCR phase
       if (downloadTimer) clearInterval(downloadTimer);
-      showOcrProgressOverlay("正在 OCR 识别 (" + (engine === "paddle_ocr_vl" ? "PaddleOCR" : "GLM OCR") + ")...", 35);
+      showOcrProgressOverlay("正在 OCR 识别 (" + (engine === "paddle_ocr_vl" ? "PaddleOCR" : "GLM OCR") + ")...", 35, idx);
 
       // Simulate OCR phase progress
       let ocrTimer = null;
@@ -8800,7 +8847,7 @@ async function ocrPdf() {
         ocrTimer = setInterval(() => {
           if (ocrProgress < 85) {
             ocrProgress += Math.max(1, Math.floor((85 - ocrProgress) * 0.08));
-            showOcrProgressOverlay("正在 OCR 识别 (" + (engine === "paddle_ocr_vl" ? "PaddleOCR" : "GLM OCR") + ")... " + Math.round(ocrProgress * totalPages / 85) + "/" + totalPages + " 页", ocrProgress);
+            showOcrProgressOverlay("正在 OCR 识别 (" + (engine === "paddle_ocr_vl" ? "PaddleOCR" : "GLM OCR") + ")... " + Math.round(ocrProgress * totalPages / 85) + "/" + totalPages + " 页", ocrProgress, idx);
           }
         }, 800);
       }
@@ -8830,7 +8877,7 @@ async function ocrPdf() {
         showError("OCR 提取内容为空");
         return false;
       }
-      showOcrProgressOverlay("正在解析 OCR 结果...", 90);
+      showOcrProgressOverlay("正在解析 OCR 结果...", 90, idx);
       const blocks = result.blocks || [];
       const pageDimensions = result.page_dimensions || {};
       kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
@@ -8845,8 +8892,11 @@ async function ocrPdf() {
           };
         });
       }
-      showOcrProgressOverlay("OCR 完成", 100);
-      updateExtractPanel();
+      showOcrProgressOverlay("OCR 完成", 100, idx);
+      // 如果当前仍在查看此文档，更新提取面板
+      if (pdfViewState.currentDocIdx === idx) {
+        updateExtractPanel();
+      }
       autoSaveCache();
       return true;
     } catch (e) {
@@ -8865,23 +8915,22 @@ async function ocrPdf() {
     const searchBtn = document.getElementById("pdf-search-btn");
     if (searchInput) { searchInput.disabled = false; searchInput.placeholder = "搜索关键词..."; }
     if (searchBtn) searchBtn.disabled = false;
-    // Re-render PDF with block overlays, preserving scroll position
-    if (pdfViewState.active) {
-      // Save current scroll position
+    // Re-render PDF with block overlays, preserving scroll position (only if current doc)
+    if (pdfViewState.active && pdfViewState.currentDocIdx === idx) {
       const scrollTop = readerPdfContainer.scrollTop;
       const scrollRatio = readerPdfContainer.scrollHeight > 0 ? scrollTop / readerPdfContainer.scrollHeight : 0;
       await renderPdfView(idx);
-      // Restore scroll position after re-render
       requestAnimationFrame(() => {
         const newScrollTop = Math.round(scrollRatio * readerPdfContainer.scrollHeight);
         readerPdfContainer.scrollTop = newScrollTop;
       });
     }
-    // Hide OCR progress overlay
-    hideOcrProgressOverlay();
+    // Hide OCR progress overlay (only affects UI if this is the current doc)
+    hideOcrProgressOverlay(idx);
   } else {
-    // Hide OCR progress overlay on failure too
-    hideOcrProgressOverlay();
+    // Mark job as failed
+    if (ocrJobs[idx]) ocrJobs[idx].status = 'error';
+    hideOcrProgressOverlay(idx);
   }
 }
 
@@ -9293,6 +9342,66 @@ function syncExtractPanelToPdfPage() {
     }
   }
 }
+
+// ── OCR 提取内容栏右键菜单：选中翻译 + 悬浮窗 ──
+let _extractCtxMenu = null;
+
+function showExtractContextMenu(clientX, clientY) {
+  hideExtractContextMenu();
+  const sel = window.getSelection();
+  const selectedText = sel ? sel.toString().trim() : "";
+  if (!selectedText) return;
+
+  const menu = document.createElement("div");
+  menu.className = "pdf-block-context-menu";
+  menu.style.left = clientX + "px";
+  menu.style.top = clientY + "px";
+
+  const translateItem = document.createElement("div");
+  translateItem.className = "pdf-ctx-menu-item";
+  translateItem.textContent = "翻译选中文本";
+  translateItem.addEventListener("click", () => {
+    hideExtractContextMenu();
+    translateSelectedPatentText(selectedText, null);
+  });
+  menu.appendChild(translateItem);
+
+  document.body.appendChild(menu);
+  _extractCtxMenu = menu;
+
+  const r = menu.getBoundingClientRect();
+  const maxX = window.innerWidth - 16;
+  const maxY = window.innerHeight - 16;
+  if (r.right > maxX) menu.style.left = (maxX - r.width) + "px";
+  if (r.bottom > maxY) menu.style.top = (maxY - r.height) + "px";
+}
+
+function hideExtractContextMenu() {
+  if (_extractCtxMenu && _extractCtxMenu.parentNode) {
+    _extractCtxMenu.parentNode.removeChild(_extractCtxMenu);
+  }
+  _extractCtxMenu = null;
+}
+
+// 绑定右键菜单到提取内容栏（事件委托，兼容动态内容和动态创建的面板）
+document.addEventListener("contextmenu", (ev) => {
+  const extractPanel = ev.target.closest("#reader-extract-content");
+  if (!extractPanel) return;
+  const sel = window.getSelection();
+  const selectedText = sel ? sel.toString().trim() : "";
+  if (selectedText) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    showExtractContextMenu(ev.clientX, ev.clientY);
+  }
+});
+// 点击其他地方关闭右键菜单
+document.addEventListener("mousedown", (ev) => {
+  if (_extractCtxMenu && !_extractCtxMenu.contains(ev.target)) {
+    hideExtractContextMenu();
+  }
+}, true);
+document.addEventListener("scroll", () => hideExtractContextMenu(), true);
 
 // ===== Open reader for specific document from kanban =====
 
@@ -10461,17 +10570,16 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Floating ball click to restore reader
+  // 打开侧边栏（文字复制/对照翻译/AI问一问）按钮
   if (readerChatToggle) {
     readerChatToggle.addEventListener("click", () => {
-      if (readerChatPanel) {
-        const wasHidden = readerChatPanel.classList.contains("hidden");
+      const rightPanel = document.getElementById("reader-right-panel");
+      if (rightPanel) {
+        const wasHidden = rightPanel.classList.contains("hidden");
         if (wasHidden) {
-          readerChatPanel.classList.remove("hidden");
           readerChatToggle.classList.add("active");
-          enterReadingMode("chat");
+          enterReadingMode("translate");
         } else {
-          // Chat panel is visible, toggle off exits reading mode
           exitReadingMode();
         }
       }

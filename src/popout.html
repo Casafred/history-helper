@@ -138,6 +138,8 @@
       var currentUrl = targetUrl;
       var isTranslated = false;
       var wv = null;
+      var wvReady = false;
+      var wvEventListenersAttached = false;
       var loadAttempts = 0;
       var MAX_AUTO_RETRY = 1;
       var LOAD_TIMEOUT_MS = 30000;
@@ -146,6 +148,8 @@
       var findTerm = "";
       var findDebounceTimer = null;
       var findRequestId = 0;
+      var _currentProbeResult = null;
+      var _itScriptLoaded = false;
       var jplatpatSearchNum = params.get("jpn") || "";
 
       var isJplatpat = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
@@ -468,12 +472,41 @@
         "    var allLinks = document.querySelectorAll('a[href]');",
         "    var pdfLinks = [];",
         "    var pdfHrefs = {};",
-        "    function addPdfLink(href, text, visible) {",
-        "      if (!href) return;",
-        "      var key = href;",
+        "    var clickablePdfElements = [];",
+        "    var clickablePdfIdx = 0;",
+        "    function getSelector(el) {",
+        "      if (!el) return '';",
+        "      try {",
+        "        if (el.id) return '#' + el.id;",
+        "        var parts = [];",
+        "        var el2 = el;",
+        "        for (var d = 0; d < 3 && el2; d++) {",
+        "          var part = el2.tagName.toLowerCase();",
+        "          if (el2.className && typeof el2.className === 'string') {",
+        "            var cls = el2.className.split(/\\s+/).filter(function(c){return c.length>0 && c.indexOf('__')===-1;}).slice(0,2).join('.');",
+        "            if (cls) part += '.' + cls;",
+        "          }",
+        "          parts.unshift(part);",
+        "          el2 = el2.parentElement;",
+        "        }",
+        "        return parts.join(' > ');",
+        "      } catch(e) { return ''; }",
+        "    }",
+        "    function addPdfLink(href, text, visible, el) {",
+        "      if (!href && !el) return;",
+        "      var key = href || (el ? getSelector(el) : '');",
+        "      if (!key) return;",
         "      if (pdfHrefs[key]) return;",
         "      pdfHrefs[key] = true;",
-        "      pdfLinks.push({ href: href, text: text || 'PDF', visible: !!visible });",
+        "      var info = { href: href || '', text: text || 'PDF', visible: !!visible };",
+        "      if (el) {",
+        "        info._clickIdx = clickablePdfIdx;",
+        "        info._isButton = (el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || (el.className && el.className.toString().toLowerCase().indexOf('pdf') !== -1) || (el.className && el.className.toString().toLowerCase().indexOf('download') !== -1));",
+        "        info._isDirectPdf = (href && href.toLowerCase().indexOf('.pdf') !== -1);",
+        "        clickablePdfElements.push(el);",
+        "        clickablePdfIdx++;",
+        "      }",
+        "      pdfLinks.push(info);",
         "    }",
         "    for (var li = 0; li < allLinks.length; li++) {",
         "      var a = allLinks[li];",
@@ -482,16 +515,16 @@
         "      var onclickAttr = a.getAttribute('onclick') || '';",
         "      var lowHref = href.toLowerCase();",
         "      var lowText = (linkText || '').toLowerCase();",
-        "      var hasDocText = (lowText.indexOf('pdf') !== -1 || lowText.indexOf('download') !== -1 || lowText.indexOf('公報') !== -1 || lowText.indexOf('明細書') !== -1 || lowText.indexOf('図面') !== -1 || lowText.indexOf('請求') !== -1 || lowText.indexOf('抄録') !== -1 || lowText.indexOf('全文') !== -1);",
+        "      var hasDocText = (lowText.indexOf('pdf') !== -1 || lowText.indexOf('download') !== -1 || lowText.indexOf('entire document') !== -1 || lowText.indexOf('公報') !== -1 || lowText.indexOf('明細書') !== -1 || lowText.indexOf('図面') !== -1 || lowText.indexOf('請求') !== -1 || lowText.indexOf('抄録') !== -1 || lowText.indexOf('全文') !== -1);",
         "      if (lowHref.indexOf('.pdf') !== -1) {",
         "        addPdfLink(href, linkText, isVisible(a));",
-        "      } else if (lowHref.indexOf('pdf') !== -1 && (lowHref.indexOf('download') !== -1 || hasDocText)) {",
-        "        addPdfLink(href, linkText, isVisible(a));",
+        "      } else if (hasDocText && (lowHref.indexOf('pdf') !== -1 || lowHref.indexOf('download') !== -1 || a.tagName === 'A')) {",
+        "        addPdfLink(href, linkText, isVisible(a), a);",
         "      }",
         "      if (onclickAttr) {",
         "        var ocl = onclickAttr.toLowerCase();",
-        "        if (ocl.indexOf('pdf') !== -1 || ocl.indexOf('download') !== -1 || onclickAttr.indexOf('公報') !== -1 || onclickAttr.indexOf('明細書') !== -1) {",
-        "          addPdfLink(href || ('javascript:' + (linkText || 'onclick')), linkText + ' [点击]', isVisible(a));",
+        "        if (ocl.indexOf('pdf') !== -1 || ocl.indexOf('download') !== -1) {",
+        "          addPdfLink(href || ('javascript:' + (linkText || 'onclick')), linkText + ' [点击]', isVisible(a), a);",
         "        }",
         "      }",
         "      // J-PlatPat: links to document/gazette pages",
@@ -499,19 +532,27 @@
         "        addPdfLink(href, linkText || '文献', isVisible(a));",
         "      }",
         "    }",
-        "    // Also find buttons/elements that look like document/PDF actions in J-PlatPat detail pages",
-        "    if (location.hostname.indexOf('j-platpat') !== -1) {",
-        "      var docBtns = document.querySelectorAll('button, a, [role=\"button\"], span[class*=\"download\"], a[class*=\"pdf\"], a[class*=\"download\"]');",
-        "      for (var di = 0; di < docBtns.length; di++) {",
-        "        var db = docBtns[di];",
-        "        var dbText = textOf(db, 30);",
-        "        var dbLow = (dbText || '').toLowerCase();",
-        "        var dbHref = db.href || '';",
-        "        if (dbLow.indexOf('pdf') !== -1 || dbLow.indexOf('download') !== -1 || dbLow.indexOf('公報') !== -1 || dbLow.indexOf('明細書') !== -1 || dbLow.indexOf('図面') !== -1 || dbLow.indexOf('請求の範囲') !== -1 || dbLow.indexOf('特許公報') !== -1) {",
-        "          addPdfLink(dbHref || ('javascript:' + dbText), dbText, isVisible(db));",
-        "        }",
+        "    // Find buttons/elements that look like document/PDF/download actions on ALL sites",
+        "    var docBtns = document.querySelectorAll('button, [role=\"button\"], a[class*=\"pdf\"], a[class*=\"download\"], span[class*=\"download\"], a[class*=\"patent\"], [data-testid*=\"pdf\"], [data-testid*=\"download\"]');",
+        "    for (var di = 0; di < docBtns.length; di++) {",
+        "      var db = docBtns[di];",
+        "      var dbText = textOf(db, 40);",
+        "      var dbLow = (dbText || '').toLowerCase();",
+        "      var dbHref = db.href || '';",
+        "      var dbClass = (db.className || '').toString().toLowerCase();",
+        "      var isPdfBtn = (dbLow.indexOf('pdf') !== -1 || dbLow.indexOf('download') !== -1 || dbLow.indexOf('entire') !== -1 || dbLow.indexOf('公報') !== -1 || dbLow.indexOf('明細書') !== -1 || dbLow.indexOf('図面') !== -1 || dbLow.indexOf('請求の範囲') !== -1 || dbLow.indexOf('特許公報') !== -1 || dbLow.indexOf('full document') !== -1);",
+        "      var hasPdfClass = (dbClass.indexOf('pdf') !== -1 || dbClass.indexOf('download') !== -1);",
+        "      if (isPdfBtn || (hasPdfClass && dbText)) {",
+        "        addPdfLink(dbHref || ('javascript:' + dbText), dbText, isVisible(db), db);",
         "      }",
         "    }",
+        "    // Store clickable elements globally for later click() calls",
+        "    window.__probePdfElements = clickablePdfElements;",
+        "    window.__probeClickPdf = function(idx) {",
+        "      var el = window.__probePdfElements[idx];",
+        "      if (el) { el.click(); return true; }",
+        "      return false;",
+        "    };",
         "    return { interactive: elements, pdfLinks: pdfLinks };",
         "  }",
         "",
@@ -575,8 +616,12 @@
         "    var actions = [];",
         "    // PDF downloads",
         "    if (collected.pdfLinks && collected.pdfLinks.length > 0) {",
-        "      collected.pdfLinks.slice(0, 5).forEach(function(p, i) {",
-        "        actions.push({ type: 'pdf', label: '📄 ' + (p.text || 'PDF') + (i === 0 ? '' : ' (' + (i+1) + ')'), href: p.href, visible: p.visible });",
+        "      collected.pdfLinks.slice(0, 6).forEach(function(p, i) {",
+        "        var act = { type: 'pdf', label: '📄 ' + (p.text || 'PDF') + (i === 0 ? '' : ' (' + (i+1) + ')'), href: p.href, visible: p.visible };",
+        "        if (typeof p._clickIdx === 'number') act._pdfClickIdx = p._clickIdx;",
+        "        act._isButton = !!p._isButton;",
+        "        act._isDirectPdf = !!p._isDirectPdf;",
+        "        actions.push(act);",
         "      });",
         "    }",
         "    // J-PlatPat specific tabs",
@@ -1008,23 +1053,60 @@
       }
       function handleSmartAction(act) {
         if (!isElectron || !wv) return;
-        if (act.type === "pdf" && act.href) {
-          // Open PDF in external browser (reliable for download)
-          if (window.electronAPI) window.electronAPI.openExternal(act.href);
-          else window.open(act.href, "_blank");
+        if (act.type === "pdf") {
+          var href = act.href || "";
+          // Direct PDF URL (.pdf file) → open externally for download
+          if (act._isDirectPdf && href.indexOf("http") === 0) {
+            if (window.electronAPI) window.electronAPI.openExternal(href);
+            else window.open(href, "_blank");
+            return;
+          }
+          // It's a button/action element → click it inside webview
+          if (act._isButton && typeof act._pdfClickIdx === "number") {
+            var clickScript = "if(window.__probeClickPdf) { return window.__probeClickPdf(" + act._pdfClickIdx + "); } return false;";
+            wv.executeJavaScript(clickScript).then(function(clicked) {
+              if (!clicked && href && href.indexOf("http") === 0) {
+                navigateTo(href);
+              }
+            }).catch(function() {});
+            setTimeout(function() { runDomProbe(); }, 2000);
+            return;
+          }
+          // Has a click index (anchor link that may trigger JS) → try clicking
+          if (typeof act._pdfClickIdx === "number") {
+            var clickScript2 = "if(window.__probeClickPdf) { return window.__probeClickPdf(" + act._pdfClickIdx + "); } return false;";
+            wv.executeJavaScript(clickScript2).then(function(clicked2) {
+              if (!clicked2 && href && href.indexOf("http") === 0) {
+                // Not a direct .pdf but a page URL → navigate within webview
+                navigateTo(href);
+              }
+            }).catch(function() {
+              if (href && href.indexOf("http") === 0) navigateTo(href);
+            });
+            setTimeout(function() { runDomProbe(); }, 2000);
+            return;
+          }
+          // Has a real http href → navigate within webview
+          if (href.indexOf("http") === 0) {
+            navigateTo(href);
+            return;
+          }
+          return;
+        }
+        if (act.type === "navigate" && act.href) {
+          navigateTo(act.href);
           return;
         }
         if (act.type === "click") {
-          // Use text-based click first (more reliable across page re-renders), then fall back to idx
-          var clickScript = "(function(){";
-          if (act._text === "keika") clickScript += "if(window.__probeClickText) return window.__probeClickText('経過情報');";
-          else if (act._text === "bunken") clickScript += "if(window.__probeClickText) return window.__probeClickText('文献単位');";
+          var clickScript3 = "(function(){";
+          if (act._text === "keika") clickScript3 += "if(window.__probeClickText) return window.__probeClickText('経過情報');";
+          else if (act._text === "bunken") clickScript3 += "if(window.__probeClickText) return window.__probeClickText('文献単位');";
+          if (act._selector) clickScript3 += "var el=document.querySelector('" + act._selector.replace(/'/g, "\\'") + "');if(el){el.click();return true;}";
           if (typeof act.targetIdx === "number" && act.targetIdx >= 0) {
-            clickScript += "if(window.__probeClick) return window.__probeClick(" + act.targetIdx + ");";
+            clickScript3 += "if(window.__probeClick) return window.__probeClick(" + act.targetIdx + ");";
           }
-          clickScript += "return false;})()";
-          try { wv.executeJavaScript(clickScript); } catch(e) { console.warn("click failed:", e); }
-          // Re-probe after a short delay for new page state
+          clickScript3 += "return false;})()";
+          try { wv.executeJavaScript(clickScript3); } catch(e) { console.warn("click failed:", e); }
           setTimeout(function() { runDomProbe(); }, 1500);
           return;
         }
@@ -1163,243 +1245,276 @@
         container.appendChild(div);
       }
 
+      function attachWebviewEvents() {
+        if (wvEventListenersAttached) return;
+        wvEventListenersAttached = true;
+
+        var _loaded = false;
+        var _failed = false;
+
+        wv.addEventListener("found-in-page", function(e) {
+          if (e.result && e.result.finalUpdate !== false) {
+            if (e.result.matchCount === 0) {
+              findCountEl.textContent = "无匹配";
+            } else if (e.result.activeMatchOrdinal !== undefined) {
+              findCountEl.textContent = e.result.activeMatchOrdinal + "/" + e.result.matchCount;
+            } else {
+              findCountEl.textContent = e.result.matchCount + " 个匹配";
+            }
+          }
+        });
+
+        wv.addEventListener("did-start-loading", function () {
+          hideSmartBar();
+          stopPeriodicProbe();
+          showLoading("正在加载...");
+        });
+        wv.addEventListener("did-stop-loading", function () {
+          if (_failed) return;
+          _loaded = true;
+          if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+          var ld = container.querySelector(".po-loading");
+          if (ld) ld.remove();
+          try {
+            if (wv.getURL) currentUrl = wv.getURL();
+          } catch(e) {}
+          updateJpBar();
+          updateNavButtons();
+
+          var curIsJp = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
+          var fillNum = "";
+          if (jplatpatSearchNum && curIsJp) {
+            fillNum = jplatpatSearchNum;
+            jplatpatSearchNum = "";
+          }
+          runDomProbe({ autoFillNum: fillNum, delay: 800 });
+          setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
+          setTimeout(function() { runDomProbe({ delay: 0 }); }, 5000);
+          if (curIsJp) {
+            startPeriodicProbe(10000);
+          } else {
+            stopPeriodicProbe();
+          }
+        });
+        wv.addEventListener("did-finish-load", function() {
+          _loaded = true;
+          if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+          var ld = container.querySelector(".po-loading");
+          if (ld) ld.remove();
+        });
+        wv.addEventListener("did-navigate", function (e) {
+          if (e && e.url) {
+            currentUrl = e.url;
+            hideSmartBar();
+            stopPeriodicProbe();
+            updateJpBar();
+            // Delay nav button update to avoid flashing during navigation commit
+            setTimeout(updateNavButtons, 100);
+            setTimeout(updateNavButtons, 500);
+          }
+        });
+        wv.addEventListener("did-navigate-in-page", function (e) {
+          if (e && e.url) {
+            currentUrl = e.url;
+            updateJpBar();
+            setTimeout(updateNavButtons, 100);
+            setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
+            setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
+          }
+        });
+        wv.addEventListener("did-fail-load", function (e) {
+          if (e && e.errorCode === -3) return;
+          if (e && e.isMainFrame === false) return;
+          if (_loaded) return;
+          _failed = true;
+          if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+          if (loadAttempts <= MAX_AUTO_RETRY && classifyError(e && e.errorCode) === "network") {
+            setTimeout(function() { navigateTo(currentUrl); }, 1500);
+            return;
+          }
+          showFallback(e && e.errorDescription, e && e.errorCode);
+        });
+        wv.addEventListener("new-window", function (e) {
+          if (e && e.url) {
+            e.preventDefault();
+            var newUrl = e.url;
+            if (newUrl.indexOf("http") !== 0) return;
+            if (newUrl.indexOf(".pdf") !== -1) {
+              if (window.electronAPI && window.electronAPI.openExternal) {
+                window.electronAPI.openExternal(newUrl);
+              } else {
+                window.open(newUrl, "_blank");
+              }
+              return;
+            }
+            var lowerUrl = newUrl.toLowerCase();
+            if (lowerUrl.indexOf("/help") !== -1 || lowerUrl.indexOf("/faq") !== -1 || lowerUrl.indexOf("/print") !== -1) {
+              if (window.electronAPI && window.electronAPI.openExternal) {
+                window.electronAPI.openExternal(newUrl);
+              }
+              return;
+            }
+            try {
+              var newHost = new URL(newUrl).hostname;
+              var curHost = new URL(currentUrl).hostname;
+              if (newHost && curHost && newHost === curHost) {
+                navigateTo(newUrl);
+                return;
+              }
+            } catch(uE) {}
+            if (window.electronAPI && typeof window.electronAPI.openPopoutWindow === "function") {
+              window.electronAPI.openPopoutWindow(newUrl, "专利原文查看");
+            } else {
+              window.open(newUrl, "_blank");
+            }
+          }
+        });
+
+        wv.addEventListener("dom-ready", function() {
+          wvReady = true;
+          try {
+            if (window.electronAPI && typeof window.electronAPI.setWebviewOpenHandler === "function") {
+              window.electronAPI.setWebviewOpenHandler(wv.getWebContentsId ? wv.getWebContentsId() : null);
+            }
+          } catch(ipcErr) {}
+
+          injectOverrideScript();
+          injectImmersiveTranslate();
+        });
+      }
+
+      function injectOverrideScript() {
+        if (!isElectron || !wv) return;
+        var overrideScript = [
+          "(function(){",
+          "  if (window.__popoutInjected) return;",
+          "  window.__popoutInjected = true;",
+          "  var _origOpen = window.open;",
+          "  window.open = function(url, target, features) {",
+          "    try {",
+          "      var href = String(url || '');",
+          "      if (href && href.indexOf('http') === 0) {",
+          "        var linkHost = '';",
+          "        try { linkHost = new URL(href).hostname; } catch(e) {}",
+          "        if (linkHost === location.hostname) {",
+          "          var lowHref = href.toLowerCase();",
+          "          if (lowHref.indexOf('.pdf') !== -1 || lowHref.indexOf('/help') !== -1 || lowHref.indexOf('/faq') !== -1 || lowHref.indexOf('/print') !== -1) {",
+          "            return _origOpen.call(window, url, target, features);",
+          "          }",
+          "          location.href = href;",
+          "          return null;",
+          "        }",
+          "      }",
+          "    } catch(e) {}",
+          "    return _origOpen.call(window, url, target, features);",
+          "  };",
+          "  document.addEventListener('click', function(e) {",
+          "    var a = null;",
+          "    try { a = e.target && e.target.closest ? e.target.closest('a') : null; } catch(ex) {}",
+          "    if (!a) return;",
+          "    var href = a.href || '';",
+          "    if (!href || href.indexOf('http') !== 0) return;",
+          "    try {",
+          "      var linkHost = new URL(href).hostname;",
+          "      if (linkHost === location.hostname) {",
+          "        var lowHref = href.toLowerCase();",
+          "        if (lowHref.indexOf('.pdf') === -1 && lowHref.indexOf('/help') === -1 && lowHref.indexOf('/faq') === -1 && lowHref.indexOf('/print') === -1) {",
+          "          if (a.target && a.target.toLowerCase() !== '_self') {",
+          "            a.removeAttribute('target');",
+          "          }",
+          "        }",
+          "      }",
+          "    } catch(e2) {}",
+          "  }, true);",
+          "  document.addEventListener('submit', function(e) {",
+          "    try {",
+          "      var form = e.target;",
+          "      if (form && form.tag === 'FORM' && form.target && form.target.toLowerCase() === '_blank') {",
+          "        var action = form.action || '';",
+          "        try {",
+          "          if (new URL(action, location.href).hostname === location.hostname) {",
+          "            form.removeAttribute('target');",
+          "          }",
+          "        } catch(e) {}",
+          "      }",
+          "    } catch(e) {}",
+          "  }, true);",
+          "})();"
+        ].join("");
+        try {
+          var p = wv.executeJavaScript(overrideScript);
+          if (p && typeof p.catch === 'function') {
+            p.catch(function() {});
+          }
+        } catch(e) {}
+      }
+
+      function injectImmersiveTranslate() {
+        if (!isElectron || !wv || !window.electronAPI || !window.electronAPI.getImmersiveTranslateScript) return;
+        window.electronAPI.getImmersiveTranslateScript().then(function(script) {
+          if (!script || script.length < 1000) return;
+          try {
+            var gmPolyfill = [
+              "(function(){",
+              "  if (window.__itInjected) return;",
+              "  window.__itInjected = true;",
+              "  var noop = function(){};",
+              "  var GM_getValue = function(k, d){ try { return JSON.parse(localStorage.getItem('__gm_' + k)) ?? d; } catch(e) { return d; } };",
+              "  var GM_setValue = function(k, v){ try { localStorage.setItem('__gm_' + k, JSON.stringify(v)); } catch(e) {} };",
+              "  var GM_deleteValue = function(k){ try { localStorage.removeItem('__gm_' + k); } catch(e) {} };",
+              "  var GM_listValues = function(){ var keys=[]; for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k.indexOf('__gm_')===0) keys.push(k.substring(5)); } return keys; };",
+              "  var GM_addStyle = function(css){ var s=document.createElement('style'); s.textContent=css; (document.head||document.documentElement).appendChild(s); return s; };",
+              "  var GM_addElement = function(tag, attrs){ var el=document.createElement(tag); if(attrs){ for(var k in attrs){ if(k==='textContent'||k==='text') el.textContent=attrs[k]; else el.setAttribute(k, attrs[k]); } } (document.head||document.body).appendChild(el); return el; };",
+              "  var GM_openInTab = function(url){ window.open(url, '_blank'); return { close: noop, onclose: null }; };",
+              "  var GM_registerMenuCommand = noop;",
+              "  var GM_xmlhttpRequest = function(details){ var xhr=new XMLHttpRequest(); xhr.open(details.method||'GET', details.url, true); if(details.headers){ for(var h in details.headers){ xhr.setRequestHeader(h, details.headers[h]); } } xhr.onload = function(){ details.onload && details.onload({ responseText: xhr.responseText, status: xhr.status, readyState: 4, response: xhr.response, finalUrl: details.url }) ; }; xhr.onerror = function(){ details.onerror && details.onerror({ error: 'xhr error' }); }; xhr.ontimeout = function(){ details.ontimeout && details.ontimeout(); }; if(details.timeout) xhr.timeout = details.timeout; xhr.send(details.data||null); };",
+              "  window.GM_getValue = GM_getValue;",
+              "  window.GM_setValue = GM_setValue;",
+              "  window.GM_deleteValue = GM_deleteValue;",
+              "  window.GM_listValues = GM_listValues;",
+              "  window.GM_addStyle = GM_addStyle;",
+              "  window.GM_addElement = GM_addElement;",
+              "  window.GM_openInTab = GM_openInTab;",
+              "  window.GM_registerMenuCommand = GM_registerMenuCommand;",
+              "  window.GM_xmlhttpRequest = GM_xmlhttpRequest;",
+              "  window.GM = { getValue: GM_getValue, setValue: GM_setValue, deleteValue: GM_deleteValue, listValues: GM_listValues, addStyle: GM_addStyle, addElement: GM_addElement, openInTab: GM_openInTab, registerMenuCommand: GM_registerMenuCommand, xmlHttpRequest: GM_xmlhttpRequest };",
+              "})();"
+            ].join("");
+            wv.executeJavaScript(gmPolyfill).then(function() {
+              try { wv.executeJavaScript(script); } catch(e) { console.warn("inject it script failed:", e); }
+            }).catch(function() {
+              try { wv.executeJavaScript(script); } catch(e) {}
+            });
+          } catch(e) { console.warn("inject gm polyfill failed:", e); }
+        }).catch(function(e) { console.warn("get immersive translate script failed:", e); });
+      }
+
       function embed() {
         showLoading("正在加载...");
         console.log("[popout] embed, isElectron=" + isElectron + ", attempt=" + (loadAttempts+1) + ", url=" + currentUrl);
         loadAttempts++;
         if (isElectron) {
-          wv = document.createElement("webview");
+          if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+
+          if (!wv) {
+            wv = document.createElement("webview");
+            wv.setAttribute("allowpopups", "");
+            wv.setAttribute("useragent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            wv.style.width = "100%";
+            wv.style.height = "100%";
+            wv.style.border = "none";
+            attachWebviewEvents();
+            container.appendChild(wv);
+            setupWebviewContextMenu();
+          }
+
+          wvReady = false;
           wv.setAttribute("src", currentUrl);
-          wv.setAttribute("allowpopups", "");
-          wv.setAttribute("useragent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-          wv.style.width = "100%";
-          wv.style.height = "100%";
-          wv.style.border = "none";
-          var _loaded = false;
-          var _failed = false;
-
-          // Listen for found-in-page results
-          var currentFindReqId = 0;
-          wv.addEventListener("found-in-page", function(e) {
-            currentFindReqId = findRequestId;
-            if (e.result && e.result.finalUpdate !== false) {
-              if (e.result.matchCount === 0) {
-                findCountEl.textContent = "无匹配";
-              } else if (e.result.activeMatchOrdinal !== undefined) {
-                findCountEl.textContent = e.result.activeMatchOrdinal + "/" + e.result.matchCount;
-              } else {
-                findCountEl.textContent = e.result.matchCount + " 个匹配";
-              }
-            }
-          });
-
-          wv.addEventListener("did-start-loading", function () {
-            console.log("[popout] webview did-start-loading");
-            hideSmartBar();
-            stopPeriodicProbe();
-          });
-          wv.addEventListener("did-stop-loading", function () {
-            console.log("[popout] webview did-stop-loading");
-            if (_failed) return;
-            _loaded = true;
-            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-            var ld = container.querySelector(".po-loading");
-            if (ld) ld.remove();
-            try {
-              if (wv.getURL) currentUrl = wv.getURL();
-            } catch(e) {}
-
-            updateJpBar();
-            updateNavButtons();
-
-            var curIsJp = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
-            var fillNum = "";
-            if (jplatpatSearchNum && curIsJp) {
-              fillNum = jplatpatSearchNum;
-              jplatpatSearchNum = "";
-            }
-            runDomProbe({ autoFillNum: fillNum, delay: 800 });
-            setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
-            setTimeout(function() { runDomProbe({ delay: 0 }); }, 5000);
-            if (curIsJp) {
-              startPeriodicProbe(10000);
-            } else {
-              stopPeriodicProbe();
-            }
-          });
-          wv.addEventListener("did-finish-load", function() {
-            _loaded = true;
-            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-            var ld = container.querySelector(".po-loading");
-            if (ld) ld.remove();
-          });
-          wv.addEventListener("did-navigate", function (e) {
-            if (e && e.url) {
-              currentUrl = e.url;
-              hideSmartBar();
-              stopPeriodicProbe();
-              updateNavButtons();
-              updateJpBar();
-            }
-          });
-          wv.addEventListener("did-navigate-in-page", function (e) {
-            if (e && e.url) {
-              currentUrl = e.url;
-              updateNavButtons();
-              updateJpBar();
-              setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
-              setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
-            }
-          });
-          wv.addEventListener("did-fail-load", function (e) {
-            console.log("[popout] webview did-fail-load", e && e.errorCode, e && e.errorDescription);
-            if (e && e.errorCode === -3) return;
-            if (e && e.isMainFrame === false) return;
-            if (_loaded) return;
-            _failed = true;
-            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-            if (loadAttempts <= MAX_AUTO_RETRY && classifyError(e && e.errorCode) === "network") {
-              console.log("[popout] network error, auto-retrying...");
-              setTimeout(function() { embed(); }, 1500);
-              return;
-            }
-            showFallback(e && e.errorDescription, e && e.errorCode);
-          });
-          wv.addEventListener("new-window", function (e) {
-            if (e && e.url) {
-              e.preventDefault();
-              var newUrl = e.url;
-              // Block non-http URLs (javascript:, mailto:, blob:, etc.)
-              if (newUrl.indexOf("http") !== 0) return;
-              // J-PlatPat PDF downloads: open in external browser
-              if (newUrl.indexOf(".pdf") !== -1) {
-                if (window.electronAPI && window.electronAPI.openExternal) {
-                  window.electronAPI.openExternal(newUrl);
-                } else {
-                  window.open(newUrl, "_blank");
-                }
-                return;
-              }
-              // Help/FAQ/print popup pages: open externally (these are small utility popups)
-              var lowerUrl = newUrl.toLowerCase();
-              if (lowerUrl.indexOf("/help") !== -1 || lowerUrl.indexOf("/faq") !== -1 || lowerUrl.indexOf("/print") !== -1) {
-                if (window.electronAPI && window.electronAPI.openExternal) {
-                  window.electronAPI.openExternal(newUrl);
-                }
-                return;
-              }
-              // Same-host navigation (e.g. J-PlatPat detail links): load in same webview
-              try {
-                var newHost = new URL(newUrl).hostname;
-                var curHost = new URL(currentUrl).hostname;
-                if (newHost && curHost && newHost === curHost) {
-                  // Same domain → navigate within same webview, no new window
-                  currentUrl = newUrl;
-                  wv.loadURL(newUrl);
-                  return;
-                }
-              } catch(uE) {}
-              // External domain: open as new popout window (with toolbar)
-              if (window.electronAPI && typeof window.electronAPI.openPopoutWindow === "function") {
-                window.electronAPI.openPopoutWindow(newUrl, "专利原文查看");
-              } else {
-                window.open(newUrl, "_blank");
-              }
-            }
-          });
-          container.appendChild(wv);
-          setupWebviewContextMenu();
-
-          // On webview dom-ready, inject a script to override window.open and intercept link clicks
-          // so same-domain navigation stays in the webview instead of popping new windows
-          wv.addEventListener("dom-ready", function() {
-            try {
-              // Ask main process to set window open handler on this webview's guest webContents
-              // (wv.getWebContents() is not available in renderer process)
-              try {
-                if (window.electronAPI && typeof window.electronAPI.setWebviewOpenHandler === "function") {
-                  window.electronAPI.setWebviewOpenHandler(wv.getWebContentsId ? wv.getWebContentsId() : null);
-                }
-              } catch(ipcErr) { /* ignore, injected script will handle most cases */ }
-
-              // Inject override script into the page (same-domain link interception)
-              var overrideScript = [
-                "(function(){",
-                "  if (window.__popoutInjected) return;",
-                "  window.__popoutInjected = true;",
-                "  // Override window.open to send same-host URLs back to popout for in-place navigation",
-                "  var _origOpen = window.open;",
-                "  window.open = function(url, target, features) {",
-                "    try {",
-                "      var href = String(url || '');",
-                "      if (href && href.indexOf('http') === 0) {",
-                "        var linkHost = '';",
-                "        try { linkHost = new URL(href).hostname; } catch(e) {}",
-                "        if (linkHost === location.hostname) {",
-                "          var lowHref = href.toLowerCase();",
-                "          if (lowHref.indexOf('.pdf') !== -1 || lowHref.indexOf('/help') !== -1 || lowHref.indexOf('/faq') !== -1 || lowHref.indexOf('/print') !== -1) {",
-                "            // PDF/help/print: let Electron's new-window handler deal with it via _origOpen",
-                "            return _origOpen.call(window, url, target, features);",
-                "          }",
-                "          // Same-host content page: navigate in place",
-                "          location.href = href;",
-                "          return null;",
-                "        }",
-                "      }",
-                "    } catch(e) {}",
-                "    return _origOpen.call(window, url, target, features);",
-                "  };",
-                "  // Capture-phase click interceptor to neutralize target=_blank on same-host links",
-                "  document.addEventListener('click', function(e) {",
-                "    var a = null;",
-                "    try { a = e.target && e.target.closest ? e.target.closest('a') : null; } catch(ex) {}",
-                "    if (!a) return;",
-                "    var href = a.href || '';",
-                "    if (!href || href.indexOf('http') !== 0) return;",
-                "    try {",
-                "      var linkHost = new URL(href).hostname;",
-                "      if (linkHost === location.hostname) {",
-                "        var lowHref = href.toLowerCase();",
-                "        if (lowHref.indexOf('.pdf') === -1 && lowHref.indexOf('/help') === -1 && lowHref.indexOf('/faq') === -1 && lowHref.indexOf('/print') === -1) {",
-                "          // Same-host content link: strip target=_blank so it navigates normally",
-                "          if (a.target && a.target.toLowerCase() !== '_self') {",
-                "            a.removeAttribute('target');",
-                "          }",
-                "        }",
-                "      }",
-                "    } catch(e2) {}",
-                "  }, true);",
-                "  // Also override form submission targets",
-                "  document.addEventListener('submit', function(e) {",
-                "    try {",
-                "      var form = e.target;",
-                "      if (form && form.tagName === 'FORM' && form.target && form.target.toLowerCase() === '_blank') {",
-                "        var action = form.action || '';",
-                "        try {",
-                "          if (new URL(action, location.href).hostname === location.hostname) {",
-                "            form.removeAttribute('target');",
-                "          }",
-                "        } catch(e) {}",
-                "      }",
-                "    } catch(e) {}",
-                "  }, true);",
-                "})();"
-              ].join("");
-              try {
-                var p = wv.executeJavaScript(overrideScript);
-                if (p && typeof p.catch === 'function') {
-                  p.catch(function(err) { /* script may fail if page navigates away, ignore */ });
-                }
-              } catch(execErr) { /* ignore */ }
-            } catch(injErr) { console.warn("[popout] dom-ready inject failed", injErr); }
-          });
 
           timeoutTimer = setTimeout(function () {
-            if (!_loaded && !_failed) {
+            if (!wvReady) {
               console.warn("[popout] webview " + (LOAD_TIMEOUT_MS/1000) + "s timeout");
-              _failed = true;
               if (loadAttempts <= MAX_AUTO_RETRY) {
-                console.log("[popout] timeout, auto-retrying...");
                 embed();
                 return;
               }
@@ -1407,6 +1522,8 @@
             }
           }, LOAD_TIMEOUT_MS);
         } else {
+          var existingIframe = container.querySelector("iframe");
+          if (existingIframe) existingIframe.remove();
           var ifr = document.createElement("iframe");
           ifr.src = currentUrl;
           ifr.style.width = "100%";
@@ -1431,9 +1548,39 @@
         }
       }
 
-      function loadUrl(u) {
-        currentUrl = u;
+      function navigateTo(u) {
         loadAttempts = 0;
+        showLoading("正在加载...");
+        currentUrl = u;
+        updateJpBar();
+        if (isElectron) {
+          if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+          if (!wv) {
+            embed();
+            return;
+          }
+          wvReady = false;
+          try {
+            wv.loadURL(u);
+          } catch(e) {
+            try { wv.setAttribute("src", u); } catch(e2) { embed(); }
+          }
+          timeoutTimer = setTimeout(function () {
+            if (!wvReady) {
+              console.warn("[popout] webview " + (LOAD_TIMEOUT_MS/1000) + "s timeout");
+              if (loadAttempts <= MAX_AUTO_RETRY) {
+                navigateTo(u);
+                return;
+              }
+              showFallback("加载超时（" + (LOAD_TIMEOUT_MS/1000) + "秒）", "-118");
+            }
+          }, LOAD_TIMEOUT_MS);
+          return;
+        }
+        embed();
+      }
+
+      function loadUrl(u) {
         jplatpatSearchNum = "";
         isJplatpat = u.indexOf("j-platpat.inpit.go.jp") !== -1;
         if (isJplatpat) {
@@ -1444,7 +1591,7 @@
         } else {
           jpBar.style.display = "none";
         }
-        embed();
+        navigateTo(u);
       }
 
       function translatePage() {
