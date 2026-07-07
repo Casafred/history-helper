@@ -20,6 +20,9 @@
       white-space: nowrap; text-decoration: none; display: inline-block;
     }
     .po-btn:hover { background: #4f8ff7; color: #fff; border-color: #4f8ff7; }
+    .po-btn:disabled { opacity: 0.4; cursor: default; background: #fff; color: #999; border-color: #ddd; }
+    .po-btn:disabled:hover { background: #fff; color: #999; border-color: #ddd; }
+    .po-btn-nav { width: 28px; height: 26px; padding: 2px 0; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; }
     .po-btn-find { width: 28px; height: 26px; padding: 2px 0; display: inline-flex; align-items: center; justify-content: center; }
     #po-jp-bar {
       display: none; align-items: center; gap: 8px;
@@ -67,8 +70,10 @@
 <body>
   <div id="po-header">
     <div id="po-title"></div>
+    <button id="po-back" class="po-btn po-btn-nav" title="后退 (Alt+←)" disabled>←</button>
+    <button id="po-forward" class="po-btn po-btn-nav" title="前进 (Alt+→)" disabled>→</button>
     <button id="po-find-toggle" class="po-btn po-btn-find" title="在页面内查找 (Ctrl+F)">🔍</button>
-    <button id="po-translate" class="po-btn" title="通过 Google 翻译翻译此页面">翻译</button>
+    <button id="po-translate" class="po-btn" title="双语对照翻译（类似沉浸式翻译）">翻译</button>
     <button id="po-refresh" class="po-btn" title="刷新当前页面">刷新</button>
     <button id="po-external" class="po-btn" title="在外部浏览器打开">外部打开</button>
     <button id="po-close" class="po-btn" title="关闭窗口">关闭</button>
@@ -104,6 +109,8 @@
       var title = params.get("title") || targetUrl || "专利原文查看";
       var isElectron = !!window.electronAPI;
       var container = document.getElementById("po-container");
+      var backBtn = document.getElementById("po-back");
+      var forwardBtn = document.getElementById("po-forward");
       var translateBtn = document.getElementById("po-translate");
       var refreshBtn = document.getElementById("po-refresh");
       var closeBtn = document.getElementById("po-close");
@@ -156,6 +163,18 @@
 
       function adjustContainerHeight() {
         // Container uses flex:1, no manual height adjustment needed in flex layout
+      }
+
+      function updateJpBar() {
+        var curIsJp = currentUrl && currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
+        if (curIsJp) {
+          var jm = currentUrl.match(/JP-(\d{4})-(\d+)/);
+          if (jm) jpNumEl.textContent = "番号: " + jm[1] + "-" + jm[2];
+          else if (jplatpatSearchNum) jpNumEl.textContent = "番号: " + jplatpatSearchNum;
+          jpBar.style.display = "flex";
+        } else {
+          jpBar.style.display = "none";
+        }
       }
 
       // ── Find-in-page ──
@@ -448,15 +467,49 @@
         "    // Also collect all links even if invisible-ish (for PDF detection)",
         "    var allLinks = document.querySelectorAll('a[href]');",
         "    var pdfLinks = [];",
+        "    var pdfHrefs = {};",
+        "    function addPdfLink(href, text, visible) {",
+        "      if (!href) return;",
+        "      var key = href;",
+        "      if (pdfHrefs[key]) return;",
+        "      pdfHrefs[key] = true;",
+        "      pdfLinks.push({ href: href, text: text || 'PDF', visible: !!visible });",
+        "    }",
         "    for (var li = 0; li < allLinks.length; li++) {",
         "      var a = allLinks[li];",
         "      var href = a.href || '';",
         "      var linkText = textOf(a, 40);",
         "      var onclickAttr = a.getAttribute('onclick') || '';",
-        "      if (href.toLowerCase().indexOf('.pdf') !== -1 || href.indexOf('pdf') !== -1 && (href.indexOf('download') !== -1 || href.indexOf('PDF') !== -1 || linkText.indexOf('PDF') !== -1 || linkText.indexOf('pdf') !== -1)) {",
-        "        pdfLinks.push({ href: href, text: linkText, visible: isVisible(a) });",
-        "      } else if (onclickAttr && (onclickAttr.indexOf('pdf') !== -1 || onclickAttr.indexOf('PDF') !== -1)) {",
-        "        pdfLinks.push({ href: href, text: linkText + ' [onclick]', visible: isVisible(a) });",
+        "      var lowHref = href.toLowerCase();",
+        "      var lowText = (linkText || '').toLowerCase();",
+        "      var hasDocText = (lowText.indexOf('pdf') !== -1 || lowText.indexOf('download') !== -1 || lowText.indexOf('公報') !== -1 || lowText.indexOf('明細書') !== -1 || lowText.indexOf('図面') !== -1 || lowText.indexOf('請求') !== -1 || lowText.indexOf('抄録') !== -1 || lowText.indexOf('全文') !== -1);",
+        "      if (lowHref.indexOf('.pdf') !== -1) {",
+        "        addPdfLink(href, linkText, isVisible(a));",
+        "      } else if (lowHref.indexOf('pdf') !== -1 && (lowHref.indexOf('download') !== -1 || hasDocText)) {",
+        "        addPdfLink(href, linkText, isVisible(a));",
+        "      }",
+        "      if (onclickAttr) {",
+        "        var ocl = onclickAttr.toLowerCase();",
+        "        if (ocl.indexOf('pdf') !== -1 || ocl.indexOf('download') !== -1 || onclickAttr.indexOf('公報') !== -1 || onclickAttr.indexOf('明細書') !== -1) {",
+        "          addPdfLink(href || ('javascript:' + (linkText || 'onclick')), linkText + ' [点击]', isVisible(a));",
+        "        }",
+        "      }",
+        "      // J-PlatPat: links to document/gazette pages",
+        "      if (lowHref.indexOf('/c1801/') !== -1 && lowText.indexOf('文献') !== -1) {",
+        "        addPdfLink(href, linkText || '文献', isVisible(a));",
+        "      }",
+        "    }",
+        "    // Also find buttons/elements that look like document/PDF actions in J-PlatPat detail pages",
+        "    if (location.hostname.indexOf('j-platpat') !== -1) {",
+        "      var docBtns = document.querySelectorAll('button, a, [role=\"button\"], span[class*=\"download\"], a[class*=\"pdf\"], a[class*=\"download\"]');",
+        "      for (var di = 0; di < docBtns.length; di++) {",
+        "        var db = docBtns[di];",
+        "        var dbText = textOf(db, 30);",
+        "        var dbLow = (dbText || '').toLowerCase();",
+        "        var dbHref = db.href || '';",
+        "        if (dbLow.indexOf('pdf') !== -1 || dbLow.indexOf('download') !== -1 || dbLow.indexOf('公報') !== -1 || dbLow.indexOf('明細書') !== -1 || dbLow.indexOf('図面') !== -1 || dbLow.indexOf('請求の範囲') !== -1 || dbLow.indexOf('特許公報') !== -1) {",
+        "          addPdfLink(dbHref || ('javascript:' + dbText), dbText, isVisible(db));",
+        "        }",
         "      }",
         "    }",
         "    return { interactive: elements, pdfLinks: pdfLinks };",
@@ -976,6 +1029,22 @@
           return;
         }
       }
+      var periodicProbeTimer = null;
+      function stopPeriodicProbe() {
+        if (periodicProbeTimer) { clearInterval(periodicProbeTimer); periodicProbeTimer = null; }
+      }
+      function startPeriodicProbe(duration) {
+        stopPeriodicProbe();
+        var elapsed = 0;
+        var interval = 2000;
+        var maxDuration = duration || 12000;
+        periodicProbeTimer = setInterval(function() {
+          elapsed += interval;
+          if (elapsed > maxDuration) { stopPeriodicProbe(); return; }
+          runDomProbe({ delay: 0 });
+        }, interval);
+      }
+
       function runDomProbe(opts) {
         if (!isElectron || !wv) return;
         var delay = (opts && opts.delay) != null ? (opts && opts.delay) : 800;
@@ -1126,6 +1195,8 @@
 
           wv.addEventListener("did-start-loading", function () {
             console.log("[popout] webview did-start-loading");
+            hideSmartBar();
+            stopPeriodicProbe();
           });
           wv.addEventListener("did-stop-loading", function () {
             console.log("[popout] webview did-stop-loading");
@@ -1138,26 +1209,23 @@
               if (wv.getURL) currentUrl = wv.getURL();
             } catch(e) {}
 
-            // Update JP bar visibility based on current URL
-            var curIsJp = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
-            if (curIsJp) {
-              var jm = currentUrl.match(/JP-(\d{4})-(\d+)/);
-              if (jm) jpNumEl.textContent = "番号: " + jm[1] + "-" + jm[2];
-              else if (jplatpatSearchNum) jpNumEl.textContent = "番号: " + jplatpatSearchNum;
-              jpBar.style.display = "flex";
-            } else {
-              jpBar.style.display = "none";
-            }
+            updateJpBar();
+            updateNavButtons();
 
-            // Run DomProbe: auto-fill search number (if pending) + analyze page
+            var curIsJp = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
             var fillNum = "";
             if (jplatpatSearchNum && curIsJp) {
               fillNum = jplatpatSearchNum;
               jplatpatSearchNum = "";
             }
             runDomProbe({ autoFillNum: fillNum, delay: 800 });
-            // Second probe for Angular/SPA pages that render after load
-            setTimeout(function() { runDomProbe({ delay: 0 }); }, 3500);
+            setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
+            setTimeout(function() { runDomProbe({ delay: 0 }); }, 5000);
+            if (curIsJp) {
+              startPeriodicProbe(10000);
+            } else {
+              stopPeriodicProbe();
+            }
           });
           wv.addEventListener("did-finish-load", function() {
             _loaded = true;
@@ -1169,13 +1237,23 @@
             if (e && e.url) {
               currentUrl = e.url;
               hideSmartBar();
+              stopPeriodicProbe();
+              updateNavButtons();
+              updateJpBar();
+              if (isTranslated) {
+                isTranslated = false;
+                translateBtn.textContent = "翻译";
+                translateBtn.title = "双语对照翻译（类似沉浸式翻译）";
+              }
             }
           });
           wv.addEventListener("did-navigate-in-page", function (e) {
             if (e && e.url) {
               currentUrl = e.url;
-              // SPA navigation: re-probe after short delay for new content
+              updateNavButtons();
+              updateJpBar();
               setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
+              setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
             }
           });
           wv.addEventListener("did-fail-load", function (e) {
@@ -1376,34 +1454,270 @@
 
       function translatePage() {
         if (isTranslated) {
-          isTranslated = false;
-          loadUrl(targetUrl);
-          translateBtn.textContent = "翻译";
-          translateBtn.title = "通过 Google 翻译翻译此页面";
+          removeBilingualTranslation();
           return;
         }
-        isTranslated = true;
-        translateBtn.textContent = "原文";
-        translateBtn.title = "切换回原始页面";
+        startBilingualTranslation();
+      }
+
+      function removeBilingualTranslation() {
+        isTranslated = false;
+        translateBtn.textContent = "翻译";
+        translateBtn.title = "双语对照翻译（类似沉浸式翻译）";
         if (isElectron && wv) {
-          var injectCode = [
-            "(function(){",
-            "  if(document.getElementById('google_translate_element_injected')){",
-            "    var sel=document.querySelector('.goog-te-combo');if(sel){sel.value='zh-CN';sel.dispatchEvent(new Event('change'));}return;",
-            "  }",
-            "  var c=document.createElement('div');c.id='google_translate_element_injected';",
-            "  c.style.cssText='position:fixed;top:0;left:0;right:0;z-index:999999;';document.body.prepend(c);",
-            "  window.googleTranslateElementInitInner=function(){",
-            "    new google.translate.TranslateElement({pageLanguage:'auto',includedLanguages:'zh-CN,zh-TW,en,ja,ko,de,fr',layout:google.translate.TranslateElement.InlineLayout.SIMPLE,autoDisplay:true},'google_translate_element_injected');",
-            "  };",
-            "  var s=document.createElement('script');s.type='text/javascript';",
-            "  s.src='https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInitInner';document.head.appendChild(s);",
-            "})();"
-          ].join("");
-          try { wv.executeJavaScript(injectCode); }
-          catch (e) { loadUrl("https://translate.google.com/translate?sl=auto&tl=en&u=" + encodeURIComponent(currentUrl)); }
-        } else {
-          loadUrl("https://translate.google.com/translate?sl=auto&tl=en&u=" + encodeURIComponent(currentUrl));
+          try {
+            wv.executeJavaScript(
+              "(function(){" +
+              "  var style=document.getElementById('__btrans_style');" +
+              "  if(style)style.remove();" +
+              "  var panel=document.getElementById('__btrans_panel');" +
+              "  if(panel)panel.remove();" +
+              "  var trans=document.querySelectorAll('.__btrans_text');" +
+              "  trans.forEach(function(n){n.remove();});" +
+              "  var orig=document.querySelectorAll('.__btrans_orig');" +
+              "  orig.forEach(function(n){" +
+              "    n.classList.remove('__btrans_orig');" +
+              "    n.style.display='';" +
+              "  });" +
+              "  if(window.__btransObserver){window.__btransObserver.disconnect();window.__btransObserver=null;}" +
+              "  return true;" +
+              "})()"
+            );
+          } catch(e) { console.warn("remove translation failed:", e); }
+        }
+      }
+
+      function startBilingualTranslation() {
+        isTranslated = true;
+        translateBtn.textContent = "关闭翻译";
+        translateBtn.title = "关闭双语翻译";
+        if (!isElectron || !wv) {
+          loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(currentUrl));
+          return;
+        }
+
+        var injectCode = [
+          "(function(){",
+          "  if(window.__btransActive) return;",
+          "  window.__btransActive = true;",
+          "  window.__btransTargetLang = 'zh-CN';",
+          "  window.__btransProcessed = new WeakSet();",
+          "  window.__btransQueue = [];",
+          "  window.__btransTranslating = false;",
+          "",
+          "  var style=document.createElement('style');",
+          "  style.id='__btrans_style';",
+          "  style.textContent=",
+          "    '.__btrans_orig{display:block!important;}'+",
+          "    '.__btrans_text{display:block;color:#1a73e8;font-size:0.92em;line-height:1.5;padding:2px 0 2px 0;border-left:3px solid #1a73e8;padding-left:8px;margin:2px 0 4px 0;background:rgba(26,115,232,0.04);border-radius:0 4px 4px 0;word-break:break-word;}'+",
+          "    '.__btrans_text:hover{background:rgba(26,115,232,0.1);}'+",
+          "    '#__btrans_panel{position:fixed;top:12px;right:12px;z-index:2147483647;background:#fff;border:1px solid #dadce0;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.15);padding:10px 14px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;font-size:13px;color:#202124;display:flex;align-items:center;gap:10px;max-width:320px;}'+",
+          "    '#__btrans_panel button{background:#1a73e8;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px;}'+",
+          "    '#__btrans_panel button:hover{background:#1557b0;}'+",
+          "    '#__btrans_panel button.bt-sec{background:#f1f3f4;color:#202124;}'+",
+          "    '#__btrans_panel button.bt-sec:hover{background:#e8eaed;}'+",
+          "    '#__btrans_status{font-size:12px;color:#5f6368;}'",
+          "  ;",
+          "  if(!document.getElementById('__btrans_style')) document.head.appendChild(style);",
+          "",
+          "  var panel=document.createElement('div');",
+          "  panel.id='__btrans_panel';",
+          "  panel.innerHTML='<span id=\"__btrans_status\">正在翻译...</span><button class=\"bt-sec\" id=\"__btrans_toggle\">仅译文</button><button id=\"__btrans_close\">关闭</button>';",
+          "  document.body.appendChild(panel);",
+          "",
+          "  var showMode='bilingual';",
+          "  document.getElementById('__btrans_close').onclick=function(){",
+          "    var s=document.getElementById('__btrans_style');if(s)s.remove();",
+          "    var p=document.getElementById('__btrans_panel');if(p)p.remove();",
+          "    document.querySelectorAll('.__btrans_text').forEach(function(n){n.remove();});",
+          "    document.querySelectorAll('.__btrans_orig').forEach(function(n){n.classList.remove('__btrans_orig');n.style.display='';});",
+          "    if(window.__btransObserver){window.__btransObserver.disconnect();window.__btransObserver=null;}",
+          "    window.__btransActive=false;",
+          "  };",
+          "  document.getElementById('__btrans_toggle').onclick=function(){",
+          "    var btn=this;",
+          "    var ts=document.querySelectorAll('.__btrans_text');",
+          "    var os=document.querySelectorAll('.__btrans_orig');",
+          "    if(showMode==='bilingual'){",
+          "      showMode='transOnly';",
+          "      btn.textContent='双语';",
+          "      os.forEach(function(n){n.style.display='none';});",
+          "      ts.forEach(function(n){n.style.display='block';});",
+          "    } else {",
+          "      showMode='bilingual';",
+          "      btn.textContent='仅译文';",
+          "      os.forEach(function(n){n.style.display='block';});",
+          "      ts.forEach(function(n){n.style.display='block';});",
+          "    }",
+          "  };",
+          "",
+          "  function isTranslatable(node){",
+          "    if(!node||!node.parentElement)return false;",
+          "    var p=node.parentElement;",
+          "    var tag=p.tagName;",
+          "    if(tag==='SCRIPT'||tag==='STYLE'||tag==='NOSCRIPT'||tag==='CODE'||tag==='PRE')return false;",
+          "    if(tag==='TEXTAREA'||tag==='INPUT'||tag==='SELECT'||tag==='OPTION')return false;",
+          "    if(p.closest('#__btrans_panel')||p.closest('.goog-te-banner-frame')||p.closest('.goog-te-menu-frame'))return false;",
+          "    if(p.closest('[contenteditable=\"true\"]'))return false;",
+          "    var text=node.textContent.trim();",
+          "    if(text.length<2)return false;",
+          "    if(!/[a-zA-Z\\u3040-\\u309f\\u30a0-\\u30ff\\u4e00-\\u9fff\\uac00-\\ud7af]/.test(text))return false;",
+          "    if(node.parentElement.closest('.__btrans_text'))return false;",
+          "    return true;",
+          "  }",
+          "",
+          "  function getTextNodes(root){",
+          "    var nodes=[];",
+          "    var walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode:function(n){",
+          "      if(window.__btransProcessed.has(n))return NodeFilter.FILTER_REJECT;",
+          "      return isTranslatable(n)?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_SKIP;",
+          "    }});",
+          "    var n;",
+          "    while(n=walker.nextNode()){",
+          "      if(n.textContent.trim().length>=2)nodes.push(n);",
+          "    }",
+          "    return nodes;",
+          "  }",
+          "",
+          "  function groupByBlock(nodes){",
+          "    var groups=[];",
+          "    var current={el:null,texts:[]};",
+          "    for(var i=0;i<nodes.length;i++){",
+          "      var node=nodes[i];",
+          "      var block=node.parentElement.closest('p,div,li,td,th,h1,h2,h3,h4,h5,h6,dd,dt,blockquote,section,article,span,a,button,label,option,small,strong,em,b,i')||node.parentElement;",
+          "      if(current.el!==block){",
+          "        if(current.texts.length>0)groups.push(current);",
+          "        current={el:block,texts:[node]};",
+          "      } else {",
+          "        current.texts.push(node);",
+          "      }",
+          "    }",
+          "    if(current.texts.length>0)groups.push(current);",
+          "    return groups;",
+          "  }",
+          "",
+          "  function translateBatch(texts){",
+          "    return new Promise(function(resolve){",
+          "      var combined=texts.join('\\n|||\\n');",
+          "      if(combined.length>4500){combined=combined.substring(0,4500);}",
+          "      var url='https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl='+window.__btransTargetLang+'&dt=t&q='+encodeURIComponent(combined);",
+          "      fetch(url).then(function(r){return r.json();}).then(function(data){",
+          "        try{",
+          "          var translated=(data[0]||[]).map(function(seg){return seg[0]||'';}).join('');",
+          "          var parts=translated.split('\\n|||\\n');",
+          "          resolve(parts);",
+          "        }catch(e){resolve([]);}",
+          "      }).catch(function(){resolve([]);});",
+          "    });",
+          "  }",
+          "",
+          "  function insertTranslation(node,translated){",
+          "    if(!translated||!translated.trim())return;",
+          "    var orig=node.textContent.trim();",
+          "    if(translated.trim()===orig)return;",
+          "    var parent=node.parentElement;",
+          "    if(!parent)return;",
+          "    var blockEl=parent.closest('p,div,li,td,th,h1,h2,h3,h4,h5,h6,dd,dt,blockquote,section,article')||parent;",
+          "    var nid=node.__btransId;",
+          "    if(nid&&blockEl.querySelector('.__btrans_text[data-for=\"'+nid+'\"]'))return;",
+          "    var span=document.createElement('span');",
+          "    span.className='__btrans_text';",
+          "    span.textContent=translated;",
+          "    if(nid)span.setAttribute('data-for',nid);",
+          "    var isInline=window.getComputedStyle(blockEl).display==='inline';",
+          "    if(isInline){",
+          "      span.style.display='inline';",
+          "      span.style.borderLeft='none';",
+          "      span.style.paddingLeft='4px';",
+          "      span.style.color='#1a73e8';",
+          "    }",
+          "    var next=node.nextSibling;",
+          "    if(next){",
+          "      parent.insertBefore(span,next);",
+          "    }else{",
+          "      parent.appendChild(span);",
+          "    }",
+          "  }",
+          "",
+          "  var nodeIdCounter=0;",
+          "  async function processQueue(){",
+          "    if(window.__btransTranslating)return;",
+          "    window.__btransTranslating=true;",
+          "    var total=0,done=0;",
+          "    function updateStatus(){",
+          "      var el=document.getElementById('__btrans_status');",
+          "      if(el)el.textContent=done>0?'已翻译 '+done+' 段':'翻译中...';",
+          "    }",
+          "    async function processBatch(){",
+          "      var textNodes=getTextNodes(document.body);",
+          "      if(textNodes.length===0){window.__btransTranslating=false;updateStatus();return;}",
+          "      var groups=groupByBlock(textNodes);",
+          "      var batch=[];",
+          "      var batchNodes=[];",
+          "      var batchLen=0;",
+          "      for(var g=0;g<groups.length;g++){",
+          "        var group=groups[g];",
+          "        var combinedText=group.texts.map(function(t){return t.textContent.trim();}).join(' ');",
+          "        if(combinedText.length<2)continue;",
+          "        if(batchLen+combinedText.length>800&&batch.length>0){",
+          "          var trans=await translateBatch(batch);",
+          "          for(var b=0;b<batchNodes.length&&b<trans.length;b++){",
+          "            var bn=batchNodes[b];",
+          "            for(var bt=0;bt<bn.length;bt++){",
+          "              if(!bn[bt].__btransId){bn[bt].__btransId='__bt_'+(++nodeIdCounter);window.__btransProcessed.add(bn[bt]);}",
+          "              insertTranslation(bn[bt],trans[b]);",
+          "            }",
+          "            done++;total++;",
+          "          }",
+          "          batch=[];batchNodes=[];batchLen=0;",
+          "          updateStatus();",
+          "          await new Promise(function(r){setTimeout(r,100);});",
+          "        }",
+          "        batch.push(combinedText);",
+          "        batchNodes.push(group.texts);",
+          "        batchLen+=combinedText.length;",
+          "      }",
+          "      if(batch.length>0){",
+          "        var trans2=await translateBatch(batch);",
+          "        for(var b2=0;b2<batchNodes.length&&b2<trans2.length;b2++){",
+          "          var bn2=batchNodes[b2];",
+          "          for(var bt2=0;bt2<bn2.length;bt2++){",
+          "            if(!bn2[bt2].__btransId){bn2[bt2].__btransId='__bt_'+(++nodeIdCounter);window.__btransProcessed.add(bn2[bt2]);}",
+          "            insertTranslation(bn2[bt2],trans2[b2]);",
+          "          }",
+          "          done++;total++;",
+          "        }",
+          "      }",
+          "      updateStatus();",
+          "      var remaining=getTextNodes(document.body).length;",
+          "      if(remaining>0){",
+          "        setTimeout(processBatch,500);",
+          "      } else {",
+          "        window.__btransTranslating=false;",
+          "        var el2=document.getElementById('__btrans_status');",
+          "        if(el2)el2.textContent='翻译完成 ('+done+' 段)';",
+          "      }",
+          "    }",
+          "    processBatch();",
+          "  }",
+          "",
+          "  processQueue();",
+          "",
+          "  window.__btransObserver=new MutationObserver(function(){",
+          "    if(!window.__btransActive)return;",
+          "    if(window.__btransTranslating)return;",
+          "    clearTimeout(window.__btransDebounce);",
+          "    window.__btransDebounce=setTimeout(function(){processQueue();},1500);",
+          "  });",
+          "  window.__btransObserver.observe(document.body,{childList:true,subtree:true});",
+          "})()"
+        ].join("");
+
+        try {
+          wv.executeJavaScript(injectCode);
+        } catch(e) {
+          console.warn("inject translation failed:", e);
+          loadUrl("https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + encodeURIComponent(currentUrl));
         }
       }
 
@@ -1417,6 +1731,55 @@
           else embed();
         }
       }
+
+      function updateNavButtons() {
+        if (!isElectron || !wv) {
+          if (backBtn) backBtn.disabled = true;
+          if (forwardBtn) forwardBtn.disabled = true;
+          return;
+        }
+        try {
+          if (backBtn) backBtn.disabled = !wv.canGoBack();
+          if (forwardBtn) forwardBtn.disabled = !wv.canGoForward();
+        } catch(e) {
+          if (backBtn) backBtn.disabled = true;
+          if (forwardBtn) forwardBtn.disabled = true;
+        }
+      }
+
+      function goBack() {
+        if (!isElectron || !wv) return;
+        try {
+          if (wv.canGoBack()) {
+            wv.goBack();
+            setTimeout(updateNavButtons, 300);
+          }
+        } catch(e) {}
+      }
+
+      function goForward() {
+        if (!isElectron || !wv) return;
+        try {
+          if (wv.canGoForward()) {
+            wv.goForward();
+            setTimeout(updateNavButtons, 300);
+          }
+        } catch(e) {}
+      }
+
+      if (backBtn) backBtn.addEventListener("click", goBack);
+      if (forwardBtn) forwardBtn.addEventListener("click", goForward);
+
+      // Keyboard shortcuts: Alt+Left/Right for back/forward
+      document.addEventListener("keydown", function(e) {
+        if (e.altKey && (e.key === "ArrowLeft" || e.key === "Left")) {
+          e.preventDefault();
+          goBack();
+        } else if (e.altKey && (e.key === "ArrowRight" || e.key === "Right")) {
+          e.preventDefault();
+          goForward();
+        }
+      });
 
       translateBtn.addEventListener("click", translatePage);
       refreshBtn.addEventListener("click", refreshPage);
