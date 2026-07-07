@@ -1245,167 +1245,6 @@
         container.appendChild(div);
       }
 
-      function attachWebviewEvents() {
-        if (wvEventListenersAttached) return;
-        wvEventListenersAttached = true;
-
-        var _loaded = false;
-        var _failed = false;
-
-        wv.addEventListener("found-in-page", function(e) {
-          if (e.result && e.result.finalUpdate !== false) {
-            if (e.result.matchCount === 0) {
-              findCountEl.textContent = "无匹配";
-            } else if (e.result.activeMatchOrdinal !== undefined) {
-              findCountEl.textContent = e.result.activeMatchOrdinal + "/" + e.result.matchCount;
-            } else {
-              findCountEl.textContent = e.result.matchCount + " 个匹配";
-            }
-          }
-        });
-
-        wv.addEventListener("did-start-loading", function () {
-          _loaded = false;
-          _failed = false;
-          wvReady = false;
-          hideSmartBar();
-          stopPeriodicProbe();
-          showLoading("正在加载...");
-        });
-        wv.addEventListener("did-stop-loading", function () {
-          if (_failed) return;
-          _loaded = true;
-          wvReady = true;
-          if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-          var ld = container.querySelector(".po-loading");
-          if (ld) ld.remove();
-          try {
-            if (wv.getURL) currentUrl = wv.getURL();
-          } catch(e) {}
-          updateJpBar();
-          updateNavButtons();
-
-          var curIsJp = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
-          var fillNum = "";
-          if (jplatpatSearchNum && curIsJp) {
-            fillNum = jplatpatSearchNum;
-            jplatpatSearchNum = "";
-          }
-          runDomProbe({ autoFillNum: fillNum, delay: 800 });
-          setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
-          setTimeout(function() { runDomProbe({ delay: 0 }); }, 5000);
-          if (curIsJp) {
-            startPeriodicProbe(10000);
-          } else {
-            stopPeriodicProbe();
-          }
-        });
-        wv.addEventListener("did-finish-load", function() {
-          _loaded = true;
-          wvReady = true;
-          _failed = false;
-          if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-          var ld = container.querySelector(".po-loading");
-          if (ld) ld.remove();
-          updateNavButtons();
-        });
-        wv.addEventListener("did-navigate", function (e) {
-          if (e && e.url) {
-            currentUrl = e.url;
-            hideSmartBar();
-            stopPeriodicProbe();
-            updateJpBar();
-            // Delay nav button update to avoid flashing during navigation commit
-            setTimeout(updateNavButtons, 100);
-            setTimeout(updateNavButtons, 500);
-          }
-        });
-        wv.addEventListener("did-navigate-in-page", function (e) {
-          if (e && e.url) {
-            currentUrl = e.url;
-            updateJpBar();
-            setTimeout(updateNavButtons, 100);
-            setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
-            setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
-          }
-        });
-        wv.addEventListener("did-fail-load", function (e) {
-          if (!e) return;
-          // Ignore aborted navigations (-3) and other non-fatal provisional load errors
-          if (e.errorCode === -3) return;
-          // Only care about main frame failures; subframe failures shouldn't break the page
-          if (e.isMainFrame === false) return;
-          // If we already successfully loaded a page (content is visible), ignore late failures.
-          // This handles cases where a subresource redirect or post-load request fails after the page is displayed.
-          if (_loaded) return;
-          // Ignore common non-fatal errors that don't prevent page display
-          var fatalCodes = [-102, -105, -106, -109, -113, -118, -137, -300, -501, -701];
-          var isFatal = false;
-          if (e.errorCode === -7) isFatal = true; // ERR_TIMED_OUT
-          if (fatalCodes.indexOf(e.errorCode) !== -1) isFatal = true;
-          // Network errors (classifyError returns "network") are retryable
-          var errClass = classifyError(e.errorCode);
-          if (!isFatal && errClass !== "network") {
-            console.log("[popout] did-fail-load ignored (non-fatal): code=" + e.errorCode + " desc=" + e.errorDescription);
-            return;
-          }
-          _failed = true;
-          if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-          if (loadAttempts <= MAX_AUTO_RETRY && errClass === "network") {
-            setTimeout(function() { navigateTo(currentUrl, true); }, 1500);
-            return;
-          }
-          showFallback(e.errorDescription, e.errorCode);
-        });
-        wv.addEventListener("new-window", function (e) {
-          if (e && e.url) {
-            e.preventDefault();
-            var newUrl = e.url;
-            if (newUrl.indexOf("http") !== 0) return;
-            if (newUrl.indexOf(".pdf") !== -1) {
-              if (window.electronAPI && window.electronAPI.openExternal) {
-                window.electronAPI.openExternal(newUrl);
-              } else {
-                window.open(newUrl, "_blank");
-              }
-              return;
-            }
-            var lowerUrl = newUrl.toLowerCase();
-            if (lowerUrl.indexOf("/help") !== -1 || lowerUrl.indexOf("/faq") !== -1 || lowerUrl.indexOf("/print") !== -1) {
-              if (window.electronAPI && window.electronAPI.openExternal) {
-                window.electronAPI.openExternal(newUrl);
-              }
-              return;
-            }
-            try {
-              var newHost = new URL(newUrl).hostname;
-              var curHost = new URL(currentUrl).hostname;
-              if (newHost && curHost && newHost === curHost) {
-                navigateTo(newUrl);
-                return;
-              }
-            } catch(uE) {}
-            if (window.electronAPI && typeof window.electronAPI.openPopoutWindow === "function") {
-              window.electronAPI.openPopoutWindow(newUrl, "专利原文查看");
-            } else {
-              window.open(newUrl, "_blank");
-            }
-          }
-        });
-
-        wv.addEventListener("dom-ready", function() {
-          wvReady = true;
-          try {
-            if (window.electronAPI && typeof window.electronAPI.setWebviewOpenHandler === "function") {
-              window.electronAPI.setWebviewOpenHandler(wv.getWebContentsId ? wv.getWebContentsId() : null);
-            }
-          } catch(ipcErr) {}
-
-          injectOverrideScript();
-          injectImmersiveTranslate();
-        });
-      }
-
       function injectOverrideScript() {
         if (!isElectron || !wv) return;
         var overrideScript = [
@@ -1538,57 +1377,183 @@
         if (isElectron) {
           if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
 
-          if (!wv) {
-            wv = document.createElement("webview");
-            wv.setAttribute("allowpopups", "");
-            wv.setAttribute("useragent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-            wv.style.width = "100%";
-            wv.style.height = "100%";
-            wv.style.border = "none";
-            attachWebviewEvents();
-            container.appendChild(wv);
-            setupWebviewContextMenu();
-            // For initial creation, wait for the guest page to be ready before loading URL.
-            // Setting src immediately after appendChild can fail silently in some Electron versions.
-            // Use requestAnimationFrame + small delay to ensure webview is fully initialized.
+          // 移除旧webview，每次embed都是全新的状态
+          if (wv) {
+            try { wv.stop(); } catch(e) {}
+            try { container.removeChild(wv); } catch(e) {}
+            wv = null;
             wvReady = false;
-            var doInitialLoad = function() {
-              try {
-                wv.loadURL(currentUrl);
-              } catch(e) {
-                try { wv.setAttribute("src", currentUrl); } catch(e2) {}
-              }
-            };
-            if (wv.isReady && wv.isReady()) {
-              doInitialLoad();
-            } else {
-              var _initialFired = false;
-              var _fireInitial = function() {
-                if (_initialFired) return;
-                _initialFired = true;
-                wv.removeEventListener("dom-ready", _fireInitial);
-                doInitialLoad();
-              };
-              wv.addEventListener("dom-ready", _fireInitial);
-              setTimeout(_fireInitial, 800);
-            }
-          } else {
-            // Webview already exists - use loadURL for reliable navigation
-            wvReady = false;
-            try {
-              wv.loadURL(currentUrl);
-            } catch(e) {
-              try { wv.setAttribute("src", currentUrl); } catch(e2) {}
-            }
+            wvEventListenersAttached = false;
           }
 
-          timeoutTimer = setTimeout(function () {
-            if (!wvReady) {
-              console.warn("[popout] webview " + (LOAD_TIMEOUT_MS/1000) + "s timeout");
-              if (loadAttempts <= MAX_AUTO_RETRY) {
-                navigateTo(currentUrl, true);
+          wv = document.createElement("webview");
+          wv.setAttribute("src", currentUrl);
+          wv.setAttribute("allowpopups", "");
+          wv.setAttribute("useragent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+          wv.style.width = "100%";
+          wv.style.height = "100%";
+          wv.style.border = "none";
+
+          var _loaded = false;
+          var _failed = false;
+
+          // 所有事件监听器直接绑定在这个闭包中
+          wv.addEventListener("found-in-page", function(e) {
+            if (e.result && e.result.finalUpdate !== false) {
+              if (e.result.matchCount === 0) {
+                findCountEl.textContent = "无匹配";
+              } else if (e.result.activeMatchOrdinal !== undefined) {
+                findCountEl.textContent = e.result.activeMatchOrdinal + "/" + e.result.matchCount;
+              } else {
+                findCountEl.textContent = e.result.matchCount + " 个匹配";
+              }
+            }
+          });
+
+          wv.addEventListener("did-start-loading", function () {
+            _loaded = false;
+            _failed = false;
+            wvReady = false;
+            hideSmartBar();
+            stopPeriodicProbe();
+            showLoading("正在加载...");
+          });
+
+          wv.addEventListener("did-stop-loading", function () {
+            if (_failed) return;
+            _loaded = true;
+            wvReady = true;
+            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+            var ld = container.querySelector(".po-loading");
+            if (ld) ld.remove();
+            try {
+              if (wv.getURL) currentUrl = wv.getURL();
+            } catch(e) {}
+            updateJpBar();
+            updateNavButtons();
+
+            var curIsJp = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
+            var fillNum = "";
+            if (jplatpatSearchNum && curIsJp) {
+              fillNum = jplatpatSearchNum;
+              jplatpatSearchNum = "";
+            }
+            runDomProbe({ autoFillNum: fillNum, delay: 800 });
+            setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
+            setTimeout(function() { runDomProbe({ delay: 0 }); }, 5000);
+            if (curIsJp) {
+              startPeriodicProbe(10000);
+            } else {
+              stopPeriodicProbe();
+            }
+          });
+
+          wv.addEventListener("did-finish-load", function() {
+            _loaded = true;
+            wvReady = true;
+            _failed = false;
+            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+            var ld = container.querySelector(".po-loading");
+            if (ld) ld.remove();
+            updateNavButtons();
+          });
+
+          wv.addEventListener("did-navigate", function (e) {
+            if (e && e.url) {
+              currentUrl = e.url;
+              hideSmartBar();
+              stopPeriodicProbe();
+              updateJpBar();
+              setTimeout(updateNavButtons, 100);
+              setTimeout(updateNavButtons, 500);
+            }
+          });
+
+          wv.addEventListener("did-navigate-in-page", function (e) {
+            if (e && e.url) {
+              currentUrl = e.url;
+              updateJpBar();
+              setTimeout(updateNavButtons, 100);
+              setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
+              setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
+            }
+          });
+
+          wv.addEventListener("did-fail-load", function (e) {
+            if (!e) return;
+            if (e.errorCode === -3) return;
+            if (e.isMainFrame === false) return;
+            if (_loaded) return;
+            var errClass = classifyError(e.errorCode);
+            if (errClass !== "network" && errClass !== "fatal") {
+              console.log("[popout] did-fail-load ignored:", e.errorCode);
+              return;
+            }
+            _failed = true;
+            if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+            if (loadAttempts <= MAX_AUTO_RETRY && errClass === "network") {
+              setTimeout(function() { embed(); }, 1500);
+              return;
+            }
+            showFallback(e.errorDescription, e.errorCode);
+          });
+
+          wv.addEventListener("new-window", function (e) {
+            if (e && e.url) {
+              e.preventDefault();
+              var newUrl = e.url;
+              if (newUrl.indexOf("http") !== 0) return;
+              if (newUrl.indexOf(".pdf") !== -1) {
+                if (window.electronAPI && window.electronAPI.openExternal) {
+                  window.electronAPI.openExternal(newUrl);
+                } else {
+                  window.open(newUrl, "_blank");
+                }
                 return;
               }
+              var lowerUrl = newUrl.toLowerCase();
+              if (lowerUrl.indexOf("/help") !== -1 || lowerUrl.indexOf("/faq") !== -1 || lowerUrl.indexOf("/print") !== -1) {
+                if (window.electronAPI && window.electronAPI.openExternal) {
+                  window.electronAPI.openExternal(newUrl);
+                }
+                return;
+              }
+              try {
+                var newHost = new URL(newUrl).hostname;
+                var curHost = new URL(currentUrl).hostname;
+                if (newHost && curHost && newHost === curHost) {
+                  navigateTo(newUrl);
+                  return;
+                }
+              } catch(uE) {}
+              if (window.electronAPI && typeof window.electronAPI.openPopoutWindow === "function") {
+                window.electronAPI.openPopoutWindow(newUrl, "专利原文查看");
+              } else {
+                window.open(newUrl, "_blank");
+              }
+            }
+          });
+
+          wv.addEventListener("dom-ready", function() {
+            wvReady = true;
+            try {
+              if (window.electronAPI && typeof window.electronAPI.setWebviewOpenHandler === "function") {
+                window.electronAPI.setWebviewOpenHandler(wv.getWebContentsId ? wv.getWebContentsId() : null);
+              }
+            } catch(ipcErr) {}
+            injectOverrideScript();
+            injectImmersiveTranslate();
+          });
+
+          container.appendChild(wv);
+          setupWebviewContextMenu();
+
+          // 超时检查
+          timeoutTimer = setTimeout(function () {
+            if (!_loaded && !_failed) {
+              console.warn("[popout] webview " + (LOAD_TIMEOUT_MS/1000) + "s timeout");
+              _failed = true;
+              if (loadAttempts <= MAX_AUTO_RETRY) { embed(); return; }
               showFallback("加载超时（" + (LOAD_TIMEOUT_MS/1000) + "秒）", "-118");
             }
           }, LOAD_TIMEOUT_MS);
@@ -1619,33 +1584,19 @@
         }
       }
 
-      function navigateTo(u, isRetry) {
-        if (!isRetry) loadAttempts = 0;
+      function navigateTo(u) {
+        loadAttempts = 0;
         showLoading("正在加载...");
         currentUrl = u;
         updateJpBar();
         if (isElectron) {
           if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-          if (!wv) {
-            embed();
-            return;
-          }
+          if (!wv || !wvReady) { embed(); return; }
+          // webview已就绪，使用loadURL导航(保留历史记录用于前进后退)
           wvReady = false;
-          try {
-            wv.loadURL(u);
-          } catch(e) {
-            try { wv.setAttribute("src", u); } catch(e2) { embed(); }
-          }
+          try { wv.loadURL(u); } catch(e) { embed(); return; }
           timeoutTimer = setTimeout(function () {
-            if (!wvReady) {
-              console.warn("[popout] webview " + (LOAD_TIMEOUT_MS/1000) + "s timeout");
-              if (loadAttempts <= MAX_AUTO_RETRY) {
-                loadAttempts++;
-                navigateTo(u, true);
-                return;
-              }
-              showFallback("加载超时（" + (LOAD_TIMEOUT_MS/1000) + "秒）", "-118");
-            }
+            if (!wvReady) { showFallback("加载超时", "-118"); }
           }, LOAD_TIMEOUT_MS);
           return;
         }
