@@ -6019,6 +6019,8 @@ function buildReviewManualSelectPanel() {
 
     try {
       let fullText = "";
+      // Clear previous content (including any previous progress UI)
+      analysisContent.innerHTML = "";
       // Create a stable container once to avoid full DOM replacement on each chunk
       // Keep the progress bar visible initially; it will be replaced when first content arrives
       const progressPlaceholder = document.createElement("div");
