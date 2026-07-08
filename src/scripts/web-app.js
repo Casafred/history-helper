@@ -11428,11 +11428,38 @@ function appendAnalysisChatMessage(role, content) {
   const msgEl = document.createElement("div");
   msgEl.className = `chat-msg ${role}`;
   if (role === "assistant") {
-    msgEl.innerHTML = `<div class="chat-msg-content markdown-body">${renderMarkdown(content)}</div>`;
+    const contentEl = document.createElement("div");
+    contentEl.className = "chat-msg-content markdown-body";
+    if (content) {
+      contentEl.innerHTML = renderMarkdownWithTrace(content);
+    }
+    msgEl.appendChild(contentEl);
   } else if (role === "system") {
     msgEl.textContent = content;
   } else {
     msgEl.textContent = content;
+  }
+  // Add copy button for user and assistant messages
+  if (role !== "system") {
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "chat-msg-copy-btn";
+    copyBtn.title = "复制消息内容";
+    copyBtn.textContent = "📋";
+    copyBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      let textToCopy = content;
+      if (role === "assistant") {
+        const contentDiv = msgEl.querySelector(".chat-msg-content");
+        if (contentDiv) textToCopy = contentDiv.innerText || contentDiv.textContent || content;
+      }
+      copyTextToClipboard(textToCopy).then(ok => {
+        if (ok) {
+          copyBtn.textContent = "✓";
+          setTimeout(() => { copyBtn.textContent = "📋"; }, 1500);
+        }
+      });
+    });
+    msgEl.appendChild(copyBtn);
   }
   messagesEl.appendChild(msgEl);
   messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -11493,11 +11520,22 @@ async function sendAnalysisChatMessage() {
     }, analysisChatAbortController.signal);
 
     const messagesEl = document.getElementById("analysis-chat-messages");
+    const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
+    // 创建思考区
+    const thinkingHost = _createThinkingHost(assistantMsgEl);
+    let contentStarted = false;
     let _rafPending = false;
     let _lastRenderLen = 0;
     for await (const chunk of stream) {
       if (analysisChatAbortController.signal.aborted) break;
+      if (chunk.reasoningContent && thinkingHost) {
+        thinkingHost.appendReasoning(chunk.reasoningContent);
+      }
       if (chunk.content) {
+        if (!contentStarted) {
+          contentStarted = true;
+          if (thinkingHost) thinkingHost.startContent();
+        }
         fullResponse += chunk.content;
         if (assistantMsgEl && !_rafPending) {
           _rafPending = true;
@@ -11505,16 +11543,15 @@ async function sendAnalysisChatMessage() {
             _rafPending = false;
             if (fullResponse.length - _lastRenderLen > 20 || fullResponse.length < 50) {
               _lastRenderLen = fullResponse.length;
-              const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
               contentEl.innerHTML = renderMarkdownWithTrace(fullResponse);
             }
           });
         }
       }
     }
+    if (thinkingHost) thinkingHost.finish();
     // Final render to ensure complete content is displayed
     if (assistantMsgEl) {
-      const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
       contentEl.innerHTML = renderMarkdownWithTrace(fullResponse);
     }
 
@@ -11597,6 +11634,94 @@ async function sendAnalysisChatMessage() {
       analysisChatAbortBtnEl.classList.add("hidden");
       const sendBtn = document.getElementById("analysis-chat-send-btn");
       if (sendBtn) sendBtn.disabled = false;
+    });
+  }
+
+  // ── 拖拽移动和调整大小 ──
+  if (analysisChatPanel) {
+    const dragHandle = document.getElementById("analysis-chat-drag-handle");
+    const resizeHandle = document.getElementById("analysis-chat-resize-handle");
+    let isDragging = false;
+    let isResizing = false;
+    let startX, startY, startLeft, startTop, startWidth, startHeight;
+
+    // 拖拽移动
+    if (dragHandle) {
+      dragHandle.addEventListener("mousedown", (e) => {
+        // 不要在按钮、选择框等交互元素上触发拖拽
+        if (e.target.closest("button") || e.target.closest("select") || e.target.closest("input")) return;
+        isDragging = true;
+        const rect = analysisChatPanel.getBoundingClientRect();
+        startX = e.clientX;
+        startY = e.clientY;
+        startLeft = rect.left;
+        startTop = rect.top;
+        // 切换到left/top定位（原来是right/bottom）
+        analysisChatPanel.style.right = "auto";
+        analysisChatPanel.style.bottom = "auto";
+        analysisChatPanel.style.left = rect.left + "px";
+        analysisChatPanel.style.top = rect.top + "px";
+        document.body.style.userSelect = "none";
+        e.preventDefault();
+      });
+    }
+
+    // 调整大小
+    if (resizeHandle) {
+      resizeHandle.addEventListener("mousedown", (e) => {
+        isResizing = true;
+        const rect = analysisChatPanel.getBoundingClientRect();
+        startY = e.clientY;
+        startHeight = rect.height;
+        startX = e.clientX;
+        startWidth = rect.width;
+        // 如果是right/bottom定位，需要先切换
+        if (analysisChatPanel.style.right && analysisChatPanel.style.right !== "auto") {
+          analysisChatPanel.style.right = "auto";
+          analysisChatPanel.style.bottom = "auto";
+          analysisChatPanel.style.left = rect.left + "px";
+          analysisChatPanel.style.top = rect.top + "px";
+        }
+        document.body.style.userSelect = "none";
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    }
+
+    document.addEventListener("mousemove", (e) => {
+      if (isDragging) {
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        let newLeft = startLeft + dx;
+        let newTop = startTop + dy;
+        // 边界检查
+        const panelRect = analysisChatPanel.getBoundingClientRect();
+        const maxLeft = window.innerWidth - 50;
+        const maxTop = window.innerHeight - 50;
+        newLeft = Math.max(-panelRect.width + 100, Math.min(newLeft, maxLeft));
+        newTop = Math.max(0, Math.min(newTop, maxTop));
+        analysisChatPanel.style.left = newLeft + "px";
+        analysisChatPanel.style.top = newTop + "px";
+      }
+      if (isResizing) {
+        const dy = e.clientY - startY;
+        const dx = e.clientX - startX;
+        let newHeight = startHeight - dy; // 向上拖拽增大
+        let newWidth = startWidth + dx;  // 向右拖拽增大
+        // 最小/最大尺寸
+        newHeight = Math.max(300, Math.min(newHeight, window.innerHeight * 0.85));
+        newWidth = Math.max(320, Math.min(newWidth, window.innerWidth * 0.9));
+        analysisChatPanel.style.height = newHeight + "px";
+        analysisChatPanel.style.width = newWidth + "px";
+      }
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (isDragging || isResizing) {
+        isDragging = false;
+        isResizing = false;
+        document.body.style.userSelect = "";
+      }
     });
   }
 })();
@@ -12635,6 +12760,7 @@ function _switchPdTab(pn) {
     if (patentInput) patentInput.value = pn;
   }
   _renderPdTabs();
+  updateFloatingBallsVisibility();
 }
 
 function _closePdTab(pn) {
@@ -12693,8 +12819,22 @@ function _openPdPatent(pn) {
     _pdBatchMode = false;
   }
   if (batchResultsSection) batchResultsSection.classList.add("hidden");
+
+  // Ensure we're in patent mode and update UI
+  if (searchMode !== "patent") {
+    searchMode = "patent";
+    document.querySelectorAll(".search-mode-btn").forEach(b => {
+      b.classList.toggle("active", b.dataset.mode === "patent");
+    });
+    if (patentInput) {
+      patentInput.placeholder = "输入专利号查询原文信息（如 US12030161B2, EP4252965A3）";
+    }
+    if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "";
+  }
+
   patentDetailSection.classList.remove("hidden");
   resultSection.classList.add("hidden");
+  updateFloatingBallsVisibility();
 
   if (_pdOpenPatents.includes(raw)) {
     _switchPdTab(raw);

@@ -769,7 +769,7 @@
 
       <!-- AI Analysis Chat Floating Panel (page-level) -->
       <div id="analysis-chat-panel" class="analysis-chat-panel hidden">
-        <div class="analysis-chat-header">
+        <div class="analysis-chat-header" id="analysis-chat-drag-handle">
           <span class="analysis-chat-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> 继续对话</span>
           <div class="analysis-chat-header-actions">
             <select class="chat-provider-select" id="analysis-chat-provider-select" title="选择AI服务商"></select>
@@ -785,6 +785,7 @@
           <button id="analysis-chat-send-btn" class="btn-primary btn-small">发送</button>
           <button id="analysis-chat-abort-btn" class="btn-danger btn-small hidden">中止</button>
         </div>
+        <div class="analysis-chat-resize-handle" id="analysis-chat-resize-handle" title="拖拽调整大小"></div>
       </div>
     </main>
 

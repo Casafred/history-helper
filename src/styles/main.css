@@ -1618,6 +1618,10 @@ body {
   right: 30px;
   width: 420px;
   height: 520px;
+  min-width: 320px;
+  min-height: 300px;
+  max-width: 90vw;
+  max-height: 85vh;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg-card);
@@ -1625,10 +1629,47 @@ body {
   flex-direction: column;
   z-index: 9999;
   box-shadow: var(--shadow-lg);
+  overflow: hidden;
 }
 
 .analysis-chat-panel .analysis-chat-header {
   border-radius: 12px 12px 0 0;
+  cursor: move;
+  user-select: none;
+  position: relative;
+}
+
+.analysis-chat-panel .analysis-chat-header .analysis-chat-header-actions {
+  cursor: default;
+}
+
+.analysis-chat-resize-handle {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+  background: transparent;
+  z-index: 10;
+}
+
+.analysis-chat-resize-handle::after {
+  content: "";
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 40px;
+  height: 3px;
+  background: var(--border-color, var(--border));
+  border-radius: 2px;
+  opacity: 0.5;
+}
+
+.analysis-chat-resize-handle:hover::after {
+  opacity: 1;
+  background: var(--accent);
 }
 
 .analysis-chat-panel .analysis-chat-messages {
@@ -1644,6 +1685,50 @@ body {
 
 .analysis-chat-panel .analysis-chat-input-area {
   border-radius: 0 0 12px 12px;
+}
+
+/* Analysis chat message copy button */
+.analysis-chat-messages .chat-msg {
+  position: relative;
+}
+
+.analysis-chat-messages .chat-msg .chat-msg-copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: rgba(0,0,0,0.05);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  color: var(--text-secondary);
+  padding: 0;
+}
+
+.analysis-chat-messages .chat-msg:hover .chat-msg-copy-btn {
+  opacity: 1;
+}
+
+.analysis-chat-messages .chat-msg .chat-msg-copy-btn:hover {
+  background: rgba(0,0,0,0.1);
+  color: var(--text-primary);
+}
+
+.analysis-chat-messages .chat-msg.user .chat-msg-copy-btn {
+  background: rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.8);
+}
+
+.analysis-chat-messages .chat-msg.user .chat-msg-copy-btn:hover {
+  background: rgba(255,255,255,0.3);
+  color: white;
 }
 
 /* ── Reader Sidebar Search ── */
