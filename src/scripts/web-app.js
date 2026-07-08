@@ -1327,7 +1327,7 @@ function renderPatentDetail(data) {
       html += '<table class="pd-legal-table"><thead><tr><th>公开号</th><th>标题</th><th>状态</th></tr></thead><tbody>';
       data.family_applications.forEach(fa => {
         html += '<tr>';
-        html += '<td><a class="pd-patent-link" data-patent="' + escapeHtml(fa.publication_number) + '">' + escapeHtml(fa.publication_number) + '</a></td>';
+        html += '<td><a class="pd-patent-link" data-patent="' + escapeHtml(fa.publication_number) + '">' + escapeHtml(fa.publication_number) + '</a>' + patentLinkButtons(fa.publication_number) + '</td>';
         html += '<td>' + escapeHtml(fa.title || "") + '</td>';
         html += '<td>' + escapeHtml(fa.status || "") + '</td>';
         html += '</tr>';
@@ -1846,112 +1846,194 @@ function openInGoogleTranslate(text) {
   window.open(url, '_blank');
 }
 
-function showFloatingTranslationPopup(text, posX, posY, popupId) {
+function copyTextToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch(e) {}
+    document.body.removeChild(ta);
+    resolve();
+  });
+}
+
+function showFloatingTranslationPopup(text, posX, posY, popupId, preferredSource) {
   const existingPopup = document.getElementById(popupId);
   if (existingPopup) existingPopup.remove();
 
+  const config = window.AI.loadAIConfig();
+  const hasAiProvider = !!(window.AI.getTranslateProvider(config) && window.AI.getTranslateProvider(config).apiKey);
+  const initialSource = preferredSource || (hasAiProvider ? "ai" : "google");
+
   const popup = document.createElement('div');
   popup.id = popupId;
-  popup.style.cssText = 'position:fixed;left:' + posX + 'px;top:' + posY + 'px;z-index:100010;max-width:480px;min-width:220px;padding:10px 14px;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.18);border:1px solid #e0e0e0;font-size:13px;color:#333;line-height:1.6;';
-  popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">' +
-    '<span style="font-size:11px;color:#888;font-weight:500;">翻译结果</span>' +
+  popup.style.cssText = 'position:fixed;left:' + posX + 'px;top:' + posY + 'px;z-index:100010;max-width:520px;min-width:280px;max-height:500px;display:flex;flex-direction:column;padding:10px 14px;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.18);border:1px solid #e0e0e0;font-size:13px;color:#333;line-height:1.6;';
+
+  const aiBtnDisabled = !hasAiProvider ? 'opacity:0.5;pointer-events:none;' : '';
+  const activeStyle = 'background:#1a73e8;color:#fff;border-color:#1a73e8;';
+  const inactiveStyle = 'background:#f8f9fa;color:#5f6368;border-color:#e0e0e0;';
+
+  popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-shrink:0;">' +
     '<div style="display:flex;gap:4px;align-items:center;">' +
-    '<button id="' + popupId + '-google-btn" style="border:1px solid #e0e0e0;background:#f8f9fa;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#5f6368;" title="在Google翻译中打开">🌐 Google</button>' +
+    '<button id="' + popupId + '-source-ai" style="border:1px solid;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;' + (initialSource === 'ai' ? activeStyle : inactiveStyle) + aiBtnDisabled + '" title="使用AI翻译">🤖 AI</button>' +
+    '<button id="' + popupId + '-source-google" style="border:1px solid;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;' + (initialSource === 'google' ? activeStyle : inactiveStyle) + '" title="使用Google翻译">🌐 Google</button>' +
+    '</div>' +
+    '<div style="display:flex;gap:4px;align-items:center;">' +
+    '<button id="' + popupId + '-copy-btn" style="border:1px solid #e0e0e0;background:#f8f9fa;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#5f6368;" title="复制译文">📋 复制</button>' +
+    '<button id="' + popupId + '-open-google-btn" style="border:1px solid #e0e0e0;background:#f8f9fa;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#5f6368;" title="在Google翻译中打开">↗️</button>' +
     '<button id="' + popupId + '-close" style="border:none;background:transparent;cursor:pointer;font-size:16px;color:#999;padding:0 4px;line-height:1;">&times;</button>' +
     '</div></div>' +
-    '<div id="' + popupId + '-body"><div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;border-width:2px;margin:0;"></div><span style="font-size:12px;color:#888;">翻译中...</span></div></div>';
+    '<div id="' + popupId + '-body" style="overflow-y:auto;flex:1;min-height:60px;max-height:400px;padding-right:4px;"><div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;border-width:2px;margin:0;"></div><span style="font-size:12px;color:#888;">翻译中...</span></div></div>';
   document.body.appendChild(popup);
+
+  let currentSource = initialSource;
+  let currentOriginal = text;
+  let currentTranslated = "";
+  let currentSourceLabel = "";
+  let currentIsStreaming = false;
+
+  function updateSourceButtons() {
+    const aiBtn = document.getElementById(popupId + '-source-ai');
+    const gBtn = document.getElementById(popupId + '-source-google');
+    if (aiBtn) aiBtn.style.cssText = 'border:1px solid;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;' + (currentSource === 'ai' ? activeStyle : inactiveStyle) + aiBtnDisabled;
+    if (gBtn) gBtn.style.cssText = 'border:1px solid;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;' + (currentSource === 'google' ? activeStyle : inactiveStyle);
+  }
+
+  function positionPopup() {
+    requestAnimationFrame(() => {
+      const r = popup.getBoundingClientRect();
+      if (r.right > window.innerWidth - 10) popup.style.left = Math.max(10, window.innerWidth - r.width - 10) + 'px';
+      if (r.bottom > window.innerHeight - 10) popup.style.top = Math.max(10, posY - r.height - 16) + 'px';
+      if (r.top < 10) popup.style.top = '10px';
+    });
+  }
+
+  function renderContent() {
+    const body = document.getElementById(popupId + '-body');
+    if (!body) return;
+    if (currentIsStreaming && !currentTranslated) {
+      body.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;border-width:2px;margin:0;"></div><span style="font-size:12px;color:#888;">翻译中...</span></div>';
+    } else {
+      body.innerHTML = '<div style="color:#57606a;font-size:11px;margin-bottom:4px;font-weight:500;position:sticky;top:0;background:#fff;padding:2px 0;">原文</div>' +
+        '<div style="color:#24292e;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #eaecef;white-space:pre-wrap;word-break:break-word;line-height:1.5;font-size:12px;">' + escapeHtml(currentOriginal) + '</div>' +
+        (currentTranslated ? '<div style="color:#1a73e8;font-size:11px;margin-bottom:4px;font-weight:500;position:sticky;top:0;background:#fff;padding:2px 0;">' + escapeHtml(currentSourceLabel) + (currentIsStreaming ? ' <span class="spinner" style="width:10px;height:10px;border-width:1.5px;display:inline-block;vertical-align:middle;margin-left:4px;"></span>' : '') + '</div>' +
+        '<div style="color:#1a73e8;white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:13px;">' + escapeHtml(currentTranslated).replace(/\n/g, '<br>') + '</div>' : '');
+    }
+    positionPopup();
+  }
 
   const closeBtn = document.getElementById(popupId + '-close');
   if (closeBtn) closeBtn.addEventListener('click', () => popup.remove());
 
-  const googleBtn = document.getElementById(popupId + '-google-btn');
-  if (googleBtn) googleBtn.addEventListener('click', () => openInGoogleTranslate(text));
-
-  requestAnimationFrame(() => {
-    const r = popup.getBoundingClientRect();
-    if (r.right > window.innerWidth - 10) popup.style.left = Math.max(10, window.innerWidth - r.width - 10) + 'px';
-    if (r.bottom > window.innerHeight - 10) popup.style.top = Math.max(10, posY - r.height - 16) + 'px';
+  const copyBtn = document.getElementById(popupId + '-copy-btn');
+  if (copyBtn) copyBtn.addEventListener('click', () => {
+    if (currentTranslated) {
+      copyTextToClipboard(currentTranslated).then(() => {
+        copyBtn.textContent = '✓ 已复制';
+        setTimeout(() => { copyBtn.textContent = '📋 复制'; }, 1500);
+      });
+    }
   });
+
+  const openGoogleBtn = document.getElementById(popupId + '-open-google-btn');
+  if (openGoogleBtn) openGoogleBtn.addEventListener('click', () => openInGoogleTranslate(text));
+
+  async function runTranslation(source) {
+    currentSource = source;
+    currentIsStreaming = true;
+    currentTranslated = "";
+    updateSourceButtons();
+    renderContent();
+
+    if (source === 'ai' && hasAiProvider) {
+      try {
+        const tp = window.AI.getTranslateProvider(config);
+        let fullResponse = "";
+        let _rafPending = false;
+        const stream = window.AI.streamChat(tp.type, tp.apiKey, tp.baseUrl, {
+          model: tp.model,
+          messages: [
+            { role: "system", content: "你是一位专业的专利文献翻译专家。请将以下文本翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。" },
+            { role: "user", content: text }
+          ],
+          temperature: 0.3,
+          maxTokens: 4096,
+        });
+
+        for await (const chunk of stream) {
+          if (chunk.content) {
+            fullResponse += chunk.content;
+            currentTranslated = fullResponse;
+            currentSourceLabel = "AI译文";
+            if (!_rafPending) {
+              _rafPending = true;
+              requestAnimationFrame(() => {
+                renderContent();
+                const body = document.getElementById(popupId + '-body');
+                if (body) body.scrollTop = body.scrollHeight;
+                _rafPending = false;
+              });
+            }
+          }
+        }
+        currentIsStreaming = false;
+        currentTranslated = fullResponse;
+        currentSourceLabel = "AI译文";
+        renderContent();
+        return;
+      } catch (e) {
+        console.warn("AI translate failed, falling back to Google:", e);
+        currentIsStreaming = false;
+      }
+    }
+
+    try {
+      currentSource = 'google';
+      updateSourceButtons();
+      const googleResult = await googleTranslateText(text);
+      currentIsStreaming = false;
+      if (googleResult) {
+        currentTranslated = googleResult;
+        currentSourceLabel = "Google译文";
+      } else {
+        currentTranslated = "翻译失败，未获取到结果";
+      }
+      renderContent();
+    } catch (e) {
+      currentIsStreaming = false;
+      currentTranslated = "翻译失败: " + e.message;
+      currentSourceLabel = "错误";
+      renderContent();
+    }
+  }
+
+  const aiBtn = document.getElementById(popupId + '-source-ai');
+  const gBtn = document.getElementById(popupId + '-source-google');
+  if (aiBtn) aiBtn.addEventListener('click', () => { if (!currentIsStreaming) runTranslation('ai'); });
+  if (gBtn) gBtn.addEventListener('click', () => { if (!currentIsStreaming) runTranslation('google'); });
+
+  positionPopup();
+
+  setTimeout(() => runTranslation(initialSource), 50);
 
   return {
     popup: popup,
-    bodyEl: document.getElementById(popupId + '-body'),
-    updateContent: function(originalText, translatedText, sourceLabel) {
-      const body = document.getElementById(popupId + '-body');
-      if (body) {
-        body.innerHTML = '<div style="color:#57606a;font-size:11px;margin-bottom:4px;font-weight:500;">原文</div>' +
-          '<div style="color:#24292e;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #eaecef;white-space:pre-wrap;word-break:break-word;line-height:1.5;">' + escapeHtml(originalText) + '</div>' +
-          '<div style="color:#1a73e8;font-size:11px;margin-bottom:4px;font-weight:500;">' + escapeHtml(sourceLabel) + '</div>' +
-          '<div style="color:#1a73e8;white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:14px;">' + escapeHtml(translatedText).replace(/\n/g, '<br>') + '</div>';
-      }
-      requestAnimationFrame(() => {
-        const r = popup.getBoundingClientRect();
-        if (r.right > window.innerWidth - 10) popup.style.left = Math.max(10, window.innerWidth - r.width - 10) + 'px';
-        if (r.bottom > window.innerHeight - 10) popup.style.top = Math.max(10, posY - r.height - 16) + 'px';
-      });
-    },
-    showError: function(msg) {
-      const body = document.getElementById(popupId + '-body');
-      if (body) body.innerHTML = '<span style="color:#d32f2f;">' + escapeHtml(msg) + '</span>';
-    }
+    switchSource: (src) => runTranslation(src),
+    destroy: () => popup.remove()
   };
 }
 
-async function showFloatingTranslation(text, posX, posY) {
-  const popupId = 'generic-translation-popup';
-  const ui = showFloatingTranslationPopup(text, posX, posY, popupId);
-  if (!ui) return;
-
-  const config = window.AI.loadAIConfig();
-  const translateProvider = window.AI.getTranslateProvider(config);
-
-  if (translateProvider && translateProvider.apiKey) {
-    try {
-      let fullResponse = "";
-      let _rafPending = false;
-      const stream = window.AI.streamChat(translateProvider.type, translateProvider.apiKey, translateProvider.baseUrl, {
-        model: translateProvider.model,
-        messages: [
-          { role: "system", content: "你是一位专业的专利文献翻译专家。请将以下文本翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。" },
-          { role: "user", content: text }
-        ],
-        temperature: 0.3,
-        maxTokens: 4096,
-      });
-
-      for await (const chunk of stream) {
-        if (chunk.content) {
-          fullResponse += chunk.content;
-          if (!_rafPending) {
-            _rafPending = true;
-            requestAnimationFrame(() => {
-              ui.updateContent(text, fullResponse, "AI译文");
-              _rafPending = false;
-            });
-          }
-        }
-      }
-      ui.updateContent(text, fullResponse, "AI译文");
-      return;
-    } catch (e) {
-      console.warn("AI translate failed, trying Google:", e);
-    }
-  }
-
-  try {
-    const googleResult = await googleTranslateText(text);
-    if (googleResult) {
-      ui.updateContent(text, googleResult, "Google译文");
-    } else {
-      ui.showError("翻译失败，未获取到结果");
-    }
-  } catch (e) {
-    ui.showError("翻译失败: " + e.message);
-  }
+async function showFloatingTranslation(text, posX, posY, preferredSource) {
+  showFloatingTranslationPopup(text, posX, posY, 'generic-translation-popup', preferredSource);
 }
 
-async function translateSelectedPatentText(text, targetSection) {
+async function translateSelectedPatentText(text, targetSection, preferredSource) {
   let posX = 100, posY = 100;
   const sel = window.getSelection();
   if (sel && sel.rangeCount > 0) {
@@ -1960,57 +2042,7 @@ async function translateSelectedPatentText(text, targetSection) {
     posX = rect.left;
     posY = rect.bottom + 8;
   }
-
-  const popupId = "pd-selected-translation-popup";
-  const ui = showFloatingTranslationPopup(text, posX, posY, popupId);
-  if (!ui) return;
-
-  const config = window.AI.loadAIConfig();
-  const translateProvider = window.AI.getTranslateProvider(config);
-
-  if (translateProvider && translateProvider.apiKey) {
-    try {
-      let fullResponse = "";
-      let _rafPending = false;
-      const stream = window.AI.streamChat(translateProvider.type, translateProvider.apiKey, translateProvider.baseUrl, {
-        model: translateProvider.model,
-        messages: [
-          { role: "system", content: "你是一位专业的专利文献翻译专家。请将以下文本翻译为中文。保持专利术语的准确性，保留所有数字标记，翻译要流畅自然。只返回翻译结果。" },
-          { role: "user", content: text }
-        ],
-        temperature: 0.3,
-        maxTokens: 4096,
-      });
-
-      for await (const chunk of stream) {
-        if (chunk.content) {
-          fullResponse += chunk.content;
-          if (!_rafPending) {
-            _rafPending = true;
-            requestAnimationFrame(() => {
-              ui.updateContent(text, fullResponse, "AI译文");
-              _rafPending = false;
-            });
-          }
-        }
-      }
-      ui.updateContent(text, fullResponse, "AI译文");
-      return;
-    } catch (e) {
-      console.warn("AI translate failed, trying Google:", e);
-    }
-  }
-
-  try {
-    const googleResult = await googleTranslateText(text);
-    if (googleResult) {
-      ui.updateContent(text, googleResult, "Google译文");
-    } else {
-      ui.showError("翻译失败，未获取到结果");
-    }
-  } catch (e) {
-    ui.showError("翻译失败: " + e.message);
-  }
+  showFloatingTranslationPopup(text, posX, posY, "pd-selected-translation-popup", preferredSource);
 }
 
 // Translate a single claim by index
@@ -2455,7 +2487,7 @@ function renderPatentPopupContent(data) {
       html += '<table class="pd-legal-table"><thead><tr><th>公开号</th><th>标题</th><th>状态</th></tr></thead><tbody>';
       data.family_applications.forEach(fa => {
         html += '<tr>';
-        html += '<td><a class="pd-patent-link" data-patent="' + escapeHtml(fa.publication_number) + '">' + escapeHtml(fa.publication_number) + '</a></td>';
+        html += '<td><a class="pd-patent-link" data-patent="' + escapeHtml(fa.publication_number) + '">' + escapeHtml(fa.publication_number) + '</a>' + patentLinkButtons(fa.publication_number) + '</td>';
         html += '<td>' + escapeHtml(fa.title || "") + '</td>';
         html += '<td>' + escapeHtml(fa.status || "") + '</td>';
         html += '</tr>';
@@ -3638,6 +3670,13 @@ function refreshHistoryList() {
               if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "";
               _openPdPatent(patentNumber);
             } else {
+              searchMode = "dossier";
+              document.querySelectorAll(".search-mode-btn").forEach(b => {
+                b.classList.toggle("active", b.dataset.mode === "dossier");
+              });
+              if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
+              if (patentDetailSection) patentDetailSection.classList.add("hidden");
+              if (resultSection) resultSection.classList.remove("hidden");
               const isCached = item.dataset.cached === "1";
               if (isCached) {
                 restoreFromCache(patentNumber);
@@ -6959,7 +6998,7 @@ function onTraceClick(blockIdStr) {
     togglePdfView(true);
   }
 
-  selectReaderDoc(info.docIdx);
+  selectReaderDoc(info.docIdx, true);
 
   // Fallback: try to highlight after a delay if PDF was already rendered
   // (covers the case where renderPdfView already completed before we get here)
@@ -7162,10 +7201,12 @@ function openReader(defaultToPdf = true, skipRender = false) {
   readerContent.innerHTML = '<p class="placeholder">请从左侧选择文档查看内容</p>';
 }
 
-function selectReaderDoc(idx) {
-  // Reset chat for new document
-  chatHistory = [];
-  if (chatMessages) chatMessages.innerHTML = "";
+function selectReaderDoc(idx, preserveChat) {
+  const sameDoc = pdfViewState.currentDocIdx === idx;
+  if (!sameDoc || !preserveChat) {
+    chatHistory = [];
+    if (chatMessages) chatMessages.innerHTML = "";
+  }
 
   const items = kanbanState.documents;
   const it = items.find(d => d.idx === idx);
@@ -11062,34 +11103,79 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // ── Global text selection translation floating button ──
+  // ── Global text selection context menu & floating button ──
   let _selectionFloatingBtn = null;
-  function hideSelectionTranslateBtn() {
+  let _contextMenu = null;
+
+  function hideSelectionMenu() {
     if (_selectionFloatingBtn && _selectionFloatingBtn.parentNode) {
       _selectionFloatingBtn.parentNode.removeChild(_selectionFloatingBtn);
     }
     _selectionFloatingBtn = null;
   }
-  function showSelectionTranslateBtn(x, y, text) {
-    hideSelectionTranslateBtn();
+
+  function hideContextMenu() {
+    if (_contextMenu && _contextMenu.parentNode) {
+      _contextMenu.parentNode.removeChild(_contextMenu);
+    }
+    _contextMenu = null;
+  }
+
+  function showSelectionActionBtn(x, y, text) {
+    hideSelectionMenu();
+    hideContextMenu();
     const btn = document.createElement("button");
-    btn.textContent = "🔤 翻译";
-    btn.style.cssText = 'position:fixed;z-index:100020;background:#1a73e8;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-family:inherit;';
-    btn.style.left = Math.min(x, window.innerWidth - 80) + "px";
-    btn.style.top = Math.max(10, y - 36) + "px";
+    btn.textContent = "🔤";
+    btn.title = "翻译/复制选中文本";
+    btn.style.cssText = 'position:fixed;z-index:100020;background:#1a73e8;color:#fff;border:none;border-radius:50%;width:32px;height:32px;font-size:14px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-family:inherit;display:flex;align-items:center;justify-content:center;';
+    btn.style.left = Math.min(x, window.innerWidth - 40) + "px";
+    btn.style.top = Math.max(10, y - 40) + "px";
     btn.addEventListener("mousedown", (e) => e.preventDefault());
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const selText = text;
-      hideSelectionTranslateBtn();
-      window.getSelection()?.removeAllRanges();
-      showFloatingTranslation(selText, x, y + 8);
+      showSelectionContextMenu(x, y + 36, text);
     });
     document.body.appendChild(btn);
     _selectionFloatingBtn = btn;
   }
+
+  function showSelectionContextMenu(x, y, text) {
+    hideSelectionMenu();
+    hideContextMenu();
+    const menu = document.createElement("div");
+    menu.style.cssText = 'position:fixed;z-index:100021;background:#fff;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);border:1px solid #e0e0e0;padding:4px 0;min-width:140px;font-size:13px;';
+    menu.style.left = Math.min(x, window.innerWidth - 160) + "px";
+    menu.style.top = Math.max(10, Math.min(y, window.innerHeight - 160)) + "px";
+
+    const config = window.AI.loadAIConfig();
+    const hasAi = !!(window.AI.getTranslateProvider(config) && window.AI.getTranslateProvider(config).apiKey);
+
+    const items = [
+      { label: "📋 复制", action: () => { copyTextToClipboard(text); window.getSelection()?.removeAllRanges(); } },
+      { label: "🤖 AI 翻译", action: () => { window.getSelection()?.removeAllRanges(); showFloatingTranslation(text, x, y + 8, "ai"); }, disabled: !hasAi },
+      { label: "🌐 Google 翻译", action: () => { window.getSelection()?.removeAllRanges(); showFloatingTranslation(text, x, y + 8, "google"); } },
+      { label: "↗️ 打开 Google 翻译", action: () => { openInGoogleTranslate(text); } },
+    ];
+
+    items.forEach(item => {
+      const it = document.createElement("div");
+      it.textContent = item.label;
+      it.style.cssText = 'padding:8px 16px;cursor:pointer;color:#333;' + (item.disabled ? 'opacity:0.5;cursor:not-allowed;' : '');
+      if (!item.disabled) {
+        it.addEventListener("mouseenter", () => { it.style.background = "#f0f7ff"; });
+        it.addEventListener("mouseleave", () => { it.style.background = "transparent"; });
+        it.addEventListener("click", (e) => { e.stopPropagation(); hideContextMenu(); item.action(); });
+      }
+      menu.appendChild(it);
+    });
+
+    document.body.appendChild(menu);
+    _contextMenu = menu;
+  }
+
   document.addEventListener("mouseup", (e) => {
+    if (_contextMenu && _contextMenu.contains(e.target)) return;
     setTimeout(() => {
       const sel = window.getSelection();
       const text = sel ? sel.toString().trim() : "";
@@ -11097,19 +11183,36 @@ document.addEventListener("DOMContentLoaded", () => {
         const range = sel.getRangeAt(0);
         const rect = range.getBoundingClientRect();
         if (rect.width > 0) {
-          showSelectionTranslateBtn(rect.left + rect.width / 2 - 30, rect.top, text);
+          showSelectionActionBtn(rect.left + rect.width / 2 - 16, rect.top, text);
           return;
         }
       }
-      hideSelectionTranslateBtn();
+      hideSelectionMenu();
     }, 10);
   });
   document.addEventListener("mousedown", (e) => {
-    if (_selectionFloatingBtn && !_selectionFloatingBtn.contains(e.target)) {
-      hideSelectionTranslateBtn();
+    if (_selectionFloatingBtn && !_selectionFloatingBtn.contains(e.target) && (!_contextMenu || !_contextMenu.contains(e.target))) {
+      hideSelectionMenu();
+    }
+    if (_contextMenu && !_contextMenu.contains(e.target)) {
+      hideContextMenu();
     }
   });
-  document.addEventListener("scroll", () => hideSelectionTranslateBtn(), true);
+  document.addEventListener("contextmenu", (e) => {
+    const sel = window.getSelection();
+    const text = sel ? sel.toString().trim() : "";
+    if (text && text.length > 1 && text.length < 5000) {
+      e.preventDefault();
+      showSelectionContextMenu(e.clientX, e.clientY, text);
+      hideSelectionMenu();
+    } else {
+      hideContextMenu();
+    }
+  });
+  document.addEventListener("scroll", () => { hideSelectionMenu(); hideContextMenu(); }, true);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { hideContextMenu(); hideSelectionMenu(); }
+  });
 
   // ── Merge export events ──
   const mergeExportBtn = document.getElementById("merge-export-btn");
