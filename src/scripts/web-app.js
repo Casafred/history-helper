@@ -329,8 +329,14 @@ let _pdfDocCache = {}; // Cache loaded PDF documents by key (idx_url)
 
 let chatHistory = [];
 let chatAbortController = null;
+let chatProviderOverride = null;
+let chatModelOverride = null;
 let analysisChatHistory = [];
 let analysisChatAbortController = null;
+let analysisChatProviderOverride = null;
+let analysisChatModelOverride = null;
+let _patentAskProviderOverride = null;
+let _patentAskModelOverride = null;
 let translateAbortController = null;
 let translatePageCache = {};
 
@@ -338,6 +344,117 @@ function showError(msg) {
   errorToast.textContent = msg;
   errorToast.classList.remove("hidden");
   setTimeout(() => { errorToast.classList.add("hidden"); }, 5000);
+}
+
+function getChatProvider(providerOverride, modelOverride) {
+  const config = window.AI.loadAIConfig();
+  if (providerOverride && config[providerOverride] && config[providerOverride].apiKey) {
+    const p = config[providerOverride];
+    return {
+      type: providerOverride,
+      apiKey: p.apiKey,
+      baseUrl: p.baseUrl,
+      model: modelOverride || p.model,
+    };
+  }
+  return window.AI.getCurrentProvider(config);
+}
+
+function populateChatProviderSelect(selectEl, modelSelectEl, currentType, currentModel) {
+  if (!selectEl) return;
+  const config = window.AI.loadAIConfig();
+  const providers = window.AI.getAvailableProviders();
+  selectEl.innerHTML = "";
+  providers.forEach(p => {
+    const option = document.createElement("option");
+    option.value = p.value;
+    option.textContent = p.label;
+    option.disabled = !config[p.value] || !config[p.value].apiKey;
+    selectEl.appendChild(option);
+  });
+  const selectedType = currentType || config.currentProvider || "zhipu";
+  selectEl.value = selectedType;
+  const updateModels = () => {
+    if (!modelSelectEl) return;
+    const type = selectEl.value;
+    const models = window.AI.getAvailableModels(type);
+    modelSelectEl.innerHTML = "";
+    models.forEach(m => {
+      const option = document.createElement("option");
+      option.value = m.value;
+      option.textContent = m.label;
+      modelSelectEl.appendChild(option);
+    });
+    modelSelectEl.value = currentModel || (config[type] ? config[type].model : models[0].value);
+  };
+  updateModels();
+  selectEl.addEventListener("change", updateModels);
+}
+
+function exportChatToWord(messages, title) {
+  if (typeof docx === "undefined" || typeof saveAs === "undefined") {
+    showError("Word导出功能不可用");
+    return;
+  }
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = docx;
+  const children = [];
+  children.push(new Paragraph({
+    text: title || "AI对话记录",
+    heading: HeadingLevel.HEADING_1,
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 400 }
+  }));
+  children.push(new Paragraph({
+    text: "导出时间：" + new Date().toLocaleString("zh-CN"),
+    spacing: { after: 400 }
+  }));
+  children.push(new Paragraph({ text: "" }));
+
+  messages.forEach((msg, idx) => {
+    if (msg.role === "system") return;
+    const roleText = msg.role === "user" ? "用户" : "AI";
+    const roleRun = new TextRun({
+      text: roleText + "：",
+      bold: true,
+      color: msg.role === "user" ? "2563EB" : "059669",
+      size: 24
+    });
+    const contentText = msg.content || "";
+    const contentParagraphs = contentText.split("\n").filter(line => line.trim() !== "" || true);
+    contentParagraphs.forEach((line, lineIdx) => {
+      if (lineIdx === 0) {
+        children.push(new Paragraph({
+          children: [
+            roleRun,
+            new TextRun({ text: line, size: 24 })
+          ],
+          spacing: { after: 100 }
+        }));
+      } else {
+        children.push(new Paragraph({
+          text: line,
+          spacing: { after: 100 }
+        }));
+      }
+    });
+    if (idx < messages.length - 1) {
+      children.push(new Paragraph({ text: "" }));
+    }
+  });
+
+  const doc = new Document({
+    sections: [{
+      properties: {},
+      children: children
+    }]
+  });
+
+  Packer.toBlob(doc).then(blob => {
+    const fileName = (title || "对话记录") + "_" + new Date().toISOString().slice(0, 10) + ".docx";
+    saveAs(blob, fileName);
+  }).catch(err => {
+    showError("导出失败：" + err.message);
+  });
 }
 
 function hideError() {
@@ -4287,8 +4404,12 @@ async function sendPatentAsk() {
   if (!inputEl) return;
   const question = inputEl.value.trim();
   if (!question) return;
-  const config = window.AI.loadAIConfig();
-  const provider = window.AI.getCurrentProvider(config);
+  // Get AI config (use panel-selected provider if available)
+  const providerSelect = document.getElementById("patent-ask-provider-select");
+  const modelSelect = document.getElementById("patent-ask-model-select");
+  if (providerSelect) _patentAskProviderOverride = providerSelect.value;
+  if (modelSelect) _patentAskModelOverride = modelSelect.value;
+  const provider = getChatProvider(_patentAskProviderOverride, _patentAskModelOverride);
   if (!provider) { alert("请先在「设置」中配置 AI 服务"); return; }
 
   _appendPatentAskMessage("user", question);
@@ -4393,6 +4514,18 @@ function _initPatentAskBindings() {
   if (inputEl) {
     inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendPatentAsk(); }
+    });
+  }
+  // Initialize provider/model selectors
+  const patProviderSelect = document.getElementById("patent-ask-provider-select");
+  const patModelSelect = document.getElementById("patent-ask-model-select");
+  populateChatProviderSelect(patProviderSelect, patModelSelect);
+  const patExportBtn = document.getElementById("patent-ask-export-btn");
+  if (patExportBtn) {
+    patExportBtn.addEventListener("click", () => {
+      const pnEl = document.getElementById("patent-ask-pn");
+      const title = pnEl ? "专利对话记录-" + (pnEl.textContent || "") : "专利对话记录";
+      exportChatToWord(_patentAskMessages, title);
     });
   }
   // 弹窗头部 AI 问一问按钮（数据来自 window._patentPopupData，由 openPatentPopup/switchPpvPatent 同步）
@@ -4822,6 +4955,7 @@ if (aiTestBtn) aiTestBtn.addEventListener("click", async () => {
 if (aiSaveBtn) aiSaveBtn.addEventListener("click", () => {
   const type = aiProviderSelect.value;
   const config = window.AI.loadAIConfig();
+  window.AI.setCurrentProvider(config, type);
   if (config[type]) {
     config[type].apiKey = aiApiKeyInput.value.trim();
     config[type].baseUrl = aiBaseUrlInput.value.trim();
@@ -4967,14 +5101,19 @@ function updateTranslateModelOptions(type) {
 
 function loadAISettingsToForm() {
   const config = window.AI.loadAIConfig();
-  let type = aiProviderSelect.value;
-  if (!config[type]) type = Object.keys(config).find(k => k !== "ocr" && k !== "prompts" && k !== "translate") || "zhipu";
+  // Use saved currentProvider if available
+  let type = config.currentProvider || aiProviderSelect.value;
+  if (!config[type] || !["deepseek", "zhipu", "openai"].includes(type)) {
+    type = Object.keys(config).find(k => ["deepseek", "zhipu", "openai"].includes(k) && config[k] && config[k].apiKey) || "zhipu";
+  }
+  if (aiProviderSelect) aiProviderSelect.value = type;
   if (config[type]) {
     aiApiKeyInput.value = config[type].apiKey || "";
-    aiBaseUrlInput.value = config[type].baseUrl || "";
+    aiBaseUrlInput.value = config[type].baseUrl || window.AI.getDefaultBaseUrl(type);
     updateModelOptions(type);
     if (config[type].model) aiModelSelect.value = config[type].model;
   } else {
+    aiApiKeyInput.value = "";
     aiBaseUrlInput.value = window.AI.getDefaultBaseUrl(type);
     updateModelOptions(type);
   }
@@ -10740,6 +10879,23 @@ document.addEventListener("DOMContentLoaded", () => {
     chatSendBtn.addEventListener("click", sendChatMessage);
   }
 
+  // Initialize reader chat provider/model selectors
+  const chatProviderSelect = document.getElementById("chat-provider-select");
+  const chatModelSelect = document.getElementById("chat-model-select");
+  populateChatProviderSelect(chatProviderSelect, chatModelSelect);
+  const chatExportBtn = document.getElementById("chat-export-btn");
+  if (chatExportBtn) {
+    chatExportBtn.addEventListener("click", () => exportChatToWord(chatHistory, "审查文档对话记录"));
+  }
+  const chatAbortBtn = document.getElementById("chat-abort-btn");
+  if (chatAbortBtn && chatSendBtn) {
+    chatAbortBtn.addEventListener("click", () => {
+      if (chatAbortController) {
+        chatAbortController.abort();
+      }
+    });
+  }
+
   if (chatInput) {
     chatInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -10799,9 +10955,12 @@ async function sendChatMessage() {
     return;
   }
 
-  // Get AI config
-  const config = AI.loadAIConfig();
-  const provider = AI.getCurrentProvider(config);
+  // Get AI config (use panel-selected provider if available)
+  const providerSelect = document.getElementById("chat-provider-select");
+  const modelSelect = document.getElementById("chat-model-select");
+  if (providerSelect) chatProviderOverride = providerSelect.value;
+  if (modelSelect) chatModelOverride = modelSelect.value;
+  const provider = getChatProvider(chatProviderOverride, chatModelOverride);
   if (!provider || !provider.apiKey) {
     showError("请先配置 AI 服务（API Key）");
     return;
@@ -10862,6 +11021,8 @@ async function sendChatMessage() {
   // Add assistant placeholder
   const assistantMsgEl = appendChatMessage("assistant", "");
   chatSendBtn.disabled = true;
+  const chatAbortBtn = document.getElementById("chat-abort-btn");
+  if (chatAbortBtn) chatAbortBtn.classList.remove("hidden");
   chatAbortController = new AbortController();
 
   // 思考区挂在消息气泡内
@@ -10928,6 +11089,8 @@ async function sendChatMessage() {
     }
   } finally {
     chatSendBtn.disabled = false;
+    const chatAbortBtn = document.getElementById("chat-abort-btn");
+    if (chatAbortBtn) chatAbortBtn.classList.add("hidden");
     chatAbortController = null;
   }
 }
@@ -10982,8 +11145,12 @@ async function sendAnalysisChatMessage() {
     return;
   }
 
-  const config = window.AI.loadAIConfig();
-  const provider = window.AI.getCurrentProvider(config);
+  // Get AI config (use panel-selected provider if available)
+  const providerSelect = document.getElementById("analysis-chat-provider-select");
+  const modelSelect = document.getElementById("analysis-chat-model-select");
+  if (providerSelect) analysisChatProviderOverride = providerSelect.value;
+  if (modelSelect) analysisChatModelOverride = modelSelect.value;
+  const provider = getChatProvider(analysisChatProviderOverride, analysisChatModelOverride);
   if (!provider || !provider.apiKey) {
     showError("请先配置 AI 服务（API Key）");
     return;
@@ -11096,6 +11263,15 @@ async function sendAnalysisChatMessage() {
 
   if (analysisChatSendBtn) {
     analysisChatSendBtn.addEventListener("click", sendAnalysisChatMessage);
+  }
+
+  // Initialize analysis chat provider/model selectors
+  const analysisProviderSelect = document.getElementById("analysis-chat-provider-select");
+  const analysisModelSelect = document.getElementById("analysis-chat-model-select");
+  populateChatProviderSelect(analysisProviderSelect, analysisModelSelect);
+  const analysisExportBtn = document.getElementById("analysis-chat-export-btn");
+  if (analysisExportBtn) {
+    analysisExportBtn.addEventListener("click", () => exportChatToWord(analysisChatHistory, "审查分析对话记录"));
   }
 
   if (analysisChatInput) {

@@ -83,9 +83,14 @@ var AI = (function () {
         openai: createDefaultConfig("openai"),
         zhipu: createDefaultConfig("zhipu"),
         deepseek: createDefaultConfig("deepseek"),
+        currentProvider: "zhipu",
         ocr: { engine: "paddle_ocr_vl" },
         ops: { consumerKey: "", consumerSecret: "" },
       };
+    }
+    // Ensure currentProvider exists
+    if (!config.currentProvider) {
+      config.currentProvider = "zhipu";
     }
     // Invalidate cached custom prompts if prompts version is outdated
     if (config.prompts && config.promptsVersion !== PROMPTS_VERSION) {
@@ -148,10 +153,22 @@ var AI = (function () {
   }
 
   function getCurrentProvider(config) {
-    var keys = Object.keys(config);
-    for (var i = 0; i < keys.length; i++) {
-      var c = config[keys[i]];
+    // First, try to use the explicitly selected provider
+    if (config.currentProvider) {
+      var selected = config[config.currentProvider];
+      if (selected && selected.apiKey) return selected;
+    }
+    // Fallback: find the first provider with an API key
+    var providerTypes = ["deepseek", "zhipu", "openai"];
+    for (var i = 0; i < providerTypes.length; i++) {
+      var c = config[providerTypes[i]];
       if (c && c.apiKey) return c;
+    }
+    // Last resort: iterate all keys
+    var keys = Object.keys(config);
+    for (var j = 0; j < keys.length; j++) {
+      var c2 = config[keys[j]];
+      if (c2 && c2.apiKey && c2.type) return c2;
     }
     return null;
   }
@@ -270,13 +287,27 @@ var AI = (function () {
     }
   }
 
+  function setCurrentProvider(config, providerType) {
+    config.currentProvider = providerType;
+  }
+
+  function getAvailableProviders() {
+    return [
+      { value: "deepseek", label: "DeepSeek" },
+      { value: "zhipu", label: "智谱 GLM" },
+      { value: "openai", label: "OpenAI" },
+    ];
+  }
+
   return {
     getDefaultBaseUrl: getDefaultBaseUrl,
     getAvailableModels: getAvailableModels,
+    getAvailableProviders: getAvailableProviders,
     getDefaultTranslateModel: getDefaultTranslateModel,
     getTranslateProvider: getTranslateProvider,
     loadAIConfig: loadAIConfig,
     saveAIConfig: saveAIConfig,
+    setCurrentProvider: setCurrentProvider,
     getCurrentProvider: getCurrentProvider,
     getOCRConfig: getOCRConfig,
     getOpsConfig: getOpsConfig,

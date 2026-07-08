@@ -1776,6 +1776,69 @@ body {
   overflow: hidden;
 }
 
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  gap: 8px;
+}
+
+.chat-title {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.chat-provider-select,
+.chat-model-select {
+  font-size: 11px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  max-width: 90px;
+  cursor: pointer;
+}
+
+.chat-model-select {
+  max-width: 120px;
+}
+
+.chat-provider-select:disabled,
+.chat-model-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.patent-ask-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.patent-ask-header-actions .chat-provider-select,
+.patent-ask-header-actions .chat-model-select {
+  font-size: 11px;
+  padding: 2px 4px;
+  max-width: 80px;
+}
+
+.patent-ask-header-actions .chat-model-select {
+  max-width: 110px;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
