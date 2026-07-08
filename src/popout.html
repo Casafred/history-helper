@@ -1339,9 +1339,7 @@
             hideSmartBar();
             stopPeriodicProbe();
             updateJpBar();
-            setTimeout(updateNavButtons, 150);
-            setTimeout(updateNavButtons, 500);
-            setTimeout(updateNavButtons, 1000);
+            scheduleNavButtonsUpdate();
             var isOnGoogleTranslate = currentUrl.indexOf("translate.google.com/translate") !== -1;
             if (!isOnGoogleTranslate && translateMode !== "bilingual") {
               isTranslated = false;
@@ -1362,8 +1360,7 @@
             currentUrl = e.url;
             hideLoading();
             updateJpBar();
-            setTimeout(updateNavButtons, 100);
-            setTimeout(updateNavButtons, 400);
+            scheduleNavButtonsUpdate();
             setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
             setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
           }
@@ -2086,12 +2083,25 @@
           return;
         }
         try {
-          if (backBtn) backBtn.disabled = !wv.canGoBack();
-          if (forwardBtn) forwardBtn.disabled = !wv.canGoForward();
+          var canBack = false, canForward = false;
+          try { canBack = wv.canGoBack(); } catch(e) { canBack = false; }
+          try { canForward = wv.canGoForward(); } catch(e) { canForward = false; }
+          if (backBtn) backBtn.disabled = !canBack;
+          if (forwardBtn) forwardBtn.disabled = !canForward;
         } catch(e) {
           if (backBtn) backBtn.disabled = true;
           if (forwardBtn) forwardBtn.disabled = true;
         }
+      }
+
+      function scheduleNavButtonsUpdate() {
+        setTimeout(updateNavButtons, 50);
+        setTimeout(updateNavButtons, 150);
+        setTimeout(updateNavButtons, 300);
+        setTimeout(updateNavButtons, 600);
+        setTimeout(updateNavButtons, 1000);
+        setTimeout(updateNavButtons, 1500);
+        setTimeout(updateNavButtons, 2500);
       }
 
       function goBack() {
@@ -2105,12 +2115,7 @@
             stopPeriodicProbe();
             if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
             try { wv.goBack(); } catch(navErr) { console.warn("goBack failed:", navErr); hideLoading(); }
-            setTimeout(function() { hideLoading(); updateNavButtons(); }, 1500);
-            setTimeout(updateNavButtons, 100);
-            setTimeout(updateNavButtons, 300);
-            setTimeout(updateNavButtons, 700);
-            setTimeout(updateNavButtons, 1200);
-            setTimeout(updateNavButtons, 2000);
+            scheduleNavButtonsUpdate();
           }
         } catch(e) { console.warn("goBack error:", e); hideLoading(); }
       }
@@ -2126,12 +2131,7 @@
             stopPeriodicProbe();
             if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
             try { wv.goForward(); } catch(navErr) { console.warn("goForward failed:", navErr); hideLoading(); }
-            setTimeout(function() { hideLoading(); updateNavButtons(); }, 1500);
-            setTimeout(updateNavButtons, 100);
-            setTimeout(updateNavButtons, 300);
-            setTimeout(updateNavButtons, 700);
-            setTimeout(updateNavButtons, 1200);
-            setTimeout(updateNavButtons, 2000);
+            scheduleNavButtonsUpdate();
           }
         } catch(e) { console.warn("goForward error:", e); hideLoading(); }
       }
