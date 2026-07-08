@@ -955,7 +955,7 @@ function openInAppWebview(url, title, opts) {
 
   function bindBtnHover(btn) {
     if (!btn) return;
-    btn.addEventListener("mouseenter", function() { this.style.background = "var(--accent, #4f8ff7)"; this.style.color = "#fff"; });
+    btn.addEventListener("mouseenter", function() { this.style.background = "var(--accent, #22c55e)"; this.style.color = "#fff"; });
     btn.addEventListener("mouseleave", function() { this.style.background = "#fff"; this.style.color = "#333"; });
   }
   const closeBtn = document.getElementById("pd-wv-close-btn");

@@ -10,16 +10,16 @@
     body { display: flex; flex-direction: column; }
     #po-header {
       display: flex; align-items: center; gap: 8px;
-      padding: 8px 12px; background: #f5f7fa; border-bottom: 1px solid #d8dce6;
+      padding: 8px 12px; background: #f0f9f4; border-bottom: 1px solid #bbf7d0;
       flex-shrink: 0;
     }
-    #po-title { font-size: 13px; color: #1a1d27; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #po-title { font-size: 13px; color: #14532d; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .po-btn {
       cursor: pointer; border: 1px solid #bbb; background: #fff; color: #333;
       font-size: 12px; padding: 4px 12px; border-radius: 4px; transition: all 0.2s;
       white-space: nowrap; text-decoration: none; display: inline-block;
     }
-    .po-btn:hover { background: #4f8ff7; color: #fff; border-color: #4f8ff7; }
+    .po-btn:hover { background: #22c55e; color: #fff; border-color: #22c55e; }
     .po-btn:disabled { opacity: 0.4; cursor: default; background: #fff; color: #999; border-color: #ddd; }
     .po-btn:disabled:hover { background: #fff; color: #999; border-color: #ddd; }
     .po-btn-nav { width: 28px; height: 26px; padding: 2px 0; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; }
@@ -40,24 +40,24 @@
       flex: 1; max-width: 240px; background: #fff; border: 1px solid #ccc;
       border-radius: 4px; padding: 4px 8px; font-size: 12px; outline: none;
     }
-    #po-find-input:focus { border-color: #4f8ff7; }
+    #po-find-input:focus { border-color: #22c55e; }
     #po-find-count { font-size: 11px; color: #888; min-width: 80px; text-align: center; }
     #po-smart-bar {
       display: none; flex-wrap: wrap; align-items: center; gap: 6px;
-      background: #e8f4fd; border-bottom: 1px solid #b3d9f2;
-      padding: 6px 14px; font-size: 12px; color: #0c5460; flex-shrink: 0;
+      background: #f0fdf4; border-bottom: 1px solid #bbf7d0;
+      padding: 6px 14px; font-size: 12px; color: #14532d; flex-shrink: 0;
     }
-    #po-smart-bar .po-smart-label { font-weight: bold; color: #0c5460; margin-right: 4px; }
-    #po-smart-bar .po-smart-info { color: #31708f; margin-right: 8px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #po-smart-bar .po-smart-label { font-weight: bold; color: #14532d; margin-right: 4px; }
+    #po-smart-bar .po-smart-info { color: #166534; margin-right: 8px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #po-smart-bar .po-smart-actions { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
     .po-btn-smart {
-      cursor: pointer; border: 1px solid #4f8ff7; background: #fff; color: #4f8ff7;
+      cursor: pointer; border: 1px solid #22c55e; background: #fff; color: #16a34a;
       font-size: 11px; padding: 2px 8px; border-radius: 3px; transition: all 0.2s;
       white-space: nowrap; text-decoration: none; display: inline-block;
     }
-    .po-btn-smart:hover { background: #4f8ff7; color: #fff; }
-    .po-btn-smart.po-btn-primary { background: #4f8ff7; color: #fff; }
-    .po-btn-smart.po-btn-primary:hover { background: #3a7ae6; }
+    .po-btn-smart:hover { background: #22c55e; color: #fff; }
+    .po-btn-smart.po-btn-primary { background: #22c55e; color: #fff; }
+    .po-btn-smart.po-btn-primary:hover { background: #16a34a; }
     .po-btn-smart.po-btn-warn { border-color: #e67e22; color: #e67e22; }
     .po-btn-smart.po-btn-warn:hover { background: #e67e22; color: #fff; }
     #po-container { width: 100%; flex: 1; position: relative; background: #fff; min-height: 0; }
