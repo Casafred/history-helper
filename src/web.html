@@ -463,7 +463,7 @@
 
       <!-- AI 问一问 悬浮窗 -->
       <div id="patent-ask-modal" class="patent-ask-modal hidden">
-        <div class="patent-ask-header">
+        <div class="patent-ask-header" id="patent-ask-drag-handle">
           <span class="patent-ask-title">AI 问一问</span>
           <span id="patent-ask-pn" class="patent-ask-pn"></span>
           <div class="patent-ask-header-actions">
@@ -485,6 +485,7 @@
           <textarea id="patent-ask-input" class="patent-ask-input" placeholder="针对本篇专利提问细节…" rows="2"></textarea>
           <button id="patent-ask-send-btn" class="btn-primary btn-small">发送</button>
         </div>
+        <div class="patent-ask-resize-handle" id="patent-ask-resize-handle" title="拖拽调整大小"></div>
       </div>
 
       <div id="ai-settings-modal" class="modal hidden">

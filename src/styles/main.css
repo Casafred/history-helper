@@ -4792,9 +4792,9 @@ body {
   flex-shrink: 0;
   width: 56px;
   position: sticky;
-  top: 70px;
+  top: 96px;
   align-self: flex-start;
-  max-height: calc(100vh - 100px);
+  max-height: calc(100vh - 120px);
   overflow-y: auto;
   background: var(--bg-secondary);
   z-index: 5;
@@ -5967,9 +5967,11 @@ body {
   right: 24px;
   bottom: 24px;
   width: 420px;
+  min-width: 320px;
+  min-height: 300px;
   max-width: calc(100vw - 48px);
   height: 540px;
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - 80px);
   background: var(--bg-primary, #fff);
   color: var(--text-primary, #222);
   border: 1px solid var(--border, #ddd);
@@ -5988,6 +5990,13 @@ body {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border, #eee);
   background: var(--bg-secondary, #f7f7f9);
+  cursor: move;
+  user-select: none;
+  border-radius: 12px 12px 0 0;
+  position: relative;
+}
+.patent-ask-header .patent-ask-header-actions {
+  cursor: default;
 }
 .patent-ask-title { font-weight: 600; font-size: 14px; }
 .patent-ask-pn { font-size: 12px; color: var(--accent); }
@@ -6000,6 +6009,7 @@ body {
   padding: 8px 12px;
   font-size: 12px;
   border-bottom: 1px solid var(--border, #eee);
+  flex-shrink: 0;
 }
 .patent-ask-context label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
 .patent-ask-context-label { color: var(--text-secondary, #888); }
@@ -6009,6 +6019,33 @@ body {
   padding: 10px 12px;
   font-size: 13px;
   line-height: 1.6;
+  min-height: 0;
+}
+.patent-ask-resize-handle {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+  background: transparent;
+  z-index: 10;
+}
+.patent-ask-resize-handle::after {
+  content: "";
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 40px;
+  height: 3px;
+  background: var(--border-color, var(--border));
+  border-radius: 2px;
+  opacity: 0.5;
+}
+.patent-ask-resize-handle:hover::after {
+  opacity: 1;
+  background: var(--accent);
 }
 .patent-ask-placeholder { color: var(--text-secondary, #999); font-size: 12px; margin: 0; }
 .patent-ask-msg { margin-bottom: 10px; }

@@ -220,10 +220,12 @@ function openJPlatPat(patentNo, title) {
 }
 
 function patentLinkButtons(patentNo) {
-  let btns = '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(patentNo) + '\', \'Google Patents: ' + escapeHtml(patentNo) + '\')" title="在应用内打开 Google Patents">GP</button>';
-  btns += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(patentNo) + '\', \'Espacenet: ' + escapeHtml(patentNo) + '\')" title="在应用内打开 Espacenet (EPO)" style="background:#1565c0;color:#fff;border-color:#0d47a1;">EP</button>';
-  if (isJPPatent(patentNo)) {
-    btns += '<button class="pd-gp-link" onclick="openJPlatPat(\'' + escapeHtml(patentNo) + '\', \'J-PlatPat: ' + escapeHtml(patentNo) + '\')" title="在 J-PlatPat（日本专利局）查看" style="background:#e74c3c;color:#fff;border-color:#c0392b;font-size:10px;padding:1px 5px;">JP</button>';
+  // Clean patent number: remove language suffixes like /en, /de, /fr etc.
+  const cleanNo = String(patentNo).replace(/\/[a-z]{2}$/i, "").trim();
+  let btns = '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(cleanNo) + '\', \'Google Patents: ' + escapeHtml(cleanNo) + '\')" title="在应用内打开 Google Patents">GP</button>';
+  btns += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(cleanNo) + '\', \'Espacenet: ' + escapeHtml(cleanNo) + '\')" title="在应用内打开 Espacenet (EPO)" style="background:#1565c0;color:#fff;border-color:#0d47a1;">EP</button>';
+  if (isJPPatent(cleanNo)) {
+    btns += '<button class="pd-gp-link" onclick="openJPlatPat(\'' + escapeHtml(cleanNo) + '\', \'J-PlatPat: ' + escapeHtml(cleanNo) + '\')" title="在 J-PlatPat（日本专利局）查看" style="background:#e74c3c;color:#fff;border-color:#c0392b;font-size:10px;padding:1px 5px;">JP</button>';
   }
   return btns;
 }
@@ -4691,6 +4693,90 @@ function _initPatentAskBindings() {
   // 弹窗头部网页翻译按钮
   const ppvTranslateBtn = document.getElementById("ppv-translate-btn");
   if (ppvTranslateBtn) ppvTranslateBtn.addEventListener("click", () => toggleGoogleTranslate());
+
+  // ── 拖拽移动和调整大小 ──
+  const patentAskModal = document.getElementById("patent-ask-modal");
+  if (patentAskModal) {
+    const dragHandle = document.getElementById("patent-ask-drag-handle");
+    const resizeHandle = document.getElementById("patent-ask-resize-handle");
+    let isDragging = false;
+    let isResizing = false;
+    let startX, startY, startLeft, startTop, startWidth, startHeight;
+
+    // 拖拽移动
+    if (dragHandle) {
+      dragHandle.addEventListener("mousedown", (e) => {
+        if (e.target.closest("button") || e.target.closest("select") || e.target.closest("input") || e.target.closest("label")) return;
+        isDragging = true;
+        const rect = patentAskModal.getBoundingClientRect();
+        startX = e.clientX;
+        startY = e.clientY;
+        startLeft = rect.left;
+        startTop = rect.top;
+        patentAskModal.style.right = "auto";
+        patentAskModal.style.bottom = "auto";
+        patentAskModal.style.left = rect.left + "px";
+        patentAskModal.style.top = rect.top + "px";
+        document.body.style.userSelect = "none";
+        e.preventDefault();
+      });
+    }
+
+    // 调整大小
+    if (resizeHandle) {
+      resizeHandle.addEventListener("mousedown", (e) => {
+        isResizing = true;
+        const rect = patentAskModal.getBoundingClientRect();
+        startY = e.clientY;
+        startHeight = rect.height;
+        startX = e.clientX;
+        startWidth = rect.width;
+        if (patentAskModal.style.right && patentAskModal.style.right !== "auto") {
+          patentAskModal.style.right = "auto";
+          patentAskModal.style.bottom = "auto";
+          patentAskModal.style.left = rect.left + "px";
+          patentAskModal.style.top = rect.top + "px";
+        }
+        document.body.style.userSelect = "none";
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    }
+
+    document.addEventListener("mousemove", (e) => {
+      if (isDragging) {
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        let newLeft = startLeft + dx;
+        let newTop = startTop + dy;
+        const panelRect = patentAskModal.getBoundingClientRect();
+        const maxLeft = window.innerWidth - 50;
+        const maxTop = window.innerHeight - 50;
+        newLeft = Math.max(-panelRect.width + 100, Math.min(newLeft, maxLeft));
+        newTop = Math.max(0, Math.min(newTop, maxTop));
+        patentAskModal.style.left = newLeft + "px";
+        patentAskModal.style.top = newTop + "px";
+      }
+      if (isResizing) {
+        const dy = e.clientY - startY;
+        const dx = e.clientX - startX;
+        let newHeight = startHeight - dy;
+        let newWidth = startWidth + dx;
+        newHeight = Math.max(300, Math.min(newHeight, window.innerHeight * 0.85));
+        newWidth = Math.max(320, Math.min(newWidth, window.innerWidth * 0.9));
+        patentAskModal.style.height = newHeight + "px";
+        patentAskModal.style.width = newWidth + "px";
+      }
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (isDragging || isResizing) {
+        isDragging = false;
+        isResizing = false;
+        document.body.style.userSelect = "";
+      }
+    });
+  }
 }
 _initPatentAskBindings();
 
@@ -11106,6 +11192,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // ── Global text selection context menu & floating button ──
   let _selectionFloatingBtn = null;
   let _contextMenu = null;
+  let _justOpenedMenu = false;
 
   function hideSelectionMenu() {
     if (_selectionFloatingBtn && _selectionFloatingBtn.parentNode) {
@@ -11127,14 +11214,20 @@ document.addEventListener("DOMContentLoaded", () => {
     const btn = document.createElement("button");
     btn.textContent = "🔤";
     btn.title = "翻译/复制选中文本";
-    btn.style.cssText = 'position:fixed;z-index:100020;background:#1a73e8;color:#fff;border:none;border-radius:50%;width:32px;height:32px;font-size:14px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-family:inherit;display:flex;align-items:center;justify-content:center;';
+    btn.style.cssText = 'position:fixed;z-index:100020;background:var(--accent,#22c55e);color:#fff;border:none;border-radius:50%;width:32px;height:32px;font-size:14px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-family:inherit;display:flex;align-items:center;justify-content:center;';
     btn.style.left = Math.min(x, window.innerWidth - 40) + "px";
     btn.style.top = Math.max(10, y - 40) + "px";
-    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    btn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      showSelectionContextMenu(x, y + 36, text);
+      _justOpenedMenu = true;
+      setTimeout(() => { _justOpenedMenu = false; }, 150);
+      const rect = btn.getBoundingClientRect();
+      showSelectionContextMenu(rect.left, rect.bottom + 4, text);
     });
     document.body.appendChild(btn);
     _selectionFloatingBtn = btn;
@@ -11144,13 +11237,14 @@ document.addEventListener("DOMContentLoaded", () => {
     hideSelectionMenu();
     hideContextMenu();
     const menu = document.createElement("div");
-    menu.style.cssText = 'position:fixed;z-index:100021;background:#fff;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);border:1px solid #e0e0e0;padding:4px 0;min-width:140px;font-size:13px;';
-    menu.style.left = Math.min(x, window.innerWidth - 160) + "px";
-    menu.style.top = Math.max(10, Math.min(y, window.innerHeight - 160)) + "px";
+    menu.style.cssText = 'position:fixed;z-index:100021;background:var(--bg-card,#fff);color:var(--text-primary,#333);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);border:1px solid var(--border,#e0e0e0);padding:4px 0;min-width:160px;font-size:13px;';
+    menu.style.left = Math.min(x, window.innerWidth - 180) + "px";
+    menu.style.top = Math.max(10, Math.min(y, window.innerHeight - 180)) + "px";
 
     const config = window.AI.loadAIConfig();
     const hasAi = !!(window.AI.getTranslateProvider(config) && window.AI.getTranslateProvider(config).apiKey);
 
+    const hoverBg = 'var(--bg-hover,#f0fdf4)';
     const items = [
       { label: "📋 复制", action: () => { copyTextToClipboard(text); window.getSelection()?.removeAllRanges(); } },
       { label: "🤖 AI 翻译", action: () => { window.getSelection()?.removeAllRanges(); showFloatingTranslation(text, x, y + 8, "ai"); }, disabled: !hasAi },
@@ -11161,11 +11255,11 @@ document.addEventListener("DOMContentLoaded", () => {
     items.forEach(item => {
       const it = document.createElement("div");
       it.textContent = item.label;
-      it.style.cssText = 'padding:8px 16px;cursor:pointer;color:#333;' + (item.disabled ? 'opacity:0.5;cursor:not-allowed;' : '');
+      it.style.cssText = 'padding:8px 16px;cursor:pointer;' + (item.disabled ? 'opacity:0.5;cursor:not-allowed;' : '');
       if (!item.disabled) {
-        it.addEventListener("mouseenter", () => { it.style.background = "#f0f7ff"; });
+        it.addEventListener("mouseenter", () => { it.style.background = hoverBg; });
         it.addEventListener("mouseleave", () => { it.style.background = "transparent"; });
-        it.addEventListener("click", (e) => { e.stopPropagation(); hideContextMenu(); item.action(); });
+        it.addEventListener("click", (e) => { e.stopPropagation(); hideContextMenu(); hideSelectionMenu(); item.action(); });
       }
       menu.appendChild(it);
     });
@@ -11176,7 +11270,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.addEventListener("mouseup", (e) => {
     if (_contextMenu && _contextMenu.contains(e.target)) return;
+    if (_selectionFloatingBtn && _selectionFloatingBtn.contains(e.target)) return;
     setTimeout(() => {
+      if (_justOpenedMenu) return;
       const sel = window.getSelection();
       const text = sel ? sel.toString().trim() : "";
       if (text && text.length > 1 && text.length < 2000) {
@@ -11191,24 +11287,26 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 10);
   });
   document.addEventListener("mousedown", (e) => {
-    if (_selectionFloatingBtn && !_selectionFloatingBtn.contains(e.target) && (!_contextMenu || !_contextMenu.contains(e.target))) {
-      hideSelectionMenu();
-    }
-    if (_contextMenu && !_contextMenu.contains(e.target)) {
-      hideContextMenu();
-    }
+    if (_selectionFloatingBtn && _selectionFloatingBtn.contains(e.target)) return;
+    if (_contextMenu && _contextMenu.contains(e.target)) return;
+    hideSelectionMenu();
+    hideContextMenu();
   });
   document.addEventListener("contextmenu", (e) => {
+    if (e.target.closest && (e.target.closest("#generic-translation-popup") || e.target.closest("#pd-selected-translation-popup") || e.target.closest("button") || e.target.closest("input") || e.target.closest("select") || e.target.closest("textarea"))) return;
     const sel = window.getSelection();
     const text = sel ? sel.toString().trim() : "";
     if (text && text.length > 1 && text.length < 5000) {
       e.preventDefault();
+      e.stopPropagation();
+      _justOpenedMenu = true;
+      setTimeout(() => { _justOpenedMenu = false; }, 150);
       showSelectionContextMenu(e.clientX, e.clientY, text);
       hideSelectionMenu();
     } else {
       hideContextMenu();
     }
-  });
+  }, true);
   document.addEventListener("scroll", () => { hideSelectionMenu(); hideContextMenu(); }, true);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { hideContextMenu(); hideSelectionMenu(); }
