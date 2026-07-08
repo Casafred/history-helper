@@ -6192,7 +6192,8 @@ function buildReviewManualSelectPanel() {
           .join("\n\n");
         annotatedLines.push(header + "\n" + blockParts);
       } else {
-        const content = (ext.markdown || ext.text || "").substring(0, 12000);
+        const fullContent = ext.markdown || ext.text || "";
+        const content = fullContent.length > 50000 ? fullContent.substring(0, 50000) + "\n\n[...内容过长，已截断...]" : fullContent;
         annotatedLines.push(header + "\n" + content);
       }
     });
@@ -10979,11 +10980,11 @@ async function sendChatMessage() {
   let docContext = "";
   let chatTraceIndex = {};
   if (hasBlocks) {
-    // Build context with block-level reference markers
+    // Build context with block-level reference markers (consistent with analysis panel format: D{idx}_{block_id})
     const blockParts = ext.blocks
       .filter(b => b.content && b.content.trim())
       .map(b => {
-        const refId = `D${idx}_B_p${b.page}_${b.block_id}`;
+        const refId = `D${idx}_${b.block_id}`;
         chatTraceIndex[refId] = {
           docIdx: idx,
           page: b.page,
@@ -10996,15 +10997,19 @@ async function sendChatMessage() {
         return `[ref:${refId}]${b.content}[/ref:${refId}]`;
       });
     docContext = blockParts.join("\n\n");
-    // Trim if too long
-    if (docContext.length > 12000) {
-      docContext = docContext.substring(0, 12000) + "\n\n[...内容过长，已截断...]";
+    // Only trim if extremely long (most models support 64K+ context now, use 100K as safe limit)
+    if (docContext.length > 100000) {
+      docContext = docContext.substring(0, 100000) + "\n\n[...内容过长，已截断...]";
     }
     // Merge chatTraceIndex into global traceIndex for click navigation
     if (!kanbanState.traceIndex) kanbanState.traceIndex = {};
     Object.assign(kanbanState.traceIndex, chatTraceIndex);
   } else {
-    docContext = ext.text.slice(0, 8000);
+    docContext = ext.text || "";
+    // Only trim plain text if extremely long
+    if (docContext.length > 100000) {
+      docContext = docContext.substring(0, 100000) + "\n\n[...内容过长，已截断...]";
+    }
   }
 
   const baseSystemPrompt = `你是专利审查文档分析助手。用户正在查看专利审查文档「${docName}」的内容。以下是该文档的OCR提取内容，请基于此内容回答用户的问题。如果文档内容不足以回答，请如实说明。`;
