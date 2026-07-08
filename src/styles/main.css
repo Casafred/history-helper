@@ -3105,6 +3105,16 @@ body {
   animation: trace-pulse 0.6s ease-in-out 3;
 }
 
+.pd-abstract.trace-highlight,
+.pd-claim-item.trace-highlight,
+.pd-description-text.trace-highlight {
+  outline: 2px solid var(--warning);
+  outline-offset: 2px;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.3);
+  animation: trace-pulse 0.6s ease-in-out 3;
+  border-radius: 4px;
+}
+
 .reader-block-header {
   display: flex;
   align-items: center;

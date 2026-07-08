@@ -4210,16 +4210,57 @@ function clearPatentAsk() {
   _renderPatentAskMessages();
 }
 
+let _patentAskTraceIndex = {};
+
 function _buildPatentAskContext() {
   const data = _getPatentDataSource(_patentAskSource);
   if (!data) return "";
   const parts = [];
+  _patentAskTraceIndex = {};
   const absCb = document.getElementById("patent-ask-ctx-abstract");
   const clmCb = document.getElementById("patent-ask-ctx-claims");
   const descCb = document.getElementById("patent-ask-ctx-description");
-  if (absCb && absCb.checked && data.abstract) parts.push("【摘要】\n" + data.abstract);
-  if (clmCb && clmCb.checked && data.claims && data.claims.length) parts.push("【权利要求】\n" + _buildClaimsText(data));
-  if (descCb && descCb.checked && data.description) parts.push("【说明书】\n" + data.description);
+  if (absCb && absCb.checked && data.abstract) {
+    const refId = "PAT_abstract";
+    _patentAskTraceIndex[refId] = {
+      type: "patent",
+      section: "abstract",
+      label: "摘要",
+      content: data.abstract,
+    };
+    parts.push(`【摘要】[ref:${refId}]${data.abstract}[/ref:${refId}]`);
+  }
+  if (clmCb && clmCb.checked && data.claims && data.claims.length) {
+    const claimParts = data.claims.map((c, i) => {
+      const refId = `PAT_claim_${i}`;
+      const claimText = (c.num ? c.num + ". " : "") + (c.text || "");
+      _patentAskTraceIndex[refId] = {
+        type: "patent",
+        section: "claims",
+        index: i,
+        claimNum: c.num || (i + 1),
+        label: `权利要求${c.num || (i + 1)}`,
+        content: claimText,
+      };
+      return `[ref:${refId}]${claimText}[/ref:${refId}]`;
+    });
+    parts.push("【权利要求】\n" + claimParts.join("\n"));
+  }
+  if (descCb && descCb.checked && data.description) {
+    const paragraphs = data.description.split(/\n{2,}/).filter(p => p.trim());
+    const descParts = paragraphs.map((p, i) => {
+      const refId = `PAT_desc_${i}`;
+      _patentAskTraceIndex[refId] = {
+        type: "patent",
+        section: "description",
+        index: i,
+        label: `说明书段落${i + 1}`,
+        content: p,
+      };
+      return `[ref:${refId}]${p}[/ref:${refId}]`;
+    });
+    parts.push("【说明书】\n" + descParts.join("\n\n"));
+  }
   return parts.join("\n\n");
 }
 
@@ -4259,14 +4300,21 @@ async function sendPatentAsk() {
   // 首轮：注入系统提示词 + 勾选的上下文
   if (_patentAskMessages.length === 0) {
     const context = _buildPatentAskContext();
+    const hasTrace = Object.keys(_patentAskTraceIndex).length > 0;
+    const traceInstruction = hasTrace
+      ? "\n\n**重要：回答时每一句话都必须标注来源**，使用 【来源: ref_id1, ref_id2】 格式。ref_id 格式为 PAT_abstract / PAT_claim_N / PAT_desc_N，只能引用文档中已有的 ref_id，不要编造。如果是总结性语句，也要标注所有相关来源。"
+      : "";
     const sys = "你是一位资深专利分析工程师。请根据用户提供的专利内容回答用户关于该专利细节的问题。"
-      + "如果问题超出提供内容范围，请明确说明。请用中文回答，使用 Markdown 格式。\n\n" + (context || "（未纳入任何上下文）");
+      + "如果问题超出提供内容范围，请明确说明。请用中文回答，使用 Markdown 格式。"
+      + traceInstruction
+      + "\n\n" + (context || "（未纳入任何上下文）");
     _patentAskMessages.push({ role: "system", content: sys });
   }
   _patentAskMessages.push({ role: "user", content: question });
 
   const assistantEl = _appendPatentAskMessage("assistant", "");
   const contentEl = assistantEl.querySelector(".patent-ask-msg-content");
+  const hasTrace = Object.keys(_patentAskTraceIndex).length > 0;
 
   let acc = "";
   try {
@@ -4302,7 +4350,7 @@ async function sendPatentAsk() {
                 answerEl.className = "patent-ask-answer markdown-body";
                 contentEl.appendChild(answerEl);
               }
-              answerEl.innerHTML = renderMarkdown(acc);
+              answerEl.innerHTML = hasTrace ? renderMarkdownWithTrace(acc, _patentAskTraceIndex) : renderMarkdown(acc);
             }
           });
         }
@@ -4316,7 +4364,7 @@ async function sendPatentAsk() {
         answerEl.className = "patent-ask-answer markdown-body";
         contentEl.appendChild(answerEl);
       }
-      answerEl.innerHTML = renderMarkdown(acc) || "（未返回内容）";
+      answerEl.innerHTML = (hasTrace ? renderMarkdownWithTrace(acc, _patentAskTraceIndex) : renderMarkdown(acc)) || "（未返回内容）";
     }
     _patentAskMessages.push({ role: "assistant", content: acc });
     _savePatentAskCache(); // 流式完成后持久化对话
@@ -6133,73 +6181,91 @@ function renderMarkdown(text) {
   return escapeHtml(text).replace(/\n/g, "<br>");
 }
 
-function renderMarkdownWithTrace(text) {
+function renderMarkdownWithTrace(text, customTraceIndex) {
   if (!text) return "";
+  const traceIdx = customTraceIndex || kanbanState.traceIndex;
   const processed = text.replace(/【来源:\s*([^\】]+)】/g, (match, refsStr) => {
-    const refs = refsStr.split(",").map(r => r.trim()).filter(r => /^D\d+_B_/.test(r));
+    const refs = refsStr.split(",").map(r => r.trim()).filter(r => /^(D\d+_B_|PAT_)/.test(r));
     if (refs.length === 0) return "";
-    const validRefs = refs.filter(r => kanbanState.traceIndex[r]);
+    const validRefs = refs.filter(r => traceIdx[r]);
     if (validRefs.length === 0) {
       return '<span class="trace-links"><span class="trace-label">溯源:</span> <span class="trace-unavailable">引用块未找到</span></span>';
     }
-    // Group valid refs by document and page, then merge consecutive block indices into ranges
+    // Group valid refs by source type (doc vs patent)
     const refLinks = [];
-    const grouped = {};
-    validRefs.forEach(ref => {
-      const info = kanbanState.traceIndex[ref];
-      if (!info) return;
-      const doc = kanbanState.documents.find(d => d.idx === info.docIdx);
-      const docLabel = doc ? `${doc.name} (${doc.docCode})` : `文档${info.docIdx}`;
-      const key = `${info.docIdx}|${info.page}|${docLabel}`;
-      if (!grouped[key]) grouped[key] = [];
-      // Extract docIdx, page, blockIdx from traceIndex key like "D0_B_p2_5" -> docIdx=0, page=2, blockIdx=5
-      const blockMatch = ref.match(/^D(\d+)_B_p(\d+)_(\d+)$/);
-      if (blockMatch) {
-        grouped[key].push({ ref, blockIdx: parseInt(blockMatch[3]), page: parseInt(blockMatch[2]) });
-      } else {
-        grouped[key].push({ ref, blockIdx: -1, page: info.page });
-      }
-    });
+    const docRefs = validRefs.filter(r => r.startsWith("D"));
+    const patRefs = validRefs.filter(r => r.startsWith("PAT_"));
 
-    Object.keys(grouped).forEach(key => {
-      const [docIdxStr, pageStr, docLabel] = key.split("|");
-      const page = parseInt(pageStr);
-      const docIdx = parseInt(docIdxStr);
-      const entries = grouped[key].sort((a, b) => a.blockIdx - b.blockIdx);
-
-      // Merge consecutive block indices into ranges
-      const ranges = [];
-      let rangeStart = entries[0];
-      let rangeEnd = entries[0];
-      for (let i = 1; i < entries.length; i++) {
-        if (entries[i].blockIdx === rangeEnd.blockIdx + 1) {
-          rangeEnd = entries[i];
+    // Handle doc refs (existing logic)
+    if (docRefs.length > 0) {
+      const grouped = {};
+      docRefs.forEach(ref => {
+        const info = traceIdx[ref];
+        if (!info) return;
+        const doc = kanbanState.documents.find(d => d.idx === info.docIdx);
+        const docLabel = doc ? `${doc.name} (${doc.docCode})` : `文档${info.docIdx}`;
+        const key = `${info.docIdx}|${info.page}|${docLabel}`;
+        if (!grouped[key]) grouped[key] = [];
+        const blockMatch = ref.match(/^D(\d+)_B_p(\d+)_(\d+)$/);
+        if (blockMatch) {
+          grouped[key].push({ ref, blockIdx: parseInt(blockMatch[3]), page: parseInt(blockMatch[2]) });
         } else {
-          ranges.push({ start: rangeStart, end: rangeEnd });
-          rangeStart = entries[i];
-          rangeEnd = entries[i];
+          grouped[key].push({ ref, blockIdx: -1, page: info.page });
         }
-      }
-      ranges.push({ start: rangeStart, end: rangeEnd });
-
-      ranges.forEach(range => {
-        const allRefs = [];
-        for (let bi = range.start.blockIdx; bi <= range.end.blockIdx; bi++) {
-          const refId = `D${docIdx}_B_p${page}_${bi}`;
-          if (kanbanState.traceIndex[refId]) allRefs.push(refId);
-        }
-        const dataBlockIds = allRefs.map(r => escapeHtml(r)).join(",");
-        let label, hoverTitle;
-        if (range.start.blockIdx === range.end.blockIdx) {
-          label = `第${page}页 §${range.start.blockIdx}`;
-          hoverTitle = `${docLabel} · 第${page}页 第${range.start.blockIdx}段`;
-        } else {
-          label = `第${page}页 §${range.start.blockIdx}-${range.end.blockIdx}`;
-          hoverTitle = `${docLabel} · 第${page}页 第${range.start.blockIdx}-${range.end.blockIdx}段`;
-        }
-        refLinks.push(`<a class="trace-link" data-block-id="${dataBlockIds}" title="${escapeHtml(hoverTitle)}">${escapeHtml(label)}</a>`);
       });
-    });
+
+      Object.keys(grouped).forEach(key => {
+        const [docIdxStr, pageStr, docLabel] = key.split("|");
+        const page = parseInt(pageStr);
+        const docIdx = parseInt(docIdxStr);
+        const entries = grouped[key].sort((a, b) => a.blockIdx - b.blockIdx);
+
+        // Merge consecutive block indices into ranges
+        const ranges = [];
+        let rangeStart = entries[0];
+        let rangeEnd = entries[0];
+        for (let i = 1; i < entries.length; i++) {
+          if (entries[i].blockIdx === rangeEnd.blockIdx + 1) {
+            rangeEnd = entries[i];
+          } else {
+            ranges.push({ start: rangeStart, end: rangeEnd });
+            rangeStart = entries[i];
+            rangeEnd = entries[i];
+          }
+        }
+        ranges.push({ start: rangeStart, end: rangeEnd });
+
+        ranges.forEach(range => {
+          const allRefs = [];
+          for (let bi = range.start.blockIdx; bi <= range.end.blockIdx; bi++) {
+            const refId = `D${docIdx}_B_p${page}_${bi}`;
+            if (traceIdx[refId]) allRefs.push(refId);
+          }
+          const dataBlockIds = allRefs.map(r => escapeHtml(r)).join(",");
+          let label, hoverTitle;
+          if (range.start.blockIdx === range.end.blockIdx) {
+            label = `第${page}页 §${range.start.blockIdx}`;
+            hoverTitle = `${docLabel} · 第${page}页 第${range.start.blockIdx}段`;
+          } else {
+            label = `第${page}页 §${range.start.blockIdx}-${range.end.blockIdx}`;
+            hoverTitle = `${docLabel} · 第${page}页 第${range.start.blockIdx}-${range.end.blockIdx}段`;
+          }
+          refLinks.push(`<a class="trace-link" data-block-id="${dataBlockIds}" title="${escapeHtml(hoverTitle)}">${escapeHtml(label)}</a>`);
+        });
+      });
+    }
+
+    // Handle patent refs
+    if (patRefs.length > 0) {
+      patRefs.forEach(ref => {
+        const info = traceIdx[ref];
+        if (!info) return;
+        const label = info.label || ref;
+        const hoverTitle = info.content ? `${label}: ${info.content.substring(0, 100)}...` : label;
+        refLinks.push(`<a class="trace-link patent-trace-link" data-block-id="${escapeHtml(ref)}" data-patent-trace="1" title="${escapeHtml(hoverTitle)}">${escapeHtml(label)}</a>`);
+      });
+    }
+
     return `<span class="trace-links"><span class="trace-label">溯源:</span> ${refLinks.join(" ")}</span>`;
   });
   if (typeof marked !== "undefined" && marked.parse) {
@@ -6507,7 +6573,85 @@ function showModuleRegenPopup(btnEl, moduleId, moduleLabel) {
   });
 }
 
+function _jumpToPatentTrace(traceInfo) {
+  if (!traceInfo) return;
+  const source = _patentAskSource || "detail";
+  const isPopup = source === "popup";
+  const containerSelector = isPopup ? "#ppv-content" : "#patent-detail-content";
+  const container = document.querySelector(containerSelector);
+  if (!container) return;
+
+  // Close patent ask panel if open
+  const askPanel = document.getElementById("patent-ask-panel");
+  if (askPanel && !askPanel.classList.contains("hidden")) {
+    askPanel.classList.add("hidden");
+  }
+
+  const section = traceInfo.section;
+
+  // Switch to the correct tab first
+  if (section === "abstract") {
+    // Abstract is in overview tab
+    if (isPopup) {
+      switchPpvTab("overview");
+    } else {
+      switchPatentTab("overview");
+    }
+    setTimeout(() => {
+      const abstractEl = container.querySelector(".pd-abstract");
+      if (abstractEl) {
+        abstractEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        _highlightElement(abstractEl);
+      }
+    }, 100);
+  } else if (section === "claims") {
+    if (isPopup) {
+      switchPpvTab("claims");
+    } else {
+      switchPatentTab("claims");
+    }
+    setTimeout(() => {
+      const claimItems = container.querySelectorAll(".pd-claim-item");
+      const idx = traceInfo.index;
+      if (idx != null && claimItems[idx]) {
+        claimItems[idx].scrollIntoView({ behavior: "smooth", block: "center" });
+        _highlightElement(claimItems[idx]);
+      }
+    }, 100);
+  } else if (section === "description") {
+    if (isPopup) {
+      switchPpvTab("description");
+    } else {
+      switchPatentTab("description");
+    }
+    setTimeout(() => {
+      const descEl = container.querySelector(".pd-description-text");
+      if (descEl) {
+        descEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        _highlightElement(descEl);
+      }
+    }, 100);
+  }
+}
+
+function _highlightElement(el) {
+  if (!el) return;
+  el.classList.add("trace-highlight");
+  setTimeout(() => el.classList.remove("trace-highlight"), 3000);
+}
+
 function onTraceClick(blockIdStr) {
+  // Handle patent trace (starts with PAT_)
+  if (blockIdStr && blockIdStr.startsWith("PAT_")) {
+    const traceInfo = _patentAskTraceIndex[blockIdStr];
+    if (!traceInfo) {
+      showError("溯源信息不存在: " + blockIdStr);
+      return;
+    }
+    _jumpToPatentTrace(traceInfo);
+    return;
+  }
+
   const blockIds = blockIdStr.split(",").filter(id => kanbanState.traceIndex[id]);
   if (blockIds.length === 0) {
     showError("溯源信息不存在: " + blockIdStr);
@@ -10669,11 +10813,46 @@ async function sendChatMessage() {
   input.value = "";
 
   // Build context from document content
-  const docContent = ext.text.slice(0, 8000); // Limit context size
   const doc = kanbanState.documents.find(d => d.idx === idx);
   const docName = doc ? `${doc.name} (${doc.docCode})` : "当前文档";
+  const hasBlocks = ext.blocks && ext.blocks.length > 0;
 
-  const systemPrompt = `你是专利审查文档分析助手。用户正在查看专利审查文档「${docName}」的内容。以下是该文档的OCR提取内容，请基于此内容回答用户的问题。如果文档内容不足以回答，请如实说明。\n\n---文档内容开始---\n${docContent}\n---文档内容结束---`;
+  let docContext = "";
+  let chatTraceIndex = {};
+  if (hasBlocks) {
+    // Build context with block-level reference markers
+    const blockParts = ext.blocks
+      .filter(b => b.content && b.content.trim())
+      .map(b => {
+        const refId = `D${idx}_B_p${b.page}_${b.block_id}`;
+        chatTraceIndex[refId] = {
+          docIdx: idx,
+          page: b.page,
+          bbox: b.bbox,
+          content: b.content,
+          label: b.label,
+          originalBlockId: b.block_id,
+          pageDimensions: ext.page_dimensions ? ext.page_dimensions[b.page] || null : null,
+        };
+        return `[ref:${refId}]${b.content}[/ref:${refId}]`;
+      });
+    docContext = blockParts.join("\n\n");
+    // Trim if too long
+    if (docContext.length > 12000) {
+      docContext = docContext.substring(0, 12000) + "\n\n[...内容过长，已截断...]";
+    }
+    // Merge chatTraceIndex into global traceIndex for click navigation
+    if (!kanbanState.traceIndex) kanbanState.traceIndex = {};
+    Object.assign(kanbanState.traceIndex, chatTraceIndex);
+  } else {
+    docContext = ext.text.slice(0, 8000);
+  }
+
+  const baseSystemPrompt = `你是专利审查文档分析助手。用户正在查看专利审查文档「${docName}」的内容。以下是该文档的OCR提取内容，请基于此内容回答用户的问题。如果文档内容不足以回答，请如实说明。`;
+  const traceInstruction = hasBlocks
+    ? `\n\n**重要：回答时每一句话都必须标注来源**，使用 【来源: block_id1, block_id2】 格式。block_id 格式为 D${idx}_B_p{页码}_{块序号}，只能引用文档中已有的 block_id，不要编造。如果是总结性语句，也要标注所有相关来源。`
+    : "";
+  const systemPrompt = `${baseSystemPrompt}${traceInstruction}\n\n---文档内容开始---\n${docContext}\n---文档内容结束---`;
 
   const messages = [
     { role: "system", content: systemPrompt },
@@ -10722,7 +10901,7 @@ async function sendChatMessage() {
                 answerEl.className = "chat-msg-answer markdown-body";
                 contentEl.appendChild(answerEl);
               }
-              answerEl.innerHTML = renderMarkdown(fullResponse);
+              answerEl.innerHTML = hasBlocks ? renderMarkdownWithTrace(fullResponse, chatTraceIndex) : renderMarkdown(fullResponse);
             }
             _rafPending = false;
           });
@@ -10739,7 +10918,7 @@ async function sendChatMessage() {
         answerEl.className = "chat-msg-answer markdown-body";
         contentEl.appendChild(answerEl);
       }
-      answerEl.innerHTML = renderMarkdown(fullResponse);
+      answerEl.innerHTML = hasBlocks ? renderMarkdownWithTrace(fullResponse, chatTraceIndex) : renderMarkdown(fullResponse);
     }
 
     chatHistory.push({ role: "assistant", content: fullResponse });
@@ -10816,8 +10995,9 @@ async function sendAnalysisChatMessage() {
   input.value = "";
 
   // Build messages: system prompt + original OCR content + AI report + chat history
+  const traceSystemInstruction = "在回答用户问题时，**每一句话都必须标注来源**，使用 【来源: block_id1, block_id2】 格式。block_id 格式为 D{文档序号}_B_p{页码}_{块序号}，如 D0_B_p1_0。只能引用用户提供的文档中存在的 block_id，不要编造。如果是总结性语句，也要标注所有相关来源。";
   const messages = [
-    { role: "system", content: kanbanState.analysisSystemPrompt },
+    { role: "system", content: kanbanState.analysisSystemPrompt + "\n\n" + traceSystemInstruction },
     { role: "user", content: kanbanState.analysisUserMessage },
     { role: "assistant", content: kanbanState.analysis },
     ...analysisChatHistory,
@@ -10854,7 +11034,7 @@ async function sendAnalysisChatMessage() {
             if (fullResponse.length - _lastRenderLen > 20 || fullResponse.length < 50) {
               _lastRenderLen = fullResponse.length;
               const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
-              contentEl.innerHTML = renderMarkdown(fullResponse);
+              contentEl.innerHTML = renderMarkdownWithTrace(fullResponse);
             }
           });
         }
@@ -10863,7 +11043,7 @@ async function sendAnalysisChatMessage() {
     // Final render to ensure complete content is displayed
     if (assistantMsgEl) {
       const contentEl = assistantMsgEl.querySelector(".chat-msg-content") || assistantMsgEl;
-      contentEl.innerHTML = renderMarkdown(fullResponse);
+      contentEl.innerHTML = renderMarkdownWithTrace(fullResponse);
     }
 
     analysisChatHistory.push({ role: "assistant", content: fullResponse });
