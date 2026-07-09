@@ -1354,32 +1354,6 @@ function createWindow(port) {
 // 通过本地 HTTP 服务器加载 popout.html（webview 标签需要 http:// 源，data: URL 不支持）
 function createPopoutWindow(targetUrl, title, port, opts) {
   console.log("[Electron] createPopoutWindow targetUrl=" + targetUrl + ", title=" + title + ", port=" + port);
-
-  // CNIPA中国专利查询系统：直接用BrowserWindow打开，不走webview嵌入
-  // CNIPA的Angular SPA在Electron webview中无法正常渲染，直接加载URL可正常显示
-  if (targetUrl && (targetUrl.indexOf("cnipa.gov.cn") !== -1 || targetUrl.indexOf("cpquery") !== -1)) {
-    const cnWin = new BrowserWindow({
-      width: 1200,
-      height: 850,
-      title: title || "中国专利查询系统",
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-        partition: "persist:cnipa-session",
-        webSecurity: true,
-        allowRunningInsecureContent: false,
-      },
-    });
-    cnWin.loadURL(targetUrl);
-    cnWin.webContents.setWindowOpenHandler(({ url }) => {
-      if (url && url.startsWith("http")) {
-        shell.openExternal(url);
-      }
-      return { action: "deny" };
-    });
-    return;
-  }
-
   let popoutUrl = `http://127.0.0.1:${port}/popout.html?url=${encodeURIComponent(targetUrl)}&title=${encodeURIComponent(title || targetUrl)}`;
   if (opts && opts.jpn) {
     popoutUrl += "&jpn=" + encodeURIComponent(opts.jpn);
@@ -1415,15 +1389,6 @@ function createPopoutWindow(targetUrl, title, port, opts) {
   // 同域链接在当前 webview 内导航（通过 executeJavaScript 重定向），外部链接开带工具栏的新弹窗
   win.webContents.on("did-attach-webview", (_event, guestWebContents) => {
     console.log("[Electron] popout webview attached");
-    // 移除可能阻止webview渲染的安全响应头
-    guestWebContents.session.webRequest.onHeadersReceived({ urls: ["*://*/*"] }, (details, callback) => {
-      const headers = details.responseHeaders || {};
-      delete headers["x-frame-options"];
-      delete headers["X-Frame-Options"];
-      delete headers["content-security-policy"];
-      delete headers["Content-Security-Policy"];
-      callback({ responseHeaders: headers });
-    });
     guestWebContents.setWindowOpenHandler(({ url }) => {
       console.log("[Electron] webview guest setWindowOpenHandler url=" + url);
       if (!url) return { action: "deny" };

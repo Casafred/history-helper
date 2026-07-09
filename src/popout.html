@@ -110,7 +110,7 @@
     <span class="po-cn-label">🇨🇳 CNIPA</span>
     <span id="po-cn-num"></span>
     <button id="po-cn-copy" class="po-btn po-btn-sm" title="一键复制专利号" style="font-size:11px;padding:1px 6px;">📋 复制</button>
-    <span class="po-cn-hint">请登录您的中国专利查询系统账号，公开号已自动填入搜索框</span>
+    <span class="po-cn-hint">请登录您的中国专利查询系统账号后进行查询操作</span>
     <button id="po-cn-ext" class="po-btn" title="外部打开">外部打开</button>
     <button id="po-cn-close" class="po-btn po-btn-find" title="关闭提示">✕</button>
   </div>
@@ -1229,12 +1229,6 @@
         if (!isElectron || !wv) return;
         var delay = (opts && opts.delay) != null ? (opts && opts.delay) : 800;
         var fillNum = (opts && opts.autoFillNum) || "";
-        // CNIPA站点跳过probe注入，避免干扰Angular页面渲染
-        var curUrl = currentUrl || "";
-        if (curUrl.indexOf("cnipa.gov.cn") !== -1 || curUrl.indexOf("cpquery") !== -1) {
-          hideLoading();
-          return;
-        }
         function doExec() {
           try {
             var script = buildProbeScript({ autoFillNum: fillNum });
@@ -1822,7 +1816,6 @@
         _wvEventsBound = false;
         wv = document.createElement("webview");
         wv.setAttribute("allowpopups", "");
-        wv.setAttribute("partition", "persist:popout-webview");
         wv.setAttribute("useragent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
         wv.style.width = "100%";
         wv.style.height = "100%";
