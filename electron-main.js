@@ -1362,21 +1362,10 @@ function createPopoutWindow(targetUrl, title, port, opts) {
   // CNIPA中国专利查询系统：使用独立BrowserWindow直接加载（瑞数WAF需要完整浏览器环境）
   if (targetUrl && (targetUrl.indexOf("cnipa.gov.cn") !== -1 || targetUrl.indexOf("cpquery") !== -1)) {
     const cnSession = session.fromPartition("persist:cnipa", { cache: true });
+    const chromeUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
+    cnSession.setUserAgent(chromeUA, "zh-CN");
     cnSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
       callback(true);
-    });
-    const chromeUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
-    const acceptLanguage = "zh-CN,zh;q=0.9,en;q=0.8";
-    cnSession.webRequest.onBeforeSendHeaders((details, callback) => {
-      const headers = { ...details.requestHeaders };
-      headers["User-Agent"] = chromeUA;
-      headers["Accept-Language"] = acceptLanguage;
-      headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
-      if (headers["X-Electron-Version"]) delete headers["X-Electron-Version"];
-      if (headers["Sec-CH-UA"]) {
-        headers["Sec-CH-UA"] = '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"';
-      }
-      callback({ requestHeaders: headers });
     });
     const cnWin = new BrowserWindow({
       width: 1200,
