@@ -1389,6 +1389,15 @@ function createPopoutWindow(targetUrl, title, port, opts) {
   // 同域链接在当前 webview 内导航（通过 executeJavaScript 重定向），外部链接开带工具栏的新弹窗
   win.webContents.on("did-attach-webview", (_event, guestWebContents) => {
     console.log("[Electron] popout webview attached");
+    // 移除可能阻止webview渲染的安全响应头
+    guestWebContents.session.webRequest.onHeadersReceived({ urls: ["*://*/*"] }, (details, callback) => {
+      const headers = details.responseHeaders || {};
+      delete headers["x-frame-options"];
+      delete headers["X-Frame-Options"];
+      delete headers["content-security-policy"];
+      delete headers["Content-Security-Policy"];
+      callback({ responseHeaders: headers });
+    });
     guestWebContents.setWindowOpenHandler(({ url }) => {
       console.log("[Electron] webview guest setWindowOpenHandler url=" + url);
       if (!url) return { action: "deny" };
