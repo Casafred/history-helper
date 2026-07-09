@@ -31,6 +31,7 @@
       "electron-main.js",
       "patent-parser.js",
       "preload.js",
+      "cnipa-preload.js",
       "fonts/**",
       {
         "from": "src",

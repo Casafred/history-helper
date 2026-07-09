@@ -1379,19 +1379,7 @@ function createPopoutWindow(targetUrl, title, port, opts) {
     });
     cnWin.webContents.setUserAgent(CHROME_UA);
     console.log("[CNIPA] Loading URL:", targetUrl);
-    // Clear CNIPA cached data before loading to avoid stale WAF cookies/scripts
-    const ses = cnWin.webContents.session;
-    ses.clearStorageData({
-      origin: "https://cpquery.cponline.cnipa.gov.cn",
-      storages: ["cookies", "cachestorage", "localstorage", "indexdb", "websql", "serviceworkers"],
-      quotas: ["temporary", "persistent", "syncable"],
-    }).then(() => {
-      return ses.clearCache();
-    }).then(() => {
-      cnWin.loadURL(targetUrl, { userAgent: CHROME_UA });
-    }).catch(() => {
-      cnWin.loadURL(targetUrl, { userAgent: CHROME_UA });
-    });
+    cnWin.loadURL(targetUrl, { userAgent: CHROME_UA });
     cnWin.webContents.on("did-start-loading", () => {
       console.log("[CNIPA] did-start-loading");
     });
