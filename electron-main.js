@@ -1371,9 +1371,10 @@ function createPopoutWindow(targetUrl, title, port, opts) {
       show: true,
       webPreferences: {
         nodeIntegration: false,
-        contextIsolation: true,
+        contextIsolation: false,
         sandbox: false,
         webSecurity: true,
+        preload: path.join(__dirname, "cnipa-preload.js"),
       },
     });
     cnWin.webContents.setUserAgent(CHROME_UA);
