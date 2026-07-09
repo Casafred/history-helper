@@ -1,4 +1,8 @@
 const { app, BrowserWindow, shell, ipcMain, dialog, session } = require("electron");
+
+// 命令行开关：隐藏navigator.webdriver等自动化检测特征
+app.commandLine.appendSwitch("disable-blink-features", "AutomationControlled");
+
 const http = require("http");
 const https = require("https");
 const fs = require("fs");
@@ -28,7 +32,7 @@ const GD_HEADERS = {
   "user-type": "external",
   "Referer": "https://globaldossier.uspto.gov/",
   "Origin": "https://globaldossier.uspto.gov",
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
 };
 
 const MIME_TYPES = {
@@ -274,7 +278,7 @@ async function scrapeGooglePatent(patentNumber, res, useProxy, proxyUrl) {
       "--max-time", "30",
       "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "-H", "Accept-Language: en-US,en;q=0.9",
-      "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
       url
     ];
     if (useProxy && proxyUrl) {
@@ -1354,6 +1358,78 @@ function createWindow(port) {
 // 通过本地 HTTP 服务器加载 popout.html（webview 标签需要 http:// 源，data: URL 不支持）
 function createPopoutWindow(targetUrl, title, port, opts) {
   console.log("[Electron] createPopoutWindow targetUrl=" + targetUrl + ", title=" + title + ", port=" + port);
+
+  // CNIPA中国专利查询系统：使用独立BrowserWindow直接加载（瑞数WAF需要完整浏览器环境）
+  if (targetUrl && (targetUrl.indexOf("cnipa.gov.cn") !== -1 || targetUrl.indexOf("cpquery") !== -1)) {
+    const cnSession = session.fromPartition("persist:cnipa", { cache: true });
+    cnSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+      callback(true);
+    });
+    const chromeUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
+    const acceptLanguage = "zh-CN,zh;q=0.9,en;q=0.8";
+    cnSession.webRequest.onBeforeSendHeaders((details, callback) => {
+      const headers = { ...details.requestHeaders };
+      headers["User-Agent"] = chromeUA;
+      headers["Accept-Language"] = acceptLanguage;
+      headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
+      if (headers["X-Electron-Version"]) delete headers["X-Electron-Version"];
+      if (headers["Sec-CH-UA"]) {
+        headers["Sec-CH-UA"] = '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"';
+      }
+      callback({ requestHeaders: headers });
+    });
+    const cnWin = new BrowserWindow({
+      width: 1200,
+      height: 850,
+      title: title || "中国专利查询系统",
+      show: true,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: false,
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+        session: cnSession,
+      },
+    });
+    cnWin.webContents.setUserAgent(chromeUA);
+    console.log("[CNIPA] Loading URL:", targetUrl);
+    cnWin.loadURL(targetUrl, { userAgent: chromeUA });
+    cnWin.webContents.on("did-start-loading", () => {
+      console.log("[CNIPA] did-start-loading");
+    });
+    cnWin.webContents.on("did-stop-loading", () => {
+      console.log("[CNIPA] did-stop-loading, current URL:", cnWin.webContents.getURL());
+    });
+    cnWin.webContents.on("did-fail-load", (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (isMainFrame && errorCode !== -3) {
+        console.error("[CNIPA] did-fail-load:", errorCode, errorDescription, validatedURL);
+      }
+    });
+    cnWin.webContents.on("did-finish-load", () => {
+      console.log("[CNIPA] did-finish-load, title:", cnWin.webContents.getTitle());
+    });
+    cnWin.webContents.on("console-message", (_e, level, message, line, sourceId) => {
+      console.log(`[CNIPA console][${level}]`, message, sourceId + ":" + line);
+    });
+    cnWin.webContents.on("page-title-updated", (_e, title) => {
+      console.log("[CNIPA] page-title-updated:", title);
+    });
+    cnWin.webContents.setWindowOpenHandler(({ url }) => {
+      console.log("[CNIPA] window-open:", url);
+      if (url && url.startsWith("http")) {
+        if (url.indexOf("cnipa.gov.cn") !== -1 || url.indexOf("cpquery") !== -1) {
+          cnWin.loadURL(url, { userAgent: chromeUA });
+        } else {
+          shell.openExternal(url);
+        }
+      }
+      return { action: "deny" };
+    });
+    cnWin.webContents.openDevTools({ mode: "detach" });
+    return cnWin;
+  }
+
   let popoutUrl = `http://127.0.0.1:${port}/popout.html?url=${encodeURIComponent(targetUrl)}&title=${encodeURIComponent(title || targetUrl)}`;
   if (opts && opts.jpn) {
     popoutUrl += "&jpn=" + encodeURIComponent(opts.jpn);
@@ -1389,6 +1465,44 @@ function createPopoutWindow(targetUrl, title, port, opts) {
   // 同域链接在当前 webview 内导航（通过 executeJavaScript 重定向），外部链接开带工具栏的新弹窗
   win.webContents.on("did-attach-webview", (_event, guestWebContents) => {
     console.log("[Electron] popout webview attached");
+    const chromeUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
+    guestWebContents.setUserAgent(chromeUA);
+
+    const isCNIPAUrl = (u) => u && (u.indexOf("cnipa.gov.cn") !== -1 || u.indexOf("cpquery") !== -1);
+
+    guestWebContents.on("did-start-loading", () => {
+      const u = guestWebContents.getURL();
+      if (isCNIPAUrl(u)) console.log("[CNIPA webview] did-start-loading:", u);
+    });
+    guestWebContents.on("did-stop-loading", () => {
+      const u = guestWebContents.getURL();
+      if (isCNIPAUrl(u)) console.log("[CNIPA webview] did-stop-loading:", u);
+    });
+    guestWebContents.on("did-fail-load", (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (isMainFrame && errorCode !== -3) {
+        const u = guestWebContents.getURL();
+        if (isCNIPAUrl(u) || isCNIPAUrl(validatedURL)) {
+          console.error("[CNIPA webview] did-fail-load:", errorCode, errorDescription, validatedURL);
+        }
+      }
+    });
+    guestWebContents.on("did-finish-load", () => {
+      const u = guestWebContents.getURL();
+      if (isCNIPAUrl(u)) {
+        console.log("[CNIPA webview] did-finish-load, title:", guestWebContents.getTitle());
+      }
+    });
+    guestWebContents.on("console-message", (_e, level, message, line, sourceId) => {
+      const u = guestWebContents.getURL();
+      if (isCNIPAUrl(u)) {
+        console.log(`[CNIPA webview console][${level}]`, message, sourceId + ":" + line);
+      }
+    });
+    guestWebContents.on("page-title-updated", (_e, title) => {
+      const u = guestWebContents.getURL();
+      if (isCNIPAUrl(u)) console.log("[CNIPA webview] page-title-updated:", title);
+    });
+
     guestWebContents.setWindowOpenHandler(({ url }) => {
       console.log("[Electron] webview guest setWindowOpenHandler url=" + url);
       if (!url) return { action: "deny" };
@@ -1407,7 +1521,7 @@ function createPopoutWindow(targetUrl, title, port, opts) {
         var isHelp = lowUrl.indexOf("/help") !== -1 || lowUrl.indexOf("/faq") !== -1 || lowUrl.indexOf("/print") !== -1;
         if (newHost && curHost && newHost === curHost && !isPdf && !isHelp) {
           // Same host content page: navigate within the webview
-          guestWebContents.loadURL(url);
+          guestWebContents.loadURL(url, { userAgent: chromeUA });
           return { action: "deny" };
         }
         if (isPdf || isHelp) {
@@ -1457,7 +1571,7 @@ function downloadText(url) {
       method: "GET",
       timeout: 30000,
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
         "Accept": "*/*",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
       },

@@ -230,7 +230,7 @@ function cnQueryUrl() {
 function openCNQuery(patentNo, title) {
   const url = cnQueryUrl();
   const fullTitle = title || ("中国专利查询: " + patentNo);
-  openInAppWebview(url, fullTitle, {});
+  openInAppWebview(url, fullTitle, { cnpn: patentNo });
 }
 
 function patentLinkButtons(patentNo) {

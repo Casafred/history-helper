@@ -1816,7 +1816,8 @@
         _wvEventsBound = false;
         wv = document.createElement("webview");
         wv.setAttribute("allowpopups", "");
-        wv.setAttribute("useragent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        var chromeUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
+        wv.setAttribute("useragent", chromeUA);
         wv.style.width = "100%";
         wv.style.height = "100%";
         wv.style.border = "none";
