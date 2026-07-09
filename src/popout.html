@@ -1229,6 +1229,12 @@
         if (!isElectron || !wv) return;
         var delay = (opts && opts.delay) != null ? (opts && opts.delay) : 800;
         var fillNum = (opts && opts.autoFillNum) || "";
+        // CNIPA站点跳过probe注入，避免干扰Angular页面渲染
+        var curUrl = currentUrl || "";
+        if (curUrl.indexOf("cnipa.gov.cn") !== -1 || curUrl.indexOf("cpquery") !== -1) {
+          hideLoading();
+          return;
+        }
         function doExec() {
           try {
             var script = buildProbeScript({ autoFillNum: fillNum });
@@ -1430,14 +1436,16 @@
           if (jplatpatSearchNum && curIsJp) {
             fillNum = jplatpatSearchNum;
             jplatpatSearchNum = "";
-          } else if (cnipaSearchNum && curIsCN) {
-            fillNum = cnipaSearchNum;
+          }
+          // CNIPA: 不自动填入，用户自行登录后操作
+          if (curIsCN) {
             cnipaSearchNum = "";
+            fillNum = "";
           }
           runDomProbe({ autoFillNum: fillNum, delay: 800 });
           setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
           setTimeout(function() { runDomProbe({ delay: 0 }); }, 5000);
-          if (curIsJp || curIsCN) {
+          if (curIsJp) {
             startPeriodicProbe(10000);
           } else {
             stopPeriodicProbe();
@@ -1816,7 +1824,6 @@
         wv.setAttribute("allowpopups", "");
         wv.setAttribute("partition", "persist:popout-webview");
         wv.setAttribute("useragent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-        wv.setAttribute("webpreferences", "allowRunningInsecureContent=true,webSecurity=false,allowDisplayingInsecureContent=true");
         wv.style.width = "100%";
         wv.style.height = "100%";
         wv.style.border = "none";
