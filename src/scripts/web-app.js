@@ -3602,11 +3602,31 @@ function refreshHistoryList() {
     });
     unifiedEntries.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
-    if (unifiedEntries.length === 0) {
-      historyList.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px 4px;">暂无历史记录</div>';
+    // Apply search filter if search box has input
+    const searchInput = document.getElementById("history-search-input");
+    let searchQuery = "";
+    if (searchInput) {
+      searchQuery = searchInput.value.trim().toLowerCase();
+    }
+    let displayEntries = unifiedEntries;
+    if (searchQuery) {
+      displayEntries = unifiedEntries.filter(e => {
+        const pn = (e.patentNumber || "").toLowerCase();
+        const title = (e.title || "").toLowerCase();
+        const applicant = (e.applicantName || "").toLowerCase();
+        return pn.includes(searchQuery) || title.includes(searchQuery) || applicant.includes(searchQuery);
+      });
+    }
+
+    if (displayEntries.length === 0) {
+      if (unifiedEntries.length === 0) {
+        historyList.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px 4px;">暂无历史记录</div>';
+      } else {
+        historyList.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px 4px;">未找到匹配的记录</div>';
+      }
     } else {
       const isSelectMode = historyList.classList.contains("select-mode");
-      historyList.innerHTML = unifiedEntries.map(e => {
+      historyList.innerHTML = displayEntries.map(e => {
         const currentPatent = currentData ? (currentData.raw || (currentData.office + currentData.applicationNumber)) : "";
         const isActive = e.patentNumber === currentPatent;
         let badges = "";
@@ -12286,6 +12306,28 @@ if (historySidebarEdgeToggle && historySidebar) {
     // Refresh list when expanding
     if (!historySidebar.classList.contains("collapsed")) {
       refreshHistoryList();
+    }
+  });
+}
+
+// ── History search box ──
+const historySearchInput = document.getElementById("history-search-input");
+if (historySearchInput) {
+  let searchDebounce = null;
+  historySearchInput.addEventListener("input", () => {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+      refreshHistoryList();
+    }, 150);
+  });
+  // Ctrl+F or keyboard shortcut to focus search when sidebar is open
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "f" && historySidebar && !historySidebar.classList.contains("collapsed")) {
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) return;
+      e.preventDefault();
+      historySearchInput.focus();
+      historySearchInput.select();
     }
   });
 }

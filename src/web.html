@@ -30,6 +30,9 @@
             <button id="history-clear-btn" class="btn-icon-sm" title="清空全部"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
           </div>
         </div>
+        <div class="history-search-box" style="padding:0 12px 8px;">
+          <input type="text" id="history-search-input" placeholder="🔍 搜索专利号、标题、申请人..." style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;outline:none;transition:border-color .2s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+        </div>
         <div id="history-batch-bar" class="history-batch-bar hidden">
           <label class="history-batch-select-all"><input type="checkbox" id="history-select-all-cb"> 全选</label>
           <span id="history-batch-count" class="history-batch-count">已选 0 项</span>

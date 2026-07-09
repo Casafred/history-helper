@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, dialog, session } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, dialog, session, clipboard } = require("electron");
 
 // 全局命令行配置：模拟真实Chrome浏览器环境，用于绕过WAF检测
 const CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
@@ -1364,6 +1364,7 @@ function createPopoutWindow(targetUrl, title, port, opts) {
 
   // CNIPA中国专利查询系统：使用独立BrowserWindow直接加载（瑞数WAF需要完整浏览器环境）
   if (targetUrl && (targetUrl.indexOf("cnipa.gov.cn") !== -1 || targetUrl.indexOf("cpquery") !== -1)) {
+    const patentNo = (opts && opts.cnpn) ? String(opts.cnpn) : "";
     const cnWin = new BrowserWindow({
       width: 1200,
       height: 850,
@@ -1378,6 +1379,72 @@ function createPopoutWindow(targetUrl, title, port, opts) {
       },
     });
     cnWin.webContents.setUserAgent(CHROME_UA);
+    // Auto-copy patent number to clipboard on open
+    if (patentNo) {
+      clipboard.writeText(patentNo);
+      console.log("[CNIPA] Copied patent number to clipboard:", patentNo);
+    }
+    // Inject top toolbar with patent number and copy button after page loads
+    const injectToolbar = (wc) => {
+      if (!patentNo) return;
+      const toolbarCode = `
+        (function() {
+          if (document.getElementById('__cnipa_toolbar__')) return;
+          try {
+            var tb = document.createElement('div');
+            tb.id = '__cnipa_toolbar__';
+            tb.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#dc2626;color:#fff;padding:8px 16px;display:flex;align-items:center;gap:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);box-sizing:border-box;';
+            tb.innerHTML = '<span style="font-weight:600;white-space:nowrap;">中国专利查询</span><span style="opacity:0.8;">|</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;background:rgba(255,255,255,0.15);padding:4px 10px;border-radius:4px;">' + ${JSON.stringify(patentNo)} + '</span><button id="__cnipa_copy_btn__" style="background:#fff;color:#dc2626;border:none;padding:5px 14px;border-radius:4px;cursor:pointer;font-weight:600;font-size:13px;white-space:nowrap;">📋 复制号码</button>';
+            document.documentElement.appendChild(tb);
+            document.body.style.setProperty('margin-top', '44px', 'important');
+            var toastTimer = null;
+            function showToast(msg) {
+              var old = document.getElementById('__cnipa_toast__');
+              if (old) old.remove();
+              var t = document.createElement('div');
+              t.id = '__cnipa_toast__';
+              t.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#16a34a;color:#fff;padding:10px 24px;border-radius:8px;z-index:2147483647;font-size:14px;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+              t.textContent = msg;
+              document.documentElement.appendChild(t);
+              clearTimeout(toastTimer);
+              toastTimer = setTimeout(function() { t.remove(); }, 2500);
+            }
+            var copyBtn = document.getElementById('__cnipa_copy_btn__');
+            copyBtn.addEventListener('click', function() {
+              try {
+                navigator.clipboard.writeText(${JSON.stringify(patentNo)}).then(function() {
+                  showToast('✅ 专利号已复制到剪贴板');
+                  copyBtn.textContent = '✅ 已复制';
+                  setTimeout(function() { copyBtn.textContent = '📋 复制号码'; }, 2000);
+                }).catch(function() {
+                  var ta = document.createElement('textarea');
+                  ta.value = ${JSON.stringify(patentNo)};
+                  ta.style.position = 'fixed';
+                  ta.style.opacity = '0';
+                  document.body.appendChild(ta);
+                  ta.select();
+                  document.execCommand('copy');
+                  ta.remove();
+                  showToast('✅ 专利号已复制到剪贴板');
+                  copyBtn.textContent = '✅ 已复制';
+                  setTimeout(function() { copyBtn.textContent = '📋 复制号码'; }, 2000);
+                });
+              } catch(e) { showToast('复制失败'); }
+            });
+            // Show initial toast
+            setTimeout(function() { showToast('✅ 专利号已复制到剪贴板，可直接粘贴查询'); }, 500);
+          } catch(e) { console.log('[CNIPA toolbar] inject error:', e); }
+        })();
+      `;
+      wc.executeJavaScript(toolbarCode).catch(() => {});
+    };
+    cnWin.webContents.on("did-finish-load", () => {
+      console.log("[CNIPA] did-finish-load, title:", cnWin.webContents.getTitle());
+      setTimeout(() => injectToolbar(cnWin.webContents), 800);
+    });
+    cnWin.webContents.on("did-navigate-in-page", () => {
+      setTimeout(() => injectToolbar(cnWin.webContents), 500);
+    });
     console.log("[CNIPA] Loading URL:", targetUrl);
     cnWin.loadURL(targetUrl, { userAgent: CHROME_UA });
     cnWin.webContents.on("did-start-loading", () => {
@@ -1390,9 +1457,6 @@ function createPopoutWindow(targetUrl, title, port, opts) {
       if (isMainFrame && errorCode !== -3) {
         console.error("[CNIPA] did-fail-load:", errorCode, errorDescription, validatedURL);
       }
-    });
-    cnWin.webContents.on("did-finish-load", () => {
-      console.log("[CNIPA] did-finish-load, title:", cnWin.webContents.getTitle());
     });
     cnWin.webContents.on("page-title-updated", (_e, title) => {
       console.log("[CNIPA] page-title-updated:", title);
