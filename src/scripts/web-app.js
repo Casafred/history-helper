@@ -4684,45 +4684,60 @@ function _initPatentAskBindings() {
   const patentAskModal = document.getElementById("patent-ask-modal");
   if (patentAskModal) {
     const dragHandle = document.getElementById("patent-ask-drag-handle");
-    const resizeHandle = document.getElementById("patent-ask-resize-handle");
+    const resizeW = document.getElementById("patent-ask-resize-w");
+    const resizeH = document.getElementById("patent-ask-resize-h");
     let isDragging = false;
-    let isResizing = false;
+    let resizeMode = null; // 'w' | 'h' | null
     let startX, startY, startLeft, startTop, startWidth, startHeight;
+
+    function _fixPosition() {
+      const rect = patentAskModal.getBoundingClientRect();
+      patentAskModal.style.right = "auto";
+      patentAskModal.style.bottom = "auto";
+      patentAskModal.style.left = rect.left + "px";
+      patentAskModal.style.top = rect.top + "px";
+    }
 
     // 拖拽移动
     if (dragHandle) {
       dragHandle.addEventListener("mousedown", (e) => {
         if (e.target.closest("button") || e.target.closest("select") || e.target.closest("input") || e.target.closest("label")) return;
         isDragging = true;
+        _fixPosition();
         const rect = patentAskModal.getBoundingClientRect();
         startX = e.clientX;
         startY = e.clientY;
         startLeft = rect.left;
         startTop = rect.top;
-        patentAskModal.style.right = "auto";
-        patentAskModal.style.bottom = "auto";
-        patentAskModal.style.left = rect.left + "px";
-        patentAskModal.style.top = rect.top + "px";
         document.body.style.userSelect = "none";
         e.preventDefault();
       });
     }
 
-    // 调整大小
-    if (resizeHandle) {
-      resizeHandle.addEventListener("mousedown", (e) => {
-        isResizing = true;
+    // 左边手柄：调整宽度（向右拉变窄，向左拉变宽；右边固定，左边移动）
+    if (resizeW) {
+      resizeW.addEventListener("mousedown", (e) => {
+        resizeMode = "w";
+        _fixPosition();
+        const rect = patentAskModal.getBoundingClientRect();
+        startX = e.clientX;
+        startY = e.clientY;
+        startLeft = rect.left;
+        startWidth = rect.width;
+        document.body.style.userSelect = "none";
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    }
+
+    // 下边手柄：调整高度（向下拉变高，向上拉变矮；上边固定，下边移动）
+    if (resizeH) {
+      resizeH.addEventListener("mousedown", (e) => {
+        resizeMode = "h";
+        _fixPosition();
         const rect = patentAskModal.getBoundingClientRect();
         startY = e.clientY;
         startHeight = rect.height;
-        startX = e.clientX;
-        startWidth = rect.width;
-        if (patentAskModal.style.right && patentAskModal.style.right !== "auto") {
-          patentAskModal.style.right = "auto";
-          patentAskModal.style.bottom = "auto";
-          patentAskModal.style.left = rect.left + "px";
-          patentAskModal.style.top = rect.top + "px";
-        }
         document.body.style.userSelect = "none";
         e.preventDefault();
         e.stopPropagation();
@@ -4736,29 +4751,32 @@ function _initPatentAskBindings() {
         let newLeft = startLeft + dx;
         let newTop = startTop + dy;
         const panelRect = patentAskModal.getBoundingClientRect();
-        const maxLeft = window.innerWidth - 50;
-        const maxTop = window.innerHeight - 50;
-        newLeft = Math.max(-panelRect.width + 100, Math.min(newLeft, maxLeft));
-        newTop = Math.max(0, Math.min(newTop, maxTop));
+        newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - 80));
+        newTop = Math.max(0, Math.min(newTop, window.innerHeight - 50));
         patentAskModal.style.left = newLeft + "px";
         patentAskModal.style.top = newTop + "px";
       }
-      if (isResizing) {
-        const dy = e.clientY - startY;
+      if (resizeMode === "w") {
         const dx = e.clientX - startX;
-        let newHeight = startHeight - dy;
-        let newWidth = startWidth + dx;
-        newHeight = Math.max(300, Math.min(newHeight, window.innerHeight * 0.85));
-        newWidth = Math.max(320, Math.min(newWidth, window.innerWidth * 0.9));
-        patentAskModal.style.height = newHeight + "px";
+        let newWidth = startWidth - dx;
+        let newLeft = startLeft + dx;
+        newWidth = Math.max(320, Math.min(newWidth, window.innerWidth - 40));
+        if (newLeft < 0) { newWidth += newLeft; newLeft = 0; }
         patentAskModal.style.width = newWidth + "px";
+        patentAskModal.style.left = newLeft + "px";
+      }
+      if (resizeMode === "h") {
+        const dy = e.clientY - startY;
+        let newHeight = startHeight + dy;
+        newHeight = Math.max(300, Math.min(newHeight, window.innerHeight - 40));
+        patentAskModal.style.height = newHeight + "px";
       }
     });
 
     document.addEventListener("mouseup", () => {
-      if (isDragging || isResizing) {
+      if (isDragging || resizeMode) {
         isDragging = false;
-        isResizing = false;
+        resizeMode = null;
         document.body.style.userSelect = "";
       }
     });
