@@ -219,6 +219,21 @@ function openJPlatPat(patentNo, title) {
   openInAppWebview(url, fullTitle, { jpn: searchNum });
 }
 
+function isCNPatent(patentNo) {
+  return /^CN\d+/i.test(patentNo);
+}
+
+function cnQueryUrl() {
+  return "https://cpquery.cponline.cnipa.gov.cn/chinesepatent/index";
+}
+
+function openCNQuery(patentNo, title) {
+  const raw = (patentNo || "").trim().toUpperCase().replace(/[\s\/-]/g, "");
+  const url = cnQueryUrl();
+  const fullTitle = title || ("中国专利查询: " + patentNo);
+  openInAppWebview(url, fullTitle, { cnpn: raw });
+}
+
 function patentLinkButtons(patentNo) {
   // Clean patent number: remove language suffixes like /en, /de, /fr etc.
   const cleanNo = String(patentNo).replace(/\/[a-z]{2}$/i, "").trim();
@@ -226,6 +241,9 @@ function patentLinkButtons(patentNo) {
   btns += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(cleanNo) + '\', \'Espacenet: ' + escapeHtml(cleanNo) + '\')" title="在应用内打开 Espacenet (EPO)" style="background:#1565c0;color:#fff;border-color:#0d47a1;">EP</button>';
   if (isJPPatent(cleanNo)) {
     btns += '<button class="pd-gp-link" onclick="openJPlatPat(\'' + escapeHtml(cleanNo) + '\', \'J-PlatPat: ' + escapeHtml(cleanNo) + '\')" title="在 J-PlatPat（日本专利局）查看" style="background:#e74c3c;color:#fff;border-color:#c0392b;font-size:10px;padding:1px 5px;">JP</button>';
+  }
+  if (isCNPatent(cleanNo)) {
+    btns += '<button class="pd-gp-link" onclick="openCNQuery(\'' + escapeHtml(cleanNo) + '\', \'中国专利查询: ' + escapeHtml(cleanNo) + '\')" title="在中国专利查询系统（CNIPA）查看" style="background:#dc2626;color:#fff;border-color:#b91c1c;font-size:10px;padding:1px 5px;">CN</button>';
   }
   return btns;
 }
@@ -2918,11 +2936,24 @@ async function doSearch(input) {
     return;
   }
 
+  if (isCNPatent(rawPn)) {
+    openCNQuery(rawPn, "中国专利查询: " + rawPn);
+    PatentCache.addPatentHistory(rawPn, { title: "CNIPA: " + rawPn, source: "cnipa" });
+    refreshHistoryList();
+  }
+
   searchBtn.disabled = true;
   loadingText.textContent = "正在查询专利信息...";
   loading.classList.remove("hidden");
   resultSection.classList.add("hidden");
   hideError();
+
+  kanbanState.documents = [];
+  kanbanState.extractions = {};
+  kanbanState.analysis = "";
+  kanbanState.traceIndex = {};
+  const _msPanel = document.getElementById("ai-manual-select");
+  if (_msPanel) { _msPanel.innerHTML = ""; _msPanel.classList.add("hidden"); }
 
   const office = pn.office;
   const docNum = pn.applicationNumber;
@@ -6099,13 +6130,31 @@ function renderAiProgressUI(step, detail, progress) {
 // ── Build review manual selection panel ──
 function buildReviewManualSelectPanel() {
   const items = kanbanState.documents;
-  if (!items || items.length === 0) return;
-
   const manualSelectPanel = document.getElementById("ai-manual-select");
   if (!manualSelectPanel) return;
 
-  const canDownload = currentData && (currentData.office === "US" || currentData.office === "EP");
-  if (!canDownload) return;
+  if (!items || items.length === 0) {
+    manualSelectPanel.innerHTML = "";
+    manualSelectPanel.classList.add("hidden");
+    return;
+  }
+
+  const canDownload = currentData && (currentData.office === "US" || currentData.office === "EP" || currentData.office === "CN" || currentData.office === "WO" || currentData.office === "KR");
+  if (!canDownload) {
+    manualSelectPanel.innerHTML = "";
+    manualSelectPanel.classList.add("hidden");
+    return;
+  }
+
+  function _parseDateForSort(d) {
+    if (!d) return 0;
+    const s = String(d).replace(/[.\-]/g, "/");
+    const parts = s.split("/");
+    if (parts.length >= 3) return parseInt(parts[0])*10000 + (parseInt(parts[1])||1)*100 + (parseInt(parts[2])||1);
+    if (parts.length === 2) return parseInt(parts[0])*10000 + (parseInt(parts[1])||1)*100;
+    return 0;
+  }
+  const sortedItems = [...items].sort((a, b) => _parseDateForSort(b.date) - _parseDateForSort(a.date));
 
   // Build checkbox list
   const typeLabels = { office_action: "审查意见", response: "答复", request: "请求", allowance: "授权", notification: "通知", misc: "其他" };
@@ -6115,7 +6164,7 @@ function buildReviewManualSelectPanel() {
   html += '<div class="ai-manual-select-all"><button id="manual-select-all" class="btn-small btn-extract">全选</button><button id="manual-select-none" class="btn-small btn-extract">全不选</button><button id="manual-select-default" class="btn-small btn-extract">默认选择</button></div>';
   html += '</div>';
   html += '<div class="ai-manual-docs">';
-  items.forEach(it => {
+  sortedItems.forEach(it => {
     const typeLabel = typeLabels[it.type] || it.type;
     const searchText = ((it.name || '') + ' ' + (it.docCode || '') + ' ' + (it.date || '') + ' ' + typeLabel).toLowerCase();
     html += `

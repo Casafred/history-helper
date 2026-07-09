@@ -31,6 +31,13 @@
     }
     #po-jp-bar .po-jp-label { font-weight: bold; }
     #po-jp-bar .po-jp-hint { flex: 1; color: #a08030; }
+    #po-cn-bar {
+      display: none; align-items: center; gap: 8px;
+      background: #d1ecf1; border-bottom: 1px solid #0c5460;
+      padding: 6px 14px; font-size: 12px; color: #0c5460; flex-shrink: 0;
+    }
+    #po-cn-bar .po-cn-label { font-weight: bold; }
+    #po-cn-bar .po-cn-hint { flex: 1; color: #0c5460; }
     #po-find-bar {
       display: none; align-items: center; gap: 6px;
       background: #f5f5f5; border-bottom: 1px solid #ddd;
@@ -99,6 +106,14 @@
     <button id="po-jp-ext" class="po-btn" title="外部打开">外部打开</button>
     <button id="po-jp-close" class="po-btn po-btn-find" title="关闭提示">✕</button>
   </div>
+  <div id="po-cn-bar">
+    <span class="po-cn-label">🇨🇳 CNIPA</span>
+    <span id="po-cn-num"></span>
+    <button id="po-cn-copy" class="po-btn po-btn-sm" title="一键复制专利号" style="font-size:11px;padding:1px 6px;">📋 复制</button>
+    <span class="po-cn-hint">请登录您的中国专利查询系统账号，公开号已自动填入搜索框</span>
+    <button id="po-cn-ext" class="po-btn" title="外部打开">外部打开</button>
+    <button id="po-cn-close" class="po-btn po-btn-find" title="关闭提示">✕</button>
+  </div>
   <div id="po-smart-bar">
     <span class="po-smart-label" id="po-smart-label">🤖 智能识别</span>
     <span class="po-smart-info" id="po-smart-info"></span>
@@ -142,6 +157,11 @@
       var jpOpdBtn = document.getElementById("po-jp-opd");
       var jpExtBtn = document.getElementById("po-jp-ext");
       var jpCloseBtn = document.getElementById("po-jp-close");
+      var cnBar = document.getElementById("po-cn-bar");
+      var cnNumEl = document.getElementById("po-cn-num");
+      var cnCopyBtn = document.getElementById("po-cn-copy");
+      var cnExtBtn = document.getElementById("po-cn-ext");
+      var cnCloseBtn = document.getElementById("po-cn-close");
       var smartBar = document.getElementById("po-smart-bar");
       var smartLabel = document.getElementById("po-smart-label");
       var smartInfo = document.getElementById("po-smart-info");
@@ -171,6 +191,7 @@
       var findDebounceTimer = null;
       var findRequestId = 0;
       var jplatpatSearchNum = params.get("jpn") || "";
+      var cnipaSearchNum = params.get("cnpn") || "";
 
       var isJplatpat = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
       if (isJplatpat) {
@@ -183,6 +204,14 @@
           }
         }
         jpBar.style.display = "flex";
+      }
+
+      var isCNIPA = currentUrl.indexOf("cpquery.cponline.cnipa.gov.cn") !== -1 || currentUrl.indexOf("cnipa.gov.cn") !== -1;
+      if (isCNIPA) {
+        if (cnipaSearchNum) {
+          cnNumEl.textContent = "公开(公告)号: " + cnipaSearchNum;
+        }
+        cnBar.style.display = "flex";
       }
 
       function adjustContainerHeight() {
@@ -198,6 +227,16 @@
           jpBar.style.display = "flex";
         } else {
           jpBar.style.display = "none";
+        }
+      }
+
+      function updateCnBar() {
+        var curIsCN = currentUrl && (currentUrl.indexOf("cnipa.gov.cn") !== -1 || currentUrl.indexOf("cpquery") !== -1);
+        if (curIsCN) {
+          if (cnipaSearchNum) cnNumEl.textContent = "公开(公告)号: " + cnipaSearchNum;
+          cnBar.style.display = "flex";
+        } else {
+          cnBar.style.display = "none";
         }
       }
 
@@ -383,6 +422,42 @@
       if (jpCloseBtn) {
         jpCloseBtn.addEventListener("click", function() {
           jpBar.style.display = "none";
+        });
+      }
+      // CNIPA bar buttons
+      if (cnCopyBtn) {
+        cnCopyBtn.addEventListener("click", function() {
+          var numText = cnNumEl.textContent || "";
+          var num = numText.replace(/^公开\(公告\)号:\s*/, "").trim();
+          if (!num) num = cnipaSearchNum || "";
+          if (num) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(num);
+            } else {
+              var ta = document.createElement("textarea");
+              ta.value = num;
+              ta.style.position = "fixed";
+              ta.style.left = "-9999px";
+              document.body.appendChild(ta);
+              ta.select();
+              try { document.execCommand("copy"); } catch(e) {}
+              document.body.removeChild(ta);
+            }
+            var orig = cnCopyBtn.textContent;
+            cnCopyBtn.textContent = "✓ 已复制";
+            setTimeout(function() { cnCopyBtn.textContent = orig; }, 1500);
+          }
+        });
+      }
+      if (cnExtBtn) {
+        cnExtBtn.addEventListener("click", function() {
+          if (window.electronAPI) window.electronAPI.openExternal(currentUrl);
+          else window.open(currentUrl, "_blank");
+        });
+      }
+      if (cnCloseBtn) {
+        cnCloseBtn.addEventListener("click", function() {
+          cnBar.style.display = "none";
         });
       }
       if (smartCloseBtn) {
@@ -608,6 +683,9 @@
         "    } else if (host.indexOf('espacenet') !== -1) {",
         "      pageInfo.pageType = 'espacenet';",
         "      pageInfo.label = 'Espacenet';",
+        "    } else if (host.indexOf('cnipa.gov.cn') !== -1 || host.indexOf('cpquery') !== -1) {",
+        "      pageInfo.pageType = 'cnipa';",
+        "      pageInfo.label = '中国专利查询系统';",
         "    }",
         "    return pageInfo;",
         "  }",
@@ -670,6 +748,10 @@
         "      if (pageInfo.pageType === 'jplatpat_search' || pageInfo.pageType === 'jplatpat_opd') {",
         "        actions.push({ type: 'info', label: '💡 已自动填入检索番号', passive: true });",
         "      }",
+        "    }",
+        "    // CNIPA actions",
+        "    if (pageInfo.pageType === 'cnipa') {",
+        "      actions.push({ type: 'info', label: '💡 已自动填入专利公开(公告)号，请登录后点击查询', passive: true });",
         "    }",
         "    // Global Dossier actions",
         "    if (pageInfo.pageType === 'global_dossier') {",
@@ -775,6 +857,9 @@
         "        // Matches for J-PlatPat: placeholder with 番号/例/特許, name/id with sQuery/query",
         "        if (ph.indexOf('番号') !== -1) return inp;",
         "        if (ph.indexOf('例') !== -1 && /\\d/.test(inp.placeholder || '')) return inp;",
+        "        // Matches for CNIPA",
+        "        if (ph.indexOf('例如') !== -1 && ph.indexOf('cn') !== -1) return inp;",
+        "        if (ph.indexOf('公开') !== -1 || ph.indexOf('公告号') !== -1 || ph.indexOf('申请号') !== -1 || ph.indexOf('专利号') !== -1) return inp;",
         "        if (dataBind.indexOf('query') !== -1 || dataBind.indexOf('squery') !== -1 || dataBind.indexOf('search') !== -1) return inp;",
         "        if (idn.indexOf('squery') !== -1 || nm.indexOf('squery') !== -1) return inp;",
         "        if (idn === 'query' || nm === 'query') return inp;",
@@ -811,6 +896,7 @@
         "          if (btn.offsetParent === null) continue;",
         "          var txt = ((btn.textContent || btn.value || btn.getAttribute('aria-label') || '')).trim();",
         "          if (txt === '検索' || txt === '検索する' || txt.indexOf('この条件で検索') !== -1 || txt === 'Search' || txt === 'SEARCH' || txt.indexOf('Search') === 0) return btn;",
+        "          if (txt === '查询' || txt === '搜索' || txt === '检索' || txt === '查 询' || txt.indexOf('查询') !== -1) return btn;",
         "        }",
         "      }",
         "      // Strategy 2: any submit-type button in the same form",
@@ -1328,6 +1414,7 @@
           } catch(e) {}
 
           updateJpBar();
+          updateCnBar();
           updateNavButtons();
           setTimeout(updateNavButtons, 200);
           setTimeout(updateNavButtons, 500);
@@ -1335,15 +1422,19 @@
           setTimeout(updateNavButtons, 1500);
 
           var curIsJp = currentUrl.indexOf("j-platpat.inpit.go.jp") !== -1;
+          var curIsCN = currentUrl.indexOf("cnipa.gov.cn") !== -1 || currentUrl.indexOf("cpquery") !== -1;
           var fillNum = "";
           if (jplatpatSearchNum && curIsJp) {
             fillNum = jplatpatSearchNum;
             jplatpatSearchNum = "";
+          } else if (cnipaSearchNum && curIsCN) {
+            fillNum = cnipaSearchNum;
+            cnipaSearchNum = "";
           }
           runDomProbe({ autoFillNum: fillNum, delay: 800 });
           setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
           setTimeout(function() { runDomProbe({ delay: 0 }); }, 5000);
-          if (curIsJp) {
+          if (curIsJp || curIsCN) {
             startPeriodicProbe(10000);
           } else {
             stopPeriodicProbe();
@@ -1364,6 +1455,7 @@
             hideSmartBar();
             stopPeriodicProbe();
             updateJpBar();
+            updateCnBar();
             scheduleNavButtonsUpdate();
             var isOnGoogleTranslate = currentUrl.indexOf("translate.google.com/translate") !== -1;
             if (!isOnGoogleTranslate && translateMode !== "bilingual") {
@@ -1385,6 +1477,7 @@
             currentUrl = e.url;
             hideLoading();
             updateJpBar();
+            updateCnBar();
             scheduleNavButtonsUpdate();
             setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
             setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
@@ -1796,6 +1889,7 @@
         currentUrl = u;
         loadAttempts = 0;
         jplatpatSearchNum = "";
+        cnipaSearchNum = "";
         isJplatpat = u.indexOf("j-platpat.inpit.go.jp") !== -1;
         if (isJplatpat) {
           var jm = u.match(/JP-(\d{4})-(\d+)/);
@@ -1804,6 +1898,13 @@
           jpBar.style.display = "flex";
         } else {
           jpBar.style.display = "none";
+        }
+        var curIsCN = u.indexOf("cnipa.gov.cn") !== -1 || u.indexOf("cpquery") !== -1;
+        if (curIsCN) {
+          cnNumEl.textContent = "";
+          cnBar.style.display = "flex";
+        } else {
+          cnBar.style.display = "none";
         }
         if (isElectron && wv) {
           _navigateInWebview(u);

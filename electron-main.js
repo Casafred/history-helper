@@ -1358,6 +1358,9 @@ function createPopoutWindow(targetUrl, title, port, opts) {
   if (opts && opts.jpn) {
     popoutUrl += "&jpn=" + encodeURIComponent(opts.jpn);
   }
+  if (opts && opts.cnpn) {
+    popoutUrl += "&cnpn=" + encodeURIComponent(opts.cnpn);
+  }
   const win = new BrowserWindow({
     width: 1100,
     height: 800,
