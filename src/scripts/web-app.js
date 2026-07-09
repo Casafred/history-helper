@@ -3808,6 +3808,39 @@ function doRestoreFromCache(patentNumber) {
   }
 }
 
+function parseDocDateToTimestamp(d) {
+  if (!d) return 0;
+  const s = String(d).trim();
+  if (!s) return 0;
+  const ts = new Date(s).getTime();
+  if (!isNaN(ts) && ts > 0) return ts;
+  const normalized = s.replace(/[.\-]/g, "/");
+  const parts = normalized.split("/").map(p => parseInt(p));
+  if (parts.length >= 3) {
+    let y, m, day;
+    if (parts[0] > 31) {
+      y = parts[0]; m = parts[1]; day = parts[2];
+    } else if (parts[2] > 31) {
+      y = parts[2];
+      if (parts[0] > 12) {
+        day = parts[0]; m = parts[1];
+      } else if (parts[1] > 12) {
+        m = parts[0]; day = parts[1];
+      } else {
+        m = parts[0]; day = parts[1];
+      }
+    } else {
+      y = parts[0] > 31 ? parts[0] : (parts[2] > 31 ? parts[2] : parts[0]);
+      m = parts[1] || 1;
+      day = parts[2] || 1;
+    }
+    y = y || 1970; m = (m >= 1 && m <= 12) ? m : 1; day = (day >= 1 && day <= 31) ? day : 1;
+    if (y < 100) y += 2000;
+    return new Date(y, m - 1, day).getTime();
+  }
+  return 0;
+}
+
 function renderKanban(data) {
   const board = document.getElementById("kanban-board");
   const statusEl = document.getElementById("kanban-status");
@@ -3941,7 +3974,7 @@ function renderKanban(data) {
 
   let html = '<div class="kanban-columns">';
   columns.forEach(col => {
-    const colItems = items.filter(it => it.type === col.key);
+    const colItems = items.filter(it => it.type === col.key).sort((a, b) => parseDocDateToTimestamp(b.date) - parseDocDateToTimestamp(a.date));
     const count = colItems.length;
     html += `
       <div class="kanban-column ${col.color}">
@@ -6146,15 +6179,7 @@ function buildReviewManualSelectPanel() {
     return;
   }
 
-  function _parseDateForSort(d) {
-    if (!d) return 0;
-    const s = String(d).replace(/[.\-]/g, "/");
-    const parts = s.split("/");
-    if (parts.length >= 3) return parseInt(parts[0])*10000 + (parseInt(parts[1])||1)*100 + (parseInt(parts[2])||1);
-    if (parts.length === 2) return parseInt(parts[0])*10000 + (parseInt(parts[1])||1)*100;
-    return 0;
-  }
-  const sortedItems = [...items].sort((a, b) => _parseDateForSort(b.date) - _parseDateForSort(a.date));
+  const sortedItems = [...items].sort((a, b) => parseDocDateToTimestamp(b.date) - parseDocDateToTimestamp(a.date));
 
   // Build checkbox list
   const typeLabels = { office_action: "审查意见", response: "答复", request: "请求", allowance: "授权", notification: "通知", misc: "其他" };

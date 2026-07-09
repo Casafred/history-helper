@@ -470,11 +470,14 @@
       // Factory: returns the IIFE script string with opts baked in
       function buildProbeScript(opts) {
         opts = opts || {};
-        var optsJson = JSON.stringify({ autoFillNum: opts.autoFillNum || "" });
+        var optsJson = JSON.stringify({ autoFillNum: opts.autoFillNum || "", noAutoSearch: !!opts.noAutoSearch });
         return [
           "(function(opts) {",
           "  opts = opts || {};",
           "  var autoFillNum = opts.autoFillNum || '';",
+          "  var noAutoSearch = !!opts.noAutoSearch;",
+          "  var _host = (location.hostname || '').toLowerCase();",
+          "  if (_host.indexOf('cnipa') !== -1 || _host.indexOf('cpquery') !== -1) noAutoSearch = true;",
         "  function isVisible(el) {",
         "    if (!el || el.nodeType !== 1) return false;",
         "    if (el.offsetParent === null) {",
@@ -833,7 +836,7 @@
         "            } catch(e) { el.value = expectedVal; }",
         "            try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch(e) {}",
         "            // After re-applying, try search again if not already triggered",
-        "            if (!searchTriggered) {",
+        "            if (!searchTriggered && !noAutoSearch) {",
         "              setTimeout(function() { triggerSearch(el); }, 200);",
         "            }",
         "          }",
@@ -1036,7 +1039,7 @@
         "        if (!searchInput) { setTimeout(tryNow, 300); return; }",
         "        // Already filled with correct value?",
         "        if (searchInput.value === searchNum) {",
-        "          if (!isOnResultsPage() && !searchTriggered) {",
+        "          if (!isOnResultsPage() && !searchTriggered && !noAutoSearch) {",
         "            // Value present but search not triggered yet",
         "            guardValue(searchInput, searchNum);",
         "            setTimeout(function() { triggerSearch(searchInput); }, 300);",
@@ -1050,7 +1053,7 @@
         "        // Verify and trigger search after delay for framework to process",
         "        setTimeout(function() {",
         "          if (searchInput.value === searchNum) {",
-        "            if (!isOnResultsPage() && !searchTriggered) {",
+        "            if (!isOnResultsPage() && !searchTriggered && !noAutoSearch) {",
         "              setTimeout(function() { triggerSearch(searchInput); }, 300);",
         "            }",
         "          } else {",
@@ -1811,7 +1814,9 @@
         _wvEventsBound = false;
         wv = document.createElement("webview");
         wv.setAttribute("allowpopups", "");
+        wv.setAttribute("partition", "persist:popout-webview");
         wv.setAttribute("useragent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        wv.setAttribute("webpreferences", "allowRunningInsecureContent=true,webSecurity=false,allowDisplayingInsecureContent=true");
         wv.style.width = "100%";
         wv.style.height = "100%";
         wv.style.border = "none";
