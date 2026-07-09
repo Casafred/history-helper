@@ -1354,6 +1354,32 @@ function createWindow(port) {
 // 通过本地 HTTP 服务器加载 popout.html（webview 标签需要 http:// 源，data: URL 不支持）
 function createPopoutWindow(targetUrl, title, port, opts) {
   console.log("[Electron] createPopoutWindow targetUrl=" + targetUrl + ", title=" + title + ", port=" + port);
+
+  // CNIPA中国专利查询系统：直接用BrowserWindow打开，不走webview嵌入
+  // CNIPA的Angular SPA在Electron webview中无法正常渲染，直接加载URL可正常显示
+  if (targetUrl && (targetUrl.indexOf("cnipa.gov.cn") !== -1 || targetUrl.indexOf("cpquery") !== -1)) {
+    const cnWin = new BrowserWindow({
+      width: 1200,
+      height: 850,
+      title: title || "中国专利查询系统",
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: "persist:cnipa-session",
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+      },
+    });
+    cnWin.loadURL(targetUrl);
+    cnWin.webContents.setWindowOpenHandler(({ url }) => {
+      if (url && url.startsWith("http")) {
+        shell.openExternal(url);
+      }
+      return { action: "deny" };
+    });
+    return;
+  }
+
   let popoutUrl = `http://127.0.0.1:${port}/popout.html?url=${encodeURIComponent(targetUrl)}&title=${encodeURIComponent(title || targetUrl)}`;
   if (opts && opts.jpn) {
     popoutUrl += "&jpn=" + encodeURIComponent(opts.jpn);
