@@ -1,7 +1,10 @@
 const { app, BrowserWindow, shell, ipcMain, dialog, session } = require("electron");
 
-// 命令行开关：隐藏navigator.webdriver等自动化检测特征
+// 全局命令行配置：模拟真实Chrome浏览器环境，用于绕过WAF检测
+const CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
 app.commandLine.appendSwitch("disable-blink-features", "AutomationControlled");
+app.commandLine.appendSwitch("user-agent", CHROME_UA);
+app.commandLine.appendSwitch("lang", "zh-CN");
 
 const http = require("http");
 const https = require("https");
@@ -1361,12 +1364,6 @@ function createPopoutWindow(targetUrl, title, port, opts) {
 
   // CNIPA中国专利查询系统：使用独立BrowserWindow直接加载（瑞数WAF需要完整浏览器环境）
   if (targetUrl && (targetUrl.indexOf("cnipa.gov.cn") !== -1 || targetUrl.indexOf("cpquery") !== -1)) {
-    const cnSession = session.fromPartition("persist:cnipa", { cache: true });
-    const chromeUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
-    cnSession.setUserAgent(chromeUA, "zh-CN");
-    cnSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
-      callback(true);
-    });
     const cnWin = new BrowserWindow({
       width: 1200,
       height: 850,
@@ -1377,13 +1374,23 @@ function createPopoutWindow(targetUrl, title, port, opts) {
         contextIsolation: true,
         sandbox: false,
         webSecurity: true,
-        allowRunningInsecureContent: false,
-        session: cnSession,
       },
     });
-    cnWin.webContents.setUserAgent(chromeUA);
+    cnWin.webContents.setUserAgent(CHROME_UA);
     console.log("[CNIPA] Loading URL:", targetUrl);
-    cnWin.loadURL(targetUrl, { userAgent: chromeUA });
+    // Clear CNIPA cached data before loading to avoid stale WAF cookies/scripts
+    const ses = cnWin.webContents.session;
+    ses.clearStorageData({
+      origin: "https://cpquery.cponline.cnipa.gov.cn",
+      storages: ["cookies", "cachestorage", "localstorage", "indexdb", "websql", "serviceworkers"],
+      quotas: ["temporary", "persistent", "syncable"],
+    }).then(() => {
+      return ses.clearCache();
+    }).then(() => {
+      cnWin.loadURL(targetUrl, { userAgent: CHROME_UA });
+    }).catch(() => {
+      cnWin.loadURL(targetUrl, { userAgent: CHROME_UA });
+    });
     cnWin.webContents.on("did-start-loading", () => {
       console.log("[CNIPA] did-start-loading");
     });
@@ -1398,9 +1405,6 @@ function createPopoutWindow(targetUrl, title, port, opts) {
     cnWin.webContents.on("did-finish-load", () => {
       console.log("[CNIPA] did-finish-load, title:", cnWin.webContents.getTitle());
     });
-    cnWin.webContents.on("console-message", (_e, level, message, line, sourceId) => {
-      console.log(`[CNIPA console][${level}]`, message, sourceId + ":" + line);
-    });
     cnWin.webContents.on("page-title-updated", (_e, title) => {
       console.log("[CNIPA] page-title-updated:", title);
     });
@@ -1408,14 +1412,13 @@ function createPopoutWindow(targetUrl, title, port, opts) {
       console.log("[CNIPA] window-open:", url);
       if (url && url.startsWith("http")) {
         if (url.indexOf("cnipa.gov.cn") !== -1 || url.indexOf("cpquery") !== -1) {
-          cnWin.loadURL(url, { userAgent: chromeUA });
+          cnWin.loadURL(url, { userAgent: CHROME_UA });
         } else {
           shell.openExternal(url);
         }
       }
       return { action: "deny" };
     });
-    cnWin.webContents.openDevTools({ mode: "detach" });
     return cnWin;
   }
 
@@ -1454,8 +1457,7 @@ function createPopoutWindow(targetUrl, title, port, opts) {
   // 同域链接在当前 webview 内导航（通过 executeJavaScript 重定向），外部链接开带工具栏的新弹窗
   win.webContents.on("did-attach-webview", (_event, guestWebContents) => {
     console.log("[Electron] popout webview attached");
-    const chromeUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
-    guestWebContents.setUserAgent(chromeUA);
+    guestWebContents.setUserAgent(CHROME_UA);
 
     const isCNIPAUrl = (u) => u && (u.indexOf("cnipa.gov.cn") !== -1 || u.indexOf("cpquery") !== -1);
 
@@ -1510,7 +1512,7 @@ function createPopoutWindow(targetUrl, title, port, opts) {
         var isHelp = lowUrl.indexOf("/help") !== -1 || lowUrl.indexOf("/faq") !== -1 || lowUrl.indexOf("/print") !== -1;
         if (newHost && curHost && newHost === curHost && !isPdf && !isHelp) {
           // Same host content page: navigate within the webview
-          guestWebContents.loadURL(url, { userAgent: chromeUA });
+          guestWebContents.loadURL(url, { userAgent: CHROME_UA });
           return { action: "deny" };
         }
         if (isPdf || isHelp) {
