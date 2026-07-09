@@ -2381,20 +2381,6 @@ function _bindPpvContentEvents(content, data) {
       if (!isNaN(idx)) translateClaimByIndex(idx, claimItem);
     });
   });
-
-  // Right-click context menu for popup patent content
-  content.addEventListener("contextmenu", (ev) => {
-    let targetSection = "";
-    const claimsEl = ev.target.closest('[data-section-type="claims"]');
-    const descEl = ev.target.closest('[data-section-type="description"]');
-    if (claimsEl) targetSection = "claims";
-    else if (descEl) targetSection = "description";
-
-    if (targetSection || window.getSelection().toString().trim()) {
-      ev.preventDefault();
-      showPatentDetailContextMenu(ev.clientX, ev.clientY, targetSection);
-    }
-  });
 }
 
 function _renderPpvPatentTabs() {
@@ -9202,36 +9188,10 @@ document.addEventListener("mousedown", (ev) => {
   }
 });
 document.addEventListener("scroll", () => hidePdfBlockContextMenu(), true);
-window.addEventListener("resize", () => hidePdfBlockContextMenu());
-
-// Right-click context menu for patent detail view
-if (patentDetailContent) {
-  patentDetailContent.addEventListener("contextmenu", (ev) => {
-    // Determine which section was right-clicked
-    let targetSection = "";
-    const claimsEl = ev.target.closest('[data-section-type="claims"]');
-    const descEl = ev.target.closest('[data-section-type="description"]');
-    if (claimsEl) {
-      targetSection = "claims";
-    } else if (descEl) {
-      targetSection = "description";
-    }
-
-    // Only show context menu if we're in a translatable area
-    if (targetSection || window.getSelection().toString().trim()) {
-      ev.preventDefault();
-      showPatentDetailContextMenu(ev.clientX, ev.clientY, targetSection);
-    }
-  });
-}
-
-// Close patent detail context menu on click outside or scroll
-document.addEventListener("mousedown", (ev) => {
-  if (_patentDetailCtxMenu && !_patentDetailCtxMenu.contains(ev.target)) {
-    hidePatentDetailContextMenu();
-  }
+window.addEventListener("resize", () => {
+  hidePdfBlockContextMenu();
+  hideContextMenu();
 });
-document.addEventListener("scroll", () => hidePatentDetailContextMenu(), true);
 
 // ===== PDF keyword search =====
 
@@ -11211,12 +11171,16 @@ document.addEventListener("DOMContentLoaded", () => {
   function showSelectionActionBtn(x, y, text) {
     hideSelectionMenu();
     hideContextMenu();
+    const existingPopup = document.getElementById("generic-translation-popup");
+    if (existingPopup) existingPopup.remove();
+    const existingPopup2 = document.getElementById("pd-selected-translation-popup");
+    if (existingPopup2) existingPopup2.remove();
     const btn = document.createElement("button");
     btn.textContent = "🔤";
     btn.title = "翻译/复制选中文本";
     btn.style.cssText = 'position:fixed;z-index:100020;background:var(--accent,#22c55e);color:#fff;border:none;border-radius:50%;width:32px;height:32px;font-size:14px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-family:inherit;display:flex;align-items:center;justify-content:center;';
-    btn.style.left = Math.min(x, window.innerWidth - 40) + "px";
-    btn.style.top = Math.max(10, y - 40) + "px";
+    btn.style.left = Math.min(Math.max(x, 5), window.innerWidth - 40) + "px";
+    btn.style.top = Math.max(5, y) + "px";
     btn.addEventListener("mousedown", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -11268,20 +11232,40 @@ document.addEventListener("DOMContentLoaded", () => {
     _contextMenu = menu;
   }
 
+  function _getSelectionBtnPos() {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    const text = sel.toString().trim();
+    if (!text || text.length <= 1 || text.length >= 2000) return null;
+    const range = sel.getRangeAt(0);
+    let rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return null;
+    const rects = range.getClientRects();
+    let targetRect = rect;
+    if (rects.length > 0) {
+      let lastVisible = null;
+      for (let i = rects.length - 1; i >= 0; i--) {
+        if (rects[i].width > 0 || rects[i].height > 0) {
+          lastVisible = rects[i];
+          break;
+        }
+      }
+      if (lastVisible) targetRect = lastVisible;
+    }
+    const btnX = Math.min(targetRect.right + 4, window.innerWidth - 40);
+    const btnY = Math.max(5, targetRect.top - 36);
+    return { x: btnX, y: btnY, text: text };
+  }
+
   document.addEventListener("mouseup", (e) => {
     if (_contextMenu && _contextMenu.contains(e.target)) return;
     if (_selectionFloatingBtn && _selectionFloatingBtn.contains(e.target)) return;
     setTimeout(() => {
       if (_justOpenedMenu) return;
-      const sel = window.getSelection();
-      const text = sel ? sel.toString().trim() : "";
-      if (text && text.length > 1 && text.length < 2000) {
-        const range = sel.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        if (rect.width > 0) {
-          showSelectionActionBtn(rect.left + rect.width / 2 - 16, rect.top, text);
-          return;
-        }
+      const pos = _getSelectionBtnPos();
+      if (pos) {
+        showSelectionActionBtn(pos.x, pos.y, pos.text);
+        return;
       }
       hideSelectionMenu();
     }, 10);
@@ -11289,27 +11273,28 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("mousedown", (e) => {
     if (_selectionFloatingBtn && _selectionFloatingBtn.contains(e.target)) return;
     if (_contextMenu && _contextMenu.contains(e.target)) return;
+    const tgt = e.target;
+    if (tgt.closest && (tgt.closest("#generic-translation-popup") || tgt.closest("#pd-selected-translation-popup"))) return;
     hideSelectionMenu();
     hideContextMenu();
   });
   document.addEventListener("contextmenu", (e) => {
     if (e.target.closest && (e.target.closest("#generic-translation-popup") || e.target.closest("#pd-selected-translation-popup") || e.target.closest("button") || e.target.closest("input") || e.target.closest("select") || e.target.closest("textarea"))) return;
-    const sel = window.getSelection();
-    const text = sel ? sel.toString().trim() : "";
-    if (text && text.length > 1 && text.length < 5000) {
-      e.preventDefault();
-      e.stopPropagation();
-      _justOpenedMenu = true;
-      setTimeout(() => { _justOpenedMenu = false; }, 150);
-      showSelectionContextMenu(e.clientX, e.clientY, text);
-      hideSelectionMenu();
-    } else {
-      hideContextMenu();
-    }
+    setTimeout(() => {
+      const pos = _getSelectionBtnPos();
+      if (pos) {
+        e.preventDefault();
+        e.stopPropagation();
+        showSelectionActionBtn(pos.x, pos.y, pos.text);
+      } else {
+        hideSelectionMenu();
+        hideContextMenu();
+      }
+    }, 0);
   }, true);
   document.addEventListener("scroll", () => { hideSelectionMenu(); hideContextMenu(); }, true);
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { hideContextMenu(); hideSelectionMenu(); }
+    if (e.key === "Escape") { hideContextMenu(); hideSelectionMenu(); const p = document.getElementById("generic-translation-popup"); if (p) p.remove(); const p2 = document.getElementById("pd-selected-translation-popup"); if (p2) p2.remove(); }
   });
 
   // ── Merge export events ──

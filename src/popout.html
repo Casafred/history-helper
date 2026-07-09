@@ -2328,12 +2328,14 @@
       function showPopSelBtn(x, y, text) {
         hidePopSelMenu();
         hidePopCtxMenu();
+        var existingPopup = document.getElementById("pop-translation-popup");
+        if (existingPopup) existingPopup.remove();
         var btn = document.createElement("button");
         btn.textContent = "🔤";
         btn.title = "翻译/复制选中文本";
         btn.style.cssText = 'position:fixed;z-index:100020;background:#22c55e;color:#fff;border:none;border-radius:50%;width:32px;height:32px;font-size:14px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-family:inherit;display:flex;align-items:center;justify-content:center;';
-        btn.style.left = Math.min(x, window.innerWidth - 40) + "px";
-        btn.style.top = Math.max(10, y - 40) + "px";
+        btn.style.left = Math.min(Math.max(x, 5), window.innerWidth - 40) + "px";
+        btn.style.top = Math.max(5, y) + "px";
         btn.addEventListener("mousedown", function(e) { e.preventDefault(); e.stopPropagation(); });
         btn.addEventListener("click", function(e) {
           e.preventDefault();
@@ -2587,17 +2589,8 @@
           getSelectedText(function(text) {
             text = (text || "").trim();
             if (text && text.length > 1 && text.length < 2000) {
-              var sel = window.getSelection();
-              var rectX = e.clientX, rectY = e.clientY;
-              if (sel && sel.rangeCount > 0) {
-                var range = sel.getRangeAt(0);
-                var r = range.getBoundingClientRect();
-                if (r.width > 0) {
-                  rectX = r.left + r.width / 2 - 16;
-                  rectY = r.top;
-                }
-              }
-              showPopSelBtn(rectX, rectY, text);
+              var bx = e.clientX, by = e.clientY - 36;
+              showPopSelBtn(bx, by, text);
             } else {
               hidePopSelMenu();
             }
@@ -2615,19 +2608,19 @@
 
       document.addEventListener("contextmenu", function(e) {
         if (e.target.closest && (e.target.closest("#pop-translation-popup") || e.target.closest("button") || e.target.closest("input") || e.target.closest("select") || e.target.closest("textarea"))) return;
-        getSelectedText(function(text) {
-          text = (text || "").trim();
-          if (text && text.length > 1 && text.length < 5000) {
-            e.preventDefault();
-            e.stopPropagation();
-            _popJustOpened = true;
-            setTimeout(function() { _popJustOpened = false; }, 150);
-            showPopCtxMenu(e.clientX, e.clientY, text);
-            hidePopSelMenu();
-          } else {
-            hidePopCtxMenu();
-          }
-        });
+        setTimeout(function() {
+          getSelectedText(function(text) {
+            text = (text || "").trim();
+            if (text && text.length > 1 && text.length < 5000) {
+              e.preventDefault();
+              e.stopPropagation();
+              showPopSelBtn(e.clientX, e.clientY - 36, text);
+            } else {
+              hidePopSelMenu();
+              hidePopCtxMenu();
+            }
+          });
+        }, 0);
       }, true);
 
       document.addEventListener("scroll", function() { hidePopSelMenu(); hidePopCtxMenu(); }, true);

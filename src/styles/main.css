@@ -4734,8 +4734,8 @@ body {
 }
 .pd-data-source-badge {
   position: absolute;
-  top: 0;
-  right: 0;
+  top: 12px;
+  right: 24px;
   padding: 4px 12px;
   border-radius: 12px;
   font-size: 11px;
