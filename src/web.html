@@ -51,6 +51,10 @@
         <div class="search-mode-switch">
           <button class="search-mode-btn active" data-mode="dossier" title="查询审查历史、文档下载与AI梳理">审查文档</button>
           <button class="search-mode-btn" data-mode="patent" title="查询专利原文信息（Google Patents）">专利原文</button>
+          <button class="search-mode-btn" data-mode="extract" title="智能抽取：从审查文档中批量抽取字段到Excel">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;vertical-align:-1px;margin-right:2px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            智能抽取
+          </button>
         </div>
         <input type="text" id="patent-input" placeholder="输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型" autocomplete="off">
         <button id="search-btn" class="btn-primary">查询</button>
@@ -804,6 +808,93 @@
         </div>
         <div class="analysis-chat-resize-handle" id="analysis-chat-resize-handle" title="拖拽调整大小"></div>
       </div>
+
+      <!-- 智能抽取模式 -->
+      <section id="extract-mode-section" class="extract-mode-section hidden">
+        <div class="extract-header">
+          <div class="extract-header-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:22px;height:22px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <h2>智能抽取</h2>
+            <span class="extract-subtitle">从审查文档中AI抽取指定字段，审核后导出Excel</span>
+          </div>
+          <div class="extract-header-actions">
+            <button id="extract-back-btn" class="btn-secondary btn-small">返回</button>
+          </div>
+        </div>
+
+        <!-- Step 1: Select documents -->
+        <div id="extract-step-docs" class="extract-step">
+          <div class="extract-step-title"><span class="extract-step-num">1</span> 选择要抽取的审查文档</div>
+          <div class="extract-step-hint">从历史记录中勾选要抽取字段的审查文档（每个文档需要先完成OCR），或者输入专利号加载。</div>
+          <div class="extract-doc-toolbar">
+            <input type="text" id="extract-doc-search" class="extract-doc-search" placeholder="搜索历史专利号...">
+            <button id="extract-select-all" class="btn-secondary btn-small">全选已加载文档</button>
+            <button id="extract-clear-selection" class="btn-secondary btn-small">清空选择</button>
+          </div>
+          <div id="extract-doc-list" class="extract-doc-list"></div>
+          <div class="extract-step-footer">
+            <span id="extract-doc-count" class="extract-count">已选 0 个文档</span>
+            <button id="extract-to-fields-btn" class="btn-primary" disabled>下一步：配置抽取字段</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Configure fields -->
+        <div id="extract-step-fields" class="extract-step hidden">
+          <div class="extract-step-title"><span class="extract-step-num">2</span> 配置抽取字段</div>
+          <div class="extract-step-hint">定义要抽取的字段名称、类型和描述。字段描述越准确，AI抽取结果越精准。</div>
+          <div class="extract-template-bar">
+            <label>模板：</label>
+            <select id="extract-template-select" class="extract-select">
+              <option value="">-- 自定义 --</option>
+            </select>
+            <button id="extract-save-template" class="btn-secondary btn-small">保存为模板</button>
+            <button id="extract-del-template" class="btn-secondary btn-small">删除模板</button>
+          </div>
+          <div id="extract-field-list" class="extract-field-list"></div>
+          <button id="extract-add-field-btn" class="extract-add-field-btn">+ 添加字段</button>
+          <div class="extract-step-footer">
+            <button id="extract-back-to-docs" class="btn-secondary">上一步</button>
+            <button id="extract-run-btn" class="btn-primary btn-large" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;vertical-align:-3px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              开始智能抽取
+            </button>
+          </div>
+        </div>
+
+        <!-- Step 3: Progress animation while extracting -->
+        <div id="extract-step-progress" class="extract-step hidden">
+          <div class="extract-progress-wrap">
+            <div class="extract-progress-spinner"></div>
+            <div class="extract-progress-title" id="extract-progress-title">正在初始化AI抽取...</div>
+            <div class="extract-progress-detail" id="extract-progress-detail">准备文档...</div>
+            <div class="extract-progress-bar-outer">
+              <div id="extract-progress-bar" class="extract-progress-bar" style="width:0%"></div>
+            </div>
+            <div class="extract-progress-percent" id="extract-progress-percent">0%</div>
+          </div>
+        </div>
+
+        <!-- Step 4: Review results & export -->
+        <div id="extract-step-result" class="extract-step hidden">
+          <div class="extract-step-title"><span class="extract-step-num">3</span> 审核抽取结果</div>
+          <div class="extract-step-hint">点击字段值可直接修改，带"待审核"标记的建议确认；点击溯源链接跳转至原文定位。全部确认后导出Excel。</div>
+          <div class="extract-result-toolbar">
+            <div class="extract-result-stats" id="extract-result-stats"></div>
+            <button id="extract-confirm-all-btn" class="btn-secondary btn-small">一键全部确认</button>
+            <button id="extract-rerun-btn" class="btn-secondary btn-small">重新配置字段</button>
+            <button id="extract-export-btn" class="btn-primary btn-small">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:-2px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              导出 Excel
+            </button>
+          </div>
+          <div class="extract-result-table-wrap">
+            <table id="extract-result-table" class="extract-result-table">
+              <thead id="extract-result-thead"></thead>
+              <tbody id="extract-result-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- Cache Confirm Dialog -->

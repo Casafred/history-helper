@@ -1,7 +1,10 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, clipboard } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   openExternal: (url) => ipcRenderer.send("open-external", url),
+  copyToClipboard: (text) => {
+    try { clipboard.writeText(String(text || "")); return true; } catch (e) { return false; }
+  },
   setHasAnnotations: (val) => ipcRenderer.send("set-has-annotations", !!val),
   openPopoutWindow: (url, title, opts) => ipcRenderer.send("open-popout-window", url, title, opts || null),
   exportPdfWithAnnotations: (data) => ipcRenderer.invoke("export-pdf-annotations", data),

@@ -229,8 +229,24 @@ function cnQueryUrl() {
 
 function openCNQuery(patentNo, title) {
   const url = cnQueryUrl();
-  const fullTitle = title || ("中国专利查询: " + patentNo);
-  openInAppWebview(url, fullTitle, { cnpn: patentNo });
+  // Copy patent number to clipboard
+  let copied = false;
+  if (window.electronAPI && typeof window.electronAPI.copyToClipboard === "function") {
+    copied = window.electronAPI.copyToClipboard(patentNo);
+  } else if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(String(patentNo)).then(() => { copied = true; }).catch(() => {});
+  }
+  // Open in external browser directly (no more in-app window for CNIPA due to WAF issues)
+  if (window.electronAPI && typeof window.electronAPI.openExternal === "function") {
+    window.electronAPI.openExternal(url);
+  } else {
+    window.open(url, "_blank");
+  }
+  if (copied) {
+    showToast("✅ 专利号 " + patentNo + " 已复制到剪贴板，已在外部浏览器打开CNIPA");
+  } else {
+    showToast("🌐 已在外部浏览器打开CNIPA，请手动复制专利号：" + patentNo);
+  }
 }
 
 function patentLinkButtons(patentNo) {
@@ -324,6 +340,7 @@ let pdfViewState = {
   searchMatches: [],
   searchCurrentIdx: -1,
   selectedBlockIds: [],
+  selectedAnnotIds: [],     // Multi-selected annotation ids for batch operations
   selecting: false,
   selectStart: null,
   selectEnd: null,
@@ -368,6 +385,20 @@ function showError(msg) {
   errorToast.textContent = msg;
   errorToast.classList.remove("hidden");
   setTimeout(() => { errorToast.classList.add("hidden"); }, 5000);
+}
+
+function showToast(msg, duration = 3000) {
+  let t = document.getElementById("__app_toast__");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "__app_toast__";
+    t.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#16a34a;color:#fff;padding:10px 22px;border-radius:8px;z-index:999999;font-size:14px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,0.25);max-width:80vw;pointer-events:none;transition:opacity .2s;";
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = "1";
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.opacity = "0"; }, duration);
 }
 
 function getChatProvider(providerOverride, modelOverride) {
@@ -687,9 +718,20 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
     document.querySelectorAll(".search-mode-btn").forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
     searchMode = btn.dataset.mode;
-    if (searchMode === "patent") {
+    const extractSection = document.getElementById("extract-mode-section");
+    if (searchMode === "extract") {
+      patentInput.placeholder = "智能抽取模式：从历史审查文档中批量抽取字段到Excel";
+      resultSection.classList.add("hidden");
+      patentDetailSection.classList.add("hidden");
+      if (batchSearchPanel) batchSearchPanel.classList.add("hidden");
+      if (batchResultsSection) batchResultsSection.classList.add("hidden");
+      if (extractSection) extractSection.classList.remove("hidden");
+      if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
+      initExtractMode();
+    } else if (searchMode === "patent") {
       patentInput.placeholder = "输入专利号查询原文信息（如 US12030161B2, EP4252965A3）";
       resultSection.classList.add("hidden");
+      if (extractSection) extractSection.classList.add("hidden");
       if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "";
       if (_pdOpenPatents.length > 0 && _pdActivePatent && _pdPatentCache[_pdActivePatent]) {
         patentDetailSection.classList.remove("hidden");
@@ -703,12 +745,12 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
     } else {
       patentInput.placeholder = "输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型";
       patentDetailSection.classList.add("hidden");
+      if (extractSection) extractSection.classList.add("hidden");
       if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
       if (batchSearchPanel) batchSearchPanel.classList.add("hidden");
       if (batchResultsSection) batchResultsSection.classList.add("hidden");
       if (pdFindBar) pdFindBar.classList.add("hidden");
       _clearFindHighlights();
-      // Restore result section if there's cached data
       if (currentData) resultSection.classList.remove("hidden");
     }
     updateFloatingBallsVisibility();
@@ -8045,9 +8087,14 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
           if (width > 5 && height > 5) {
             // 真正的框选，将框中的 blocks 加入选中集合
             selectBlocksInRect(left, top, width, height, page);
+            // Also select annotations inside the rect when not in annotation-creation mode
+            if (!pdfViewState.annotTool) {
+              selectAnnotsInRect(left, top, width, height, page, ev && ev.shiftKey);
+            }
           } else {
             // 过小的拖动视为点击空白，清除选择
             clearPdfBlockSelection();
+            clearPdfAnnotMultiSelection();
           }
         }
       }
@@ -9213,6 +9260,166 @@ function selectBlocksInRect(left, top, width, height, page) {
   });
   refreshPdfBlockSelectionVisual();
   updatePdfSelectionInfo();
+}
+
+// ---- Annotation multi-selection for batch operations ----
+function selectAnnotsInRect(left, top, width, height, page, additive) {
+  const wrapper = pdfViewState.renderedPages[page];
+  if (!wrapper) return;
+  if (!additive) pdfViewState.selectedAnnotIds = [];
+  const annots = wrapper.querySelectorAll(".pdf-annot");
+  annots.forEach(el => {
+    const aid = el.dataset.annotId;
+    if (!aid) return;
+    const ax = parseFloat(el.style.left) || 0;
+    const ay = parseFloat(el.style.top) || 0;
+    // Use bounding rect for elements with transform
+    const r = el.getBoundingClientRect();
+    const wr = wrapper.getBoundingClientRect();
+    const cx = r.left + r.width / 2 - wr.left;
+    const cy = r.top + r.height / 2 - wr.top;
+    if (cx >= left && cx <= left + width && cy >= top && cy <= top + height) {
+      if (!pdfViewState.selectedAnnotIds.includes(aid)) {
+        pdfViewState.selectedAnnotIds.push(aid);
+      }
+    }
+  });
+  refreshPdfAnnotMultiSelectionVisual();
+  showAnnotMultiToolbar();
+}
+
+function clearPdfAnnotMultiSelection() {
+  pdfViewState.selectedAnnotIds = [];
+  refreshPdfAnnotMultiSelectionVisual();
+  hideAnnotMultiToolbar();
+}
+
+function refreshPdfAnnotMultiSelectionVisual() {
+  document.querySelectorAll(".pdf-annot.annot-multi-selected").forEach(el => el.classList.remove("annot-multi-selected"));
+  pdfViewState.selectedAnnotIds.forEach(aid => {
+    const el = document.querySelector(`.pdf-annot[data-annot-id="${aid}"]`);
+    if (el) el.classList.add("annot-multi-selected");
+  });
+}
+
+function _getAnnotsByIds(ids) {
+  const docKey = _getCurrentPdfAnnotKey();
+  if (!docKey) return [];
+  const list = pdfViewState.annotList[docKey] || [];
+  return ids.map(id => list.find(a => a.id === id)).filter(Boolean);
+}
+
+function deleteSelectedAnnots() {
+  const ids = pdfViewState.selectedAnnotIds.slice();
+  if (ids.length === 0) return;
+  const docKey = _getCurrentPdfAnnotKey();
+  if (!docKey) return;
+  pushPdfAnnotUndo();
+  pdfViewState.annotList[docKey] = (pdfViewState.annotList[docKey] || []).filter(a => !ids.includes(a.id));
+  ids.forEach(p => {
+    const m = /^p(\d+):/.exec(p);
+    if (m) renderPdfAnnotsForPage(parseInt(m[1], 10));
+  });
+  // Re-render all affected pages
+  const affected = new Set();
+  (pdfViewState.annotList[docKey] || []).forEach(a => affected.add(a.page));
+  ids.forEach(id => { const m = /^p(\d+):/.exec(id); if (m) affected.add(parseInt(m[1], 10)); });
+  affected.forEach(p => renderPdfAnnotsForPage(p));
+  clearPdfAnnotMultiSelection();
+}
+
+function batchSetAnnotColor(color, which) {
+  const docKey = _getCurrentPdfAnnotKey();
+  if (!docKey) return;
+  const ids = pdfViewState.selectedAnnotIds;
+  if (ids.length === 0) return;
+  pushPdfAnnotUndo();
+  const list = pdfViewState.annotList[docKey] || [];
+  const affected = new Set();
+  list.forEach(a => {
+    if (ids.includes(a.id)) {
+      if (which === "line") a.stroke = color;
+      else if (which === "text") a.color = color;
+      else { a.color = color; a.stroke = color; }
+      affected.add(a.page);
+    }
+  });
+  affected.forEach(p => renderPdfAnnotsForPage(p));
+  refreshPdfAnnotMultiSelectionVisual();
+}
+
+function batchSetAnnotFontSize(size) {
+  const docKey = _getCurrentPdfAnnotKey();
+  if (!docKey) return;
+  const ids = pdfViewState.selectedAnnotIds;
+  if (ids.length === 0) return;
+  pushPdfAnnotUndo();
+  const list = pdfViewState.annotList[docKey] || [];
+  const affected = new Set();
+  list.forEach(a => {
+    if (ids.includes(a.id) && a.type === "note") {
+      a.fontSize = parseInt(size, 10) || a.fontSize;
+      affected.add(a.page);
+    }
+  });
+  affected.forEach(p => renderPdfAnnotsForPage(p));
+  refreshPdfAnnotMultiSelectionVisual();
+}
+
+function batchSetAnnotLineWidth(width) {
+  const docKey = _getCurrentPdfAnnotKey();
+  if (!docKey) return;
+  const ids = pdfViewState.selectedAnnotIds;
+  if (ids.length === 0) return;
+  pushPdfAnnotUndo();
+  const list = pdfViewState.annotList[docKey] || [];
+  const affected = new Set();
+  list.forEach(a => {
+    if (ids.includes(a.id) && (a.type === "underline" || a.type === "arrow")) {
+      a.lineWidth = parseInt(width, 10) || a.lineWidth;
+      affected.add(a.page);
+    }
+  });
+  affected.forEach(p => renderPdfAnnotsForPage(p));
+  refreshPdfAnnotMultiSelectionVisual();
+}
+
+function showAnnotMultiToolbar() {
+  let tb = document.getElementById("pdf-annot-multi-toolbar");
+  if (!tb) {
+    tb = document.createElement("div");
+    tb.id = "pdf-annot-multi-toolbar";
+    tb.className = "pdf-annot-multi-toolbar";
+    tb.innerHTML =
+      '<span class="pdf-amt-count" id="pdf-amt-count">0</span>' +
+      '<div class="pdf-amt-sep"></div>' +
+      '<label class="pdf-amt-label" title="线条/箭头颜色">线色<input type="color" id="pdf-amt-line-color" value="#e53935"></label>' +
+      '<label class="pdf-amt-label" title="文字颜色/注释颜色">字色<input type="color" id="pdf-amt-text-color" value="#e53935"></label>' +
+      '<label class="pdf-amt-label">字号' +
+        '<select id="pdf-amt-font-size"><option value="10">10</option><option value="12">12</option><option value="14" selected>14</option><option value="16">16</option><option value="18">18</option><option value="20">20</option><option value="24">24</option><option value="28">28</option><option value="32">32</option></select>' +
+      '</label>' +
+      '<label class="pdf-amt-label">粗细' +
+        '<select id="pdf-amt-line-width"><option value="1">1px</option><option value="2" selected>2px</option><option value="3">3px</option><option value="4">4px</option><option value="6">6px</option><option value="8">8px</option></select>' +
+      '</label>' +
+      '<div class="pdf-amt-sep"></div>' +
+      '<button class="pdf-amt-btn pdf-amt-delete" id="pdf-amt-delete" title="删除选中标注">🗑 删除</button>' +
+      '<button class="pdf-amt-btn pdf-amt-close" id="pdf-amt-close" title="取消选择">✕</button>';
+    readerPdfContainer.parentElement.appendChild(tb);
+
+    document.getElementById("pdf-amt-line-color").addEventListener("input", (e) => batchSetAnnotColor(e.target.value, "line"));
+    document.getElementById("pdf-amt-text-color").addEventListener("input", (e) => batchSetAnnotColor(e.target.value, "text"));
+    document.getElementById("pdf-amt-font-size").addEventListener("change", (e) => batchSetAnnotFontSize(e.target.value));
+    document.getElementById("pdf-amt-line-width").addEventListener("change", (e) => batchSetAnnotLineWidth(e.target.value));
+    document.getElementById("pdf-amt-delete").addEventListener("click", deleteSelectedAnnots);
+    document.getElementById("pdf-amt-close").addEventListener("click", clearPdfAnnotMultiSelection);
+  }
+  tb.classList.remove("hidden");
+  document.getElementById("pdf-amt-count").textContent = "已选 " + pdfViewState.selectedAnnotIds.length + " 个标注";
+}
+
+function hideAnnotMultiToolbar() {
+  const tb = document.getElementById("pdf-annot-multi-toolbar");
+  if (tb) tb.classList.add("hidden");
 }
 
 function updatePdfSelectionInfo() {
@@ -13574,3 +13781,550 @@ setTimeout(() => {
   const splash = document.getElementById("splash-screen");
   if (splash) { splash.style.opacity = "0"; setTimeout(() => splash.remove(), 500); }
 }, 8000);
+
+// ================================================================
+//  Intelligent Field Extraction Mode (智能抽取)
+// ================================================================
+const _extractState = {
+  selectedDocs: new Set(),     // patentNumbers
+  fields: [],                  // [{ id, name, type, description }]
+  results: [],                 // [{ patentNumber, docTitle, fields: { fieldId: { value, confidence, blockId?, page? } } }]
+  templates: [],
+  inited: false,
+};
+
+const EXTRACT_TEMPLATES_KEY = "patentlens-extract-templates";
+
+function loadExtractTemplates() {
+  try {
+    const raw = localStorage.getItem(EXTRACT_TEMPLATES_KEY);
+    _extractState.templates = raw ? JSON.parse(raw) : [];
+  } catch { _extractState.templates = []; }
+}
+function saveExtractTemplates() {
+  try { localStorage.setItem(EXTRACT_TEMPLATES_KEY, JSON.stringify(_extractState.templates)); } catch {}
+}
+
+function initExtractMode() {
+  if (_extractState.inited) {
+    renderExtractDocList();
+    return;
+  }
+  _extractState.inited = true;
+  loadExtractTemplates();
+  renderExtractTemplateSelect();
+
+  // Bind buttons once
+  const backBtn = document.getElementById("extract-back-btn");
+  if (backBtn) backBtn.addEventListener("click", () => {
+    // Switch back to dossier mode
+    document.querySelectorAll(".search-mode-btn").forEach(b => {
+      b.classList.toggle("active", b.dataset.mode === "dossier");
+    });
+    searchMode = "dossier";
+    const es = document.getElementById("extract-mode-section");
+    if (es) es.classList.add("hidden");
+    patentInput.placeholder = "输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型";
+    if (currentData) resultSection.classList.remove("hidden");
+  });
+
+  const docSearch = document.getElementById("extract-doc-search");
+  if (docSearch) docSearch.addEventListener("input", renderExtractDocList);
+  const selAll = document.getElementById("extract-select-all");
+  if (selAll) selAll.addEventListener("click", () => {
+    document.querySelectorAll(".extract-doc-item").forEach(item => {
+      if (item.classList.contains("excluded")) return;
+      const cb = item.querySelector("input[type=checkbox]");
+      if (cb && !cb.disabled) { cb.checked = true; _extractState.selectedDocs.add(cb.dataset.pn); }
+    });
+    updateExtractDocCount();
+  });
+  const clrSel = document.getElementById("extract-clear-selection");
+  if (clrSel) clrSel.addEventListener("click", () => {
+    _extractState.selectedDocs.clear();
+    document.querySelectorAll(".extract-doc-item input[type=checkbox]").forEach(cb => cb.checked = false);
+    updateExtractDocCount();
+  });
+  document.getElementById("extract-to-fields-btn").addEventListener("click", () => {
+    if (_extractState.selectedDocs.size === 0) { showError("请至少选择一个文档"); return; }
+    showExtractStep("fields");
+  });
+  document.getElementById("extract-back-to-docs").addEventListener("click", () => showExtractStep("docs"));
+  document.getElementById("extract-add-field-btn").addEventListener("click", () => addExtractField());
+  document.getElementById("extract-run-btn").addEventListener("click", runExtract);
+  document.getElementById("extract-save-template").addEventListener("click", saveExtractTemplate);
+  document.getElementById("extract-del-template").addEventListener("click", deleteExtractTemplate);
+  const tplSel = document.getElementById("extract-template-select");
+  if (tplSel) tplSel.addEventListener("change", () => loadExtractTemplate(tplSel.value));
+  document.getElementById("extract-confirm-all-btn").addEventListener("click", confirmAllExtracts);
+  document.getElementById("extract-rerun-btn").addEventListener("click", () => showExtractStep("fields"));
+  document.getElementById("extract-export-btn").addEventListener("click", exportExtractExcel);
+
+  // Default fields preset
+  if (_extractState.fields.length === 0) {
+    _extractState.fields = [
+      { id: _extractFieldId(), name: "申请号/专利号", type: "string", description: "本审查文档对应的申请号或专利号" },
+      { id: _extractFieldId(), name: "审查意见引用文献1", type: "string", description: "审查员引用的对比文件1的专利号/公开号" },
+      { id: _extractFieldId(), name: "审查意见引用文献2", type: "string", description: "审查员引用的对比文件2的专利号/公开号（如果有）" },
+      { id: _extractFieldId(), name: "审查员意见要点", type: "text", description: "审查员对本申请的主要驳回理由和意见的摘要" },
+    ];
+  }
+  renderExtractFieldList();
+
+  document.getElementById("extract-step-docs").classList.remove("hidden");
+  renderExtractDocList();
+}
+
+function showExtractStep(step) {
+  ["docs", "fields", "progress", "result"].forEach(s => {
+    const el = document.getElementById("extract-step-" + s);
+    if (el) el.classList.toggle("hidden", s !== step);
+  });
+}
+
+function renderExtractDocList() {
+  const list = document.getElementById("extract-doc-list");
+  if (!list) return;
+  const search = (document.getElementById("extract-doc-search")?.value || "").trim().toLowerCase();
+  list.innerHTML = "";
+  // Gather all documents from cached kanbanState (dossier cache)
+  const allCache = PatentCache.getAll();
+  const historyAll = PatentCache.getHistoryAll();
+  const items = [];
+  Object.entries(allCache).forEach(([pn, data]) => {
+    if (!data || !data.kanbanState) return;
+    const docs = (data.kanbanState.documents || []);
+    docs.forEach((doc, i) => {
+      const extraction = data.kanbanState.extractions && data.kanbanState.extractions[i];
+      const hasOCR = !!(extraction && extraction.blocks && extraction.blocks.length > 0);
+      const title = doc.title || doc.fileName || doc.name || "";
+      const label = pn + (title ? " - " + title : "");
+      items.push({ pn, docIdx: i, title, label, hasOCR, patentTitle: data.title || "" });
+    });
+  });
+  // Deduplicate by patentNumber+docIdx
+  const seen = new Set();
+  const unique = items.filter(it => {
+    const k = it.pn + "::" + it.docIdx;
+    if (seen.has(k)) return false; seen.add(k); return true;
+  }).sort((a, b) => (historyAll[b.pn]?.timestamp || 0) - (historyAll[a.pn]?.timestamp || 0));
+  const filtered = search ? unique.filter(it => it.label.toLowerCase().includes(search) || it.patentTitle.toLowerCase().includes(search)) : unique;
+  if (filtered.length === 0) {
+    list.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-secondary);font-size:13px;">还没有已加载OCR的审查文档。请先在审查文档模式中打开文档并完成OCR。</div>';
+    return;
+  }
+  filtered.forEach(it => {
+    const div = document.createElement("div");
+    div.className = "extract-doc-item" + (it.hasOCR ? "" : " excluded");
+    const cbId = "ext-doc-" + it.pn.replace(/[^a-zA-Z0-9]/g, "_") + "-" + it.docIdx;
+    const checked = _extractState.selectedDocs.has(it.pn + "::" + it.docIdx) ? "checked" : "";
+    const disabled = it.hasOCR ? "" : "disabled";
+    div.innerHTML =
+      '<input type="checkbox" id="' + cbId + '" data-pn="' + escapeHtml(it.pn) + '" data-docidx="' + it.docIdx + '" ' + checked + ' ' + disabled + '>' +
+      '<label for="' + cbId + '" class="extract-doc-patent">' + escapeHtml(it.pn) + '</label>' +
+      '<span class="extract-doc-title">' + escapeHtml(it.title || it.patentTitle) + '</span>' +
+      '<span class="extract-doc-ocr ' + (it.hasOCR ? "" : "no") + '">' + (it.hasOCR ? "已OCR" : "未OCR") + '</span>';
+    const cb = div.querySelector("input[type=checkbox]");
+    cb.addEventListener("change", () => {
+      const k = it.pn + "::" + it.docIdx;
+      if (cb.checked) _extractState.selectedDocs.add(k); else _extractState.selectedDocs.delete(k);
+      updateExtractDocCount();
+    });
+    list.appendChild(div);
+  });
+  updateExtractDocCount();
+}
+
+function updateExtractDocCount() {
+  const cnt = document.getElementById("extract-doc-count");
+  const nextBtn = document.getElementById("extract-to-fields-btn");
+  const n = _extractState.selectedDocs.size;
+  if (cnt) cnt.textContent = "已选 " + n + " 个文档";
+  if (nextBtn) nextBtn.disabled = n === 0;
+}
+
+function _extractFieldId() { return "f_" + Math.random().toString(36).slice(2, 10); }
+
+function addExtractField(preset) {
+  _extractState.fields.push({
+    id: _extractFieldId(),
+    name: preset?.name || "新字段",
+    type: preset?.type || "string",
+    description: preset?.description || ""
+  });
+  renderExtractFieldList();
+}
+
+function renderExtractFieldList() {
+  const list = document.getElementById("extract-field-list");
+  if (!list) return;
+  list.innerHTML = "";
+  _extractState.fields.forEach((f, idx) => {
+    const row = document.createElement("div");
+    row.className = "extract-field-row";
+    row.innerHTML =
+      '<div class="drag-handle">⋮⋮</div>' +
+      '<input type="text" class="ef-name" placeholder="字段名称" value="' + escapeHtml(f.name) + '">' +
+      '<select class="ef-type">' +
+        '<option value="string"' + (f.type === "string" ? " selected" : "") + '>文本 (String)</option>' +
+        '<option value="number"' + (f.type === "number" ? " selected" : "") + '>数字 (Number)</option>' +
+        '<option value="text"' + (f.type === "text" ? " selected" : "") + '>长文本 (Text)</option>' +
+        '<option value="date"' + (f.type === "date" ? " selected" : "") + '>日期 (Date)</option>' +
+      '</select>' +
+      '<textarea class="ef-desc" placeholder="字段定义/抽取要求（描述越准确抽取质量越高）" rows="1">' + escapeHtml(f.description) + '</textarea>' +
+      '<button class="extract-field-remove" title="删除该字段">✕</button>';
+    row.querySelector(".ef-name").addEventListener("input", e => f.name = e.target.value);
+    row.querySelector(".ef-type").addEventListener("change", e => f.type = e.target.value);
+    row.querySelector(".ef-desc").addEventListener("input", e => f.description = e.target.value);
+    row.querySelector(".extract-field-remove").addEventListener("click", () => {
+      _extractState.fields.splice(idx, 1);
+      renderExtractFieldList();
+    });
+    list.appendChild(row);
+  });
+  const runBtn = document.getElementById("extract-run-btn");
+  if (runBtn) runBtn.disabled = _extractState.fields.length === 0;
+}
+
+function renderExtractTemplateSelect() {
+  const sel = document.getElementById("extract-template-select");
+  if (!sel) return;
+  sel.innerHTML = '<option value="">-- 自定义 --</option>';
+  _extractState.templates.forEach((t, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = t.name;
+    sel.appendChild(opt);
+  });
+}
+function saveExtractTemplate() {
+  const name = prompt("请输入模板名称：");
+  if (!name) return;
+  if (_extractState.fields.length === 0) { showError("请先添加字段"); return; }
+  _extractState.templates.push({ name, fields: JSON.parse(JSON.stringify(_extractState.fields)) });
+  saveExtractTemplates();
+  renderExtractTemplateSelect();
+  showToast("✅ 模板已保存");
+}
+function deleteExtractTemplate() {
+  const sel = document.getElementById("extract-template-select");
+  if (!sel || sel.value === "") return;
+  const i = parseInt(sel.value, 10);
+  if (!confirm("确定删除模板：" + _extractState.templates[i].name + "？")) return;
+  _extractState.templates.splice(i, 1);
+  saveExtractTemplates();
+  renderExtractTemplateSelect();
+  sel.value = "";
+}
+function loadExtractTemplate(idx) {
+  if (idx === "") return;
+  const t = _extractState.templates[parseInt(idx, 10)];
+  if (!t) return;
+  _extractState.fields = JSON.parse(JSON.stringify(t.fields));
+  renderExtractFieldList();
+}
+
+// ---- AI extraction ----
+async function runExtract() {
+  if (_extractState.fields.length === 0) { showError("请至少配置一个字段"); return; }
+  const docs = getSelectedExtractDocs();
+  if (docs.length === 0) { showError("未找到可抽取的文档"); return; }
+
+  showExtractStep("progress");
+  const bar = document.getElementById("extract-progress-bar");
+  const pct = document.getElementById("extract-progress-percent");
+  const title = document.getElementById("extract-progress-title");
+  const detail = document.getElementById("extract-progress-detail");
+
+  _extractState.results = [];
+  const provider = getChatProvider();
+  if (!provider || !provider.apiKey) {
+    showError("请先配置AI模型API Key");
+    showExtractStep("fields");
+    document.getElementById("ai-settings-btn")?.click();
+    return;
+  }
+
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
+    title.textContent = `正在抽取 (${i + 1}/${docs.length})：${doc.pn}`;
+    detail.textContent = "准备OCR文本...";
+    bar.style.width = Math.round((i / docs.length) * 100) + "%";
+    pct.textContent = Math.round((i / docs.length) * 100) + "%";
+    await new Promise(r => setTimeout(r, 30));
+
+    const extraction = doc.extraction;
+    const text = (extraction.text || "").trim();
+    if (!text) {
+      _extractState.results.push({ patentNumber: doc.pn, docTitle: doc.title, fields: {}, failed: true, reason: "无OCR文本" });
+      continue;
+    }
+
+    // Build prompt
+    const schemaLines = _extractState.fields.map(f => `- ${f.name} (${f.type}): ${f.description || ""}`).join("\n");
+    const sysPrompt =
+`你是专利审查文档信息抽取助手。根据用户提供的审查文档OCR文本，抽取指定字段。
+输出必须是严格的JSON，每个字段包含value（抽取的值，未找到填""或null）和confidence（0-1之间的置信度数字，不要用字符串），以及evidence（原文中支持该抽取结果的最关键文本片段，用于溯源显示）。
+输出格式：{"fields": {"字段名": {"value": ..., "confidence": 0.0-1.0, "evidence": "原文片段"}}}`;
+    const userPrompt = `请从以下审查文档OCR文本中抽取指定字段：
+
+【字段定义】
+${schemaLines}
+
+【审查文档（专利号 ${doc.pn}）】
+${text.slice(0, 12000)}
+
+请输出严格的JSON对象，不要任何其他文字。`;
+
+    detail.textContent = "调用AI抽取...";
+    let result;
+    try {
+      const apiBase = window.AI.buildUrl(provider.type, provider.baseUrl);
+      const resp = await fetch(apiBase + "/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + provider.apiKey },
+        body: JSON.stringify({
+          model: provider.model,
+          messages: [
+            { role: "system", content: sysPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.1,
+          max_tokens: 4096,
+          response_format: { type: "json_object" },
+        }),
+      });
+      if (!resp.ok) throw new Error("API错误: " + resp.status);
+      const json = await resp.json();
+      const content = json.choices?.[0]?.message?.content || "{}";
+      let parsed;
+      try { parsed = JSON.parse(content); } catch (e) {
+        // Try to extract JSON from markdown code block
+        const m = content.match(/\{[\s\S]*\}/);
+        parsed = m ? JSON.parse(m[0]) : { fields: {} };
+      }
+      const fmap = {};
+      const fieldsObj = parsed.fields || parsed || {};
+      _extractState.fields.forEach(f => {
+        const raw = fieldsObj[f.name];
+        const entry = (raw && typeof raw === "object") ? raw : { value: raw, confidence: 0.5, evidence: "" };
+        let v = entry.value;
+        if (f.type === "number" && v !== null && v !== "" && v !== undefined) v = Number(v) || v;
+        // Try to find blockId for traceability
+        const blockId = findBlockByEvidence(extraction.blocks, entry.evidence || (typeof v === "string" ? v : ""));
+        fmap[f.name] = {
+          value: v === null || v === undefined ? "" : v,
+          confidence: Math.max(0, Math.min(1, Number(entry.confidence) || 0.5)),
+          evidence: entry.evidence || "",
+          blockId: blockId?.block_id || null,
+          page: blockId?.page || null,
+          status: "pending",
+        };
+      });
+      _extractState.results.push({ patentNumber: doc.pn, docTitle: doc.title, fields: fmap, failed: false });
+    } catch (err) {
+      console.error("[Extract] error:", err);
+      _extractState.results.push({ patentNumber: doc.pn, docTitle: doc.title, fields: {}, failed: true, reason: err.message });
+    }
+  }
+  bar.style.width = "100%"; pct.textContent = "100%";
+  title.textContent = "抽取完成";
+  detail.textContent = "共 " + docs.length + " 个文档，成功 " + _extractState.results.filter(r => !r.failed).length + " 个";
+  await new Promise(r => setTimeout(r, 500));
+  showExtractStep("result");
+  renderExtractResults();
+}
+
+function getSelectedExtractDocs() {
+  const allCache = PatentCache.getAll();
+  const docs = [];
+  _extractState.selectedDocs.forEach(k => {
+    const [pn, docIdxStr] = k.split("::");
+    const docIdx = parseInt(docIdxStr, 10);
+    const data = allCache[pn];
+    if (!data || !data.kanbanState) return;
+    const doc = (data.kanbanState.documents || [])[docIdx];
+    const extraction = (data.kanbanState.extractions || [])[docIdx];
+    if (!doc || !extraction) return;
+    docs.push({ pn, docIdx, title: doc.title || doc.fileName || pn, extraction, data });
+  });
+  return docs;
+}
+
+function findBlockByEvidence(blocks, evidence) {
+  if (!blocks || !blocks.length || !evidence) return null;
+  const evNorm = String(evidence).replace(/\s+/g, "").slice(0, 50);
+  if (!evNorm) return null;
+  let best = null, bestScore = 0;
+  for (const b of blocks) {
+    const c = String(b.content || "").replace(/\s+/g, "");
+    if (!c) continue;
+    if (c.includes(evNorm) || evNorm.includes(c.slice(0, 30))) {
+      const score = Math.min(c.length, evNorm.length);
+      if (score > bestScore) { bestScore = score; best = b; }
+    }
+  }
+  return best || blocks[0];
+}
+
+function renderExtractResults() {
+  const thead = document.getElementById("extract-result-thead");
+  const tbody = document.getElementById("extract-result-tbody");
+  const stats = document.getElementById("extract-result-stats");
+  if (!thead || !tbody) return;
+  thead.innerHTML = ""; tbody.innerHTML = "";
+
+  // Build header
+  const trh = document.createElement("tr");
+  trh.innerHTML = '<th>专利号</th>' + _extractState.fields.map(f => '<th>' + escapeHtml(f.name) + '</th>').join("") + '<th style="width:60px;">操作</th>';
+  thead.appendChild(trh);
+
+  let total = 0, confirmed = 0, pending = 0;
+  _extractState.results.forEach((r, ri) => {
+    const tr = document.createElement("tr");
+    tr.dataset.row = ri;
+    let html = '<td class="extract-cell-doc">' + escapeHtml(r.patentNumber) + '</td>';
+    _extractState.fields.forEach(f => {
+      const cell = r.fields[f.name] || { value: "", confidence: 0, status: r.failed ? "failed" : "pending" };
+      if (cell.status === "confirmed") confirmed++; else if (cell.status === "pending") pending++;
+      total++;
+      const confClass = cell.confidence >= 0.8 ? "conf-high" : cell.confidence >= 0.5 ? "conf-mid" : "conf-low";
+      const confPct = Math.round((cell.confidence || 0) * 100);
+      const statusClass = cell.status === "confirmed" ? "badge-confirmed" : cell.status === "modified" ? "badge-modified" : "badge-pending";
+      const statusText = cell.status === "confirmed" ? "已确认" : cell.status === "modified" ? "已修改" : "待审核";
+      html += '<td class="extract-cell-value" data-row="' + ri + '" data-field="' + escapeHtml(f.name) + '">' +
+        '<div><span class="extract-status-badge ' + statusClass + '">' + statusText + '</span>' +
+        '<span class="extract-cell-confidence ' + confClass + '">' + confPct + '%</span></div>' +
+        '<div class="val-text" title="点击编辑">' + escapeHtml(String(cell.value ?? "")) + '</div>' +
+        (cell.blockId ? '<div class="extract-trace-link" data-row="' + ri + '" data-field="' + escapeHtml(f.name) + '">📍 溯源定位</div>' : '') +
+        '</td>';
+    });
+    html += '<td class="extract-cell-actions"><button class="btn-confirm" data-row="' + ri + '">确认行</button></td>';
+    tr.innerHTML = html;
+    tbody.appendChild(tr);
+  });
+
+  // Click-to-edit
+  tbody.querySelectorAll(".extract-cell-value .val-text").forEach(el => {
+    el.addEventListener("click", () => {
+      const td = el.closest(".extract-cell-value");
+      const row = parseInt(td.dataset.row, 10);
+      const field = td.dataset.field;
+      const cell = _extractState.results[row].fields[field];
+      if (!cell) return;
+      const ta = document.createElement("textarea");
+      ta.className = "val-edit";
+      ta.value = cell.value ?? "";
+      el.replaceWith(ta);
+      ta.focus();
+      const finish = (save) => {
+        if (save) {
+          cell.value = ta.value;
+          cell.status = cell.status === "confirmed" ? "confirmed" : "modified";
+        }
+        renderExtractResults();
+      };
+      ta.addEventListener("blur", () => finish(true));
+      ta.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") { e.preventDefault(); finish(false); }
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(true); }
+      });
+    });
+  });
+  // Trace link
+  tbody.querySelectorAll(".extract-trace-link").forEach(el => {
+    el.addEventListener("click", () => {
+      const row = parseInt(el.dataset.row, 10);
+      const field = el.dataset.field;
+      const cell = _extractState.results[row].fields[field];
+      if (!cell || !cell.blockId) return;
+      // Jump to reader with patent doc
+      openExtractDocAndJump(_extractState.results[row].patentNumber, cell);
+    });
+  });
+  // Confirm row
+  tbody.querySelectorAll(".extract-cell-actions .btn-confirm").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const row = parseInt(btn.dataset.row, 10);
+      Object.values(_extractState.results[row].fields).forEach(c => c.status = "confirmed");
+      renderExtractResults();
+    });
+  });
+  // Row styling
+  tbody.querySelectorAll("tr").forEach(tr => {
+    const row = parseInt(tr.dataset.row, 10);
+    const r = _extractState.results[row];
+    if (r && Object.values(r.fields).every(c => c.status === "confirmed")) tr.classList.add("row-confirmed");
+  });
+
+  if (stats) stats.textContent = `共 ${_extractState.results.length} 个文档，${_extractState.fields.length} 个字段，共 ${total} 个单元格；待审核 ${pending}，已确认 ${confirmed}`;
+}
+
+function confirmAllExtracts() {
+  _extractState.results.forEach(r => {
+    Object.values(r.fields).forEach(c => c.status = "confirmed");
+  });
+  renderExtractResults();
+  showToast("✅ 全部确认完成，可以导出Excel");
+}
+
+async function openExtractDocAndJump(patentNo, cell) {
+  showToast("正在打开文档...");
+  // Switch UI to dossier
+  document.querySelectorAll(".search-mode-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === "dossier"));
+  searchMode = "dossier";
+  document.getElementById("extract-mode-section")?.classList.add("hidden");
+  resultSection.classList.remove("hidden");
+  if (patentInput) patentInput.value = patentNo;
+  patentDetailSection.classList.add("hidden");
+  if (batchSearchPanel) batchSearchPanel.classList.add("hidden");
+  if (batchResultsSection) batchResultsSection.classList.add("hidden");
+
+  // Restore from cache
+  if (typeof restoreFromCache === "function") {
+    restoreFromCache(patentNo);
+  }
+  setTimeout(() => {
+    if (typeof openReader === "function") openReader();
+    setTimeout(() => {
+      if (cell.blockId) {
+        const el = readerPdfContainer?.querySelector(`.pdf-block-overlay[data-block-id="${cell.blockId}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.add("highlight");
+          setTimeout(() => el.classList.remove("highlight"), 2500);
+        } else if (cell.page && typeof pdfGoToPage === "function") {
+          pdfGoToPage(cell.page);
+        }
+      }
+    }, 1500);
+  }, 400);
+}
+
+function exportExtractExcel() {
+  // Generate CSV (Excel-compatible) for simplicity and zero-dependency
+  const headers = ["专利号", ..._extractState.fields.map(f => f.name), "状态"];
+  const rows = _extractState.results.map(r => {
+    return [r.patentNumber, ..._extractState.fields.map(f => {
+      const c = r.fields[f.name];
+      return c ? String(c.value ?? "") : "";
+    }), r.failed ? "失败: " + (r.reason || "") : "已完成"];
+  });
+  const csv = [headers, ...rows].map(row =>
+    row.map(v => {
+      const s = String(v ?? "").replace(/"/g, '""');
+      return /[",\n\r]/.test(s) ? `"${s}"` : s;
+    }).join(",")
+  ).join("\r\n");
+  // Add BOM for Excel UTF-8
+  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "智能抽取结果_" + new Date().toISOString().slice(0, 10).replace(/-/g, "") + "_" + Date.now().toString(36) + ".csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast("✅ 已导出CSV（可用Excel直接打开）");
+}
