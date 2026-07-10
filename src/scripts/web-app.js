@@ -286,6 +286,10 @@ const readerDockBtn = null;
 const readerFullscreenBtn = null;
 const readerPdfView = document.getElementById("reader-pdf-view");
 const readerPdfContainer = document.getElementById("reader-pdf-container");
+const pdfTocBtn = document.getElementById("pdf-toc-btn");
+const pdfTocPanel = document.getElementById("pdf-toc-panel");
+const pdfTocList = document.getElementById("pdf-toc-list");
+const pdfTocClose = document.getElementById("pdf-toc-close");
 const pdfPageInfo = document.getElementById("pdf-page-info");
 const pdfPageInput = document.getElementById("pdf-page-input");
 const pdfZoomLevel = document.getElementById("pdf-zoom-level");
@@ -7975,6 +7979,10 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
     pdfViewState.renderedPages[pageNum] = wrapper;
   }
 
+  // Build document TOC from title/paragraph_title blocks
+  buildPdfToc(blocks);
+  installPdfTocScrollTracker();
+
   // PDF scroll → extract panel page sync (install once)
   if (!readerPdfContainer._extractScrollSyncInstalled) {
     readerPdfContainer._extractScrollSyncInstalled = true;
@@ -8217,6 +8225,171 @@ async function rerenderPdfPages() {
   // Restore selection visual after re-render
   refreshPdfBlockSelectionVisual();
   updatePdfSelectionInfo();
+}
+
+// ---- PDF TOC (Table of Contents) from paragraph_title blocks ----
+let _tocItems = [];
+let _activeTocIndex = -1;
+let _tocScrollRafPending = false;
+
+function buildPdfToc(blocks) {
+  _tocItems = [];
+  _activeTocIndex = -1;
+  if (!pdfTocList) return;
+  pdfTocList.innerHTML = "";
+
+  const titles = (blocks || []).filter(b => {
+    if (!b || !b.content) return false;
+    const lbl = (b.label || "").toLowerCase();
+    return lbl === "title" || lbl === "paragraph_title";
+  });
+
+  if (titles.length === 0) {
+    pdfTocPanel.classList.add("hidden");
+    if (pdfTocBtn) pdfTocBtn.classList.remove("active");
+    return;
+  }
+
+  // Build toc data
+  _tocItems = titles.map((b, i) => {
+    const wrapper = pdfViewState.renderedPages[b.page];
+    let targetEl = null;
+    if (wrapper) {
+      targetEl = wrapper.querySelector(`[data-block-id="${b.block_id}"]`);
+      if (!targetEl) {
+        // Fallback: find overlay div by data-page+index
+        const overlays = wrapper.querySelectorAll(".pdf-block-overlay");
+        for (const ov of overlays) {
+          if (ov.dataset && ov.dataset.blockId === b.block_id) { targetEl = ov; break; }
+        }
+      }
+    }
+    return {
+      index: i,
+      blockId: b.block_id,
+      page: b.page,
+      text: (b.content || "").trim().replace(/\s+/g, " "),
+      targetEl,
+    };
+  }).filter(t => t.text.length > 0 && t.text.length < 200);
+
+  if (_tocItems.length === 0) {
+    pdfTocPanel.classList.add("hidden");
+    if (pdfTocBtn) pdfTocBtn.classList.remove("active");
+    return;
+  }
+
+  // Render TOC items
+  _tocItems.forEach((t) => {
+    const btn = document.createElement("button");
+    btn.className = "pdf-toc-item";
+    btn.dataset.tocIndex = t.index;
+    const shortText = t.text.length > 40 ? t.text.slice(0, 40) + "…" : t.text;
+    btn.innerHTML =
+      '<span class="pdf-toc-item-content">' +
+      '<span class="pdf-toc-item-text"></span>' +
+      '<span class="pdf-toc-page-num">p.' + t.page + '</span>' +
+      '</span>';
+    btn.querySelector(".pdf-toc-item-text").textContent = shortText;
+    btn.title = t.text + " (第 " + t.page + " 页)";
+    btn.addEventListener("click", () => {
+      jumpToTocItem(t.index);
+    });
+    pdfTocList.appendChild(btn);
+  });
+
+  // Auto-show toc panel when there are titles
+  pdfTocPanel.classList.remove("hidden");
+  if (pdfTocBtn) pdfTocBtn.classList.add("active");
+}
+
+function jumpToTocItem(idx) {
+  const t = _tocItems[idx];
+  if (!t) return;
+  const container = readerPdfContainer;
+  if (!container) return;
+  const wrapper = pdfViewState.renderedPages[t.page];
+  if (!wrapper) return;
+  // Re-resolve targetEl if missing (may happen after re-render)
+  let el = t.targetEl;
+  if (!el || !document.body.contains(el)) {
+    el = wrapper.querySelector(`[data-block-id="${t.blockId}"]`);
+    t.targetEl = el;
+  }
+  const containerRect = container.getBoundingClientRect();
+  let targetTop;
+  if (el) {
+    const elRect = el.getBoundingClientRect();
+    targetTop = container.scrollTop + (elRect.top - containerRect.top) - 8;
+  } else {
+    const wrapRect = wrapper.getBoundingClientRect();
+    targetTop = container.scrollTop + (wrapRect.top - containerRect.top);
+  }
+  container.scrollTo({ top: targetTop, behavior: "smooth" });
+  setActiveTocItem(idx);
+}
+
+function setActiveTocItem(idx) {
+  if (_activeTocIndex === idx) return;
+  _activeTocIndex = idx;
+  if (!pdfTocList) return;
+  const items = pdfTocList.querySelectorAll(".pdf-toc-item");
+  items.forEach((el, i) => {
+    el.classList.toggle("active", i === idx);
+  });
+  // Scroll toc list so active item is visible
+  const activeEl = items[idx];
+  if (activeEl) {
+    const listRect = pdfTocList.getBoundingClientRect();
+    const elRect = activeEl.getBoundingClientRect();
+    if (elRect.top < listRect.top || elRect.bottom > listRect.bottom) {
+      activeEl.scrollIntoView({ block: "nearest" });
+    }
+  }
+}
+
+function updateActiveTocByScroll() {
+  if (_tocItems.length === 0 || !readerPdfContainer) return;
+  const container = readerPdfContainer;
+  const containerRect = container.getBoundingClientRect();
+  const scrollMid = containerRect.top + containerRect.height * 0.2;
+  let activeIdx = -1;
+  for (let i = 0; i < _tocItems.length; i++) {
+    const t = _tocItems[i];
+    const wrapper = pdfViewState.renderedPages[t.page];
+    if (!wrapper) continue;
+    let el = t.targetEl;
+    if (!el || !document.body.contains(el)) {
+      el = wrapper.querySelector(`[data-block-id="${t.blockId}"]`);
+      t.targetEl = el;
+    }
+    let top;
+    if (el) {
+      top = el.getBoundingClientRect().top;
+    } else {
+      top = wrapper.getBoundingClientRect().top;
+    }
+    if (top <= scrollMid) {
+      activeIdx = i;
+    } else {
+      break;
+    }
+  }
+  if (activeIdx >= 0) setActiveTocItem(activeIdx);
+}
+
+function installPdfTocScrollTracker() {
+  if (!readerPdfContainer) return;
+  if (readerPdfContainer._tocScrollTrackerInstalled) return;
+  readerPdfContainer._tocScrollTrackerInstalled = true;
+  readerPdfContainer.addEventListener("scroll", () => {
+    if (_tocScrollRafPending) return;
+    _tocScrollRafPending = true;
+    requestAnimationFrame(() => {
+      _tocScrollRafPending = false;
+      updateActiveTocByScroll();
+    });
+  });
 }
 
 function updatePdfToolbar() {
@@ -10948,6 +11121,26 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (pdfZoomFit) {
     pdfZoomFit.addEventListener("click", pdfZoomFitAction);
+  }
+
+  // PDF TOC toggle button
+  if (pdfTocBtn) {
+    pdfTocBtn.addEventListener("click", () => {
+      if (!pdfTocPanel) return;
+      const hidden = pdfTocPanel.classList.toggle("hidden");
+      pdfTocBtn.classList.toggle("active", !hidden);
+      if (!hidden) {
+        // Panel opened — refresh highlights
+        requestAnimationFrame(() => updateActiveTocByScroll());
+      }
+    });
+  }
+  if (pdfTocClose) {
+    pdfTocClose.addEventListener("click", () => {
+      if (!pdfTocPanel) return;
+      pdfTocPanel.classList.add("hidden");
+      if (pdfTocBtn) pdfTocBtn.classList.remove("active");
+    });
   }
 
   // PDF OCR button

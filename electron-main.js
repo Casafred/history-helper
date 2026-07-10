@@ -478,7 +478,7 @@ function _paddleV2FetchJsonlResult(jsonlUrl) {
                   order: block.block_order || 0,
                   group_id: block.group_id || 0,
                 });
-                if (content && ["text", "title", "table", "formula"].includes(label)) {
+                if (content && ["text", "title", "paragraph_title", "table", "formula"].includes(label)) {
                   allText.push(content);
                 }
               });
@@ -643,7 +643,7 @@ function ocrWithGlm(pdfBase64, apiKey) {
                   page: pageNum, label, content, bbox: pixelBbox,
                   order: block.index || blockIdx, group_id: 0,
                 });
-                if (content && ["text", "title", "table", "formula"].includes(label)) {
+                if (content && ["text", "title", "paragraph_title", "table", "formula"].includes(label)) {
                   allText.push(content);
                 }
               });
@@ -1365,6 +1365,23 @@ function createPopoutWindow(targetUrl, title, port, opts) {
   // CNIPA中国专利查询系统：使用独立BrowserWindow直接加载（瑞数WAF需要完整浏览器环境）
   if (targetUrl && (targetUrl.indexOf("cnipa.gov.cn") !== -1 || targetUrl.indexOf("cpquery") !== -1)) {
     const patentNo = (opts && opts.cnpn) ? String(opts.cnpn) : "";
+    // Use dedicated persistent session to preserve login cookies
+    const cnSession = session.fromPartition("persist:cnipa-v3", { cache: true });
+    cnSession.setUserAgent(CHROME_UA, "zh-CN");
+    cnSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+      callback(true);
+    });
+    // Fix Sec-CH-UA headers to include Google Chrome brand (critical for RSecurity WAF bypass)
+    cnSession.webRequest.onBeforeSendHeaders((details, callback) => {
+      const headers = { ...details.requestHeaders };
+      // Only set the core Sec-CH-UA headers that Electron/Chromium sends but misbrands
+      headers["sec-ch-ua"] = '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"';
+      headers["sec-ch-ua-mobile"] = "?0";
+      headers["sec-ch-ua-platform"] = '"Windows"';
+      headers["accept-language"] = "zh-CN,zh;q=0.9,en;q=0.8";
+      delete headers["X-Electron-Version"];
+      callback({ requestHeaders: headers });
+    });
     const cnWin = new BrowserWindow({
       width: 1200,
       height: 850,
@@ -1375,6 +1392,7 @@ function createPopoutWindow(targetUrl, title, port, opts) {
         contextIsolation: false,
         sandbox: false,
         webSecurity: true,
+        session: cnSession,
         preload: path.join(__dirname, "cnipa-preload.js"),
       },
     });
@@ -1396,7 +1414,7 @@ function createPopoutWindow(targetUrl, title, port, opts) {
             tb.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#dc2626;color:#fff;padding:8px 16px;display:flex;align-items:center;gap:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);box-sizing:border-box;';
             tb.innerHTML = '<span style="font-weight:600;white-space:nowrap;">中国专利查询</span><span style="opacity:0.8;">|</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;background:rgba(255,255,255,0.15);padding:4px 10px;border-radius:4px;">' + ${JSON.stringify(patentNo)} + '</span><button id="__cnipa_copy_btn__" style="background:#fff;color:#dc2626;border:none;padding:5px 14px;border-radius:4px;cursor:pointer;font-weight:600;font-size:13px;white-space:nowrap;">📋 复制号码</button>';
             document.documentElement.appendChild(tb);
-            document.body.style.setProperty('margin-top', '44px', 'important');
+            if (document.body) document.body.style.setProperty('margin-top', '44px', 'important');
             var toastTimer = null;
             function showToast(msg) {
               var old = document.getElementById('__cnipa_toast__');
@@ -1431,7 +1449,6 @@ function createPopoutWindow(targetUrl, title, port, opts) {
                 });
               } catch(e) { showToast('复制失败'); }
             });
-            // Show initial toast
             setTimeout(function() { showToast('✅ 专利号已复制到剪贴板，可直接粘贴查询'); }, 500);
           } catch(e) { console.log('[CNIPA toolbar] inject error:', e); }
         })();
@@ -1446,7 +1463,30 @@ function createPopoutWindow(targetUrl, title, port, opts) {
       setTimeout(() => injectToolbar(cnWin.webContents), 500);
     });
     console.log("[CNIPA] Loading URL:", targetUrl);
-    cnWin.loadURL(targetUrl, { userAgent: CHROME_UA });
+    // Helper to load URL, with auto-retry on 412 by clearing site data first
+    const loadCnipa = (retryCount = 0) => {
+      cnWin.loadURL(targetUrl, {
+        userAgent: CHROME_UA,
+        extraHeaders: "Cache-Control: no-cache\nPragma: no-cache",
+      }).catch((err) => {
+        console.log("[CNIPA] loadURL error:", err.message);
+      });
+    };
+    // On 412 response, clear WAF cookies and reload once
+    cnWin.webContents.on("did-redirect-navigation", () => {});
+    cnSession.webRequest.onCompleted((details) => {
+      if (details.statusCode === 412 && details.url && details.url.indexOf("cpquery") !== -1 && !cnWin._retried412) {
+        cnWin._retried412 = true;
+        console.log("[CNIPA] Got 412, clearing WAF cookies and reloading...");
+        cnSession.clearStorageData({
+          origin: "https://cpquery.cponline.cnipa.gov.cn",
+          storages: ["cookies"],
+        }).then(() => {
+          cnWin.loadURL(targetUrl, { userAgent: CHROME_UA });
+        });
+      }
+    });
+    loadCnipa();
     cnWin.webContents.on("did-start-loading", () => {
       console.log("[CNIPA] did-start-loading");
     });

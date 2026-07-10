@@ -6563,4 +6563,89 @@ body {
   outline: 1px solid #e65100;
 }
 
+/* PDF Document TOC (Table of Contents) sidebar */
+.pdf-toc-panel {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: none;
+}
+.pdf-toc-panel.hidden {
+  display: none;
+}
+.pdf-toc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.pdf-toc-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+}
+.pdf-toc-item {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px 6px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background .15s, color .15s, border-color .15s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pdf-toc-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.pdf-toc-item.active {
+  background: var(--accent-bg, rgba(59, 130, 246, 0.08));
+  color: var(--accent, #3b82f6);
+  border-left-color: var(--accent, #3b82f6);
+  font-weight: 500;
+}
+.pdf-toc-empty {
+  padding: 20px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.pdf-toc-page-num {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+.pdf-toc-item-content {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.pdf-toc-item-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 

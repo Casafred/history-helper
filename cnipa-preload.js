@@ -1,82 +1,51 @@
 // Preload script: spoof Chrome browser fingerprint for CNIPA WAF bypass
-// This script runs BEFORE any page scripts to masquerade as real Chrome
+// Runs BEFORE page scripts in the same world (contextIsolation: false)
 
-// Delete Electron/Node.js specific objects that leak on window
-delete window.require;
-delete window.exports;
-delete window.module;
-delete window.process;
-delete window.Buffer;
-delete window.global;
-if (window.__filename) delete window.__filename;
-if (window.__dirname) delete window.__dirname;
+// Spoof navigator vendor to Google Inc.
+Object.defineProperty(navigator, 'vendor', { get: () => 'Google Inc.', configurable: true });
+Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true });
+Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en-US', 'en'], configurable: true });
+Object.defineProperty(navigator, 'platform', { get: () => 'Win32', configurable: true });
 
-// Spoof navigator.webdriver to false (not controlled by automation)
-Object.defineProperty(navigator, 'webdriver', {
-  get: () => false,
-  configurable: true,
-});
-
-// Spoof navigator.languages
-Object.defineProperty(navigator, 'languages', {
-  get: () => ['zh-CN', 'zh', 'en-US', 'en'],
-  configurable: true,
-});
-
-// Spoof navigator.plugins (Chrome has plugins like PDF Viewer, Native Client etc.)
-Object.defineProperty(navigator, 'plugins', {
-  get: () => {
-    const pluginData = [
-      { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-      { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-      { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
-    ];
-    const plugins = [];
-    plugins.refresh = () => {};
-    pluginData.forEach((p, i) => {
-      const plugin = {
-        name: p.name,
-        filename: p.filename,
-        description: p.description,
-        length: 0,
-        item: () => null,
-        namedItem: () => null,
-      };
-      plugins[i] = plugin;
-      plugins[p.name] = plugin;
-    });
-    Object.defineProperty(plugins, 'length', { value: pluginData.length });
-    return plugins;
-  },
-  configurable: true,
-});
-
-// Spoof navigator.mimeTypes to go along with plugins
-Object.defineProperty(navigator, 'mimeTypes', {
-  get: () => {
-    const mimeTypes = [];
-    mimeTypes.refresh = () => {};
-    return mimeTypes;
-  },
-  configurable: true,
-});
-
-// Spoof navigator.connection if needed (standard values)
-if (!navigator.connection) {
-  Object.defineProperty(navigator, 'connection', {
-    get: () => ({
-      effectiveType: '4g',
-      rtt: 50,
-      downlink: 10,
-      saveData: false,
-    }),
-    configurable: true,
-  });
+// Spoof window.chrome namespace
+if (!window.chrome) window.chrome = {};
+window.chrome.app = {
+  isInstalled: false,
+  InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+  RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+  getDetails: () => null,
+  getIsInstalled: () => false,
+  installState: () => 'not_installed',
+  runningState: () => 'cannot_run',
+};
+window.chrome.webstore = {
+  install: () => {},
+  onDownloadProgress: { addListener: () => {}, removeListener: () => {} },
+  onInstallStageChanged: { addListener: () => {}, removeListener: () => {} },
+};
+if (!window.chrome.csi) {
+  window.chrome.csi = function() {
+    return { onloadT: Date.now(), pageT: 50, startT: Date.now() - 50 };
+  };
 }
-
-// Spoof window.chrome object (Chrome-specific namespace)
-if (!window.chrome) {
-  window.chrome = {};
+if (!window.chrome.loadTimes) {
+  window.chrome.loadTimes = function() {
+    return {
+      commitLoadTime: Date.now() / 1000,
+      connectionInfo: 'h2',
+      finishDocumentLoadTime: Date.now() / 1000,
+      finishLoadTime: Date.now() / 1000,
+      firstPaintAfterLoadTime: 0,
+      firstPaintTime: Date.now() / 1000,
+      navigationType: 'Other',
+      npnNegotiatedProtocol: 'h2',
+      requestTime: Date.now() / 1000,
+      startLoadTime: Date.now() / 1000,
+      wasAlternateProtocolAvailable: false,
+      wasFetchedViaSpdy: true,
+      wasNpnNegotiated: true,
+    };
+  };
 }
 if (!window.chrome.runtime) {
   window.chrome.runtime = {
@@ -96,52 +65,16 @@ if (!window.chrome.runtime) {
     sendMessage: () => {},
   };
 }
-if (!window.chrome.csi) {
-  window.chrome.csi = () => ({
-    onloadT: Date.now(),
-    pageT: Date.now() - performance.timing.navigationStart,
-    startT: performance.timing.navigationStart,
-  });
-}
-if (!window.chrome.loadTimes) {
-  window.chrome.loadTimes = () => ({
-    commitLoadTime: Date.now() / 1000,
-    connectionInfo: 'h2',
-    finishDocumentLoadTime: Date.now() / 1000,
-    finishLoadTime: Date.now() / 1000,
-    firstPaintAfterLoadTime: 0,
-    firstPaintTime: Date.now() / 1000,
-    navigationType: 'Other',
-    npnNegotiatedProtocol: 'h2',
-    requestTime: (Date.now() - 100) / 1000,
-    startLoadTime: (Date.now() - 200) / 1000,
-    wasAlternateProtocolAvailable: false,
-    wasFetchedViaSpdy: true,
-    wasNpnNegotiated: true,
-  });
-}
 
-// Spoof Notification permission (Chrome defaults to 'default')
-if (!window.Notification) {
-  window.Notification = { permission: 'default', requestPermission: (cb) => { if (cb) cb('default'); return Promise.resolve('default'); } };
-}
-
-// Spoof Permissions API
-const originalQuery = window.navigator.permissions ? window.navigator.permissions.query : null;
-if (originalQuery) {
-  window.navigator.permissions.query = (parameters) => (
-    parameters.name === 'notifications' ?
-      Promise.resolve({ state: Notification.permission }) :
-      parameters.name === 'clipboard-read' || parameters.name === 'clipboard-write' ?
-        Promise.resolve({ state: 'granted', onchange: null }) :
-        originalQuery(parameters)
-  );
-}
-
-// Spoof screen resolution to common Windows values
-Object.defineProperty(window.screen, 'width', { get: () => 1920, configurable: true });
-Object.defineProperty(window.screen, 'height', { get: () => 1080, configurable: true });
-Object.defineProperty(window.screen, 'availWidth', { get: () => 1920, configurable: true });
-Object.defineProperty(window.screen, 'availHeight', { get: () => 1040, configurable: true });
-Object.defineProperty(window.screen, 'colorDepth', { get: () => 24, configurable: true });
-Object.defineProperty(window.screen, 'pixelDepth', { get: () => 24, configurable: true });
+// Hide Electron/Node globals with undefined getters
+const _hide = { configurable: true, get: () => undefined, set: () => {} };
+['require', 'exports', 'module', 'process', 'Buffer', 'global', '__filename', '__dirname', 'setImmediate'].forEach(k => {
+  try {
+    if (k in window) Object.defineProperty(window, k, _hide);
+  } catch (e) {}
+});
+try {
+  if ('require' in globalThis) Object.defineProperty(globalThis, 'require', _hide);
+  if ('process' in globalThis) Object.defineProperty(globalThis, 'process', _hide);
+  if ('Buffer' in globalThis) Object.defineProperty(globalThis, 'Buffer', _hide);
+} catch (e) {}
