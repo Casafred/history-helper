@@ -6919,6 +6919,27 @@ body {
   border-radius: 4px;
 }
 .extract-patent-remove:hover { background: #fee2e2; color: #dc2626; }
+.extract-patent-refresh {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  transition: background .15s, color .15s, transform .3s;
+}
+.extract-patent-refresh:hover {
+  background: var(--accent-light, rgba(59,130,246,0.1));
+  color: var(--accent, #3b82f6);
+}
+.extract-patent-band.loading .extract-patent-refresh {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 
 .extract-patent-docs {
   display: none;
@@ -6956,6 +6977,41 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.extract-doc-name {
+  flex: 1;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.extract-band-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px dashed var(--border);
+  background: var(--bg-primary);
+}
+.extract-band-search {
+  flex: 1;
+  padding: 5px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  outline: none;
+}
+.extract-band-search:focus { border-color: var(--accent, #3b82f6); }
+.extract-band-quick {
+  display: flex;
+  gap: 4px;
+}
+.extract-refresh-inline-btn {
+  margin-left: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
 }
 .extract-doc-date {
   font-size: 12px;

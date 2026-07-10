@@ -9323,7 +9323,7 @@ function deleteSelectedAnnots() {
   if (ids.length === 0) return;
   const docKey = _getCurrentPdfAnnotKey();
   if (!docKey) return;
-  pushPdfAnnotUndo();
+  _pushAnnotUndo(docKey);
   pdfViewState.annotList[docKey] = (pdfViewState.annotList[docKey] || []).filter(a => !ids.includes(a.id));
   ids.forEach(p => {
     const m = /^p(\d+):/.exec(p);
@@ -9342,7 +9342,7 @@ function batchSetAnnotColor(color, which) {
   if (!docKey) return;
   const ids = pdfViewState.selectedAnnotIds;
   if (ids.length === 0) return;
-  pushPdfAnnotUndo();
+  _pushAnnotUndo(docKey);
   const list = pdfViewState.annotList[docKey] || [];
   const affected = new Set();
   list.forEach(a => {
@@ -9362,7 +9362,7 @@ function batchSetAnnotFontSize(size) {
   if (!docKey) return;
   const ids = pdfViewState.selectedAnnotIds;
   if (ids.length === 0) return;
-  pushPdfAnnotUndo();
+  _pushAnnotUndo(docKey);
   const list = pdfViewState.annotList[docKey] || [];
   const affected = new Set();
   list.forEach(a => {
@@ -9380,7 +9380,7 @@ function batchSetAnnotLineWidth(width) {
   if (!docKey) return;
   const ids = pdfViewState.selectedAnnotIds;
   if (ids.length === 0) return;
-  pushPdfAnnotUndo();
+  _pushAnnotUndo(docKey);
   const list = pdfViewState.annotList[docKey] || [];
   const affected = new Set();
   list.forEach(a => {
@@ -9690,7 +9690,10 @@ document.addEventListener("mousedown", (ev) => {
 document.addEventListener("scroll", () => hidePdfBlockContextMenu(), true);
 window.addEventListener("resize", () => {
   hidePdfBlockContextMenu();
-  hideContextMenu();
+  const cm = document.querySelector(".text-selection-context-menu");
+  if (cm) cm.remove();
+  const fb = document.getElementById("text-selection-float-btn");
+  if (fb) fb.remove();
 });
 
 // ===== PDF keyword search =====
@@ -11721,6 +11724,7 @@ document.addEventListener("DOMContentLoaded", () => {
     hideSelectionMenu();
     hideContextMenu();
     const menu = document.createElement("div");
+    menu.className = "text-selection-context-menu";
     menu.style.cssText = 'position:fixed;z-index:100021;background:var(--bg-card,#fff);color:var(--text-primary,#333);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);border:1px solid var(--border,#e0e0e0);padding:4px 0;min-width:160px;font-size:13px;';
     menu.style.left = Math.min(x, window.innerWidth - 180) + "px";
     menu.style.top = Math.max(10, Math.min(y, window.innerHeight - 180)) + "px";
@@ -13923,11 +13927,11 @@ function seedGroupsFromCache() {
   const allCache = PatentCache.getAll();
   const historyAll = PatentCache.getHistoryAll();
   Object.entries(allCache).forEach(([pn, data]) => {
-    if (!data || !data.kanbanState) return;
-    const docs = (data.kanbanState.documents || []);
-    if (docs.length === 0) return;
+    if (!data) return;
     const office = data.office || "";
     const histInfo = historyAll[pn] || {};
+    const kanbanDocs = (data.kanbanState && data.kanbanState.documents) || [];
+    const extractions = (data.kanbanState && data.kanbanState.extractions) || [];
     const group = {
       patentNumber: pn,
       office,
@@ -13939,19 +13943,35 @@ function seedGroupsFromCache() {
       error: null,
       expanded: false,
       docs: [],
+      docsLoadedFromNetwork: kanbanDocs.length > 0,
     };
-    docs.forEach((doc, i) => {
-      const extraction = (data.kanbanState.extractions || [])[i];
+    kanbanDocs.forEach((doc, i) => {
+      const docCode = doc.docCode || doc.documentType || doc.kindCode || doc.type || "";
+      const desc = doc.docDesc || doc.documentDescription || doc.description || doc.title || "";
+      const date = doc.legalDateStr || doc.documentDate || doc.date || "";
+      const docId = doc.documentId || doc.docId || "";
+      const numberOfPages = doc.numberOfPages != null ? doc.numberOfPages : 1;
+      const docFormat = doc.docFormat || "PDF";
+      const status = getStatusInfo(office, docCode, desc);
       const canDownload = (office === "US" || office === "EP");
+      const isUS = office === "US", isEP = office === "EP";
+      const urlDocNum = isUS ? (data.applicationNumber || pn) : encodeURIComponent(data.docNumber || data.applicationNumber || pn);
+      const encodedDocId = encodeURIComponent(docId);
+      const extractUrl = (docId && canDownload) ? `/api/gd/extract-text/${office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
+      const extraction = extractions[i];
       group.docs.push({
         idx: i,
-        docId: doc.documentId || doc.docId || "",
-        docCode: doc.docCode || doc.documentType || doc.kindCode || doc.type || "",
-        desc: doc.docDesc || doc.documentDescription || doc.description || doc.title || "",
-        date: doc.legalDateStr || doc.documentDate || doc.date || "",
-        numberOfPages: doc.numberOfPages != null ? doc.numberOfPages : 1,
-        docFormat: doc.docFormat || "PDF",
+        docId,
+        docCode,
+        desc,
+        name: doc.name || status.name,
+        type: doc.type || status.type,
+        stage: doc.stage || status.stage,
+        date,
+        numberOfPages,
+        docFormat,
         canDownload,
+        extractUrl,
         ocrStatus: extraction && extraction.text ? "done" : "pending",
         ocrError: null,
         ocrProgress: 0,
@@ -13962,6 +13982,24 @@ function seedGroupsFromCache() {
     if (!_extractState.groups[pn]) {
       _extractState.groups[pn] = group;
     }
+  });
+  // Also seed history-only entries (patents that were visited but have no kanbanState cached)
+  Object.entries(historyAll).forEach(([pn, info]) => {
+    if (_extractState.groups[pn]) return;
+    if (!info) return;
+    _extractState.groups[pn] = {
+      patentNumber: pn,
+      office: info.office || "",
+      applicationNumber: pn,
+      docNumber: "",
+      title: info.title || "",
+      applicantName: info.applicantName || "",
+      loading: false,
+      error: null,
+      expanded: false,
+      docs: [],
+      docsLoadedFromNetwork: false,
+    };
   });
 }
 
@@ -14037,6 +14075,9 @@ async function fetchAndAddPatent(input) {
     const isUS = office === "US", isEP = office === "EP";
     const canDownload = isUS || isEP;
     const urlDocNum = isUS ? appNum : encodeURIComponent(group.docNumber || appNum);
+    // Preserve existing OCR/extraction by docId
+    const prevByDocId = new Map();
+    (group.docs || []).forEach(od => { if (od.docId) prevByDocId.set(od.docId, od); });
     group.docs = rawDocs.map((d, i) => {
       const docId = d.documentId || d.docId || "";
       const encodedDocId = encodeURIComponent(docId);
@@ -14046,14 +14087,20 @@ async function fetchAndAddPatent(input) {
       const numberOfPages = d.numberOfPages != null ? d.numberOfPages : 1;
       const docFormat = d.docFormat || "PDF";
       const extractUrl = (docId && canDownload) ? `/api/gd/extract-text/${office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
+      const status = getStatusInfo(office, docCode, desc);
+      const prev = docId ? prevByDocId.get(docId) : null;
       return {
         idx: i, docId, docCode, desc, date, numberOfPages, docFormat,
         canDownload, extractUrl,
-        ocrStatus: "pending", ocrError: null, ocrProgress: 0,
-        extraction: null,
+        name: status.name, type: status.type, stage: status.stage,
+        ocrStatus: prev?.ocrStatus || "pending",
+        ocrError: prev?.ocrError || null,
+        ocrProgress: prev?.ocrProgress || 0,
+        extraction: prev?.extraction || null,
         _raw: d,
       };
     });
+    group.docsLoadedFromNetwork = true;
     // Record lightweight history
     PatentCache.addHistory(raw, office, { title, applicantName: "" });
     refreshHistoryList();
@@ -14062,6 +14109,87 @@ async function fetchAndAddPatent(input) {
     group.error = err.message || String(err);
   } finally {
     group.loading = false;
+    renderExtractDocList();
+  }
+}
+
+async function refreshExtractGroup(pn) {
+  const g = _extractState.groups[pn];
+  if (!g) return;
+  if (g.loading) return;
+  // Validate office
+  if (!g.office) {
+    const parsed = parsePatentNumber(pn);
+    if (!parsed) { showError("无法识别专利号格式: " + pn); return; }
+    g.office = parsed.office;
+    g.applicationNumber = parsed.applicationNumber;
+  }
+  if (g.office === "CN") {
+    showError("中国专利（CNIPA）暂不支持直接下载OCR");
+    return;
+  }
+  if (g.office === "JP") {
+    showError("日本专利（J-PlatPat）请在审查文档模式中加载。");
+    return;
+  }
+  g.loading = true;
+  g.error = null;
+  renderExtractDocList();
+  try {
+    let appNum = g.applicationNumber;
+    let title = g.title || "";
+    try {
+      const familyData = await gdFetch(`/patent-family/svc/family/${g.patentNumber.startsWith("US") || g.patentNumber.startsWith("EP") ? "application" : "application"}/${g.office}/${appNum}`);
+      if (familyData) {
+        if (familyData.corrAppNum) appNum = familyData.corrAppNum;
+        else if (familyData.list && Array.isArray(familyData.list)) {
+          const own = familyData.list.find(x => x.countryCode === g.office);
+          if (own?.appNum) appNum = own.appNum;
+          else if (own?.docNum?.docNumber) appNum = own.docNum.docNumber;
+        }
+        if (familyData.list && familyData.list[0]?.title) title = familyData.list[0].title;
+      }
+    } catch (e) { console.warn("family query failed:", e); }
+    g.applicationNumber = appNum;
+    if (title) g.title = title;
+    const docData = await gdFetch(`/doc-list/svc/doclist/${g.office}/${appNum}/A`);
+    g.docNumber = (docData && docData.docNumber) || "";
+    const rawDocs = extractDocuments(docData);
+    const office = g.office;
+    const isUS = office === "US", isEP = office === "EP";
+    const canDownload = isUS || isEP;
+    const urlDocNum = isUS ? appNum : encodeURIComponent(g.docNumber || appNum);
+    const prevByDocId = new Map();
+    (g.docs || []).forEach(od => { if (od.docId) prevByDocId.set(od.docId, od); });
+    g.docs = rawDocs.map((d, i) => {
+      const docId = d.documentId || d.docId || "";
+      const encodedDocId = encodeURIComponent(docId);
+      const docCode = d.docCode || d.documentType || d.kindCode || d.type || "";
+      const desc = d.docDesc || d.documentDescription || d.description || d.docId || "";
+      const date = d.legalDateStr || d.documentDate || d.date || "";
+      const numberOfPages = d.numberOfPages != null ? d.numberOfPages : 1;
+      const docFormat = d.docFormat || "PDF";
+      const extractUrl = (docId && canDownload) ? `/api/gd/extract-text/${office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
+      const status = getStatusInfo(office, docCode, desc);
+      const prev = docId ? prevByDocId.get(docId) : null;
+      return {
+        idx: i, docId, docCode, desc, date, numberOfPages, docFormat,
+        canDownload, extractUrl,
+        name: status.name, type: status.type, stage: status.stage,
+        ocrStatus: prev?.ocrStatus || "pending",
+        ocrError: prev?.ocrError || null,
+        ocrProgress: prev?.ocrProgress || 0,
+        extraction: prev?.extraction || null,
+        _raw: d,
+      };
+    });
+    g.docsLoadedFromNetwork = true;
+    PatentCache.addHistory(pn, office, { title: g.title, applicantName: g.applicantName || "" });
+  } catch (err) {
+    console.error("[Extract] refresh group error:", err);
+    g.error = err.message || String(err);
+  } finally {
+    g.loading = false;
     renderExtractDocList();
   }
 }
@@ -14088,9 +14216,17 @@ function renderExtractDocList() {
   const filtered = pns.filter(pn => {
     if (!search) return true;
     const g = _extractState.groups[pn];
-    return pn.toLowerCase().includes(search) ||
-           (g.title || "").toLowerCase().includes(search) ||
-           (g.applicantName || "").toLowerCase().includes(search);
+    if (pn.toLowerCase().includes(search)) return true;
+    if ((g.title || "").toLowerCase().includes(search)) return true;
+    if ((g.applicantName || "").toLowerCase().includes(search)) return true;
+    // Also match doc names/codes within the band
+    if ((g.docs || []).some(d =>
+      (d.docCode || "").toLowerCase().includes(search) ||
+      (d.desc || "").toLowerCase().includes(search) ||
+      (d.name || "").toLowerCase().includes(search) ||
+      (d.date || "").toLowerCase().includes(search)
+    )) return true;
+    return false;
   });
   if (filtered.length === 0) {
     list.innerHTML = '<div class="extract-empty-hint">还没有添加任何专利。在上方输入框输入专利号（如 <code>US17204063</code>），点击「查询并添加」即可加载审查文档列表。</div>';
@@ -14103,18 +14239,26 @@ function renderExtractDocList() {
     band.className = "extract-patent-band" + (g.expanded ? " expanded" : "") + (g.loading ? " loading" : "");
     const ocrDone = g.docs.filter(d => d.ocrStatus === "done").length;
     const totalDocs = g.docs.length;
+    const loaded = g.docsLoadedFromNetwork && totalDocs > 0;
+    const docCountLabel = g.loading
+      ? '加载中'
+      : (!g.docsLoadedFromNetwork
+          ? '<span style="color:var(--text-warning,#e6a23c);">未加载文档列表</span>'
+          : ocrDone + '/' + totalDocs + ' 已OCR');
     band.innerHTML =
       '<div class="extract-patent-header">' +
         '<span class="extract-patent-arrow">▶</span>' +
         '<span class="extract-patent-no">' + escapeHtml(pn) + '</span>' +
         '<span class="extract-patent-title">' + escapeHtml(g.title || (g.loading ? "加载中..." : "")) + '</span>' +
         (g.applicantName ? '<span class="extract-patent-applicant">' + escapeHtml(g.applicantName) + '</span>' : '') +
-        '<span class="extract-patent-doc-count">' + (g.loading ? '加载中' : ocrDone + '/' + totalDocs + ' 已OCR') + '</span>' +
+        '<span class="extract-patent-doc-count">' + docCountLabel + '</span>' +
+        '<button class="extract-patent-refresh" title="重新查询文档列表" data-pn="' + escapeHtml(pn) + '">🔄</button>' +
         '<button class="extract-patent-remove" title="从列表移除" data-pn="' + escapeHtml(pn) + '">✕</button>' +
       '</div>';
     const header = band.querySelector(".extract-patent-header");
     header.addEventListener("click", (e) => {
       if (e.target.closest(".extract-patent-remove")) return;
+      if (e.target.closest(".extract-patent-refresh")) return;
       g.expanded = !g.expanded;
       renderExtractDocList();
     });
@@ -14122,68 +14266,139 @@ function renderExtractDocList() {
       e.stopPropagation();
       removeExtractGroup(pn);
     });
+    band.querySelector(".extract-patent-refresh").addEventListener("click", (e) => {
+      e.stopPropagation();
+      g.expanded = true;
+      refreshExtractGroup(pn);
+    });
 
     const docsWrap = document.createElement("div");
     docsWrap.className = "extract-patent-docs";
     if (g.loading) {
       docsWrap.innerHTML = '<div style="padding:10px 14px;color:var(--text-secondary);font-size:12px;">正在查询 Global Dossier，请稍候...</div>';
     } else if (g.error) {
-      docsWrap.innerHTML = '<div class="extract-doc-err">查询失败: ' + escapeHtml(g.error) + '</div>';
-    } else if (g.docs.length === 0) {
-      docsWrap.innerHTML = '<div style="padding:10px 14px;color:var(--text-secondary);font-size:12px;">未找到审查文档</div>';
+      docsWrap.innerHTML = '<div class="extract-doc-err">查询失败: ' + escapeHtml(g.error) +
+        ' <button class="btn-small btn-extract extract-retry-inline" data-pn="' + escapeHtml(pn) + '">重试</button></div>';
+    } else if (!g.docsLoadedFromNetwork || g.docs.length === 0) {
+      docsWrap.innerHTML = '<div style="padding:14px;color:var(--text-secondary);font-size:12px;text-align:center;">' +
+        (g.docsLoadedFromNetwork ? '未找到审查文档' : '该专利仅存在于历史记录，尚未加载文档列表。') +
+        ' <button class="btn-small btn-extract extract-refresh-inline-btn" data-pn="' + escapeHtml(pn) + '">🔄 点击重新查询文档列表</button>' +
+        '</div>';
     } else {
-      // Also filter docs by search keyword when in collapsed filter mode
-      const docFilter = search ? search : "";
-      g.docs.forEach((d) => {
-        if (docFilter) {
-          const hay = (d.docCode + " " + d.desc + " " + d.date).toLowerCase();
-          if (!hay.includes(docFilter) && !pn.toLowerCase().includes(docFilter) && !(g.title || "").toLowerCase().includes(docFilter)) return;
-        }
-        const row = document.createElement("div");
-        row.className = "extract-doc-row" + (d.ocrStatus === "running" ? " ocr-running" : "");
-        const key = pn + "::" + d.idx;
-        const checked = _extractState.selectedDocs.has(key) ? "checked" : "";
-        const ocrReady = d.ocrStatus === "done" ? "1" : "0";
-        const cbDisabled = d.ocrStatus === "done" ? "" : "disabled";
-        let statusHtml;
-        if (d.ocrStatus === "done") statusHtml = '<span class="extract-doc-status ocr-done">已OCR</span>';
-        else if (d.ocrStatus === "running") statusHtml = '<span class="extract-doc-status ocr-running">OCR中</span><div class="extract-doc-ocr-progress"><div class="extract-doc-ocr-progress-fill" style="width:' + (d.ocrProgress || 0) + '%"></div></div>';
-        else if (d.ocrStatus === "failed") statusHtml = '<span class="extract-doc-status ocr-failed">失败</span>';
-        else statusHtml = '<span class="extract-doc-status ocr-pending">未OCR</span>';
-        let actionHtml = '';
-        if (d.ocrStatus === "pending" || d.ocrStatus === "failed") {
-          actionHtml = d.extractUrl
-            ? '<button class="extract-doc-ocr-btn" data-pn="' + escapeHtml(pn) + '" data-idx="' + d.idx + '" ' + (d.ocrStatus === "running" ? "disabled" : "") + '>OCR</button>'
-            : '<span style="font-size:11px;color:var(--text-muted);">不可下载</span>';
-        }
-        row.innerHTML =
-          '<input type="checkbox" data-key="' + escapeHtml(key) + '" data-ocrready="' + ocrReady + '" ' + checked + ' ' + cbDisabled + '>' +
-          '<span class="extract-doc-code">' + escapeHtml(d.docCode || "—") + '</span>' +
-          '<span class="extract-doc-desc" title="' + escapeHtml(d.desc) + '">' + escapeHtml(d.desc) + '</span>' +
-          '<span class="extract-doc-date">' + escapeHtml(d.date) + '</span>' +
-          statusHtml +
-          actionHtml;
-        const cb = row.querySelector("input[type=checkbox]");
-        cb.addEventListener("change", () => {
-          if (cb.checked) _extractState.selectedDocs.add(key); else _extractState.selectedDocs.delete(key);
-          updateExtractDocCount();
-        });
-        const ocrBtn = row.querySelector(".extract-doc-ocr-btn");
-        if (ocrBtn) {
-          ocrBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            runExtractOcr(pn, d.idx);
+      // Per-band search toolbar
+      const bandToolbar = document.createElement("div");
+      bandToolbar.className = "extract-band-toolbar";
+      bandToolbar.innerHTML =
+        '<input type="text" class="extract-band-search" placeholder="在 ' + escapeHtml(pn) + ' 的文档中搜索代码/名称/日期..." data-pn="' + escapeHtml(pn) + '">' +
+        '<div class="extract-band-quick">' +
+          '<button class="btn-small extract-band-all" data-pn="' + escapeHtml(pn) + '">全选已OCR</button>' +
+          '<button class="btn-small extract-band-none" data-pn="' + escapeHtml(pn) + '">全不选</button>' +
+        '</div>';
+      docsWrap.appendChild(bandToolbar);
+
+      // Sort docs by date descending
+      const sortedDocs = [...g.docs].sort((a, b) => parseDocDateToTimestamp(b.date) - parseDocDateToTimestamp(a.date));
+
+      const docContainer = document.createElement("div");
+      docContainer.className = "extract-doc-list-inner";
+      const renderDocs = (keyword) => {
+        docContainer.innerHTML = "";
+        const kw = (keyword || "").trim().toLowerCase();
+        sortedDocs.forEach((d) => {
+          const displayName = d.name || d.desc || d.docCode || "—";
+          const hay = (d.docCode + " " + d.desc + " " + (d.name || "") + " " + d.date).toLowerCase();
+          if (kw && !hay.includes(kw)) return;
+          const row = document.createElement("div");
+          row.className = "extract-doc-row" + (d.ocrStatus === "running" ? " ocr-running" : "");
+          const key = pn + "::" + d.idx;
+          const checked = _extractState.selectedDocs.has(key) ? "checked" : "";
+          const ocrReady = d.ocrStatus === "done" ? "1" : "0";
+          const cbDisabled = d.ocrStatus === "done" ? "" : "disabled";
+          let statusHtml;
+          if (d.ocrStatus === "done") statusHtml = '<span class="extract-doc-status ocr-done">已OCR</span>';
+          else if (d.ocrStatus === "running") statusHtml = '<span class="extract-doc-status ocr-running">OCR中</span><div class="extract-doc-ocr-progress"><div class="extract-doc-ocr-progress-fill" style="width:' + (d.ocrProgress || 0) + '%"></div></div>';
+          else if (d.ocrStatus === "failed") statusHtml = '<span class="extract-doc-status ocr-failed">失败</span>';
+          else statusHtml = '<span class="extract-doc-status ocr-pending">未OCR</span>';
+          let actionHtml = '';
+          if (d.ocrStatus === "pending" || d.ocrStatus === "failed") {
+            actionHtml = d.extractUrl
+              ? '<button class="extract-doc-ocr-btn" data-pn="' + escapeHtml(pn) + '" data-idx="' + d.idx + '" ' + (d.ocrStatus === "running" ? "disabled" : "") + '>OCR</button>'
+              : '<span style="font-size:11px;color:var(--text-muted);">不可下载</span>';
+          }
+          row.innerHTML =
+            '<input type="checkbox" data-key="' + escapeHtml(key) + '" data-ocrready="' + ocrReady + '" ' + checked + ' ' + cbDisabled + '>' +
+            '<span class="extract-doc-code">' + escapeHtml(d.docCode || "—") + '</span>' +
+            '<span class="extract-doc-name" title="' + escapeHtml((d.name || "") + (d.desc && d.desc !== d.name ? "\n原始: " + d.desc : "")) + '">' + escapeHtml(displayName) + '</span>' +
+            '<span class="extract-doc-date">' + escapeHtml(d.date) + '</span>' +
+            statusHtml +
+            actionHtml;
+          const cb = row.querySelector("input[type=checkbox]");
+          cb.addEventListener("change", () => {
+            if (cb.checked) _extractState.selectedDocs.add(key); else _extractState.selectedDocs.delete(key);
+            updateExtractDocCount();
           });
+          const ocrBtn = row.querySelector(".extract-doc-ocr-btn");
+          if (ocrBtn) {
+            ocrBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              runExtractOcr(pn, d.idx);
+            });
+          }
+          docContainer.appendChild(row);
+          if (d.ocrStatus === "failed" && d.ocrError) {
+            const errEl = document.createElement("div");
+            errEl.className = "extract-doc-err";
+            errEl.textContent = "OCR失败: " + d.ocrError;
+            docContainer.appendChild(errEl);
+          }
+        });
+        if (kw && docContainer.children.length === 0) {
+          const empty = document.createElement("div");
+          empty.style.cssText = "padding:8px 14px;color:var(--text-muted);font-size:12px;";
+          empty.textContent = "没有匹配的文档";
+          docContainer.appendChild(empty);
         }
-        docsWrap.appendChild(row);
-        if (d.ocrStatus === "failed" && d.ocrError) {
-          const errEl = document.createElement("div");
-          errEl.className = "extract-doc-err";
-          errEl.textContent = "OCR失败: " + d.ocrError;
-          docsWrap.appendChild(errEl);
+      };
+      renderDocs("");
+      docsWrap.appendChild(docContainer);
+
+      // Per-band search
+      const searchInput = bandToolbar.querySelector(".extract-band-search");
+      if (searchInput) {
+        searchInput.addEventListener("input", () => renderDocs(searchInput.value));
+        searchInput.addEventListener("click", (e) => e.stopPropagation());
+      }
+      // Quick select buttons
+      const allBtn = bandToolbar.querySelector(".extract-band-all");
+      if (allBtn) allBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        sortedDocs.forEach(d => {
+          if (d.ocrStatus === "done") {
+            const key = pn + "::" + d.idx;
+            _extractState.selectedDocs.add(key);
+          }
+        });
+        renderExtractDocList();
+        updateExtractDocCount();
+      });
+      const noneBtn = bandToolbar.querySelector(".extract-band-none");
+      if (noneBtn) noneBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const prefix = pn + "::";
+        for (const k of Array.from(_extractState.selectedDocs)) {
+          if (k.startsWith(prefix)) _extractState.selectedDocs.delete(k);
         }
+        renderExtractDocList();
+        updateExtractDocCount();
       });
     }
+    // Inline retry buttons (for error/empty states)
+    band.querySelectorAll(".extract-retry-inline, .extract-refresh-inline-btn").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        refreshExtractGroup(btn.dataset.pn || pn);
+      });
+    });
     band.appendChild(docsWrap);
     list.appendChild(band);
   });
