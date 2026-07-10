@@ -1366,7 +1366,7 @@ function createPopoutWindow(targetUrl, title, port, opts) {
   if (targetUrl && (targetUrl.indexOf("cnipa.gov.cn") !== -1 || targetUrl.indexOf("cpquery") !== -1)) {
     const patentNo = (opts && opts.cnpn) ? String(opts.cnpn) : "";
     // Use dedicated persistent session to preserve login cookies
-    const cnSession = session.fromPartition("persist:cnipa-v3", { cache: true });
+    const cnSession = session.fromPartition("persist:cnipa-v4", { cache: true });
     cnSession.setUserAgent(CHROME_UA, "zh-CN");
     cnSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
       callback(true);
@@ -1374,12 +1374,12 @@ function createPopoutWindow(targetUrl, title, port, opts) {
     // Fix Sec-CH-UA headers to include Google Chrome brand (critical for RSecurity WAF bypass)
     cnSession.webRequest.onBeforeSendHeaders((details, callback) => {
       const headers = { ...details.requestHeaders };
-      // Only set the core Sec-CH-UA headers that Electron/Chromium sends but misbrands
       headers["sec-ch-ua"] = '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"';
       headers["sec-ch-ua-mobile"] = "?0";
       headers["sec-ch-ua-platform"] = '"Windows"';
       headers["accept-language"] = "zh-CN,zh;q=0.9,en;q=0.8";
       delete headers["X-Electron-Version"];
+      // DO NOT add extra headers like Cache-Control/Pragma - normal browser navigation doesn't send them
       callback({ requestHeaders: headers });
     });
     const cnWin = new BrowserWindow({
@@ -1463,30 +1463,28 @@ function createPopoutWindow(targetUrl, title, port, opts) {
       setTimeout(() => injectToolbar(cnWin.webContents), 500);
     });
     console.log("[CNIPA] Loading URL:", targetUrl);
-    // Helper to load URL, with auto-retry on 412 by clearing site data first
-    const loadCnipa = (retryCount = 0) => {
-      cnWin.loadURL(targetUrl, {
-        userAgent: CHROME_UA,
-        extraHeaders: "Cache-Control: no-cache\nPragma: no-cache",
-      }).catch((err) => {
+    // Load URL cleanly — NO extra headers (adding Cache-Control/Pragma on first navigation looks abnormal to WAF)
+    const doLoad = () => {
+      cnWin.loadURL(targetUrl, { userAgent: CHROME_UA }).catch((err) => {
         console.log("[CNIPA] loadURL error:", err.message);
       });
     };
-    // On 412 response, clear WAF cookies and reload once
-    cnWin.webContents.on("did-redirect-navigation", () => {});
+    // If main document returns 400/403/412, clear cookies/storage and retry once
     cnSession.webRequest.onCompleted((details) => {
-      if (details.statusCode === 412 && details.url && details.url.indexOf("cpquery") !== -1 && !cnWin._retried412) {
-        cnWin._retried412 = true;
-        console.log("[CNIPA] Got 412, clearing WAF cookies and reloading...");
+      if (details.resourceType !== "mainFrame") return;
+      if (!details.url || details.url.indexOf("cpquery") === -1) return;
+      if (details.statusCode >= 400 && details.statusCode < 500 && !cnWin._retried4xx) {
+        cnWin._retried4xx = true;
+        console.log("[CNIPA] Got " + details.statusCode + ", clearing site data and retrying...");
         cnSession.clearStorageData({
           origin: "https://cpquery.cponline.cnipa.gov.cn",
-          storages: ["cookies"],
-        }).then(() => {
+          storages: ["cookies", "localstorage", "sessionstorage", "indexdb", "cachestorage"],
+        }).then(() => cnSession.clearCache()).then(() => {
           cnWin.loadURL(targetUrl, { userAgent: CHROME_UA });
         });
       }
     });
-    loadCnipa();
+    doLoad();
     cnWin.webContents.on("did-start-loading", () => {
       console.log("[CNIPA] did-start-loading");
     });
