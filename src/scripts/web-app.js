@@ -8018,6 +8018,7 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
       // 如果不按 Shift，先清除之前的选择
       if (!ev.shiftKey) {
         clearPdfBlockSelection();
+        clearPdfAnnotMultiSelection();
       }
       selectionRect.style.display = "block";
       selectionRect.style.left = startX + "px";
@@ -8216,7 +8217,6 @@ async function renderAllPdfPages(pdfDoc, blocks, pageDimensions, scale) {
             const [ox0, oy0] = m.viewport.convertToPdfPoint(0, 0);
             const [ox1, oy1] = m.viewport.convertToPdfPoint(cssDx, cssDy);
             const dpx = ox1 - ox0, dpy = oy1 - oy0;
-            _pushAnnotUndo(docKey);
             target.x1 += dpx; target.y1 += dpy;
             target.x2 += dpx; target.y2 += dpy;
             savePdfAnnotations(docKey);
@@ -8748,6 +8748,14 @@ function _createAnnotElement(annot, viewport) {
       if (ev.button !== 0) return;
       ev.preventDefault();
       ev.stopPropagation();
+      // Select this annotation when starting to resize
+      if (!(ev.ctrlKey || ev.metaKey || ev.shiftKey)) {
+        pdfViewState.selectedAnnotIds = [annot.id];
+      } else if (pdfViewState.selectedAnnotIds.indexOf(annot.id) === -1) {
+        pdfViewState.selectedAnnotIds.push(annot.id);
+      }
+      refreshPdfAnnotMultiSelectionVisual();
+      if (pdfViewState.selectedAnnotIds.length > 0) showAnnotMultiToolbar();
       const wrapper = el.closest(".pdf-page-wrapper");
       const pageNum = parseInt(wrapper.dataset.page, 10);
       // 提前推入 undo 快照（保存修改前状态）
@@ -8838,26 +8846,70 @@ function _createAnnotElement(annot, viewport) {
     if (ev.target.classList.contains("pdf-annot-handle") || ev.target.classList.contains("pdf-annot-delete")) return;
     ev.preventDefault();
     ev.stopPropagation();
+
+    // Click-select this annotation: Ctrl/Cmd toggles, Shift adds, otherwise single-select
+    const aid = annot.id;
+    const alreadySelected = pdfViewState.selectedAnnotIds.indexOf(aid) !== -1;
+    if (ev.ctrlKey || ev.metaKey) {
+      if (alreadySelected) {
+        pdfViewState.selectedAnnotIds = pdfViewState.selectedAnnotIds.filter(x => x !== aid);
+      } else {
+        pdfViewState.selectedAnnotIds.push(aid);
+      }
+    } else if (ev.shiftKey) {
+      if (!alreadySelected) pdfViewState.selectedAnnotIds.push(aid);
+    } else {
+      if (!alreadySelected || pdfViewState.selectedAnnotIds.length !== 1) {
+        pdfViewState.selectedAnnotIds = [aid];
+      }
+    }
+    refreshPdfAnnotMultiSelectionVisual();
+    if (pdfViewState.selectedAnnotIds.length > 0) showAnnotMultiToolbar();
+    else {
+      const tb = document.getElementById("pdf-annot-multi-toolbar");
+      if (tb) tb.remove();
+    }
+
     const wrapper = el.closest(".pdf-page-wrapper");
     if (!wrapper) return;
     const pageNum = parseInt(wrapper.dataset.page, 10);
-    pdfViewState.annotMoving = {
-      id: annot.id,
-      startMouseX: ev.clientX,
-      startMouseY: ev.clientY,
-      origCssLeft: parseFloat(el.style.left) || 0,
-      origCssTop: parseFloat(el.style.top) || 0,
-      el: el,
-      pageNum: pageNum,
-    };
-    // 获取当前 viewport（缩放可能变化）
-    if (pdfViewState.pdfDoc) {
-      pdfViewState.pdfDoc.getPage(pageNum).then(page => {
-        if (pdfViewState.annotMoving && pdfViewState.annotMoving.id === annot.id) {
-          pdfViewState.annotMoving.viewport = page.getViewport({ scale: pdfViewState.scale });
+    // Track move threshold to distinguish click vs drag
+    const startClientX = ev.clientX;
+    const startClientY = ev.clientY;
+    let moveStarted = false;
+    const onMouseMove = (mv) => {
+      if (!moveStarted) {
+        const dx = mv.clientX - startClientX;
+        const dy = mv.clientY - startClientY;
+        if (dx * dx + dy * dy < 9) return; // < 3px threshold = click, no drag
+        moveStarted = true;
+        // Push undo snapshot only when drag actually starts
+        const docKey = _getCurrentPdfAnnotKey();
+        if (docKey) _pushAnnotUndo(docKey);
+        pdfViewState.annotMoving = {
+          id: annot.id,
+          startMouseX: startClientX,
+          startMouseY: startClientY,
+          origCssLeft: parseFloat(el.style.left) || 0,
+          origCssTop: parseFloat(el.style.top) || 0,
+          el: el,
+          pageNum: pageNum,
+        };
+        if (pdfViewState.pdfDoc) {
+          pdfViewState.pdfDoc.getPage(pageNum).then(page => {
+            if (pdfViewState.annotMoving && pdfViewState.annotMoving.id === annot.id) {
+              pdfViewState.annotMoving.viewport = page.getViewport({ scale: pdfViewState.scale });
+            }
+          });
         }
-      });
-    }
+      }
+    };
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove, true);
+      document.removeEventListener("mouseup", onMouseUp, true);
+    };
+    document.addEventListener("mousemove", onMouseMove, true);
+    document.addEventListener("mouseup", onMouseUp, true);
   });
   return el;
 }
@@ -9430,6 +9482,21 @@ function hideAnnotMultiToolbar() {
   const tb = document.getElementById("pdf-annot-multi-toolbar");
   if (tb) tb.classList.add("hidden");
 }
+
+// Keyboard shortcuts for annotation multi-selection: Delete/Backspace to delete selected
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Delete" && ev.key !== "Backspace") return;
+  if (pdfViewState.annotTool) return; // In creation mode, let the normal flow handle it
+  if (pdfViewState.selectedAnnotIds.length === 0) return;
+  // Don't intercept when focus is in an editable field
+  const ae = document.activeElement;
+  if (ae) {
+    const tag = ae.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || ae.isContentEditable) return;
+  }
+  ev.preventDefault();
+  deleteSelectedAnnots();
+});
 
 function updatePdfSelectionInfo() {
   const info = document.getElementById("pdf-selection-info");
@@ -13857,32 +13924,21 @@ function initExtractMode() {
 
   const docSearch = document.getElementById("extract-doc-search");
   if (docSearch) docSearch.addEventListener("input", renderExtractDocList);
-  const selAll = document.getElementById("extract-select-all");
-  if (selAll) selAll.addEventListener("click", () => {
-    document.querySelectorAll(".extract-doc-row input[type=checkbox]").forEach(cb => {
-      if (!cb.disabled && cb.dataset.ocrready === "1") { cb.checked = true; _extractState.selectedDocs.add(cb.dataset.key); }
-    });
-    updateExtractDocCount();
+  const expandAll = document.getElementById("extract-expand-all");
+  if (expandAll) expandAll.addEventListener("click", () => {
+    Object.values(_extractState.groups).forEach(g => { g.expanded = true; });
+    renderExtractDocList();
+  });
+  const collapseAll = document.getElementById("extract-collapse-all");
+  if (collapseAll) collapseAll.addEventListener("click", () => {
+    Object.values(_extractState.groups).forEach(g => { g.expanded = false; });
+    renderExtractDocList();
   });
   const clrSel = document.getElementById("extract-clear-selection");
   if (clrSel) clrSel.addEventListener("click", () => {
     _extractState.selectedDocs.clear();
     document.querySelectorAll(".extract-doc-row input[type=checkbox]").forEach(cb => cb.checked = false);
     updateExtractDocCount();
-  });
-  const ocrSel = document.getElementById("extract-ocr-selected");
-  if (ocrSel) ocrSel.addEventListener("click", () => {
-    const targets = [];
-    document.querySelectorAll(".extract-doc-row input[type=checkbox]").forEach(cb => {
-      if (cb.checked && cb.dataset.ocrready !== "1") {
-        targets.push(cb.dataset.key);
-      }
-    });
-    if (targets.length === 0) { showToast("选中的文档都已经OCR过了"); return; }
-    targets.forEach(k => {
-      const [pn, idxStr] = k.split("::");
-      runExtractOcr(pn, parseInt(idxStr, 10));
-    });
   });
 
   document.getElementById("extract-to-fields-btn").addEventListener("click", () => {
@@ -14117,13 +14173,12 @@ async function refreshExtractGroup(pn) {
   const g = _extractState.groups[pn];
   if (!g) return;
   if (g.loading) return;
-  // Validate office
-  if (!g.office) {
-    const parsed = parsePatentNumber(pn);
-    if (!parsed) { showError("无法识别专利号格式: " + pn); return; }
-    g.office = parsed.office;
-    g.applicationNumber = parsed.applicationNumber;
-  }
+  // Always re-parse the patent number to get the clean application number and queryType,
+  // since cached history entries may store the raw publication/patent number with kind code.
+  const parsed = parsePatentNumber(pn);
+  if (!parsed) { showError("无法识别专利号格式: " + pn); return; }
+  g.office = parsed.office;
+  g.patentNumber = parsed.raw;
   if (g.office === "CN") {
     showError("中国专利（CNIPA）暂不支持直接下载OCR");
     return;
@@ -14136,10 +14191,11 @@ async function refreshExtractGroup(pn) {
   g.error = null;
   renderExtractDocList();
   try {
-    let appNum = g.applicationNumber;
+    let appNum = parsed.applicationNumber;
+    let queryType = parsed.queryType || "application";
     let title = g.title || "";
     try {
-      const familyData = await gdFetch(`/patent-family/svc/family/${g.patentNumber.startsWith("US") || g.patentNumber.startsWith("EP") ? "application" : "application"}/${g.office}/${appNum}`);
+      const familyData = await gdFetch(`/patent-family/svc/family/${queryType}/${g.office}/${appNum}`);
       if (familyData) {
         if (familyData.corrAppNum) appNum = familyData.corrAppNum;
         else if (familyData.list && Array.isArray(familyData.list)) {
@@ -14293,6 +14349,7 @@ function renderExtractDocList() {
         '<div class="extract-band-quick">' +
           '<button class="btn-small extract-band-all" data-pn="' + escapeHtml(pn) + '">全选已OCR</button>' +
           '<button class="btn-small extract-band-none" data-pn="' + escapeHtml(pn) + '">全不选</button>' +
+          '<button class="btn-small extract-band-ocr" data-pn="' + escapeHtml(pn) + '">OCR勾选</button>' +
         '</div>';
       docsWrap.appendChild(bandToolbar);
 
@@ -14391,6 +14448,24 @@ function renderExtractDocList() {
         renderExtractDocList();
         updateExtractDocCount();
       });
+      const ocrCheckedBtn = bandToolbar.querySelector(".extract-band-ocr");
+      if (ocrCheckedBtn) ocrCheckedBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const prefix = pn + "::";
+        const targets = [];
+        docContainer.querySelectorAll(".extract-doc-row input[type=checkbox]").forEach(cb => {
+          const key = cb.dataset.key;
+          if (!key || !key.startsWith(prefix)) return;
+          if (cb.checked && cb.dataset.ocrready !== "1") {
+            targets.push(key);
+          }
+        });
+        if (targets.length === 0) { showToast("该专利下选中的文档都已经OCR过了"); return; }
+        targets.forEach(k => {
+          const [ppn, idxStr] = k.split("::");
+          runExtractOcr(ppn, parseInt(idxStr, 10));
+        });
+      });
     }
     // Inline retry buttons (for error/empty states)
     band.querySelectorAll(".extract-retry-inline, .extract-refresh-inline-btn").forEach(btn => {
@@ -14411,6 +14486,106 @@ function updateExtractDocCount() {
   const n = _extractState.selectedDocs.size;
   if (cnt) cnt.textContent = "已选 " + n + " 个文档";
   if (nextBtn) nextBtn.disabled = n === 0;
+}
+
+function _syncExtractOcrToCache(pn, docIdx) {
+  const g = _extractState.groups[pn];
+  if (!g) return;
+  const d = g.docs[docIdx];
+  if (!d || !d.extraction) return;
+  const allCache = PatentCache.getAll();
+  let entry = allCache[pn];
+  let modified = false;
+
+  if (!entry) {
+    entry = {
+      patentNumber: pn,
+      office: g.office || "",
+      timestamp: Date.now(),
+      title: g.title || "",
+      applicantName: g.applicantName || "",
+      applicationNumber: g.applicationNumber || "",
+      docNumber: g.docNumber || "",
+      currentData: {
+        office: g.office || "",
+        applicationNumber: g.applicationNumber || "",
+        docNumber: g.docNumber || "",
+        raw: pn,
+        title: g.title || "",
+        applicantName: g.applicantName || "",
+      },
+      kanbanState: {
+        documents: [],
+        extractions: {},
+        analysis: "",
+        traceIndex: {},
+        citedRefsAnalysis: "",
+      },
+      hasOCR: true,
+      hasAnalysis: false,
+      hasCitedRefs: false,
+    };
+    modified = true;
+  }
+  if (!entry.kanbanState) {
+    entry.kanbanState = { documents: [], extractions: {}, analysis: "", traceIndex: {}, citedRefsAnalysis: "" };
+    modified = true;
+  }
+  if (!Array.isArray(entry.kanbanState.documents)) { entry.kanbanState.documents = []; modified = true; }
+  if (!entry.kanbanState.extractions || typeof entry.kanbanState.extractions !== "object") {
+    entry.kanbanState.extractions = {}; modified = true;
+  }
+
+  // Find or insert the document record in kanbanState.documents (match by docId)
+  let targetIdx = entry.kanbanState.documents.findIndex(x => (x.docId || x.documentId) === d.docId);
+  if (targetIdx === -1) {
+    targetIdx = entry.kanbanState.documents.length;
+    const status = getStatusInfo(g.office || "", d.docCode, d.desc);
+    entry.kanbanState.documents.push({
+      idx: targetIdx,
+      docId: d.docId,
+      docCode: d.docCode,
+      desc: d.desc,
+      date: d.date,
+      numberOfPages: d.numberOfPages,
+      docFormat: d.docFormat,
+      name: d.name || status.name,
+      type: d.type || status.type,
+      stage: d.stage || status.stage,
+    });
+    modified = true;
+  }
+
+  // Write extraction (deep clone to avoid shared references)
+  const ext = d.extraction;
+  entry.kanbanState.extractions[targetIdx] = {
+    text: ext.text || "",
+    markdown: ext.markdown || "",
+    engine: ext.engine || "",
+    blocks: Array.isArray(ext.blocks) ? JSON.parse(JSON.stringify(ext.blocks)) : [],
+    pageDimensions: ext.pageDimensions ? JSON.parse(JSON.stringify(ext.pageDimensions)) : {},
+  };
+  entry.hasOCR = true;
+  entry.timestamp = Date.now();
+  if (g.title) entry.title = g.title;
+  if (g.applicantName) entry.applicantName = g.applicantName;
+  if (g.office) entry.office = g.office;
+  if (g.applicationNumber) entry.applicationNumber = g.applicationNumber;
+  if (g.docNumber) entry.docNumber = g.docNumber;
+  if (entry.currentData) {
+    if (g.office) entry.currentData.office = g.office;
+    if (g.applicationNumber) entry.currentData.applicationNumber = g.applicationNumber;
+    if (g.docNumber) entry.currentData.docNumber = g.docNumber;
+    if (g.title) entry.currentData.title = g.title;
+    if (g.applicantName) entry.currentData.applicantName = g.applicantName;
+  }
+  modified = true;
+
+  if (modified) {
+    allCache[pn] = entry;
+    try { localStorage.setItem(PatentCache.STORAGE_KEY, JSON.stringify(allCache)); } catch (e) { console.warn("[Extract] persist OCR to cache failed:", e); }
+    try { refreshHistoryList(); } catch {}
+  }
 }
 
 async function runExtractOcr(pn, idx) {
@@ -14450,6 +14625,8 @@ async function runExtractOcr(pn, idx) {
     d.ocrStatus = "done";
     d.ocrProgress = 100;
     showToast("✅ " + pn + " 文档 " + (d.docCode || idx) + " OCR完成");
+    // Sync OCR result back to PatentCache so kanban reader reuses it
+    try { _syncExtractOcrToCache(pn, idx); } catch (ce) { console.warn("[Extract] sync to cache failed:", ce); }
   } catch (err) {
     console.error("[Extract OCR] error:", err);
     d.ocrStatus = "failed";
