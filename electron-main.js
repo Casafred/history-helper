@@ -1,3 +1,11 @@
+/*!
+ * PatentLens Electron 主进程
+ * Copyright (c) 2026 Alfred Shi. All rights reserved.
+ *
+ * 本软件仅供内部使用，未经授权不得对外传播、复制或分发。
+ * @author Alfred Shi
+ * @version 260710
+ */
 const { app, BrowserWindow, shell, ipcMain, dialog, session, clipboard } = require("electron");
 
 // 全局命令行配置：模拟真实Chrome浏览器环境，用于绕过WAF检测
@@ -1339,14 +1347,26 @@ function createWindow(port) {
   mainWindow.on("close", (event) => {
     if (hasUnsavedAnnotations && !mainWindow._forceClose) {
       event.preventDefault();
+      let detail = "如需保留标注，请先点击「导出标注后文档」。\n\n未保存标注详情：";
+      if (unsavedAnnotationsSummary.length === 0) {
+        detail += "\n  - （有未保存的标注）";
+      } else {
+        unsavedAnnotationsSummary.forEach((s, i) => {
+          const pn = s.patentNumber || "未知专利";
+          const pt = s.patentTitle ? " - " + s.patentTitle : "";
+          const dt = s.docTitle ? "\n      文档：" + s.docTitle : "";
+          const cnt = s.count ? "（" + s.count + " 条标注）" : "";
+          detail += "\n  " + (i+1) + ". " + pn + pt + dt + (dt ? "" : " ") + cnt;
+        });
+      }
       const choice = dialog.showMessageBoxSync(mainWindow, {
         type: "question",
         buttons: ["关闭并丢弃标注", "取消"],
         defaultId: 1,
         cancelId: 1,
         title: "确认关闭",
-        message: "当前有未导出的 PDF 标注，关闭后将丢失。",
-        detail: "如需保留标注，请先点击「导出标注后文档」。",
+        message: "以下审查文档中存在未导出的 PDF 标注，关闭后将丢失：",
+        detail: detail,
       });
       if (choice === 0) {
         mainWindow._forceClose = true;
@@ -1624,6 +1644,7 @@ function createPopoutWindow(targetUrl, title, port, opts) {
 
 // 渲染进程同步的"是否存在未导出 PDF 标注"标志位，供 mainWindow.on('close') 确认
 let hasUnsavedAnnotations = false;
+let unsavedAnnotationsSummary = [];
 
 // ── 沉浸式翻译 用户脚本自动下载与注入 ──
 // 沉浸式翻译支持：优先加载本地解压的Chrome扩展，回退到用户脚本注入
@@ -1837,8 +1858,9 @@ app.whenReady().then(async () => {
   });
 
   // IPC: 渲染进程同步当前是否存在未导出的 PDF 标注（用于关闭前确认）
-  ipcMain.on("set-has-annotations", (_event, val) => {
+  ipcMain.on("set-has-annotations", (_event, val, summary) => {
     hasUnsavedAnnotations = !!val;
+    unsavedAnnotationsSummary = Array.isArray(summary) ? summary : [];
   });
 
   // IPC: 渲染进程请求创建弹出窗口（直连，不依赖 window.open → setWindowOpenHandler 链路）

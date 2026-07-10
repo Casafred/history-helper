@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "专利审查梳理工具",
-  "version": "0.1.0",
+  "version": "260710.0.1",
   "identifier": "com.history-helper.app",
   "build": {
     "frontendDist": "../src",

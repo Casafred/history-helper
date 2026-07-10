@@ -1,10 +1,17 @@
 <!DOCTYPE html>
+<!--
+  PatentLens - 专利审查文档智能梳理工具
+  Copyright (c) 2026 Alfred Shi. All rights reserved.
+  本软件仅供内部使用，未经授权不得对外传播、复制或分发。
+  @author Alfred Shi
+  @version 260710
+-->
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PatentLens - 多国专利聚合分析工具</title>
-  <link rel="stylesheet" href="styles/main.css?v=20260701o">
+  <link rel="stylesheet" href="styles/main.css?v=260710">
 </head>
 <body>
   <div id="splash-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:var(--bg-primary, #0f1713);display:flex;align-items:center;justify-content:center;z-index:99999;transition:opacity 0.5s ease;">
@@ -114,6 +121,7 @@
       </section>
 
       <section id="result-section" class="result-section hidden">
+        <div id="dossier-tabs-bar" class="dossier-tabs-bar hidden"></div>
         <div class="tabs-wrapper">
           <div class="tabs">
             <button class="tab-btn active" data-tab="overview">概览</button>
@@ -769,6 +777,14 @@
               <div id="ops-test-result" class="test-result hidden"></div>
             </div>
           </div>
+          <div class="settings-copyright">
+            <div class="settings-copyright-title">PatentLens · 专利审查文档智能梳理工具</div>
+            <div class="settings-copyright-text">
+              Copyright © 2026 <strong>Alfred Shi</strong>. All rights reserved.<br>
+              <em>本软件仅供内部使用，未经授权严禁对外传播、复制、分发或用于商业用途。</em>
+            </div>
+            <div class="settings-copyright-version">版本 v260710</div>
+          </div>
         </div>
       </div>
 
@@ -914,7 +930,7 @@
     </div>
 
     <footer class="app-footer">
-      <em><strong>Developed by Alfred Shi</strong></em> <span class="app-version">v260708</span>
+      <em><strong>Developed by Alfred Shi</strong></em> <span class="app-version">v260710</span>
     </footer>
   </div>
 
@@ -950,9 +966,9 @@
   <script src="scripts/docx.umd.js?v=20260623c"></script>
   <script src="scripts/FileSaver.min.js?v=20260623c"></script>
   <script src="scripts/pdf-lib.min.js?v=20260623c"></script>
-  <script src="scripts/fontkit.umd.min.js?v=20260701o"></script>
-  <script src="scripts/web-ai.js?v=20260701o"></script>
-  <script src="scripts/patent-status.js?v=20260701o"></script>
-  <script src="scripts/web-app.js?v=20260701o"></script>
+  <script src="scripts/fontkit.umd.min.js?v=260710"></script>
+  <script src="scripts/web-ai.js?v=260710"></script>
+  <script src="scripts/patent-status.js?v=260710"></script>
+  <script src="scripts/web-app.js?v=260710"></script>
 </body>
 </html>

@@ -3664,6 +3664,38 @@ body {
   color: var(--accent);
 }
 
+.settings-copyright {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color, #2a2d3a);
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted, #666);
+  line-height: 1.7;
+}
+.settings-copyright-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary, #aaa);
+  margin-bottom: 6px;
+}
+.settings-copyright-text {
+  color: var(--text-muted, #777);
+}
+.settings-copyright-text strong {
+  color: var(--text-secondary, #ccc);
+}
+.settings-copyright-text em {
+  font-style: normal;
+  color: var(--warning, #e6a23c);
+}
+.settings-copyright-version {
+  margin-top: 6px;
+  font-family: "Consolas", "SF Mono", monospace;
+  font-size: 11px;
+  color: var(--text-muted, #666);
+}
+
 .svg-icon {
   width: 16px;
   height: 16px;
@@ -6481,6 +6513,87 @@ body {
   background: var(--accent, #22c55e);
   color: #fff;
   border-color: var(--accent, #22c55e);
+}
+
+/* Dossier (审查文档) multi-tabs bar: reuses pdt-tab styles */
+.dossier-tabs-bar {
+  display: flex;
+  align-items: flex-end;
+  background: var(--bg-primary, #0f1713);
+  padding: 6px 8px 0;
+  gap: 1px;
+  overflow-x: auto;
+  min-height: 40px;
+  flex-shrink: 0;
+  border-radius: 12px 12px 0 0;
+  border: 1px solid var(--border-color, #2a2d3a);
+  border-bottom: none;
+  width: 100%;
+  box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.dossier-tabs-bar::-webkit-scrollbar { height: 0; }
+.dossier-tabs-bar .pdt-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  font-size: 12px;
+  color: var(--text-secondary, #888);
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+  background: var(--bg-card, #1d2923);
+  border: 1px solid var(--border-color, #2a2d3a);
+  border-bottom: none;
+  max-width: 220px;
+  transition: all 0.12s ease;
+  position: relative;
+  top: 1px;
+}
+.dossier-tabs-bar .pdt-tab:hover {
+  background: var(--bg-secondary, #252830);
+  color: var(--text-primary, #e0e0e0);
+}
+.dossier-tabs-bar .pdt-tab.active {
+  background: var(--bg-secondary, #252830);
+  color: var(--accent);
+  font-weight: 600;
+  z-index: 1;
+}
+.dossier-tabs-bar .pdt-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: "Consolas", "SF Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 0.2px;
+}
+.dossier-tabs-bar .pdt-tab-close {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 14px;
+  color: var(--text-secondary, #888);
+  opacity: 0.6;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.dossier-tabs-bar .pdt-tab-close:hover {
+  background: rgba(229,57,53,0.9);
+  color: #fff;
+  opacity: 1;
+}
+.dossier-tabs-bar .dossier-tab-new-hint {
+  font-size: 11px;
+  color: var(--text-muted, #555);
+  align-self: center;
+  margin-left: 8px;
+  white-space: nowrap;
 }
 
 /* ===== 页内查找工具栏 ===== */

@@ -1,3 +1,11 @@
+/*!
+ * PatentLens 本地服务器
+ * Copyright (c) 2026 Alfred Shi. All rights reserved.
+ *
+ * 本软件仅供内部使用，未经授权不得对外传播、复制或分发。
+ * @author Alfred Shi
+ * @version 260710
+ */
 const http = require("http");
 const { execFile } = require("child_process");
 const fs = require("fs");
