@@ -825,11 +825,16 @@
         <!-- Step 1: Select documents -->
         <div id="extract-step-docs" class="extract-step">
           <div class="extract-step-title"><span class="extract-step-num">1</span> 选择要抽取的审查文档</div>
-          <div class="extract-step-hint">从历史记录中勾选要抽取字段的审查文档（每个文档需要先完成OCR），或者输入专利号加载。</div>
+          <div class="extract-step-hint">输入专利号加载审查文档列表，勾选需要的文档（未OCR的文档可在此界面直接一键OCR），然后进入字段配置。</div>
+          <div class="extract-query-bar">
+            <input type="text" id="extract-query-input" class="extract-query-input" placeholder="输入专利号加载审查文档（如 US17204063、EP4252965A3、CN115398523A）..." title="在抽取模式下直接输入专利号，将自动查询文档列表添加到下方，不进入审查看板">
+            <button id="extract-query-btn" class="btn-primary btn-small">查询并添加</button>
+          </div>
           <div class="extract-doc-toolbar">
-            <input type="text" id="extract-doc-search" class="extract-doc-search" placeholder="搜索历史专利号...">
-            <button id="extract-select-all" class="btn-secondary btn-small">全选已加载文档</button>
+            <input type="text" id="extract-doc-search" class="extract-doc-search" placeholder="筛选下方列表中的专利号/标题...">
+            <button id="extract-select-all" class="btn-secondary btn-small">全选已OCR文档</button>
             <button id="extract-clear-selection" class="btn-secondary btn-small">清空选择</button>
+            <button id="extract-ocr-selected" class="btn-secondary btn-small">对选中未OCR文档执行OCR</button>
           </div>
           <div id="extract-doc-list" class="extract-doc-list"></div>
           <div class="extract-step-footer">
@@ -880,6 +885,7 @@
           <div class="extract-step-hint">点击字段值可直接修改，带"待审核"标记的建议确认；点击溯源链接跳转至原文定位。全部确认后导出Excel。</div>
           <div class="extract-result-toolbar">
             <div class="extract-result-stats" id="extract-result-stats"></div>
+            <button id="extract-restart-btn" class="btn-secondary btn-small">🔄 重新开始新抽取</button>
             <button id="extract-confirm-all-btn" class="btn-secondary btn-small">一键全部确认</button>
             <button id="extract-rerun-btn" class="btn-secondary btn-small">重新配置字段</button>
             <button id="extract-export-btn" class="btn-primary btn-small">

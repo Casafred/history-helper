@@ -658,6 +658,15 @@ searchBtn.addEventListener("click", async () => {
     return;
   }
 
+  // Extract mode - add to extract list instead of opening kanban
+  if (searchMode === "extract") {
+    if (typeof fetchAndAddPatent === "function") {
+      fetchAndAddPatent(input);
+      patentInput.value = "";
+    }
+    return;
+  }
+
   // Check for unsaved work before starting a new search
   if (kanbanState.hasUnsavedWork && currentData) {
     const currentPatent = currentData.raw || (currentData.office + currentData.applicationNumber);
@@ -13785,10 +13794,12 @@ setTimeout(() => {
 // ================================================================
 //  Intelligent Field Extraction Mode (智能抽取)
 // ================================================================
+// groups: patentNo -> { office, applicationNumber, docNumber, title, applicantName, loading, error, expanded, docs: [{idx, docId, docCode, desc, date, numberOfPages, docFormat, canDownload, ocrStatus, ocrError, ocrProgress, extraction}] }
 const _extractState = {
-  selectedDocs: new Set(),     // patentNumbers
-  fields: [],                  // [{ id, name, type, description }]
-  results: [],                 // [{ patentNumber, docTitle, fields: { fieldId: { value, confidence, blockId?, page? } } }]
+  groups: {},
+  selectedDocs: new Set(),     // "pn::idx" strings
+  fields: [],
+  results: [],
   templates: [],
   inited: false,
 };
@@ -13812,41 +13823,75 @@ function initExtractMode() {
   }
   _extractState.inited = true;
   loadExtractTemplates();
+
+  // Pre-populate groups from existing cache (patents the user already opened in dossier mode)
+  seedGroupsFromCache();
+
   renderExtractTemplateSelect();
 
-  // Bind buttons once
+  // Back to dossier
   const backBtn = document.getElementById("extract-back-btn");
   if (backBtn) backBtn.addEventListener("click", () => {
-    // Switch back to dossier mode
-    document.querySelectorAll(".search-mode-btn").forEach(b => {
-      b.classList.toggle("active", b.dataset.mode === "dossier");
-    });
+    document.querySelectorAll(".search-mode-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === "dossier"));
     searchMode = "dossier";
-    const es = document.getElementById("extract-mode-section");
-    if (es) es.classList.add("hidden");
+    document.getElementById("extract-mode-section")?.classList.add("hidden");
     patentInput.placeholder = "输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型";
     if (currentData) resultSection.classList.remove("hidden");
   });
+
+  // Query input
+  const qInput = document.getElementById("extract-query-input");
+  const qBtn = document.getElementById("extract-query-btn");
+  const doQuery = () => {
+    const v = (qInput?.value || "").trim();
+    if (!v) return;
+    fetchAndAddPatent(v);
+    qInput.value = "";
+  };
+  if (qBtn) qBtn.addEventListener("click", doQuery);
+  if (qInput) qInput.addEventListener("keydown", (e) => { if (e.key === "Enter") doQuery(); });
 
   const docSearch = document.getElementById("extract-doc-search");
   if (docSearch) docSearch.addEventListener("input", renderExtractDocList);
   const selAll = document.getElementById("extract-select-all");
   if (selAll) selAll.addEventListener("click", () => {
-    document.querySelectorAll(".extract-doc-item").forEach(item => {
-      if (item.classList.contains("excluded")) return;
-      const cb = item.querySelector("input[type=checkbox]");
-      if (cb && !cb.disabled) { cb.checked = true; _extractState.selectedDocs.add(cb.dataset.pn); }
+    document.querySelectorAll(".extract-doc-row input[type=checkbox]").forEach(cb => {
+      if (!cb.disabled && cb.dataset.ocrready === "1") { cb.checked = true; _extractState.selectedDocs.add(cb.dataset.key); }
     });
     updateExtractDocCount();
   });
   const clrSel = document.getElementById("extract-clear-selection");
   if (clrSel) clrSel.addEventListener("click", () => {
     _extractState.selectedDocs.clear();
-    document.querySelectorAll(".extract-doc-item input[type=checkbox]").forEach(cb => cb.checked = false);
+    document.querySelectorAll(".extract-doc-row input[type=checkbox]").forEach(cb => cb.checked = false);
     updateExtractDocCount();
   });
+  const ocrSel = document.getElementById("extract-ocr-selected");
+  if (ocrSel) ocrSel.addEventListener("click", () => {
+    const targets = [];
+    document.querySelectorAll(".extract-doc-row input[type=checkbox]").forEach(cb => {
+      if (cb.checked && cb.dataset.ocrready !== "1") {
+        targets.push(cb.dataset.key);
+      }
+    });
+    if (targets.length === 0) { showToast("选中的文档都已经OCR过了"); return; }
+    targets.forEach(k => {
+      const [pn, idxStr] = k.split("::");
+      runExtractOcr(pn, parseInt(idxStr, 10));
+    });
+  });
+
   document.getElementById("extract-to-fields-btn").addEventListener("click", () => {
-    if (_extractState.selectedDocs.size === 0) { showError("请至少选择一个文档"); return; }
+    if (_extractState.selectedDocs.size === 0) { showError("请至少选择一个已OCR的文档"); return; }
+    // Verify all selected docs are OCR-ready
+    let notReady = 0;
+    _extractState.selectedDocs.forEach(k => {
+      const [pn, idxStr] = k.split("::");
+      const g = _extractState.groups[pn];
+      const d = g?.docs?.[parseInt(idxStr, 10)];
+      if (!d || !d.extraction) notReady++;
+    });
+    if (notReady > 0) { showError("有 " + notReady + " 个文档还未完成OCR，请先执行OCR或取消勾选"); return; }
     showExtractStep("fields");
   });
   document.getElementById("extract-back-to-docs").addEventListener("click", () => showExtractStep("docs"));
@@ -13859,8 +13904,8 @@ function initExtractMode() {
   document.getElementById("extract-confirm-all-btn").addEventListener("click", confirmAllExtracts);
   document.getElementById("extract-rerun-btn").addEventListener("click", () => showExtractStep("fields"));
   document.getElementById("extract-export-btn").addEventListener("click", exportExtractExcel);
+  document.getElementById("extract-restart-btn").addEventListener("click", restartExtract);
 
-  // Default fields preset
   if (_extractState.fields.length === 0) {
     _extractState.fields = [
       { id: _extractFieldId(), name: "申请号/专利号", type: "string", description: "本审查文档对应的申请号或专利号" },
@@ -13870,16 +13915,165 @@ function initExtractMode() {
     ];
   }
   renderExtractFieldList();
-
-  document.getElementById("extract-step-docs").classList.remove("hidden");
+  showExtractStep("docs");
   renderExtractDocList();
+}
+
+function seedGroupsFromCache() {
+  const allCache = PatentCache.getAll();
+  const historyAll = PatentCache.getHistoryAll();
+  Object.entries(allCache).forEach(([pn, data]) => {
+    if (!data || !data.kanbanState) return;
+    const docs = (data.kanbanState.documents || []);
+    if (docs.length === 0) return;
+    const office = data.office || "";
+    const histInfo = historyAll[pn] || {};
+    const group = {
+      patentNumber: pn,
+      office,
+      applicationNumber: data.applicationNumber || pn,
+      docNumber: data.docNumber || "",
+      title: data.title || histInfo.title || "",
+      applicantName: data.applicantName || histInfo.applicantName || "",
+      loading: false,
+      error: null,
+      expanded: false,
+      docs: [],
+    };
+    docs.forEach((doc, i) => {
+      const extraction = (data.kanbanState.extractions || [])[i];
+      const canDownload = (office === "US" || office === "EP");
+      group.docs.push({
+        idx: i,
+        docId: doc.documentId || doc.docId || "",
+        docCode: doc.docCode || doc.documentType || doc.kindCode || doc.type || "",
+        desc: doc.docDesc || doc.documentDescription || doc.description || doc.title || "",
+        date: doc.legalDateStr || doc.documentDate || doc.date || "",
+        numberOfPages: doc.numberOfPages != null ? doc.numberOfPages : 1,
+        docFormat: doc.docFormat || "PDF",
+        canDownload,
+        ocrStatus: extraction && extraction.text ? "done" : "pending",
+        ocrError: null,
+        ocrProgress: 0,
+        extraction: extraction || null,
+        _raw: doc,
+      });
+    });
+    if (!_extractState.groups[pn]) {
+      _extractState.groups[pn] = group;
+    }
+  });
 }
 
 function showExtractStep(step) {
   ["docs", "fields", "progress", "result"].forEach(s => {
-    const el = document.getElementById("extract-step-" + s);
-    if (el) el.classList.toggle("hidden", s !== step);
+    document.getElementById("extract-step-" + s)?.classList.toggle("hidden", s !== step);
   });
+}
+
+// ------ Patent groups & document list rendering ------
+async function fetchAndAddPatent(input) {
+  const raw = input.trim().toUpperCase().replace(/[\s\/]/g, "");
+  if (!raw) return;
+  if (isCNPatent(raw)) {
+    showError("中国专利（CNIPA）暂不支持直接下载OCR，已为你复制专利号到剪贴板");
+    if (window.electronAPI?.copyToClipboard) window.electronAPI.copyToClipboard(raw);
+    return;
+  }
+  if (isJPPatent(raw)) {
+    showError("日本专利（J-PlatPat）请在审查文档模式中加载。");
+    return;
+  }
+  if (_extractState.groups[raw]) {
+    _extractState.groups[raw].expanded = true;
+    renderExtractDocList();
+    showToast("该专利已在列表中");
+    return;
+  }
+  const pn = parsePatentNumber(raw);
+  if (!pn) { showError("无法识别专利号格式: " + raw); return; }
+
+  const group = {
+    patentNumber: raw,
+    office: pn.office,
+    applicationNumber: pn.applicationNumber,
+    docNumber: "",
+    title: "",
+    applicantName: "",
+    loading: true,
+    error: null,
+    expanded: true,
+    docs: [],
+  };
+  _extractState.groups[raw] = group;
+  renderExtractDocList();
+
+  try {
+    // Query family (to get corrAppNum and title)
+    const office = pn.office;
+    let appNum = pn.applicationNumber;
+    let title = "";
+    try {
+      const familyData = await gdFetch(`/patent-family/svc/family/${pn.queryType || "application"}/${office}/${appNum}`);
+      if (familyData) {
+        if (familyData.corrAppNum) appNum = familyData.corrAppNum;
+        else if (familyData.list && Array.isArray(familyData.list)) {
+          const own = familyData.list.find(x => x.countryCode === office);
+          if (own?.appNum) appNum = own.appNum;
+          else if (own?.docNum?.docNumber) appNum = own.docNum.docNumber;
+        }
+        if (familyData.list && familyData.list[0]?.title) title = familyData.list[0].title;
+      }
+    } catch (e) {
+      console.warn("family query failed:", e);
+    }
+    group.applicationNumber = appNum;
+    group.title = title;
+
+    // Query document list
+    const docData = await gdFetch(`/doc-list/svc/doclist/${office}/${appNum}/A`);
+    group.docNumber = (docData && docData.docNumber) || "";
+    const rawDocs = extractDocuments(docData);
+    const isUS = office === "US", isEP = office === "EP";
+    const canDownload = isUS || isEP;
+    const urlDocNum = isUS ? appNum : encodeURIComponent(group.docNumber || appNum);
+    group.docs = rawDocs.map((d, i) => {
+      const docId = d.documentId || d.docId || "";
+      const encodedDocId = encodeURIComponent(docId);
+      const docCode = d.docCode || d.documentType || d.kindCode || d.type || "";
+      const desc = d.docDesc || d.documentDescription || d.description || d.docId || "";
+      const date = d.legalDateStr || d.documentDate || d.date || "";
+      const numberOfPages = d.numberOfPages != null ? d.numberOfPages : 1;
+      const docFormat = d.docFormat || "PDF";
+      const extractUrl = (docId && canDownload) ? `/api/gd/extract-text/${office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
+      return {
+        idx: i, docId, docCode, desc, date, numberOfPages, docFormat,
+        canDownload, extractUrl,
+        ocrStatus: "pending", ocrError: null, ocrProgress: 0,
+        extraction: null,
+        _raw: d,
+      };
+    });
+    // Record lightweight history
+    PatentCache.addHistory(raw, office, { title, applicantName: "" });
+    refreshHistoryList();
+  } catch (err) {
+    console.error("[Extract] fetch patent error:", err);
+    group.error = err.message || String(err);
+  } finally {
+    group.loading = false;
+    renderExtractDocList();
+  }
+}
+
+function removeExtractGroup(pn) {
+  const prefix = pn + "::";
+  for (const k of Array.from(_extractState.selectedDocs)) {
+    if (k.startsWith(prefix)) _extractState.selectedDocs.delete(k);
+  }
+  delete _extractState.groups[pn];
+  renderExtractDocList();
+  updateExtractDocCount();
 }
 
 function renderExtractDocList() {
@@ -13887,50 +14081,111 @@ function renderExtractDocList() {
   if (!list) return;
   const search = (document.getElementById("extract-doc-search")?.value || "").trim().toLowerCase();
   list.innerHTML = "";
-  // Gather all documents from cached kanbanState (dossier cache)
-  const allCache = PatentCache.getAll();
-  const historyAll = PatentCache.getHistoryAll();
-  const items = [];
-  Object.entries(allCache).forEach(([pn, data]) => {
-    if (!data || !data.kanbanState) return;
-    const docs = (data.kanbanState.documents || []);
-    docs.forEach((doc, i) => {
-      const extraction = data.kanbanState.extractions && data.kanbanState.extractions[i];
-      const hasOCR = !!(extraction && extraction.blocks && extraction.blocks.length > 0);
-      const title = doc.title || doc.fileName || doc.name || "";
-      const label = pn + (title ? " - " + title : "");
-      items.push({ pn, docIdx: i, title, label, hasOCR, patentTitle: data.title || "" });
-    });
+  const pns = Object.keys(_extractState.groups).sort((a, b) => {
+    const ha = PatentCache.getHistoryAll()[a], hb = PatentCache.getHistoryAll()[b];
+    return (hb?.timestamp || 0) - (ha?.timestamp || 0);
   });
-  // Deduplicate by patentNumber+docIdx
-  const seen = new Set();
-  const unique = items.filter(it => {
-    const k = it.pn + "::" + it.docIdx;
-    if (seen.has(k)) return false; seen.add(k); return true;
-  }).sort((a, b) => (historyAll[b.pn]?.timestamp || 0) - (historyAll[a.pn]?.timestamp || 0));
-  const filtered = search ? unique.filter(it => it.label.toLowerCase().includes(search) || it.patentTitle.toLowerCase().includes(search)) : unique;
+  const filtered = pns.filter(pn => {
+    if (!search) return true;
+    const g = _extractState.groups[pn];
+    return pn.toLowerCase().includes(search) ||
+           (g.title || "").toLowerCase().includes(search) ||
+           (g.applicantName || "").toLowerCase().includes(search);
+  });
   if (filtered.length === 0) {
-    list.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-secondary);font-size:13px;">还没有已加载OCR的审查文档。请先在审查文档模式中打开文档并完成OCR。</div>';
+    list.innerHTML = '<div class="extract-empty-hint">还没有添加任何专利。在上方输入框输入专利号（如 <code>US17204063</code>），点击「查询并添加」即可加载审查文档列表。</div>';
+    updateExtractDocCount();
     return;
   }
-  filtered.forEach(it => {
-    const div = document.createElement("div");
-    div.className = "extract-doc-item" + (it.hasOCR ? "" : " excluded");
-    const cbId = "ext-doc-" + it.pn.replace(/[^a-zA-Z0-9]/g, "_") + "-" + it.docIdx;
-    const checked = _extractState.selectedDocs.has(it.pn + "::" + it.docIdx) ? "checked" : "";
-    const disabled = it.hasOCR ? "" : "disabled";
-    div.innerHTML =
-      '<input type="checkbox" id="' + cbId + '" data-pn="' + escapeHtml(it.pn) + '" data-docidx="' + it.docIdx + '" ' + checked + ' ' + disabled + '>' +
-      '<label for="' + cbId + '" class="extract-doc-patent">' + escapeHtml(it.pn) + '</label>' +
-      '<span class="extract-doc-title">' + escapeHtml(it.title || it.patentTitle) + '</span>' +
-      '<span class="extract-doc-ocr ' + (it.hasOCR ? "" : "no") + '">' + (it.hasOCR ? "已OCR" : "未OCR") + '</span>';
-    const cb = div.querySelector("input[type=checkbox]");
-    cb.addEventListener("change", () => {
-      const k = it.pn + "::" + it.docIdx;
-      if (cb.checked) _extractState.selectedDocs.add(k); else _extractState.selectedDocs.delete(k);
-      updateExtractDocCount();
+  filtered.forEach(pn => {
+    const g = _extractState.groups[pn];
+    const band = document.createElement("div");
+    band.className = "extract-patent-band" + (g.expanded ? " expanded" : "") + (g.loading ? " loading" : "");
+    const ocrDone = g.docs.filter(d => d.ocrStatus === "done").length;
+    const totalDocs = g.docs.length;
+    band.innerHTML =
+      '<div class="extract-patent-header">' +
+        '<span class="extract-patent-arrow">▶</span>' +
+        '<span class="extract-patent-no">' + escapeHtml(pn) + '</span>' +
+        '<span class="extract-patent-title">' + escapeHtml(g.title || (g.loading ? "加载中..." : "")) + '</span>' +
+        (g.applicantName ? '<span class="extract-patent-applicant">' + escapeHtml(g.applicantName) + '</span>' : '') +
+        '<span class="extract-patent-doc-count">' + (g.loading ? '加载中' : ocrDone + '/' + totalDocs + ' 已OCR') + '</span>' +
+        '<button class="extract-patent-remove" title="从列表移除" data-pn="' + escapeHtml(pn) + '">✕</button>' +
+      '</div>';
+    const header = band.querySelector(".extract-patent-header");
+    header.addEventListener("click", (e) => {
+      if (e.target.closest(".extract-patent-remove")) return;
+      g.expanded = !g.expanded;
+      renderExtractDocList();
     });
-    list.appendChild(div);
+    band.querySelector(".extract-patent-remove").addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeExtractGroup(pn);
+    });
+
+    const docsWrap = document.createElement("div");
+    docsWrap.className = "extract-patent-docs";
+    if (g.loading) {
+      docsWrap.innerHTML = '<div style="padding:10px 14px;color:var(--text-secondary);font-size:12px;">正在查询 Global Dossier，请稍候...</div>';
+    } else if (g.error) {
+      docsWrap.innerHTML = '<div class="extract-doc-err">查询失败: ' + escapeHtml(g.error) + '</div>';
+    } else if (g.docs.length === 0) {
+      docsWrap.innerHTML = '<div style="padding:10px 14px;color:var(--text-secondary);font-size:12px;">未找到审查文档</div>';
+    } else {
+      // Also filter docs by search keyword when in collapsed filter mode
+      const docFilter = search ? search : "";
+      g.docs.forEach((d) => {
+        if (docFilter) {
+          const hay = (d.docCode + " " + d.desc + " " + d.date).toLowerCase();
+          if (!hay.includes(docFilter) && !pn.toLowerCase().includes(docFilter) && !(g.title || "").toLowerCase().includes(docFilter)) return;
+        }
+        const row = document.createElement("div");
+        row.className = "extract-doc-row" + (d.ocrStatus === "running" ? " ocr-running" : "");
+        const key = pn + "::" + d.idx;
+        const checked = _extractState.selectedDocs.has(key) ? "checked" : "";
+        const ocrReady = d.ocrStatus === "done" ? "1" : "0";
+        const cbDisabled = d.ocrStatus === "done" ? "" : "disabled";
+        let statusHtml;
+        if (d.ocrStatus === "done") statusHtml = '<span class="extract-doc-status ocr-done">已OCR</span>';
+        else if (d.ocrStatus === "running") statusHtml = '<span class="extract-doc-status ocr-running">OCR中</span><div class="extract-doc-ocr-progress"><div class="extract-doc-ocr-progress-fill" style="width:' + (d.ocrProgress || 0) + '%"></div></div>';
+        else if (d.ocrStatus === "failed") statusHtml = '<span class="extract-doc-status ocr-failed">失败</span>';
+        else statusHtml = '<span class="extract-doc-status ocr-pending">未OCR</span>';
+        let actionHtml = '';
+        if (d.ocrStatus === "pending" || d.ocrStatus === "failed") {
+          actionHtml = d.extractUrl
+            ? '<button class="extract-doc-ocr-btn" data-pn="' + escapeHtml(pn) + '" data-idx="' + d.idx + '" ' + (d.ocrStatus === "running" ? "disabled" : "") + '>OCR</button>'
+            : '<span style="font-size:11px;color:var(--text-muted);">不可下载</span>';
+        }
+        row.innerHTML =
+          '<input type="checkbox" data-key="' + escapeHtml(key) + '" data-ocrready="' + ocrReady + '" ' + checked + ' ' + cbDisabled + '>' +
+          '<span class="extract-doc-code">' + escapeHtml(d.docCode || "—") + '</span>' +
+          '<span class="extract-doc-desc" title="' + escapeHtml(d.desc) + '">' + escapeHtml(d.desc) + '</span>' +
+          '<span class="extract-doc-date">' + escapeHtml(d.date) + '</span>' +
+          statusHtml +
+          actionHtml;
+        const cb = row.querySelector("input[type=checkbox]");
+        cb.addEventListener("change", () => {
+          if (cb.checked) _extractState.selectedDocs.add(key); else _extractState.selectedDocs.delete(key);
+          updateExtractDocCount();
+        });
+        const ocrBtn = row.querySelector(".extract-doc-ocr-btn");
+        if (ocrBtn) {
+          ocrBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            runExtractOcr(pn, d.idx);
+          });
+        }
+        docsWrap.appendChild(row);
+        if (d.ocrStatus === "failed" && d.ocrError) {
+          const errEl = document.createElement("div");
+          errEl.className = "extract-doc-err";
+          errEl.textContent = "OCR失败: " + d.ocrError;
+          docsWrap.appendChild(errEl);
+        }
+      });
+    }
+    band.appendChild(docsWrap);
+    list.appendChild(band);
   });
   updateExtractDocCount();
 }
@@ -13943,6 +14198,53 @@ function updateExtractDocCount() {
   if (nextBtn) nextBtn.disabled = n === 0;
 }
 
+async function runExtractOcr(pn, idx) {
+  const g = _extractState.groups[pn];
+  if (!g) return;
+  const d = g.docs[idx];
+  if (!d || !d.extractUrl || d.ocrStatus === "running" || d.ocrStatus === "done") return;
+  d.ocrStatus = "running";
+  d.ocrProgress = 5;
+  d.ocrError = null;
+  renderExtractDocList();
+
+  // Choose engine
+  const config = window.AI.loadAIConfig();
+  const ocrConfig = window.AI.getOCRConfig ? window.AI.getOCRConfig(config) : {};
+  const engine = ocrConfig.engine || "paddle_ocr_vl";
+  let url = d.extractUrl + "?engine=" + encodeURIComponent(engine);
+  if (engine === "glm_ocr") {
+    const glmKey = window.AI.getGlmOcrApiKey ? window.AI.getGlmOcrApiKey(config) : "";
+    if (glmKey) url += "&api_key=" + encodeURIComponent(glmKey);
+  }
+  try {
+    d.ocrProgress = 30;
+    renderExtractDocList();
+    const resp = await fetch(url);
+    d.ocrProgress = 80;
+    renderExtractDocList();
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    const text = data.text || "";
+    const markdown = data.markdown || "";
+    if (!text && !markdown) throw new Error("未能提取到文本内容");
+    const blocks = data.blocks || [];
+    const pageDimensions = data.page_dimensions || {};
+    d.extraction = { text, markdown, engine: data.engine || engine, blocks, pageDimensions };
+    d.ocrStatus = "done";
+    d.ocrProgress = 100;
+    showToast("✅ " + pn + " 文档 " + (d.docCode || idx) + " OCR完成");
+  } catch (err) {
+    console.error("[Extract OCR] error:", err);
+    d.ocrStatus = "failed";
+    d.ocrError = err.message || String(err);
+    showError(pn + " 文档OCR失败: " + err.message);
+  }
+  renderExtractDocList();
+}
+
+// ------ Fields ------
 function _extractFieldId() { return "f_" + Math.random().toString(36).slice(2, 10); }
 
 function addExtractField(preset) {
@@ -14024,11 +14326,23 @@ function loadExtractTemplate(idx) {
   renderExtractFieldList();
 }
 
-// ---- AI extraction ----
+// ------ AI extraction ------
+function getSelectedExtractDocPairs() {
+  const out = [];
+  _extractState.selectedDocs.forEach(k => {
+    const [pn, idxStr] = k.split("::");
+    const idx = parseInt(idxStr, 10);
+    const g = _extractState.groups[pn];
+    const d = g?.docs?.[idx];
+    if (d && d.extraction) out.push({ pn, idx, doc: d, group: g });
+  });
+  return out;
+}
+
 async function runExtract() {
   if (_extractState.fields.length === 0) { showError("请至少配置一个字段"); return; }
-  const docs = getSelectedExtractDocs();
-  if (docs.length === 0) { showError("未找到可抽取的文档"); return; }
+  const docPairs = getSelectedExtractDocPairs();
+  if (docPairs.length === 0) { showError("未找到可抽取的文档"); return; }
 
   showExtractStep("progress");
   const bar = document.getElementById("extract-progress-bar");
@@ -14045,22 +14359,22 @@ async function runExtract() {
     return;
   }
 
-  for (let i = 0; i < docs.length; i++) {
-    const doc = docs[i];
-    title.textContent = `正在抽取 (${i + 1}/${docs.length})：${doc.pn}`;
-    detail.textContent = "准备OCR文本...";
-    bar.style.width = Math.round((i / docs.length) * 100) + "%";
-    pct.textContent = Math.round((i / docs.length) * 100) + "%";
+  for (let i = 0; i < docPairs.length; i++) {
+    const { pn, doc, group } = docPairs[i];
+    const docLabel = (doc.docCode ? doc.docCode + " " : "") + (doc.desc || pn);
+    title.textContent = `正在抽取 (${i + 1}/${docPairs.length})：${pn}`;
+    detail.textContent = docLabel;
+    bar.style.width = Math.round((i / docPairs.length) * 100) + "%";
+    pct.textContent = Math.round((i / docPairs.length) * 100) + "%";
     await new Promise(r => setTimeout(r, 30));
 
     const extraction = doc.extraction;
-    const text = (extraction.text || "").trim();
+    const text = (extraction.text || extraction.markdown || "").trim();
     if (!text) {
-      _extractState.results.push({ patentNumber: doc.pn, docTitle: doc.title, fields: {}, failed: true, reason: "无OCR文本" });
+      _extractState.results.push({ patentNumber: pn, docTitle: docLabel, docIdx: doc.idx, fields: {}, failed: true, reason: "无OCR文本" });
       continue;
     }
 
-    // Build prompt
     const schemaLines = _extractState.fields.map(f => `- ${f.name} (${f.type}): ${f.description || ""}`).join("\n");
     const sysPrompt =
 `你是专利审查文档信息抽取助手。根据用户提供的审查文档OCR文本，抽取指定字段。
@@ -14071,13 +14385,11 @@ async function runExtract() {
 【字段定义】
 ${schemaLines}
 
-【审查文档（专利号 ${doc.pn}）】
+【审查文档（专利号 ${pn} / ${doc.docCode || ""}）】
 ${text.slice(0, 12000)}
 
 请输出严格的JSON对象，不要任何其他文字。`;
 
-    detail.textContent = "调用AI抽取...";
-    let result;
     try {
       const apiBase = window.AI.buildUrl(provider.type, provider.baseUrl);
       const resp = await fetch(apiBase + "/chat/completions", {
@@ -14099,7 +14411,6 @@ ${text.slice(0, 12000)}
       const content = json.choices?.[0]?.message?.content || "{}";
       let parsed;
       try { parsed = JSON.parse(content); } catch (e) {
-        // Try to extract JSON from markdown code block
         const m = content.match(/\{[\s\S]*\}/);
         parsed = m ? JSON.parse(m[0]) : { fields: {} };
       }
@@ -14110,45 +14421,29 @@ ${text.slice(0, 12000)}
         const entry = (raw && typeof raw === "object") ? raw : { value: raw, confidence: 0.5, evidence: "" };
         let v = entry.value;
         if (f.type === "number" && v !== null && v !== "" && v !== undefined) v = Number(v) || v;
-        // Try to find blockId for traceability
-        const blockId = findBlockByEvidence(extraction.blocks, entry.evidence || (typeof v === "string" ? v : ""));
+        const matched = findBlockByEvidence(extraction.blocks, entry.evidence || (typeof v === "string" ? v : ""));
         fmap[f.name] = {
           value: v === null || v === undefined ? "" : v,
           confidence: Math.max(0, Math.min(1, Number(entry.confidence) || 0.5)),
           evidence: entry.evidence || "",
-          blockId: blockId?.block_id || null,
-          page: blockId?.page || null,
+          blockId: matched?.block_id || null,
+          page: matched?.page || null,
+          pn, docIdx: doc.idx,
           status: "pending",
         };
       });
-      _extractState.results.push({ patentNumber: doc.pn, docTitle: doc.title, fields: fmap, failed: false });
+      _extractState.results.push({ patentNumber: pn, docTitle: docLabel, docIdx: doc.idx, fields: fmap, failed: false });
     } catch (err) {
       console.error("[Extract] error:", err);
-      _extractState.results.push({ patentNumber: doc.pn, docTitle: doc.title, fields: {}, failed: true, reason: err.message });
+      _extractState.results.push({ patentNumber: pn, docTitle: docLabel, docIdx: doc.idx, fields: {}, failed: true, reason: err.message });
     }
   }
   bar.style.width = "100%"; pct.textContent = "100%";
   title.textContent = "抽取完成";
-  detail.textContent = "共 " + docs.length + " 个文档，成功 " + _extractState.results.filter(r => !r.failed).length + " 个";
+  detail.textContent = "共 " + docPairs.length + " 个文档，成功 " + _extractState.results.filter(r => !r.failed).length + " 个";
   await new Promise(r => setTimeout(r, 500));
   showExtractStep("result");
   renderExtractResults();
-}
-
-function getSelectedExtractDocs() {
-  const allCache = PatentCache.getAll();
-  const docs = [];
-  _extractState.selectedDocs.forEach(k => {
-    const [pn, docIdxStr] = k.split("::");
-    const docIdx = parseInt(docIdxStr, 10);
-    const data = allCache[pn];
-    if (!data || !data.kanbanState) return;
-    const doc = (data.kanbanState.documents || [])[docIdx];
-    const extraction = (data.kanbanState.extractions || [])[docIdx];
-    if (!doc || !extraction) return;
-    docs.push({ pn, docIdx, title: doc.title || doc.fileName || pn, extraction, data });
-  });
-  return docs;
 }
 
 function findBlockByEvidence(blocks, evidence) {
@@ -14173,17 +14468,16 @@ function renderExtractResults() {
   const stats = document.getElementById("extract-result-stats");
   if (!thead || !tbody) return;
   thead.innerHTML = ""; tbody.innerHTML = "";
-
-  // Build header
   const trh = document.createElement("tr");
-  trh.innerHTML = '<th>专利号</th>' + _extractState.fields.map(f => '<th>' + escapeHtml(f.name) + '</th>').join("") + '<th style="width:60px;">操作</th>';
+  trh.innerHTML = '<th>专利号</th><th>文档</th>' + _extractState.fields.map(f => '<th>' + escapeHtml(f.name) + '</th>').join("") + '<th style="width:80px;">操作</th>';
   thead.appendChild(trh);
 
   let total = 0, confirmed = 0, pending = 0;
   _extractState.results.forEach((r, ri) => {
     const tr = document.createElement("tr");
     tr.dataset.row = ri;
-    let html = '<td class="extract-cell-doc">' + escapeHtml(r.patentNumber) + '</td>';
+    let html = '<td class="extract-cell-doc">' + escapeHtml(r.patentNumber) + '</td>' +
+               '<td class="extract-cell-doc" style="font-family:inherit;font-weight:400;font-size:12px;">' + escapeHtml(r.docTitle || "") + '</td>';
     _extractState.fields.forEach(f => {
       const cell = r.fields[f.name] || { value: "", confidence: 0, status: r.failed ? "failed" : "pending" };
       if (cell.status === "confirmed") confirmed++; else if (cell.status === "pending") pending++;
@@ -14204,7 +14498,6 @@ function renderExtractResults() {
     tbody.appendChild(tr);
   });
 
-  // Click-to-edit
   tbody.querySelectorAll(".extract-cell-value .val-text").forEach(el => {
     el.addEventListener("click", () => {
       const td = el.closest(".extract-cell-value");
@@ -14218,10 +14511,7 @@ function renderExtractResults() {
       el.replaceWith(ta);
       ta.focus();
       const finish = (save) => {
-        if (save) {
-          cell.value = ta.value;
-          cell.status = cell.status === "confirmed" ? "confirmed" : "modified";
-        }
+        if (save) { cell.value = ta.value; cell.status = cell.status === "confirmed" ? "confirmed" : "modified"; }
         renderExtractResults();
       };
       ta.addEventListener("blur", () => finish(true));
@@ -14231,18 +14521,15 @@ function renderExtractResults() {
       });
     });
   });
-  // Trace link
   tbody.querySelectorAll(".extract-trace-link").forEach(el => {
     el.addEventListener("click", () => {
       const row = parseInt(el.dataset.row, 10);
       const field = el.dataset.field;
       const cell = _extractState.results[row].fields[field];
       if (!cell || !cell.blockId) return;
-      // Jump to reader with patent doc
-      openExtractDocAndJump(_extractState.results[row].patentNumber, cell);
+      openExtractDocAndJump(cell.pn, cell.docIdx, cell);
     });
   });
-  // Confirm row
   tbody.querySelectorAll(".extract-cell-actions .btn-confirm").forEach(btn => {
     btn.addEventListener("click", () => {
       const row = parseInt(btn.dataset.row, 10);
@@ -14250,7 +14537,6 @@ function renderExtractResults() {
       renderExtractResults();
     });
   });
-  // Row styling
   tbody.querySelectorAll("tr").forEach(tr => {
     const row = parseInt(tr.dataset.row, 10);
     const r = _extractState.results[row];
@@ -14261,51 +14547,62 @@ function renderExtractResults() {
 }
 
 function confirmAllExtracts() {
-  _extractState.results.forEach(r => {
-    Object.values(r.fields).forEach(c => c.status = "confirmed");
-  });
+  _extractState.results.forEach(r => { Object.values(r.fields).forEach(c => c.status = "confirmed"); });
   renderExtractResults();
   showToast("✅ 全部确认完成，可以导出Excel");
 }
 
-async function openExtractDocAndJump(patentNo, cell) {
+function restartExtract() {
+  if (!confirm("确定要重新开始？当前抽取结果将被清空（已选文档和字段配置保留）。")) return;
+  _extractState.results = [];
+  _extractState.selectedDocs.clear();
+  document.querySelectorAll(".extract-doc-row input[type=checkbox]").forEach(cb => cb.checked = false);
+  showExtractStep("docs");
+  renderExtractDocList();
+  updateExtractDocCount();
+}
+
+async function openExtractDocAndJump(patentNo, docIdx, cell) {
   showToast("正在打开文档...");
-  // Switch UI to dossier
+  // Switch to dossier mode and restore from cache if available; otherwise trigger doSearch
   document.querySelectorAll(".search-mode-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === "dossier"));
   searchMode = "dossier";
   document.getElementById("extract-mode-section")?.classList.add("hidden");
   resultSection.classList.remove("hidden");
   if (patentInput) patentInput.value = patentNo;
   patentDetailSection.classList.add("hidden");
-  if (batchSearchPanel) batchSearchPanel.classList.add("hidden");
-  if (batchResultsSection) batchResultsSection.classList.add("hidden");
 
-  // Restore from cache
-  if (typeof restoreFromCache === "function") {
-    restoreFromCache(patentNo);
-  }
-  setTimeout(() => {
-    if (typeof openReader === "function") openReader();
+  const cached = PatentCache.get(patentNo);
+  const afterJump = () => {
     setTimeout(() => {
-      if (cell.blockId) {
-        const el = readerPdfContainer?.querySelector(`.pdf-block-overlay[data-block-id="${cell.blockId}"]`);
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-          el.classList.add("highlight");
-          setTimeout(() => el.classList.remove("highlight"), 2500);
-        } else if (cell.page && typeof pdfGoToPage === "function") {
-          pdfGoToPage(cell.page);
+      if (typeof openReader === "function") openReader();
+      setTimeout(() => {
+        if (cell.blockId) {
+          const el = readerPdfContainer?.querySelector(`.pdf-block-overlay[data-block-id="${cell.blockId}"]`);
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            el.classList.add("highlight");
+            setTimeout(() => el.classList.remove("highlight"), 2500);
+          } else if (cell.page && typeof pdfGoToPage === "function") {
+            pdfGoToPage(cell.page);
+          }
         }
-      }
-    }, 1500);
-  }, 400);
+      }, 1500);
+    }, 500);
+  };
+  if (cached && cached.kanbanState) {
+    restoreFromCache(patentNo);
+    afterJump();
+  } else {
+    await doSearch(patentNo);
+    afterJump();
+  }
 }
 
 function exportExtractExcel() {
-  // Generate CSV (Excel-compatible) for simplicity and zero-dependency
-  const headers = ["专利号", ..._extractState.fields.map(f => f.name), "状态"];
+  const headers = ["专利号", "文档", ..._extractState.fields.map(f => f.name), "状态"];
   const rows = _extractState.results.map(r => {
-    return [r.patentNumber, ..._extractState.fields.map(f => {
+    return [r.patentNumber, r.docTitle || "", ..._extractState.fields.map(f => {
       const c = r.fields[f.name];
       return c ? String(c.value ?? "") : "";
     }), r.failed ? "失败: " + (r.reason || "") : "已完成"];
@@ -14316,7 +14613,6 @@ function exportExtractExcel() {
       return /[",\n\r]/.test(s) ? `"${s}"` : s;
     }).join(",")
   ).join("\r\n");
-  // Add BOM for Excel UTF-8
   const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

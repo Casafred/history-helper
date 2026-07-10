@@ -6810,12 +6810,34 @@ body {
   color: var(--text-secondary);
 }
 
+/* Query bar */
+.extract-query-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.extract-query-input {
+  flex: 1;
+  padding: 9px 14px;
+  border: 2px solid var(--accent, #3b82f6);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--bg-primary);
+  color: var(--text);
+  font-family: monospace;
+}
+.extract-query-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
+}
+
 /* Doc list */
 .extract-doc-toolbar {
   display: flex;
   gap: 10px;
   align-items: center;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 .extract-doc-search {
   flex: 1;
@@ -6828,35 +6850,170 @@ body {
   color: var(--text);
 }
 .extract-doc-list {
-  max-height: 400px;
+  max-height: 520px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-secondary);
 }
-.extract-doc-item {
+.extract-patent-band {
+  border-bottom: 1px solid var(--border);
+}
+.extract-patent-band:last-child { border-bottom: none; }
+.extract-patent-band.loading { opacity: 0.7; }
+.extract-patent-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-primary);
   cursor: pointer;
+  user-select: none;
   transition: background .15s;
 }
-.extract-doc-item:last-child { border-bottom: none; }
-.extract-doc-item:hover { background: var(--bg-hover); }
-.extract-doc-item input[type="checkbox"] { cursor: pointer; }
-.extract-doc-item.excluded { opacity: 0.5; }
-.extract-doc-patent { font-weight: 600; color: var(--text); font-size: 14px; font-family: monospace; }
-.extract-doc-title { flex: 1; font-size: 13px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.extract-doc-ocr {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--accent-bg, rgba(59,130,246,0.1));
+.extract-patent-header:hover { background: var(--bg-hover); }
+.extract-patent-arrow {
+  font-size: 10px;
+  color: var(--text-secondary);
+  transition: transform .2s;
+  width: 12px;
+  display: inline-block;
+}
+.extract-patent-band.expanded .extract-patent-arrow { transform: rotate(90deg); }
+.extract-patent-no {
+  font-weight: 700;
+  font-family: monospace;
+  font-size: 14px;
   color: var(--accent, #3b82f6);
 }
-.extract-doc-ocr.no { background: #fee2e2; color: #dc2626; }
+.extract-patent-title {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.extract-patent-applicant {
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.extract-patent-doc-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.extract-patent-remove {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.extract-patent-remove:hover { background: #fee2e2; color: #dc2626; }
+
+.extract-patent-docs {
+  display: none;
+  padding: 4px 0 8px 28px;
+  background: var(--bg-secondary);
+  border-top: 1px dashed var(--border);
+}
+.extract-patent-band.expanded .extract-patent-docs { display: block; }
+
+.extract-doc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px 7px 14px;
+  font-size: 13px;
+  transition: background .1s;
+}
+.extract-doc-row:hover { background: var(--bg-hover); }
+.extract-doc-row input[type="checkbox"] { cursor: pointer; }
+.extract-doc-row.ocr-running { background: rgba(59,130,246,0.06); }
+.extract-doc-code {
+  font-weight: 600;
+  font-size: 12px;
+  padding: 1px 6px;
+  background: var(--bg-primary);
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  min-width: 44px;
+  text-align: center;
+  white-space: nowrap;
+}
+.extract-doc-desc {
+  flex: 1;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.extract-doc-date {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 80px;
+}
+.extract-doc-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.extract-doc-status.ocr-done { background: #dcfce7; color: #16a34a; }
+.extract-doc-status.ocr-pending { background: #f3f4f6; color: #6b7280; }
+.extract-doc-status.ocr-running { background: #dbeafe; color: #2563eb; }
+.extract-doc-status.ocr-failed { background: #fee2e2; color: #dc2626; }
+.extract-doc-ocr-btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  border: 1px solid var(--accent, #3b82f6);
+  background: var(--bg-primary);
+  color: var(--accent, #3b82f6);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.extract-doc-ocr-btn:hover:not(:disabled) { background: var(--accent, #3b82f6); color: #fff; }
+.extract-doc-ocr-btn:disabled { opacity: 0.5; cursor: wait; }
+.extract-doc-ocr-progress {
+  width: 100px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.extract-doc-ocr-progress-fill {
+  height: 100%;
+  background: var(--accent, #3b82f6);
+  width: 0%;
+  transition: width .3s;
+}
+.extract-doc-err {
+  font-size: 11px;
+  color: #dc2626;
+  padding: 2px 14px 6px 52px;
+}
+.extract-empty-hint {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.extract-empty-hint code {
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: monospace;
+}
 
 /* Field config */
 .extract-template-bar {
