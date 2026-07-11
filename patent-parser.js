@@ -1,6 +1,14 @@
+/*!
+ * PatentLens 专利解析模块
+ * Copyright (c) 2026 Alfred Shi. All rights reserved.
+ * 本软件仅供内部使用，未经授权不得对外传播、复制或分发。
+ * @author Alfred Shi
+ * @version 260710
+ */
 // 共享模块：专利解析逻辑（normalizePatentNumber / extractPatentFromHtml）
 // 被 electron-main.js 和 server.js 同时引用。
 // 修改专利解析逻辑只需修改本文件，两个入口会自动生效。
+// __PATENTLENS_COPYRIGHT__: Copyright (c) 2026 Alfred Shi - All Rights Reserved
 
 function normalizePatentNumber(input) {
   const normalized = input.toUpperCase().replace(/[\s\/]/g, "");

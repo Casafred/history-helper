@@ -9,6 +9,40 @@
  * @author Alfred Shi
  * @version 260710
  */
+// __PATENTLENS_COPYRIGHT_WATERMARK__: Alfred Shi 2026 - All Rights Reserved
+const SVG_ICONS = {
+  search: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+  folder: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+  refresh: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+  edit: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+  globe: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+  copy: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+  close: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+  check: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+  bot: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>',
+  paperclip: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
+  file: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>',
+  lightbulb: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>',
+  alert: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  type: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>',
+  trash: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+  square: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>',
+  checkSquare: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  brain: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>',
+  loader: '<svg class="svg-icon svg-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>',
+  x: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+  checkCircle: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+  external: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
+};
+
+function icon(name, size, extraClass) {
+  const base = SVG_ICONS[name] || SVG_ICONS.file;
+  let cls = 'svg-icon';
+  if (size === 'sm') cls = 'svg-icon-sm';
+  if (extraClass) cls += ' ' + extraClass;
+  return base.replace(/class="svg-icon[^"]*"/, 'class="' + cls + '"');
+}
+
 const GD_API_BASE = "/api/gd";
 
 const OFFICE_NAMES = {
@@ -675,9 +709,9 @@ function openCNQuery(patentNo, title) {
     window.open(url, "_blank");
   }
   if (copied) {
-    showToast("✅ 专利号 " + patentNo + " 已复制到剪贴板，已在外部浏览器打开CNIPA");
+    showToast(icon('checkCircle') + " 专利号 " + patentNo + " 已复制到剪贴板，已在外部浏览器打开CNIPA");
   } else {
-    showToast("🌐 已在外部浏览器打开CNIPA，请手动复制专利号：" + patentNo);
+    showToast(icon('globe') + " 已在外部浏览器打开CNIPA，请手动复制专利号：" + patentNo);
   }
 }
 
@@ -815,7 +849,7 @@ let translateAbortController = null;
 let translatePageCache = {};
 
 function showError(msg) {
-  errorToast.textContent = msg;
+  errorToast.innerHTML = msg;
   errorToast.classList.remove("hidden");
   setTimeout(() => { errorToast.classList.add("hidden"); }, 5000);
 }
@@ -825,10 +859,10 @@ function showToast(msg, duration = 3000) {
   if (!t) {
     t = document.createElement("div");
     t.id = "__app_toast__";
-    t.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#16a34a;color:#fff;padding:10px 22px;border-radius:8px;z-index:999999;font-size:14px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,0.25);max-width:80vw;pointer-events:none;transition:opacity .2s;";
+    t.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#16a34a;color:#fff;padding:10px 22px;border-radius:8px;z-index:999999;font-size:14px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,0.25);max-width:80vw;pointer-events:none;transition:opacity .2s;display:flex;align-items:center;gap:6px;";
     document.body.appendChild(t);
   }
-  t.textContent = msg;
+  t.innerHTML = msg;
   t.style.opacity = "1";
   clearTimeout(t._timer);
   t._timer = setTimeout(() => { t.style.opacity = "0"; }, duration);
@@ -1450,7 +1484,7 @@ function openInAppWebview(url, title, opts) {
       '<span style="flex:1;color:#a08030;">如果页面未自动加载文献，请点击「番号照会」或使用下方链接手动查找</span>' +
       '<button id="pd-wv-jp-opd-btn" style="' + btnStyle + '" title="打开番号照会页面">番号照会(OPD)</button>' +
       '<button id="pd-wv-jp-ext-btn" style="' + btnStyle + '" title="外部打开">外部打开</button>' +
-      '<button id="pd-wv-jp-close" style="' + findBtnStyle + '" title="关闭提示">✕</button>' +
+      '<button id="pd-wv-jp-close" style="' + findBtnStyle + '" title="关闭提示">' + icon('close') + '</button>' +
       '</div>';
   }
   let webviewHtml = `
@@ -1461,7 +1495,7 @@ function openInAppWebview(url, title, opts) {
         <button id="pd-wv-translate-btn" style="${btnStyle}" title="通过 Google 翻译翻译此页面内容">翻译</button>
         <button id="pd-wv-refresh-btn" style="${btnStyle}" title="刷新当前页面">刷新</button>
         <button id="pd-wv-external-btn" style="${btnStyle}" title="在外部浏览器打开">外部浏览器打开</button>
-        <button id="pd-wv-close-btn" style="${btnStyle}" title="关闭">✕ 关闭</button>
+        <button id="pd-wv-close-btn" style="${btnStyle}" title="关闭">${icon('close')} 关闭</button>
       </div>
     </div>
     ${jpInfoBar}
@@ -1470,7 +1504,7 @@ function openInAppWebview(url, title, opts) {
       <button id="pd-wv-find-prev" style="${findBtnStyle}" title="上一个匹配 (Shift+Enter)">▲</button>
       <button id="pd-wv-find-next" style="${findBtnStyle}" title="下一个匹配 (Enter)">▼</button>
       <span id="pd-wv-find-count" style="font-size:11px;color:#888;min-width:50px;text-align:center;"></span>
-      <button id="pd-wv-find-close" style="${findBtnStyle}" title="关闭查找 (Esc)">✕</button>
+      <button id="pd-wv-find-close" style="${findBtnStyle}" title="关闭查找 (Esc)">${icon('close')}</button>
     </div>
     <div id="pd-inapp-webview-container" style="width:100%;height:calc(100vh - 120px);border:none;position:relative;">
       <iframe id="pd-wv-iframe" src="${escapeHtml(url)}" style="width:100%;height:100%;border:1px solid #ddd;border-radius:8px;"
@@ -2140,10 +2174,10 @@ function _handleCopyCitationNums(btn) {
   const text = nums.join("\n");
   copyToClipboard(text).then(ok => {
     if (ok) {
-      const orig = btn.textContent;
-      btn.textContent = "✓ 已复制";
+      const orig = btn.innerHTML;
+      btn.innerHTML = icon('check') + " 已复制";
       btn.classList.add("copied");
-      setTimeout(() => { btn.textContent = orig; btn.classList.remove("copied"); }, 1500);
+      setTimeout(() => { btn.innerHTML = orig; btn.classList.remove("copied"); }, 1500);
     }
   });
 }
@@ -2421,12 +2455,12 @@ function showFloatingTranslationPopup(text, posX, posY, popupId, preferredSource
 
   popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-shrink:0;">' +
     '<div style="display:flex;gap:4px;align-items:center;">' +
-    '<button id="' + popupId + '-source-ai" style="border:1px solid;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;' + (initialSource === 'ai' ? activeStyle : inactiveStyle) + aiBtnDisabled + '" title="使用AI翻译">🤖 AI</button>' +
-    '<button id="' + popupId + '-source-google" style="border:1px solid;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;' + (initialSource === 'google' ? activeStyle : inactiveStyle) + '" title="使用Google翻译">🌐 Google</button>' +
+    '<button id="' + popupId + '-source-ai" style="border:1px solid;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px;' + (initialSource === 'ai' ? activeStyle : inactiveStyle) + aiBtnDisabled + '" title="使用AI翻译">' + icon('bot') + ' AI</button>' +
+    '<button id="' + popupId + '-source-google" style="border:1px solid;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px;' + (initialSource === 'google' ? activeStyle : inactiveStyle) + '" title="使用Google翻译">' + icon('globe') + ' Google</button>' +
     '</div>' +
     '<div style="display:flex;gap:4px;align-items:center;">' +
-    '<button id="' + popupId + '-copy-btn" style="border:1px solid #e0e0e0;background:#f8f9fa;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#5f6368;" title="复制译文">📋 复制</button>' +
-    '<button id="' + popupId + '-open-google-btn" style="border:1px solid #e0e0e0;background:#f8f9fa;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#5f6368;" title="在Google翻译中打开">↗️</button>' +
+    '<button id="' + popupId + '-copy-btn" style="border:1px solid #e0e0e0;background:#f8f9fa;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#5f6368;display:flex;align-items:center;gap:4px;" title="复制译文">' + icon('copy') + ' 复制</button>' +
+    '<button id="' + popupId + '-open-google-btn" style="border:1px solid #e0e0e0;background:#f8f9fa;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#5f6368;display:flex;align-items:center;" title="在Google翻译中打开">' + icon('external', 'sm') + '</button>' +
     '<button id="' + popupId + '-close" style="border:none;background:transparent;cursor:pointer;font-size:16px;color:#999;padding:0 4px;line-height:1;">&times;</button>' +
     '</div></div>' +
     '<div id="' + popupId + '-body" style="overflow-y:auto;flex:1;min-height:60px;max-height:400px;padding-right:4px;"><div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;border-width:2px;margin:0;"></div><span style="font-size:12px;color:#888;">翻译中...</span></div></div>';
@@ -2475,8 +2509,8 @@ function showFloatingTranslationPopup(text, posX, posY, popupId, preferredSource
   if (copyBtn) copyBtn.addEventListener('click', () => {
     if (currentTranslated) {
       copyTextToClipboard(currentTranslated).then(() => {
-        copyBtn.textContent = '✓ 已复制';
-        setTimeout(() => { copyBtn.textContent = '📋 复制'; }, 1500);
+        copyBtn.innerHTML = icon('check') + ' 已复制';
+        setTimeout(() => { copyBtn.innerHTML = icon('copy') + ' 复制'; }, 1500);
       });
     }
   });
@@ -2646,7 +2680,7 @@ async function translateClaimByIndex(claimIndex, containerEl) {
     }
     translationEl.innerHTML = escapeHtml(fullResponse).replace(/\n/g, '<br>');
     translationEl.dataset.translated = '1';
-    if (btn) { btn.textContent = '✓'; btn.disabled = false; }
+    if (btn) { btn.innerHTML = icon('check'); btn.disabled = false; }
   } catch (e) {
     translationEl.innerHTML = '<span style="color:var(--danger);">翻译失败: ' + escapeHtml(e.message) + '</span>';
     if (btn) { btn.textContent = '译'; btn.disabled = false; }
@@ -2772,7 +2806,7 @@ function openPatentImageViewer(images, startIndex) {
     controls.innerHTML = '<button class="piv-btn piv-prev"' + (currentIdx <= 0 ? ' disabled' : '') + '>&#9664; 上一张</button>'
       + '<span class="piv-counter">' + (currentIdx + 1) + ' / ' + images.length + '</span>'
       + '<button class="piv-btn piv-next"' + (currentIdx >= images.length - 1 ? ' disabled' : '') + '>下一张 &#9654;</button>'
-      + '<button class="piv-btn piv-close">✕ 关闭</button>';
+      + '<button class="piv-btn piv-close" style="display:flex;align-items:center;gap:4px;">' + icon('close') + ' 关闭</button>';
     viewer.appendChild(controls);
 
     controls.querySelector(".piv-prev").addEventListener("click", (e) => { e.stopPropagation(); if (currentIdx > 0) { currentIdx--; render(); } });
@@ -5754,13 +5788,13 @@ async function aiAnalyzeDocument(idx, docType) {
     // Final render
     if (streamContainer) streamContainer.innerHTML = renderMarkdown(fullText);
     if (aiStatus) {
-      aiStatus.textContent = "分析完成 ✓";
+      aiStatus.innerHTML = icon('check') + " 分析完成";
       aiStatus.className = "ai-status ai-status-success";
     }
   } catch (e) {
     if (aiSummaryResult) aiSummaryResult.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
     if (aiStatus) {
-      aiStatus.textContent = "分析失败 ✗";
+      aiStatus.innerHTML = icon('x') + " 分析失败";
       aiStatus.className = "ai-status ai-status-error";
     }
   } finally {
@@ -6146,7 +6180,7 @@ function updateModelOptions(type) {
 
 function showTestResult(success, message) {
   aiTestResult.className = "test-result " + (success ? "test-success" : "test-error");
-  aiTestResult.textContent = (success ? "✓ " : "✗ ") + message;
+  aiTestResult.innerHTML = (success ? icon('check') + " " : icon('x') + " ") + message;
   aiTestResult.classList.remove("hidden");
 }
 
@@ -6691,7 +6725,7 @@ function _createThinkingHost(hostEl) {
     block.className = "ai-thinking-block thinking";
     block.innerHTML =
       '<div class="ai-thinking-header">' +
-        '<span class="ai-thinking-icon">🧠</span>' +
+        '<span class="ai-thinking-icon">' + icon('brain') + '</span>' +
         '<span class="ai-thinking-title">思考中…</span>' +
         '<span class="ai-thinking-meta"></span>' +
         '<span class="ai-thinking-toggle">▼</span>' +
@@ -6766,9 +6800,9 @@ function renderAiProgressUI(step, detail, progress) {
     const isActive = s.id === step;
     const isDone = steps.findIndex(st => st.id === step) > i;
     const cls = isDone ? 'done' : (isActive ? 'active' : '');
-    const icon = isDone ? '✓' : (isActive ? '⟳' : (i + 1));
+    const stepIcon = isDone ? icon('check') : (isActive ? icon('loader') : (i + 1));
     html += '<div class="ai-progress-step ' + cls + '">';
-    html += '<span class="ai-progress-step-icon">' + icon + '</span>';
+    html += '<span class="ai-progress-step-icon">' + stepIcon + '</span>';
     html += '<span>' + s.label + '</span>';
     html += '</div>';
   });
@@ -7232,19 +7266,19 @@ function buildReviewManualSelectPanel() {
       showAnalysisChatToggle();
       autoSaveCache();
       prefetchPatentLinks();
-      if (statusEl) statusEl.textContent = "AI 整理完成 ✓ 共 " + oaItems.length + " 份文档" + (hasBlocks ? "（含溯源标记）" : "");
+      if (statusEl) statusEl.innerHTML = icon('check') + " AI 整理完成 共 " + oaItems.length + " 份文档" + (hasBlocks ? "（含溯源标记）" : "");
 
       let reportHtml = "";
       if (extractReport.empty.length > 0 || extractReport.failed.length > 0) {
         reportHtml = '<div class="extract-report"><h4>提取完整性报告</h4>';
         if (extractReport.success.length > 0) {
-          reportHtml += '<div class="report-success">✓ 成功: ' + extractReport.success.map(s => escapeHtml(s.name) + ' (' + s.chars + '字/' + s.engine + ')').join('、') + '</div>';
+          reportHtml += '<div class="report-success" style="display:flex;align-items:center;gap:6px;">' + icon('check') + ' 成功: ' + extractReport.success.map(s => escapeHtml(s.name) + ' (' + s.chars + '字/' + s.engine + ')').join('、') + '</div>';
         }
         if (extractReport.empty.length > 0) {
           reportHtml += '<div class="report-warning">内容为空: ' + extractReport.empty.map(s => escapeHtml(s.name)).join('、') + '</div>';
         }
         if (extractReport.failed.length > 0) {
-          reportHtml += '<div class="report-error">✗ 提取失败: ' + extractReport.failed.map(s => escapeHtml(s.name) + ' (' + escapeHtml(s.reason) + ')').join('、') + '</div>';
+          reportHtml += '<div class="report-error" style="display:flex;align-items:center;gap:6px;">' + icon('x') + ' 提取失败: ' + extractReport.failed.map(s => escapeHtml(s.name) + ' (' + escapeHtml(s.reason) + ')').join('、') + '</div>';
         }
         reportHtml += '</div>';
         // Prepend report before the stable stream container
@@ -7254,7 +7288,7 @@ function buildReviewManualSelectPanel() {
       }
     } catch (e) {
       analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
-      if (statusEl) statusEl.textContent = "AI 整理失败 ✗";
+      if (statusEl) statusEl.innerHTML = icon('x') + " AI 整理失败";
     } finally {
       activeAnalysisProcess = null;
       ["kanban-manual-select-btn", "cited-refs-manual-btn"].forEach(id => {
@@ -7459,7 +7493,7 @@ function renderAnalysisModules(text) {
       html += '<div class="analysis-module" data-module-id="' + seg.id + '">';
       html += '<div class="analysis-module-header">';
       html += '<span class="analysis-module-title">' + escapeHtml(seg.label) + '</span>';
-      html += '<button class="analysis-module-regen-btn" data-module-id="' + seg.id + '" data-module-label="' + escapeHtml(seg.label) + '" title="重新生成此模块">⟳ 重新生成</button>';
+      html += '<button class="analysis-module-regen-btn" data-module-id="' + seg.id + '" data-module-label="' + escapeHtml(seg.label) + '" title="重新生成此模块" style="display:flex;align-items:center;gap:4px;">' + icon('refresh') + ' 重新生成</button>';
       html += '</div>';
       // Strip the leading ### heading from content to avoid duplication with the header bar
       const contentWithoutHeading = seg.content.replace(/^###\s+[^\n]*\n?/, "");
@@ -10042,8 +10076,8 @@ function showAnnotMultiToolbar() {
         '<select id="pdf-amt-line-width"><option value="1">1px</option><option value="2" selected>2px</option><option value="3">3px</option><option value="4">4px</option><option value="6">6px</option><option value="8">8px</option></select>' +
       '</label>' +
       '<div class="pdf-amt-sep"></div>' +
-      '<button class="pdf-amt-btn pdf-amt-delete" id="pdf-amt-delete" title="删除选中标注">🗑 删除</button>' +
-      '<button class="pdf-amt-btn pdf-amt-close" id="pdf-amt-close" title="取消选择">✕</button>';
+      '<button class="pdf-amt-btn pdf-amt-delete" id="pdf-amt-delete" title="删除选中标注" style="display:flex;align-items:center;gap:4px;">' + icon('trash') + ' 删除</button>' +
+      '<button class="pdf-amt-btn pdf-amt-close" id="pdf-amt-close" title="取消选择">' + icon('close') + '</button>';
     readerPdfContainer.parentElement.appendChild(tb);
 
     document.getElementById("pdf-amt-line-color").addEventListener("input", (e) => batchSetAnnotColor(e.target.value, "line"));
@@ -12114,7 +12148,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const text = ext.markdown || ext.text || "";
       if (!text.trim()) return;
       navigator.clipboard.writeText(text).then(() => {
-        extractCopyBtn.textContent = "已复制 ✓";
+        extractCopyBtn.innerHTML = icon('check') + " 已复制";
         setTimeout(() => { extractCopyBtn.textContent = "复制全文"; }, 1500);
       }).catch(() => {
         // Fallback for older browsers
@@ -12124,7 +12158,7 @@ document.addEventListener("DOMContentLoaded", () => {
         ta.select();
         document.execCommand("copy");
         document.body.removeChild(ta);
-        extractCopyBtn.textContent = "已复制 ✓";
+        extractCopyBtn.innerHTML = icon('check') + " 已复制";
         setTimeout(() => { extractCopyBtn.textContent = "复制全文"; }, 1500);
       });
     });
@@ -12345,9 +12379,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const existingPopup2 = document.getElementById("pd-selected-translation-popup");
     if (existingPopup2) existingPopup2.remove();
     const btn = document.createElement("button");
-    btn.textContent = "🔤";
+    btn.innerHTML = icon('type');
     btn.title = "翻译/复制选中文本";
-    btn.style.cssText = 'position:fixed;z-index:100020;background:var(--accent,#22c55e);color:#fff;border:none;border-radius:50%;width:32px;height:32px;font-size:14px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-family:inherit;display:flex;align-items:center;justify-content:center;';
+    btn.style.cssText = 'position:fixed;z-index:100020;background:var(--accent,#22c55e);color:#fff;border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-family:inherit;display:flex;align-items:center;justify-content:center;';
     btn.style.left = Math.min(Math.max(x, 5), window.innerWidth - 40) + "px";
     btn.style.top = Math.max(5, y) + "px";
     btn.addEventListener("mousedown", (e) => {
@@ -12380,16 +12414,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const hoverBg = 'var(--bg-hover,#f0fdf4)';
     const items = [
-      { label: "📋 复制", action: () => { copyTextToClipboard(text); window.getSelection()?.removeAllRanges(); } },
-      { label: "🤖 AI 翻译", action: () => { window.getSelection()?.removeAllRanges(); showFloatingTranslation(text, x, y + 8, "ai"); }, disabled: !hasAi },
-      { label: "🌐 Google 翻译", action: () => { window.getSelection()?.removeAllRanges(); showFloatingTranslation(text, x, y + 8, "google"); } },
-      { label: "↗️ 打开 Google 翻译", action: () => { openInGoogleTranslate(text); } },
+      { label: icon('copy') + " 复制", action: () => { copyTextToClipboard(text); window.getSelection()?.removeAllRanges(); } },
+      { label: icon('bot') + " AI 翻译", action: () => { window.getSelection()?.removeAllRanges(); showFloatingTranslation(text, x, y + 8, "ai"); }, disabled: !hasAi },
+      { label: icon('globe') + " Google 翻译", action: () => { window.getSelection()?.removeAllRanges(); showFloatingTranslation(text, x, y + 8, "google"); } },
+      { label: icon('external') + " 打开 Google 翻译", action: () => { openInGoogleTranslate(text); } },
     ];
 
     items.forEach(item => {
       const it = document.createElement("div");
-      it.textContent = item.label;
-      it.style.cssText = 'padding:8px 16px;cursor:pointer;' + (item.disabled ? 'opacity:0.5;cursor:not-allowed;' : '');
+      it.innerHTML = item.label;
+      it.style.cssText = 'padding:8px 16px;cursor:pointer;display:flex;align-items:center;gap:6px;' + (item.disabled ? 'opacity:0.5;cursor:not-allowed;' : '');
       if (!item.disabled) {
         it.addEventListener("mouseenter", () => { it.style.background = hoverBg; });
         it.addEventListener("mouseleave", () => { it.style.background = "transparent"; });
@@ -12697,7 +12731,7 @@ function appendAnalysisChatMessage(role, content) {
     const copyBtn = document.createElement("button");
     copyBtn.className = "chat-msg-copy-btn";
     copyBtn.title = "复制消息内容";
-    copyBtn.textContent = "📋";
+    copyBtn.innerHTML = icon('copy');
     copyBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       let textToCopy = content;
@@ -12707,8 +12741,8 @@ function appendAnalysisChatMessage(role, content) {
       }
       copyTextToClipboard(textToCopy).then(ok => {
         if (ok) {
-          copyBtn.textContent = "✓";
-          setTimeout(() => { copyBtn.textContent = "📋"; }, 1500);
+          copyBtn.innerHTML = icon('check');
+          setTimeout(() => { copyBtn.innerHTML = icon('copy'); }, 1500);
         }
       });
     });
@@ -13502,7 +13536,7 @@ if (networkSaveBtn) {
     const enabled = gpProxyCheckbox ? gpProxyCheckbox.checked : false;
     const proxyUrl = gpProxyUrlInput ? gpProxyUrlInput.value.trim() : "";
     saveGpProxySettings(enabled, proxyUrl);
-    networkSaveBtn.textContent = "已保存 ✓";
+    networkSaveBtn.innerHTML = icon('check') + " 已保存";
     setTimeout(() => { networkSaveBtn.textContent = "保存"; }, 1500);
   });
 }
@@ -13566,7 +13600,7 @@ if (opsSaveBtn) {
     config.ops.consumerSecret = opsConsumerSecretInput ? opsConsumerSecretInput.value.trim() : "";
     window.AI.saveAIConfig(config);
     localStorage.setItem("patentlens_ops_enabled", opsEnabledCheckbox && opsEnabledCheckbox.checked ? "true" : "false");
-    opsSaveBtn.textContent = "已保存 ✓";
+    opsSaveBtn.innerHTML = icon('check') + " 已保存";
     setTimeout(() => { opsSaveBtn.textContent = "保存"; }, 1500);
     // 保存后显示配额区域
     if (opsQuotaDisplayGroup && config.ops.consumerKey) {
@@ -13602,25 +13636,25 @@ if (opsTestBtn) {
       const data = await resp.json();
       if (data.success && data.data_source === "EPO OPS") {
         if (opsTestResult) {
-          opsTestResult.textContent = "✓ 连接成功！OPS 降级查询可用。验证专利: " + (data.data.title || "EP1000000");
+          opsTestResult.innerHTML = icon('check') + " 连接成功！OPS 降级查询可用。验证专利: " + (data.data.title || "EP1000000");
           opsTestResult.style.color = "var(--success)";
         }
         refreshOpsQuota();
       } else if (data.success) {
         if (opsTestResult) {
-          opsTestResult.textContent = "✓ 凭证有效（Google Patents 已返回数据，未触发 OPS 降级）。可尝试查询 Google Patents 没有的专利号验证降级。";
+          opsTestResult.innerHTML = icon('check') + " 凭证有效（Google Patents 已返回数据，未触发 OPS 降级）。可尝试查询 Google Patents 没有的专利号验证降级。";
           opsTestResult.style.color = "var(--success)";
         }
         refreshOpsQuota();
       } else {
         if (opsTestResult) {
-          opsTestResult.textContent = "✗ 测试失败: " + (data.error || "未知错误") + "（注意：EP1000000 在 Google Patents 和 OPS 都应存在，若失败请检查凭证）";
+          opsTestResult.innerHTML = icon('x') + " 测试失败: " + (data.error || "未知错误") + "（注意：EP1000000 在 Google Patents 和 OPS 都应存在，若失败请检查凭证）";
           opsTestResult.style.color = "var(--danger)";
         }
       }
     } catch (e) {
       if (opsTestResult) {
-        opsTestResult.textContent = "✗ 请求失败: " + e.message;
+        opsTestResult.innerHTML = icon('x') + " 请求失败: " + e.message;
         opsTestResult.style.color = "var(--danger)";
       }
     } finally {
@@ -13884,7 +13918,7 @@ function _updateBatchCardDone(card, pn, data) {
 
   if (data && data.data_source === "Espacenet") {
     card.innerHTML = `
-      <div class="batch-card-thumb"><div class="batch-card-thumb-placeholder">🌐</div></div>
+      <div class="batch-card-thumb"><div class="batch-card-thumb-placeholder">${icon('globe').replace('<svg ', '<svg style="width:32px;height:32px;" ')}</div></div>
       <div class="batch-card-body">
         <div class="batch-card-pn">${escapeHtml(pn)} <span class="batch-card-status" style="background:#e3f2fd;color:#1565c0">Espacenet</span></div>
         <div class="batch-card-title" style="color:var(--text-secondary)">Google Patents 未收录，需在 Espacenet 中查看</div>
@@ -13907,7 +13941,7 @@ function _updateBatchCardDone(card, pn, data) {
 
   card.innerHTML = `
     <div class="batch-card-thumb">
-      ${thumb ? `<img src="${escapeHtml(thumb)}" alt="附图" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="batch-card-thumb-placeholder" style="display:none">📄</div>` : `<div class="batch-card-thumb-placeholder">📄</div>`}
+      ${thumb ? `<img src="${escapeHtml(thumb)}" alt="附图" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="batch-card-thumb-placeholder" style="display:none">${icon('file').replace('<svg ', '<svg style="width:32px;height:32px;" ')}</div>` : `<div class="batch-card-thumb-placeholder">${icon('file').replace('<svg ', '<svg style="width:32px;height:32px;" ')}</div>`}
     </div>
     <div class="batch-card-body">
       <div class="batch-card-pn">${escapeHtml(pn)} <span class="batch-card-status done">已获取</span></div>
@@ -13931,7 +13965,7 @@ function _updateBatchCardError(card, pn, errMsg) {
   card.classList.remove("loading");
   card.classList.add("error");
   card.innerHTML = `
-    <div class="batch-card-thumb"><div class="batch-card-thumb-placeholder" style="color:var(--danger)">⚠</div></div>
+    <div class="batch-card-thumb"><div class="batch-card-thumb-placeholder" style="color:var(--danger)">${icon('alert').replace('<svg ', '<svg style="width:32px;height:32px;" ')}</div></div>
     <div class="batch-card-body">
       <div class="batch-card-pn">${escapeHtml(pn)} <span class="batch-card-status error">失败</span></div>
       <div class="batch-card-error">${escapeHtml(errMsg || "查询失败")}</div>
@@ -14860,8 +14894,8 @@ function renderExtractDocList() {
         '<span class="extract-patent-title">' + escapeHtml(g.title || (g.loading ? "加载中..." : "")) + '</span>' +
         (g.applicantName ? '<span class="extract-patent-applicant">' + escapeHtml(g.applicantName) + '</span>' : '') +
         '<span class="extract-patent-doc-count">' + docCountLabel + '</span>' +
-        '<button class="extract-patent-refresh" title="重新查询文档列表" data-pn="' + escapeHtml(pn) + '">🔄</button>' +
-        '<button class="extract-patent-remove" title="从列表移除" data-pn="' + escapeHtml(pn) + '">✕</button>' +
+        '<button class="extract-patent-refresh" title="重新查询文档列表" data-pn="' + escapeHtml(pn) + '">' + icon('refresh') + '</button>' +
+        '<button class="extract-patent-remove" title="从列表移除" data-pn="' + escapeHtml(pn) + '">' + icon('close') + '</button>' +
       '</div>';
     const header = band.querySelector(".extract-patent-header");
     header.addEventListener("click", (e) => {
@@ -14890,7 +14924,7 @@ function renderExtractDocList() {
     } else if (!g.docsLoadedFromNetwork || g.docs.length === 0) {
       docsWrap.innerHTML = '<div style="padding:14px;color:var(--text-secondary);font-size:12px;text-align:center;">' +
         (g.docsLoadedFromNetwork ? '未找到审查文档' : '该专利仅存在于历史记录，尚未加载文档列表。') +
-        ' <button class="btn-small btn-extract extract-refresh-inline-btn" data-pn="' + escapeHtml(pn) + '">🔄 点击重新查询文档列表</button>' +
+        ' <button class="btn-small btn-extract extract-refresh-inline-btn" data-pn="' + escapeHtml(pn) + '" style="display:inline-flex;align-items:center;gap:4px;">' + icon('refresh') + ' 点击重新查询文档列表</button>' +
         '</div>';
     } else {
       // Per-band search toolbar
@@ -15206,7 +15240,7 @@ async function runExtractOcr(pn, idx) {
     d.extraction = { text, markdown, engine: data.engine || engine, blocks, pageDimensions };
     d.ocrStatus = "done";
     d.ocrProgress = 100;
-    showToast("✅ " + pn + " 文档 " + (d.docCode || idx) + " OCR完成");
+    showToast(icon('checkCircle') + " " + pn + " 文档 " + (d.docCode || idx) + " OCR完成");
     // Sync OCR result back to PatentCache so kanban reader reuses it
     try { _syncExtractOcrToCache(pn, idx); } catch (ce) { console.warn("[Extract] sync to cache failed:", ce); }
   } catch (err) {
@@ -15248,7 +15282,7 @@ function renderExtractFieldList() {
         '<option value="date"' + (f.type === "date" ? " selected" : "") + '>日期 (Date)</option>' +
       '</select>' +
       '<textarea class="ef-desc" placeholder="字段定义/抽取要求（描述越准确抽取质量越高）" rows="1">' + escapeHtml(f.description) + '</textarea>' +
-      '<button class="extract-field-remove" title="删除该字段">✕</button>';
+      '<button class="extract-field-remove" title="删除该字段">' + icon('close') + '</button>';
     row.querySelector(".ef-name").addEventListener("input", e => f.name = e.target.value);
     row.querySelector(".ef-type").addEventListener("change", e => f.type = e.target.value);
     row.querySelector(".ef-desc").addEventListener("input", e => f.description = e.target.value);
@@ -15280,7 +15314,7 @@ function saveExtractTemplate() {
   _extractState.templates.push({ name, fields: JSON.parse(JSON.stringify(_extractState.fields)) });
   saveExtractTemplates();
   renderExtractTemplateSelect();
-  showToast("✅ 模板已保存");
+  showToast(icon('checkCircle') + " 模板已保存");
 }
 function deleteExtractTemplate() {
   const sel = document.getElementById("extract-template-select");
@@ -15523,7 +15557,7 @@ function renderExtractResults() {
 function confirmAllExtracts() {
   _extractState.results.forEach(r => { Object.values(r.fields).forEach(c => c.status = "confirmed"); });
   renderExtractResults();
-  showToast("✅ 全部确认完成，可以导出Excel");
+  showToast(icon('checkCircle') + " 全部确认完成，可以导出Excel");
 }
 
 function restartExtract() {
@@ -15602,5 +15636,5 @@ function exportExtractExcel() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showToast("✅ 已导出CSV（可用Excel直接打开）");
+  showToast(icon('checkCircle') + " 已导出CSV（可用Excel直接打开）");
 }

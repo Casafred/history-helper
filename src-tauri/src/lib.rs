@@ -1,9 +1,17 @@
+/*!
+ * PatentLens Tauri 库入口
+ * Copyright (c) 2026 Alfred Shi. All rights reserved.
+ * 本软件仅供内部使用，未经授权不得对外传播、复制或分发。
+ * @author Alfred Shi
+ * @version 260710
+ */
 mod api;
 mod cache;
 #[allow(dead_code)]
 mod models;
 mod ocr;
 mod patent;
+// __PATENTLENS_WATERMARK__: Copyright Alfred Shi 2026 - Internal Use Only
 
 use api::global_dossier::GlobalDossierClient;
 use cache::{CacheStore, DB_FILENAME, DEFAULT_TTL_SECS};

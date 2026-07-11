@@ -1,5 +1,13 @@
+/*!
+ * PatentLens CNIPA 预加载脚本
+ * Copyright (c) 2026 Alfred Shi. All rights reserved.
+ * 本软件仅供内部使用，未经授权不得对外传播、复制或分发。
+ * @author Alfred Shi
+ * @version 260710
+ */
 // Preload script: spoof Chrome browser fingerprint for CNIPA WAF bypass
 // Runs BEFORE page scripts in the same world (contextIsolation: false)
+// __PATENTLENS_WATERMARK__: Alfred Shi @ 2026
 
 // Helper: make a function whose toString() reports [native code]
 function _nativeFn(name, body) {

@@ -37,8 +37,9 @@
             <button id="history-clear-btn" class="btn-icon-sm" title="清空全部"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
           </div>
         </div>
-        <div class="history-search-box" style="padding:0 12px 8px;">
-          <input type="text" id="history-search-input" placeholder="🔍 搜索专利号、标题、申请人..." style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;outline:none;transition:border-color .2s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+        <div class="history-search-box" style="padding:0 12px 8px;position:relative;">
+          <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:20px;top:50%;transform:translateY(-50%);width:14px;height:14px;margin:0;color:var(--text-secondary);pointer-events:none;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="history-search-input" placeholder="搜索专利号、标题、申请人..." style="width:100%;box-sizing:border-box;padding:7px 10px 7px 34px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;outline:none;transition:border-color .2s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
         </div>
         <div id="history-batch-bar" class="history-batch-bar hidden">
           <label class="history-batch-select-all"><input type="checkbox" id="history-select-all-cb"> 全选</label>
@@ -384,7 +385,7 @@
                   <div id="reader-pdf-body" style="display:flex;flex:1;overflow:hidden;position:relative;">
                     <div id="pdf-toc-panel" class="pdf-toc-panel hidden">
                       <div class="pdf-toc-header">
-                        <span>📑 文档目录</span>
+                        <span><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> 文档目录</span>
                         <button id="pdf-toc-close" class="btn-icon-sm" title="关闭目录" style="padding:2px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                       </div>
                       <div id="pdf-toc-list" class="pdf-toc-list"></div>
@@ -778,10 +779,9 @@
             </div>
           </div>
           <div class="settings-copyright">
-            <div class="settings-copyright-title">PatentLens · 专利审查文档智能梳理工具</div>
             <div class="settings-copyright-text">
-              Copyright © 2026 <strong>Alfred Shi</strong>. All rights reserved.<br>
-              <em>本软件仅供内部使用，未经授权严禁对外传播、复制、分发或用于商业用途。</em>
+              Copyright © 2026 Alfred Shi. All rights reserved.
+              本软件仅供内部使用，未经授权严禁对外传播、复制、分发或用于商业用途。
             </div>
             <div class="settings-copyright-version">版本 v260710</div>
           </div>
@@ -897,7 +897,7 @@
           <div class="extract-step-hint">点击字段值可直接修改，带"待审核"标记的建议确认；点击溯源链接跳转至原文定位。全部确认后导出Excel。</div>
           <div class="extract-result-toolbar">
             <div class="extract-result-stats" id="extract-result-stats"></div>
-            <button id="extract-restart-btn" class="btn-secondary btn-small">🔄 重新开始新抽取</button>
+            <button id="extract-restart-btn" class="btn-secondary btn-small"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> 重新开始新抽取</button>
             <button id="extract-confirm-all-btn" class="btn-secondary btn-small">一键全部确认</button>
             <button id="extract-rerun-btn" class="btn-secondary btn-small">重新配置字段</button>
             <button id="extract-export-btn" class="btn-primary btn-small">

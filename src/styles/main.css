@@ -3680,31 +3680,21 @@ body {
   padding-top: 16px;
   border-top: 1px solid var(--border-color, #2a2d3a);
   text-align: center;
-  font-size: 12px;
-  color: var(--text-muted, #666);
-  line-height: 1.7;
-}
-.settings-copyright-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary, #aaa);
-  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--text-muted, #888);
+  line-height: 1.6;
+  opacity: 0.7;
 }
 .settings-copyright-text {
-  color: var(--text-muted, #777);
-}
-.settings-copyright-text strong {
-  color: var(--text-secondary, #ccc);
-}
-.settings-copyright-text em {
+  color: var(--text-muted, #888);
+  font-weight: normal;
   font-style: normal;
-  color: var(--warning, #e6a23c);
 }
 .settings-copyright-version {
-  margin-top: 6px;
+  margin-top: 4px;
   font-family: "Consolas", "SF Mono", monospace;
-  font-size: 11px;
-  color: var(--text-muted, #666);
+  font-size: 10px;
+  color: var(--text-muted, #888);
 }
 
 .svg-icon {
@@ -3720,6 +3710,15 @@ body {
   height: 14px;
   fill: currentColor;
   vertical-align: middle;
+}
+
+.svg-spin {
+  animation: svg-spin 1s linear infinite;
+}
+
+@keyframes svg-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .prompt-textarea {

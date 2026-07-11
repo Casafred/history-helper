@@ -79,16 +79,16 @@
     <div id="po-title"></div>
     <button id="po-back" class="po-btn po-btn-nav" title="后退 (Alt+←)" disabled>←</button>
     <button id="po-forward" class="po-btn po-btn-nav" title="前进 (Alt+→)" disabled>→</button>
-    <button id="po-find-toggle" class="po-btn po-btn-find" title="在页面内查找 (Ctrl+F)">🔍</button>
+    <button id="po-find-toggle" class="po-btn po-btn-find" title="在页面内查找 (Ctrl+F)"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
     <div class="po-translate-wrap" style="position:relative;display:inline-block;">
       <button id="po-translate" class="po-btn" title="翻译选项">翻译 ▾</button>
       <div id="po-translate-menu" style="display:none;position:absolute;top:100%;left:0;margin-top:2px;background:#fff;border:1px solid #d0d7de;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:4px 0;min-width:200px;z-index:99999;font-size:13px;">
         <div class="po-tm-item" data-action="bilingual" style="padding:8px 14px;cursor:pointer;color:#24292f;white-space:nowrap;border-bottom:1px solid #f0f0f0;">
-          <div style="font-weight:500;">📝 双语对照翻译</div>
+          <div style="font-weight:500;"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> 双语对照翻译</div>
           <div style="font-size:11px;color:#6b7280;margin-top:2px;">沉浸式显示原文+译文</div>
         </div>
         <div class="po-tm-item" data-action="google" style="padding:8px 14px;cursor:pointer;color:#24292f;white-space:nowrap;">
-          <div style="font-weight:500;">🌐 Google整页翻译</div>
+          <div style="font-weight:500;"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> Google整页翻译</div>
           <div style="font-size:11px;color:#6b7280;margin-top:2px;">经典Google翻译工具栏</div>
         </div>
       </div>
@@ -100,38 +100,57 @@
   <div id="po-jp-bar">
     <span class="po-jp-label">🇯🇵 J-PlatPat</span>
     <span id="po-jp-num"></span>
-    <button id="po-jp-copy" class="po-btn po-btn-sm" title="一键复制番号" style="font-size:11px;padding:1px 6px;">📋 复制</button>
+    <button id="po-jp-copy" class="po-btn po-btn-sm" title="一键复制番号" style="font-size:11px;padding:1px 6px;"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> 复制</button>
     <span class="po-jp-hint">如果页面未自动加载文献，请点击「番号照会」或使用下方链接手动查找</span>
     <button id="po-jp-opd" class="po-btn" title="打开番号照会页面">番号照会(OPD)</button>
     <button id="po-jp-ext" class="po-btn" title="外部打开">外部打开</button>
-    <button id="po-jp-close" class="po-btn po-btn-find" title="关闭提示">✕</button>
+    <button id="po-jp-close" class="po-btn po-btn-find" title="关闭提示"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   </div>
   <div id="po-cn-bar">
     <span class="po-cn-label">🇨🇳 CNIPA</span>
     <span id="po-cn-num"></span>
-    <button id="po-cn-copy" class="po-btn po-btn-sm" title="一键复制专利号" style="font-size:11px;padding:1px 6px;">📋 复制</button>
+    <button id="po-cn-copy" class="po-btn po-btn-sm" title="一键复制专利号" style="font-size:11px;padding:1px 6px;"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> 复制</button>
     <span class="po-cn-hint">请登录您的中国专利查询系统账号后进行查询操作</span>
     <button id="po-cn-ext" class="po-btn" title="外部打开">外部打开</button>
-    <button id="po-cn-close" class="po-btn po-btn-find" title="关闭提示">✕</button>
+    <button id="po-cn-close" class="po-btn po-btn-find" title="关闭提示"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   </div>
   <div id="po-smart-bar">
-    <span class="po-smart-label" id="po-smart-label">🤖 智能识别</span>
+    <span class="po-smart-label" id="po-smart-label"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg> 智能识别</span>
     <span class="po-smart-info" id="po-smart-info"></span>
     <span class="po-smart-actions" id="po-smart-actions"></span>
-    <button id="po-smart-close" class="po-btn po-btn-find" title="关闭">✕</button>
+    <button id="po-smart-close" class="po-btn po-btn-find" title="关闭"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   </div>
   <div id="po-find-bar">
     <input type="text" id="po-find-input" placeholder="在页面内查找...">
     <button id="po-find-prev" class="po-btn po-btn-find" title="上一个匹配 (Shift+Enter)">▲</button>
     <button id="po-find-next" class="po-btn po-btn-find" title="下一个匹配 (Enter)">▼</button>
     <span id="po-find-count"></span>
-    <button id="po-find-close" class="po-btn po-btn-find" title="关闭查找 (Esc)">✕</button>
+    <button id="po-find-close" class="po-btn po-btn-find" title="关闭查找 (Esc)"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   </div>
   <div id="po-container">
   </div>
   <script src="scripts/web-ai.js"></script>
   <script>
     (function () {
+      const POPOUT_SVG_ICONS = {
+        search: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+        edit: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+        globe: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+        copy: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+        close: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+        bot: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg>',
+        paperclip: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
+        file: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>',
+        lightbulb: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>',
+        alert: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="var(--warning,#e6a23c)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/></svg>',
+        type: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><polyline points="4 7 4 4 20 4 20 7"/><line x1="12" y1="4" x2="12" y2="20"/></svg>',
+        check: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success,#22c55e)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><polyline points="20 6 9 17 4 12"/></svg>',
+        folder: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+        external: '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle;margin-right:2px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
+      };
+
+      function picon(name) { return POPOUT_SVG_ICONS[name] || ''; }
+
       var params = new URLSearchParams(location.search);
       var targetUrl = params.get("url") || "";
       var title = params.get("title") || targetUrl || "专利原文查看";
@@ -402,9 +421,9 @@
               try { document.execCommand("copy"); } catch(e) {}
               document.body.removeChild(ta);
             }
-            var orig = jpCopyBtn.textContent;
-            jpCopyBtn.textContent = "✓ 已复制";
-            setTimeout(function() { jpCopyBtn.textContent = orig; }, 1500);
+            var orig = jpCopyBtn.innerHTML;
+            jpCopyBtn.innerHTML = picon('check') + ' 已复制';
+            setTimeout(function() { jpCopyBtn.innerHTML = orig; }, 1500);
           }
         });
       }
@@ -443,9 +462,9 @@
               try { document.execCommand("copy"); } catch(e) {}
               document.body.removeChild(ta);
             }
-            var orig = cnCopyBtn.textContent;
-            cnCopyBtn.textContent = "✓ 已复制";
-            setTimeout(function() { cnCopyBtn.textContent = orig; }, 1500);
+            var orig = cnCopyBtn.innerHTML;
+            cnCopyBtn.innerHTML = picon('check') + ' 已复制';
+            setTimeout(function() { cnCopyBtn.innerHTML = orig; }, 1500);
           }
         });
       }
@@ -716,9 +735,9 @@
         "    if (collected.pdfLinks && collected.pdfLinks.length > 0) {",
         "      collected.pdfLinks.slice(0, 6).forEach(function(p, i) {",
         "        if (p.method === 'click') {",
-        "          actions.push({ type: 'click', label: '📎 ' + (p.text || 'PDF') + (i === 0 ? '' : ' (' + (i+1) + ')'), targetIdx: p.elIdx, _pdfClick: true, href: p.href, visible: p.visible });",
+        "          actions.push({ type: 'click', label: '<svg class=\"svg-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:14px;height:14px;vertical-align:middle;margin-right:2px;\"><path d=\"M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48\"/></svg> ' + (p.text || 'PDF') + (i === 0 ? '' : ' (' + (i+1) + ')'), targetIdx: p.elIdx, _pdfClick: true, href: p.href, visible: p.visible });",
         "        } else {",
-        "          actions.push({ type: 'pdf', label: '📄 ' + (p.text || 'PDF') + (i === 0 ? '' : ' (' + (i+1) + ')'), href: p.href, visible: p.visible });",
+        "          actions.push({ type: 'pdf', label: '<svg class=\"svg-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:14px;height:14px;vertical-align:middle;margin-right:2px;\"><path d=\"M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z\"/><polyline points=\"13 2 13 9 20 9\"/></svg> ' + (p.text || 'PDF') + (i === 0 ? '' : ' (' + (i+1) + ')'), href: p.href, visible: p.visible });",
         "        }",
         "      });",
         "    }",
@@ -745,16 +764,16 @@
         "          if (allB[k].textContent.trim().indexOf('文献単位') !== -1 && isVisible(allB[k])) { bunkenTab = { i: -1, _raw: allB[k] }; break; }",
         "        }",
         "      }",
-        "      if (keikaTab) actions.push({ type: 'click', label: '📋 経過情報', targetIdx: keikaTab.i, _text: 'keika' });",
-        "      if (bunkenTab) actions.push({ type: 'click', label: '📑 文献単位表示', targetIdx: bunkenTab.i, _text: 'bunken' });",
+        "      if (keikaTab) actions.push({ type: 'click', label: '<svg class=\"svg-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:14px;height:14px;vertical-align:middle;margin-right:2px;\"><rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"2\" ry=\"2\"/><path d=\"M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1\"/></svg> 経過情報', targetIdx: keikaTab.i, _text: 'keika' });",
+        "      if (bunkenTab) actions.push({ type: 'click', label: '<svg class=\"svg-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:14px;height:14px;vertical-align:middle;margin-right:2px;\"><path d=\"M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z\"/></svg> 文献単位表示', targetIdx: bunkenTab.i, _text: 'bunken' });",
         "      // Search box detection for re-search",
         "      if (pageInfo.pageType === 'jplatpat_search' || pageInfo.pageType === 'jplatpat_opd') {",
-        "        actions.push({ type: 'info', label: '💡 已自动填入检索番号', passive: true });",
+        "        actions.push({ type: 'info', label: '<svg class=\"svg-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:14px;height:14px;vertical-align:middle;margin-right:2px;\"><path d=\"M9 18h6\"/><path d=\"M10 22h4\"/><path d=\"M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14\"/></svg> 已自动填入检索番号', passive: true });",
         "      }",
         "    }",
         "    // CNIPA actions",
         "    if (pageInfo.pageType === 'cnipa') {",
-        "      actions.push({ type: 'info', label: '💡 已自动填入专利公开(公告)号，请登录后点击查询', passive: true });",
+        "      actions.push({ type: 'info', label: '<svg class=\"svg-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:14px;height:14px;vertical-align:middle;margin-right:2px;\"><path d=\"M9 18h6\"/><path d=\"M10 22h4\"/><path d=\"M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14\"/></svg> 已自动填入专利公开(公告)号，请登录后点击查询', passive: true });",
         "    }",
         "    // Global Dossier actions",
         "    if (pageInfo.pageType === 'global_dossier') {",
@@ -762,7 +781,7 @@
         "      var docAnchors = document.querySelectorAll('a[href*=\"doc-content\"], a[href*=\".pdf\"]');",
         "      for (var d = 0; d < docAnchors.length && d < 8; d++) {",
         "        var dlText = textOf(docAnchors[d], 30);",
-        "        if (dlText) actions.push({ type: 'pdf', label: '📎 ' + dlText, href: docAnchors[d].href, visible: isVisible(docAnchors[d]) });",
+        "        if (dlText) actions.push({ type: 'pdf', label: '<svg class=\"svg-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:14px;height:14px;vertical-align:middle;margin-right:2px;\"><path d=\"M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48\"/></svg> ' + dlText, href: docAnchors[d].href, visible: isVisible(docAnchors[d]) });",
         "      }",
         "    }",
         "    return actions;",
@@ -1145,29 +1164,29 @@
         var hasActions = actions && actions.some(function(a) { return !a.passive; });
         if (!isKnownPage && !hasActions && !onJp && pi.pageType !== 'error') { hideSmartBar(); return; }
         if (result.__error) {
-          actions = actions.concat([{ type: 'info', label: '⚠️ ' + result.__error.substring(0, 80), passive: true }]);
+          actions = actions.concat([{ type: 'info', label: picon('alert') + ' ' + result.__error.substring(0, 80), passive: true }]);
         }
 
-        smartLabel.textContent = pi.label || "🤖 智能识别";
+        smartLabel.innerHTML = pi.label || (picon('bot') + ' 智能识别');
         var infoParts = [];
         if (result.meta && result.meta.patentNumber) infoParts.push(result.meta.patentNumber);
         else if (result.meta && result.meta.jpNumber) infoParts.push(result.meta.jpNumber);
         if (result.meta && result.meta.title) infoParts.push(result.meta.title);
-        if (result.pdfCount > 0) infoParts.push("📄 " + result.pdfCount + "个PDF");
-        smartInfo.textContent = infoParts.join(" | ");
+        if (result.pdfCount > 0) infoParts.push(picon('file') + ' ' + result.pdfCount + "个PDF");
+        smartInfo.innerHTML = infoParts.join(" | ");
 
         smartActions.innerHTML = "";
         actions.forEach(function(act, idx) {
           if (act.passive) {
             var sp = document.createElement("span");
             sp.style.color = "#31708f"; sp.style.fontSize = "11px"; sp.style.marginLeft = "4px";
-            sp.textContent = act.label;
+            sp.innerHTML = act.label;
             smartActions.appendChild(sp);
             return;
           }
           var btn = document.createElement("button");
           btn.className = "po-btn-smart" + (act.type === "pdf" ? " po-btn-primary" : "") + (act._text === "keika" ? " po-btn-warn" : "");
-          btn.textContent = act.label;
+          btn.innerHTML = act.label;
           btn.title = act.type === "pdf" ? (act.href || "") : act.label;
           btn.addEventListener("click", function() {
             handleSmartAction(act);
@@ -1191,7 +1210,7 @@
             clickScript += "if(window.__probeClickText) return window.__probeClickText('文献単位');";
           }
           if (act._pdfClick) {
-            var cleanLabel = (act.label || '').replace(/^[📎📄]\s*/, '').replace(/\s*\(\d+\)\s*$/, '').replace(/\s*\[点击\]\s*$/, '').trim();
+            var cleanLabel = (act.label || '').replace(/^<svg[^>]*>.*?<\/svg>\s*/, '').replace(/\s*\(\d+\)\s*$/, '').replace(/\s*\[点击\]\s*$/, '').trim();
             if (cleanLabel) {
               clickScript += "if(window.__probeClickText) { var r = window.__probeClickText(" + JSON.stringify(cleanLabel) + "); if(r) return true; }";
             }
@@ -1621,13 +1640,13 @@
           "      menu.style.left = e.clientX + 'px';",
           "      menu.style.top = e.clientY + 'px';",
           "      var items = [",
-          "        { label: '🔤 AI翻译选中文本', action: 'translate' },",
-          "        { label: '📋 复制选中文本', action: 'copy' },",
-          "        { label: '🌐 在Google翻译中打开', action: 'google' }",
+          "        { label: '<svg class=\"svg-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:14px;height:14px;vertical-align:middle;margin-right:2px;\"><polyline points=\"4 7 4 4 20 4 20 7\"/><line x1=\"12\" y1=\"4\" x2=\"12\" y2=\"20\"/></svg> AI翻译选中文本', action: 'translate' },",
+          "        { label: '<svg class=\"svg-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:14px;height:14px;vertical-align:middle;margin-right:2px;\"><rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"2\" ry=\"2\"/><path d=\"M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1\"/></svg> 复制选中文本', action: 'copy' },",
+          "        { label: '<svg class=\"svg-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:14px;height:14px;vertical-align:middle;margin-right:2px;\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><line x1=\"2\" y1=\"12\" x2=\"22\" y2=\"12\"/><path d=\"M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z\"/></svg> 在Google翻译中打开', action: 'google' }",
           "      ];",
           "      items.forEach(function(item) {",
           "        var div = document.createElement('div');",
-          "        div.textContent = item.label;",
+          "        div.innerHTML = item.label;",
           "        div.style.cssText = 'padding:6px 14px;cursor:pointer;color:#24292f;';",
           "        div.addEventListener('mouseenter', function() { div.style.background = '#f3f4f6'; });",
           "        div.addEventListener('mouseleave', function() { div.style.background = ''; });",
@@ -2305,22 +2324,22 @@
           var subDiv = item.querySelector("div:last-child");
           if (action === "bilingual") {
             if (translateMode === "bilingual") {
-              mainDiv.textContent = "📝 关闭双语翻译";
+              mainDiv.innerHTML = picon('edit') + ' 关闭双语翻译';
               subDiv.textContent = "点击关闭沉浸式对照翻译";
               item.style.background = "#eff6ff";
             } else {
-              mainDiv.textContent = "📝 双语对照翻译";
+              mainDiv.innerHTML = picon('edit') + ' 双语对照翻译';
               subDiv.textContent = "沉浸式显示原文+译文";
               item.style.background = "";
             }
           } else if (action === "google") {
             var isOnGoogleTranslate = currentUrl && currentUrl.indexOf("translate.google.com/translate") !== -1;
             if (isOnGoogleTranslate || translateMode === "google") {
-              mainDiv.textContent = "🌐 返回原文页面";
+              mainDiv.innerHTML = picon('globe') + ' 返回原文页面';
               subDiv.textContent = "退出Google整页翻译";
               item.style.background = "#eff6ff";
             } else {
-              mainDiv.textContent = "🌐 Google整页翻译";
+              mainDiv.innerHTML = picon('globe') + ' Google整页翻译';
               subDiv.textContent = "经典Google翻译工具栏";
               item.style.background = "";
             }
@@ -2438,7 +2457,7 @@
         var existingPopup = document.getElementById("pop-translation-popup");
         if (existingPopup) existingPopup.remove();
         var btn = document.createElement("button");
-        btn.textContent = "🔤";
+        btn.innerHTML = picon('type');
         btn.title = "翻译/复制选中文本";
         btn.style.cssText = 'position:fixed;z-index:100020;background:#22c55e;color:#fff;border:none;border-radius:50%;width:32px;height:32px;font-size:14px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-family:inherit;display:flex;align-items:center;justify-content:center;';
         btn.style.left = Math.min(Math.max(x, 5), window.innerWidth - 40) + "px";
@@ -2474,17 +2493,17 @@
         } catch(e) {}
 
         var items = [
-          { label: "📋 复制", action: function() { copyTextToClipboard(text); } },
-          { label: "🌐 Google 翻译", action: function() { showPopTranslation(text, x, y + 8, "google"); } },
-          { label: "↗️ 打开 Google 翻译页面", action: function() { openInGoogleTranslate(text); } },
+          { label: picon('copy') + ' 复制', action: function() { copyTextToClipboard(text); } },
+          { label: picon('globe') + ' Google 翻译', action: function() { showPopTranslation(text, x, y + 8, "google"); } },
+          { label: picon('external') + " 打开 Google 翻译页面", action: function() { openInGoogleTranslate(text); } },
         ];
         if (hasAi) {
-          items.splice(1, 0, { label: "🤖 AI 翻译", action: function() { showPopTranslation(text, x, y + 8, "ai"); } });
+          items.splice(1, 0, { label: picon('bot') + ' AI 翻译', action: function() { showPopTranslation(text, x, y + 8, "ai"); } });
         }
 
         items.forEach(function(item) {
           var it = document.createElement("div");
-          it.textContent = item.label;
+          it.innerHTML = item.label;
           it.style.cssText = 'padding:8px 16px;cursor:pointer;color:#333;';
           it.addEventListener("mouseenter", function() { it.style.background = "#f0fdf4"; });
           it.addEventListener("mouseleave", function() { it.style.background = "transparent"; });
@@ -2522,12 +2541,12 @@
 
         popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-shrink:0;">' +
           '<div style="display:flex;gap:4px;align-items:center;">' +
-          '<button id="' + popupId + '-source-ai" style="border:1px solid;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;' + (initialSource === 'ai' ? activeStyle : inactiveStyle) + aiBtnDisabled + '" title="使用AI翻译">🤖 AI</button>' +
-          '<button id="' + popupId + '-source-google" style="border:1px solid;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;' + (initialSource === 'google' ? activeStyle : inactiveStyle) + '" title="使用Google翻译">🌐 Google</button>' +
+          '<button id="' + popupId + '-source-ai" style="border:1px solid;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;display:flex;align-items:center;gap:2px;' + (initialSource === 'ai' ? activeStyle : inactiveStyle) + aiBtnDisabled + '" title="使用AI翻译"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;vertical-align:middle;"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg> AI</button>' +
+          '<button id="' + popupId + '-source-google" style="border:1px solid;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;display:flex;align-items:center;gap:2px;' + (initialSource === 'google' ? activeStyle : inactiveStyle) + '" title="使用Google翻译"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;vertical-align:middle;"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> Google</button>' +
           '</div>' +
           '<div style="display:flex;gap:4px;align-items:center;">' +
-          '<button id="' + popupId + '-copy-btn" style="border:1px solid #e0e0e0;background:#f8f9fa;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#5f6368;" title="复制译文">📋 复制</button>' +
-          '<button id="' + popupId + '-open-google-btn" style="border:1px solid #e0e0e0;background:#f8f9fa;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#5f6368;" title="在Google翻译中打开">↗️</button>' +
+          '<button id="' + popupId + '-copy-btn" style="border:1px solid #e0e0e0;background:#f8f9fa;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#5f6368;display:flex;align-items:center;gap:2px;" title="复制译文"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;vertical-align:middle;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> 复制</button>' +
+          '<button id="' + popupId + '-open-google-btn" style="border:1px solid #e0e0e0;background:#f8f9fa;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#5f6368;display:flex;align-items:center;" title="在Google翻译中打开"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;vertical-align:middle;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></button>' +
           '<button id="' + popupId + '-close" style="border:none;background:transparent;cursor:pointer;font-size:16px;color:#999;padding:0 4px;line-height:1;">&times;</button>' +
           '</div></div>' +
           '<div id="' + popupId + '-body" style="overflow-y:auto;flex:1;min-height:60px;max-height:400px;padding-right:4px;"><div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;border:2px solid #e0e0e0;border-top-color:#1a73e8;border-radius:50%;animation:po-spin 0.8s linear infinite;margin:0;"></div><span style="font-size:12px;color:#888;">翻译中...</span></div></div>';
@@ -2585,8 +2604,8 @@
         if (copyBtn) copyBtn.addEventListener('click', function() {
           if (currentTranslated) {
             copyTextToClipboard(currentTranslated).then(function() {
-              copyBtn.textContent = '✓ 已复制';
-              setTimeout(function() { copyBtn.textContent = '📋 复制'; }, 1500);
+              copyBtn.innerHTML = picon('check') + ' 已复制';
+              setTimeout(function() { copyBtn.innerHTML = picon('copy') + ' 复制'; }, 1500);
             });
           }
         });

@@ -1,3 +1,5 @@
+// PatentLens 专利转换器 - Copyright (c) 2026 Alfred Shi. All rights reserved.
+// __PATENTLENS_WATERMARK__: Alfred Shi 2026
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
