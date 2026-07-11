@@ -1382,17 +1382,19 @@ function createWindow(port) {
         });
       }
       const choice = dialog.showMessageBoxSync(mainWindow, {
-        type: "question",
+        type: "warning",
         buttons: ["关闭并丢弃标注", "取消"],
         defaultId: 1,
         cancelId: 1,
         title: "确认关闭",
         message: "以下审查文档中存在未导出的 PDF 标注，关闭后将丢失：",
         detail: detail,
+        noLink: true,
       });
       if (choice === 0) {
         mainWindow._forceClose = true;
-        mainWindow.close();
+        mainWindow.webContents.send("force-close-app");
+        setTimeout(() => mainWindow.close(), 100);
       }
     }
   });
