@@ -1904,11 +1904,16 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   max-width: 90px;
+}
+
+.chat-provider-select {
   cursor: pointer;
 }
 
 .chat-model-select {
-  max-width: 120px;
+  max-width: 150px;
+  min-width: 90px;
+  cursor: text;
 }
 
 .chat-provider-select:disabled,
@@ -1932,7 +1937,8 @@ body {
 }
 
 .patent-ask-header-actions .chat-model-select {
-  max-width: 110px;
+  max-width: 140px;
+  min-width: 80px;
 }
 
 .chat-messages {

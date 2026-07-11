@@ -907,6 +907,24 @@ function getChatProvider(providerOverride, modelOverride) {
   return window.AI.getCurrentProvider(config);
 }
 
+function populateModelDatalist(inputEl, models, selectedValue) {
+  if (!inputEl) return;
+  const listId = inputEl.getAttribute("list");
+  const dl = listId ? document.getElementById(listId) : null;
+  if (dl) {
+    dl.innerHTML = "";
+    models.forEach(m => {
+      const option = document.createElement("option");
+      option.value = m.value || m;
+      option.textContent = m.label || m.value || m;
+      dl.appendChild(option);
+    });
+  }
+  if (selectedValue != null) {
+    inputEl.value = selectedValue;
+  }
+}
+
 function populateChatProviderSelect(selectEl, modelSelectEl, currentType, currentModel) {
   if (!selectEl) return;
   const config = window.AI.loadAIConfig();
@@ -925,15 +943,9 @@ function populateChatProviderSelect(selectEl, modelSelectEl, currentType, curren
     if (!modelSelectEl) return;
     const type = selectEl.value;
     const models = window.AI.getAvailableModels(type);
-    modelSelectEl.innerHTML = "";
-    models.forEach(m => {
-      const option = document.createElement("option");
-      option.value = m.value;
-      option.textContent = m.label;
-      modelSelectEl.appendChild(option);
-    });
     const savedModel = config[type] ? config[type].model : null;
-    modelSelectEl.value = currentModel || savedModel || (models[0] ? models[0].value : "");
+    const defaultVal = models[0] ? models[0].value : "";
+    populateModelDatalist(modelSelectEl, models, currentModel || savedModel || defaultVal);
   };
   updateModels();
   // Remove old listener to prevent duplicates
@@ -6121,15 +6133,11 @@ function updateTranslateModelOptions(type) {
   if (!translateModelSelect) return;
   const models = window.AI.getAvailableModels(type);
   const defaultModel = window.AI.getDefaultTranslateModel(type);
-  translateModelSelect.innerHTML = "";
-  models.forEach(model => {
-    const option = document.createElement("option");
-    option.value = model.value;
-    option.textContent = model.label + (model.value === defaultModel ? " (推荐)" : "");
-    translateModelSelect.appendChild(option);
-  });
-  // Set default
-  translateModelSelect.value = defaultModel;
+  const dlModels = models.map(model => ({
+    value: model.value,
+    label: model.label + (model.value === defaultModel ? " (推荐)" : ""),
+  }));
+  populateModelDatalist(translateModelSelect, dlModels, defaultModel);
 }
 
 function loadAISettingsToForm() {
@@ -6221,13 +6229,7 @@ document.querySelectorAll("[id^='reset-prompt-']").forEach(btn => {
 
 function updateModelOptions(type) {
   const models = window.AI.getAvailableModels(type);
-  aiModelSelect.innerHTML = "";
-  models.forEach(model => {
-    const option = document.createElement("option");
-    option.value = model.value;
-    option.textContent = model.label;
-    aiModelSelect.appendChild(option);
-  });
+  populateModelDatalist(aiModelSelect, models, aiModelSelect.value || (models[0] ? models[0].value : ""));
 }
 
 function showTestResult(success, message) {

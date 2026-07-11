@@ -437,7 +437,8 @@
                       <span class="chat-title">AI 问一问</span>
                       <div class="chat-header-actions">
                         <select class="chat-provider-select" id="chat-provider-select" title="选择AI服务商"></select>
-                        <select class="chat-model-select" id="chat-model-select" title="选择模型"></select>
+                        <input type="text" class="chat-model-select" id="chat-model-select" list="chat-model-select-datalist" title="选择或输入模型名称" placeholder="选择或输入模型">
+                        <datalist id="chat-model-select-datalist"></datalist>
                         <button id="chat-export-btn" class="btn-icon-sm" title="导出对话记录为Word"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
                         <button id="chat-abort-btn" class="btn-danger btn-small hidden">中止</button>
                       </div>
@@ -497,7 +498,8 @@
           <span id="patent-ask-pn" class="patent-ask-pn"></span>
           <div class="patent-ask-header-actions">
             <select class="chat-provider-select" id="patent-ask-provider-select" title="选择AI服务商"></select>
-            <select class="chat-model-select" id="patent-ask-model-select" title="选择模型"></select>
+            <input type="text" class="chat-model-select" id="patent-ask-model-select" list="patent-ask-model-select-datalist" title="选择或输入模型名称" placeholder="选择或输入模型">
+            <datalist id="patent-ask-model-select-datalist"></datalist>
             <button id="patent-ask-export-btn" class="ppv-close-btn" title="导出对话记录为Word" style="font-size:14px;">&#x2913;</button>
             <button id="patent-ask-clear-btn" class="ppv-close-btn" title="清空对话" style="font-size:14px;">&olarr;</button>
             <button id="patent-ask-close-btn" class="ppv-close-btn" title="关闭">&times;</button>
@@ -555,7 +557,8 @@
               </div>
               <div class="form-group">
                 <label>模型</label>
-                <select id="ai-model-select"></select>
+                <input type="text" id="ai-model-select" list="ai-model-select-datalist" placeholder="选择或输入模型名称">
+                <datalist id="ai-model-select-datalist"></datalist>
               </div>
               <div class="form-actions">
                 <button id="ai-test-btn" class="btn-secondary">测试连接</button>
@@ -607,7 +610,8 @@
               </div>
               <div class="form-group">
                 <label>翻译模型</label>
-                <select id="translate-model-select"></select>
+                <input type="text" id="translate-model-select" list="translate-model-select-datalist" placeholder="选择或输入模型名称">
+                <datalist id="translate-model-select-datalist"></datalist>
               </div>
               <div class="form-group">
                 <label>默认翻译目标语言</label>
@@ -810,7 +814,8 @@
           <span class="analysis-chat-title"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> 继续对话</span>
           <div class="analysis-chat-header-actions">
             <select class="chat-provider-select" id="analysis-chat-provider-select" title="选择AI服务商"></select>
-            <select class="chat-model-select" id="analysis-chat-model-select" title="选择模型"></select>
+            <input type="text" class="chat-model-select" id="analysis-chat-model-select" list="analysis-chat-model-select-datalist" title="选择或输入模型名称" placeholder="选择或输入模型">
+            <datalist id="analysis-chat-model-select-datalist"></datalist>
             <button id="analysis-chat-export-btn" class="btn-icon-sm" title="导出对话记录为Word"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
             <button id="analysis-chat-clear-btn" class="btn-icon-sm" title="清空对话"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
             <button id="analysis-chat-close-btn" class="btn-icon-sm" title="关闭对话"><svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
