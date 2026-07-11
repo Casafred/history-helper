@@ -143,7 +143,6 @@ function _dossierMakeKey(pn) {
 }
 
 function _dossierCaptureState() {
-  // Deep-clone the globals into a storable snapshot.
   if (!currentData) return null;
   try {
     return {
@@ -152,6 +151,9 @@ function _dossierCaptureState() {
         documents: JSON.parse(JSON.stringify(kanbanState.documents || [])),
         extractions: JSON.parse(JSON.stringify(kanbanState.extractions || {})),
         analysis: kanbanState.analysis || "",
+        analysisSystemPrompt: kanbanState.analysisSystemPrompt || "",
+        analysisUserMessage: kanbanState.analysisUserMessage || "",
+        citedRefsAnalysis: kanbanState.citedRefsAnalysis || "",
         traceIndex: JSON.parse(JSON.stringify(kanbanState.traceIndex || {})),
         hasUnsavedWork: !!kanbanState.hasUnsavedWork,
       },
@@ -206,19 +208,22 @@ function _dossierApplyTab(tab) {
   const _kaContent = document.getElementById("kanban-analysis-content");
   if (_kaContent) _kaContent.innerHTML = "";
 
-  // Apply snapshot (basic fields first)
   currentData = tab.currentData;
   const savedExtractionState = tab.kanbanState.extractions || {};
   const savedAnalysis = tab.kanbanState.analysis || "";
+  const savedAnalysisSystemPrompt = tab.kanbanState.analysisSystemPrompt || "";
+  const savedAnalysisUserMessage = tab.kanbanState.analysisUserMessage || "";
+  const savedCitedRefsAnalysis = tab.kanbanState.citedRefsAnalysis || "";
   const savedTraceIndex = tab.kanbanState.traceIndex || {};
   const savedHasUnsaved = !!tab.kanbanState.hasUnsavedWork;
 
-  // Render all sub-views (renderKanban will reset kanbanState.documents/extractions/analysis/traceIndex)
   try { renderKanban(currentData); } catch (e) { console.error("renderKanban:", e); }
 
-  // After renderKanban resets extractions/analysis, restore the saved state
   kanbanState.extractions = JSON.parse(JSON.stringify(savedExtractionState));
   kanbanState.analysis = savedAnalysis;
+  kanbanState.analysisSystemPrompt = savedAnalysisSystemPrompt;
+  kanbanState.analysisUserMessage = savedAnalysisUserMessage;
+  kanbanState.citedRefsAnalysis = savedCitedRefsAnalysis;
   kanbanState.traceIndex = JSON.parse(JSON.stringify(savedTraceIndex));
   kanbanState.hasUnsavedWork = savedHasUnsaved;
   // Ensure documents have idx
@@ -319,32 +324,40 @@ function _dossierSwitchTo(key) {
   _dossierApplyTab(tab);
 }
 
+function _dossierGetTabAnnotSummary(tab) {
+  // Return array of {docTitle, count} for docs in this tab that have unsaved PDF annotations
+  if (!tab || !tab.currentData || !tab.kanbanState || !tab.kanbanState.documents) return [];
+  const results = [];
+  try {
+    tab.kanbanState.documents.forEach(d => {
+      if (!d.docId) return;
+      const isUS = tab.currentData.office === "US";
+      const urlDocNum = isUS ? tab.currentData.applicationNumber : encodeURIComponent(tab.currentData.docNumber || tab.currentData.applicationNumber);
+      const pdfUrl = `/api/gd/doc-content/svc/doccontent/${tab.currentData.office}/${urlDocNum}/${encodeURIComponent(d.docId)}/${d.numberOfPages}/${d.docFormat}`;
+      const docKey = d.idx + '_' + pdfUrl;
+      const list = pdfViewState.annotList[docKey];
+      if (list && list.length > 0) {
+        results.push({
+          docTitle: d.title || d.docIdentifier || ("文档 " + d.idx),
+          count: list.length,
+        });
+      }
+    });
+  } catch (_) {}
+  return results;
+}
+
 function _dossierCloseTab(key) {
   const idx = _dossierTabs.findIndex(t => t.key === key);
   if (idx < 0) return;
   const tab = _dossierTabs[idx];
   const doClose = () => {
-    // Clean up PDF annotations for docs belonging to this tab
-    if (tab && tab.kanbanState && tab.kanbanState.documents) {
-      try {
-        tab.kanbanState.documents.forEach(d => {
-          if (d.docId && tab.currentData) {
-            const isUS = tab.currentData.office === "US";
-            const urlDocNum = isUS ? tab.currentData.applicationNumber : encodeURIComponent(tab.currentData.docNumber || tab.currentData.applicationNumber);
-            const pdfUrl = `/api/gd/doc-content/svc/doccontent/${tab.currentData.office}/${urlDocNum}/${encodeURIComponent(d.docId)}/${d.numberOfPages}/${d.docFormat}`;
-            const docKey = d.idx + '_' + pdfUrl;
-            delete pdfViewState.annotList[docKey];
-            delete pdfViewState.annotUndoStack[docKey];
-            delete pdfViewState.annotRedoStack[docKey];
-            delete pdfViewState.annotDocMeta[docKey];
-            try { sessionStorage.removeItem(_PDF_ANNOT_STORAGE_PREFIX + docKey); } catch (_) {}
-          }
-        });
-      } catch (_) {}
-    }
+    _dossierCleanupTabPdfAnnots(tab);
     _dossierTabs.splice(idx, 1);
     if (_dossierActiveKey === key) {
-      // Activate another tab if available, else go home
+      if (typeof closeReader === "function") closeReader();
+      const analysisPanel = document.getElementById("analysis-chat-panel");
+      if (analysisPanel) analysisPanel.classList.remove("open");
       if (_dossierTabs.length > 0) {
         const next = _dossierTabs[Math.max(0, idx - 1)];
         _dossierActiveKey = next.key;
@@ -355,21 +368,24 @@ function _dossierCloseTab(key) {
         kanbanState.documents = [];
         kanbanState.extractions = {};
         kanbanState.analysis = "";
+        kanbanState.analysisSystemPrompt = "";
+        kanbanState.analysisUserMessage = "";
+        kanbanState.citedRefsAnalysis = "";
         kanbanState.traceIndex = {};
         kanbanState.hasUnsavedWork = false;
         const appEl = document.getElementById("app");
         if (appEl) appEl.classList.add("home-mode");
         resultSection.classList.add("hidden");
         if (patentInput) patentInput.value = "";
-        try {
-          const rm = document.getElementById("reader-modal");
-          if (rm) rm.classList.add("hidden");
-        } catch (_) {}
-        // Clear all remaining annot state (no tabs left)
         pdfViewState.annotList = {};
         pdfViewState.annotUndoStack = {};
         pdfViewState.annotRedoStack = {};
         pdfViewState.annotDocMeta = {};
+        pdfViewState.active = false;
+        pdfViewState.currentDocIdx = null;
+        pdfViewState.currentDocKey = null;
+        pdfViewState.renderedPages = {};
+        if (typeof _pdfDocCache !== "undefined") _pdfDocCache = {};
         _updateAnnotCloseFlag();
         updateFloatingBallsVisibility();
         _dossierRenderTabs();
@@ -379,61 +395,100 @@ function _dossierCloseTab(key) {
       _dossierRenderTabs();
     }
   };
+  let warnings = [];
   if (tab.kanbanState && tab.kanbanState.hasUnsavedWork) {
-    if (!confirm(`专利 ${tab.label} 的梳理内容尚未保存，关闭后需重新梳理，确定关闭？`)) return;
+    warnings.push("梳理内容尚未保存");
+  }
+  const annotSummary = _dossierGetTabAnnotSummary(tab);
+  if (annotSummary.length > 0) {
+    let annotMsg = "以下文档中存在未导出的PDF标注：\n";
+    annotSummary.forEach((a, i) => {
+      annotMsg += "  " + (i+1) + ". " + a.docTitle + "（" + a.count + " 条标注）\n";
+    });
+    warnings.push(annotMsg);
+  }
+  if (warnings.length > 0) {
+    const confirmMsg = `专利 ${tab.label}：\n\n${warnings.join("\n\n")}\n关闭后这些内容将丢失，确定关闭？`;
+    if (!confirm(confirmMsg)) return;
   }
   doClose();
 }
 
-function _dossierNewTabFromSearch(input) {
-  // Called by doSearch (after patent number is parsed) to route the search into a tab.
-  // Returns true if doSearch should continue and fill the current (new) tab; false to abort.
-  const pn = parsePatentNumber(input);
-  if (!pn) return false;
-  const rawPn = pn.raw || String(input).trim().toUpperCase().replace(/[\s\/]/g, "");
-  // Skip JP/CN special flows — those go through the original path and don't get tabs
-  if (isJPPatent(rawPn) || isCNPatent(rawPn)) return true;
-  const key = _dossierMakeKey(rawPn);
-  // Switch to existing tab if already open
-  const existing = _dossierTabs.find(t => t.key === key);
-  if (existing) {
-    _dossierSaveActiveTab();
-    _dossierActiveKey = key;
-    _dossierApplyTab(existing);
-    if (patentInput) patentInput.value = "";
-    return false; // tell doSearch to abort — tab already has data
+function _dossierCleanupTabPdfAnnots(tab) {
+  if (!tab || !tab.currentData || !tab.kanbanState || !tab.kanbanState.documents) return;
+  try {
+    tab.kanbanState.documents.forEach(d => {
+      if (!d.docId || !tab.currentData) return;
+      const isUS = tab.currentData.office === "US";
+      const urlDocNum = isUS ? tab.currentData.applicationNumber : encodeURIComponent(tab.currentData.docNumber || tab.currentData.applicationNumber);
+      const pdfUrl = `/api/gd/doc-content/svc/doccontent/${tab.currentData.office}/${urlDocNum}/${encodeURIComponent(d.docId)}/${d.numberOfPages}/${d.docFormat}`;
+      const docKey = d.idx + '_' + pdfUrl;
+      delete pdfViewState.annotList[docKey];
+      delete pdfViewState.annotUndoStack[docKey];
+      delete pdfViewState.annotRedoStack[docKey];
+      delete pdfViewState.annotDocMeta[docKey];
+      try { sessionStorage.removeItem(_PDF_ANNOT_STORAGE_PREFIX + docKey); } catch (_) {}
+    });
+  } catch (_) {}
+}
+
+function _dossierFindVictimTab() {
+  let victimIdx = _dossierTabs.findIndex((t) => {
+    if (t.key === _dossierActiveKey) return false;
+    if (t.kanbanState && t.kanbanState.hasUnsavedWork) return false;
+    if (_dossierGetTabAnnotSummary(t).length > 0) return false;
+    return true;
+  });
+  if (victimIdx < 0) {
+    victimIdx = _dossierTabs.findIndex((t) => t.key !== _dossierActiveKey && !(t.kanbanState && t.kanbanState.hasUnsavedWork));
   }
-  // Evict oldest non-active tab if at capacity
-  if (_dossierTabs.length >= DOSSIER_MAX_TABS) {
-    // Prefer closing a tab that has no unsaved work
-    let victimIdx = _dossierTabs.findIndex((t, i) => t.key !== _dossierActiveKey && !t.kanbanState.hasUnsavedWork);
-    if (victimIdx < 0) victimIdx = _dossierTabs.findIndex(t => t.key !== _dossierActiveKey);
-    if (victimIdx < 0) {
-      showError("已达 " + DOSSIER_MAX_TABS + " 个标签上限，请先关闭一个标签再查询新专利。");
-      return false;
-    }
-    const victim = _dossierTabs[victimIdx];
-    if (victim.kanbanState && victim.kanbanState.hasUnsavedWork) {
-      if (!confirm(`标签已满 3 个，将关闭最早的「${victim.label}」标签。该标签有未保存梳理内容，确定继续？`)) return false;
-    }
-    _dossierTabs.splice(victimIdx, 1);
+  if (victimIdx < 0) victimIdx = _dossierTabs.findIndex(t => t.key !== _dossierActiveKey);
+  return victimIdx;
+}
+
+function _dossierConfirmEvict(victim) {
+  let evictWarnings = [];
+  if (victim.kanbanState && victim.kanbanState.hasUnsavedWork) {
+    evictWarnings.push("梳理内容尚未保存");
   }
-  // Save current tab state before moving to new (empty) tab
+  const victimAnnots = _dossierGetTabAnnotSummary(victim);
+  if (victimAnnots.length > 0) {
+    let aMsg = "以下文档中有未导出的PDF标注：";
+    victimAnnots.forEach((a, i) => { aMsg += "\n  " + (i+1) + ". " + a.docTitle + "（" + a.count + " 条标注）"; });
+    evictWarnings.push(aMsg);
+  }
+  if (evictWarnings.length > 0) {
+    return confirm(`标签已满 ${DOSSIER_MAX_TABS} 个，将关闭最早的「${victim.label}」标签：\n\n${evictWarnings.join("\n\n")}\n\n确定继续？`);
+  }
+  return true;
+}
+
+function _dossierEvictTab(idx) {
+  const victim = _dossierTabs[idx];
+  _dossierCleanupTabPdfAnnots(victim);
+  _dossierTabs.splice(idx, 1);
+  _updateAnnotCloseFlag();
+}
+
+function _dossierCreateEmptyTab(key, label) {
   _dossierSaveActiveTab();
   const newTab = {
     key,
-    label: rawPn,
+    label: label || key,
     title: "",
     currentData: null,
-    kanbanState: { documents: [], extractions: {}, analysis: "", traceIndex: {}, hasUnsavedWork: false },
+    kanbanState: { documents: [], extractions: {}, analysis: "", analysisSystemPrompt: "", analysisUserMessage: "", citedRefsAnalysis: "", traceIndex: {}, hasUnsavedWork: false },
+    activeInnerTab: "overview",
   };
   _dossierTabs.push(newTab);
   _dossierActiveKey = key;
-  // Reset globals so doSearch fills this fresh tab
   currentData = null;
   kanbanState.documents = [];
   kanbanState.extractions = {};
   kanbanState.analysis = "";
+  kanbanState.analysisSystemPrompt = "";
+  kanbanState.analysisUserMessage = "";
+  kanbanState.citedRefsAnalysis = "";
   kanbanState.traceIndex = {};
   kanbanState.hasUnsavedWork = false;
   pdfViewState.active = false;
@@ -441,7 +496,45 @@ function _dossierNewTabFromSearch(input) {
   pdfViewState.currentDocKey = null;
   pdfViewState.renderedPages = {};
   if (typeof _pdfDocCache !== "undefined") _pdfDocCache = {};
+  if (typeof closeReader === "function") closeReader();
+  const analysisPanel = document.getElementById("analysis-chat-panel");
+  if (analysisPanel) analysisPanel.classList.remove("open");
+  if (patentInput) patentInput.value = "";
   _dossierRenderTabs();
+}
+
+function _dossierPrepareTab(key, rawPn) {
+  const existing = _dossierTabs.find(t => t.key === key);
+  if (existing) {
+    _dossierSaveActiveTab();
+    _dossierActiveKey = key;
+    _dossierApplyTab(existing);
+    if (patentInput) patentInput.value = "";
+    return { action: "existing" };
+  }
+  if (_dossierTabs.length >= DOSSIER_MAX_TABS) {
+    const victimIdx = _dossierFindVictimTab();
+    if (victimIdx < 0) {
+      showError("已达 " + DOSSIER_MAX_TABS + " 个标签上限，请先关闭一个标签再查询新专利。");
+      return { action: "abort" };
+    }
+    const victim = _dossierTabs[victimIdx];
+    if (!_dossierConfirmEvict(victim)) return { action: "abort" };
+    _dossierEvictTab(victimIdx);
+  }
+  _dossierCreateEmptyTab(key, rawPn);
+  return { action: "created" };
+}
+
+function _dossierNewTabFromSearch(input) {
+  const pn = parsePatentNumber(input);
+  if (!pn) return false;
+  const rawPn = pn.raw || String(input).trim().toUpperCase().replace(/[\s\/]/g, "");
+  if (isJPPatent(rawPn) || isCNPatent(rawPn)) return true;
+  const key = _dossierMakeKey(rawPn);
+  const result = _dossierPrepareTab(key, rawPn);
+  if (result.action === "existing") return false;
+  if (result.action === "abort") return false;
   return true;
 }
 
@@ -1063,9 +1156,18 @@ function updateFloatingBallsVisibility() {
 // ── 搜索模式切换 ──
 document.querySelectorAll(".search-mode-btn").forEach(btn => {
   btn.addEventListener("click", () => {
+    const prevMode = searchMode;
     document.querySelectorAll(".search-mode-btn").forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
     searchMode = btn.dataset.mode;
+
+    if (prevMode === "dossier" && searchMode !== "dossier") {
+      _dossierSaveActiveTab();
+      if (typeof closeReader === "function") closeReader();
+      const analysisPanel = document.getElementById("analysis-chat-panel");
+      if (analysisPanel) analysisPanel.classList.remove("open");
+    }
+
     const extractSection = document.getElementById("extract-mode-section");
     if (searchMode === "extract") {
       patentInput.placeholder = "输入专利号添加到抽取列表（如 US17204063、EP4252965A3、CN115398523A）...";
@@ -1077,6 +1179,7 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
       if (extractSection) extractSection.classList.remove("hidden");
       if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
       patentInput.value = "";
+      _dossierRenderTabs();
       initExtractMode();
     } else if (searchMode === "patent") {
       patentInput.placeholder = "输入专利号查询原文信息（如 US12030161B2, EP4252965A3）";
@@ -1084,6 +1187,7 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
       resultSection.classList.add("hidden");
       if (extractSection) extractSection.classList.add("hidden");
       if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "";
+      _dossierRenderTabs();
       if (_pdOpenPatents.length > 0 && _pdActivePatent && _pdPatentCache[_pdActivePatent]) {
         patentDetailSection.classList.remove("hidden");
         _renderPdTabs();
@@ -1092,6 +1196,8 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
         if (patentInput) patentInput.value = _pdActivePatent;
       } else if (window._currentPatentData) {
         patentDetailSection.classList.remove("hidden");
+      } else {
+        patentDetailSection.classList.add("hidden");
       }
     } else {
       patentInput.placeholder = "输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型";
@@ -1103,16 +1209,24 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
       if (batchResultsSection) batchResultsSection.classList.add("hidden");
       if (pdFindBar) pdFindBar.classList.add("hidden");
       _clearFindHighlights();
-      // If there's an active dossier tab, show result section; otherwise stay on home
-      if (currentData && _dossierActiveKey) {
-        resultSection.classList.remove("hidden");
-        _dossierRenderTabs();
+      if (_dossierActiveKey) {
+        const activeTab = _dossierTabs.find(t => t.key === _dossierActiveKey);
+        if (activeTab && activeTab.currentData) {
+          resultSection.classList.remove("hidden");
+          const appEl = document.getElementById("app");
+          if (appEl) appEl.classList.remove("home-mode");
+          _dossierApplyTab(activeTab);
+        } else {
+          resultSection.classList.add("hidden");
+          const appEl = document.getElementById("app");
+          if (appEl) appEl.classList.add("home-mode");
+        }
       } else {
         resultSection.classList.add("hidden");
         const appEl = document.getElementById("app");
         if (appEl) appEl.classList.add("home-mode");
-        _dossierRenderTabs();
       }
+      _dossierRenderTabs();
     }
     updateFloatingBallsVisibility();
   });
@@ -3773,38 +3887,15 @@ const PatentCache = {
 
       updateFloatingBallsVisibility();
 
-      // Show analysis chat toggle if analysis exists
       if (kanbanState.analysis) {
         showAnalysisChatToggle();
         prefetchPatentLinks();
       }
 
-      // Register as a dossier tab (when in dossier mode)
-      try {
-        if (searchMode === "dossier" && currentData) {
-          // Ensure a tab slot exists for this restored patent
-          const key = _dossierMakeKey(cacheEntry.patentNumber || currentData.raw || (currentData.office + currentData.applicationNumber));
-          if (!_dossierTabs.find(t => t.key === key)) {
-            if (_dossierTabs.length >= DOSSIER_MAX_TABS) {
-              // at capacity; don't create a tab automatically — rely on user explicitly closing tabs
-            } else {
-              _dossierSaveActiveTab();
-              const newTab = {
-                key,
-                label: currentData.raw || cacheEntry.patentNumber || key,
-                title: (currentData.family && currentData.family.list && currentData.family.list[0] && currentData.family.list[0].title) || "",
-                currentData: null,
-                kanbanState: { documents: [], extractions: {}, analysis: "", traceIndex: {}, hasUnsavedWork: false },
-              };
-              _dossierTabs.push(newTab);
-              _dossierActiveKey = key;
-            }
-          } else {
-            _dossierActiveKey = key;
-          }
-          _dossierRegisterCurrentTab();
-        }
-      } catch (_) {}
+      if (searchMode === "dossier" && _dossierActiveKey) {
+        _dossierSaveActiveTab();
+        _dossierRenderTabs();
+      }
 
       return true;
     } catch (e) {
@@ -3936,15 +4027,60 @@ function autoSaveCache() {
 }
 
 // Auto-save on page hide/close to prevent data loss
-window.addEventListener("beforeunload", () => {
+window.addEventListener("beforeunload", (ev) => {
+  const unsavedKanbanTabs = [];
   if (kanbanState.hasUnsavedWork && currentData) {
     autoSaveCache();
+    unsavedKanbanTabs.push({
+      patentNumber: currentData.raw || (currentData.office + currentData.applicationNumber),
+      patentTitle: (currentData.family && currentData.family.list && currentData.family.list[0] && currentData.family.list[0].title) || "",
+    });
   }
+  _dossierTabs.forEach(tab => {
+    if (tab.key === _dossierActiveKey) return;
+    if (tab.kanbanState && tab.kanbanState.hasUnsavedWork && tab.currentData) {
+      unsavedKanbanTabs.push({
+        patentNumber: tab.currentData.raw || (tab.currentData.office + tab.currentData.applicationNumber),
+        patentTitle: (tab.currentData.family && tab.currentData.family.list && tab.currentData.family.list[0] && tab.currentData.family.list[0].title) || "",
+      });
+    }
+  });
+
+  const annotSummary = _getUnsavedAnnotsSummary();
+
+  if (unsavedKanbanTabs.length === 0 && annotSummary.length === 0) return;
+
+  let msg = "";
+  if (unsavedKanbanTabs.length > 0) {
+    msg += "以下专利标签页存在未保存的梳理内容，关闭后将丢失：\n";
+    unsavedKanbanTabs.forEach((t, i) => {
+      const pn = t.patentNumber || "未知专利";
+      const pt = t.patentTitle ? " - " + t.patentTitle : "";
+      msg += "\n  " + (i+1) + ". " + pn + pt;
+    });
+    msg += "\n（已自动保存到本地缓存）\n\n";
+  }
+  if (annotSummary.length > 0) {
+    msg += "以下审查文档中存在未导出的PDF标注，关闭后将丢失：\n";
+    annotSummary.forEach((s, i) => {
+      const pn = s.patentNumber || "未知专利";
+      const pt = s.patentTitle ? " - " + s.patentTitle : "";
+      const dt = s.docTitle ? "\n    文档：" + s.docTitle : "";
+      const cnt = s.count ? "（" + s.count + " 条标注）" : "";
+      msg += "\n  " + (unsavedKanbanTabs.length + i + 1) + ". " + pn + pt + dt + (dt ? "" : " ") + cnt;
+    });
+    msg += "\n\n如需保留标注，请先取消并点击「导出标注后文档」。";
+  }
+  ev.preventDefault();
+  ev.returnValue = msg;
+  return msg;
 });
 // Also handle visibilitychange for mobile/Electron scenarios
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden" && kanbanState.hasUnsavedWork && currentData) {
-    autoSaveCache();
+  if (document.visibilityState === "hidden") {
+    if (kanbanState.hasUnsavedWork && currentData) {
+      autoSaveCache();
+    }
   }
 });
 
@@ -4243,20 +4379,54 @@ function restoreFromHistory(patentNumber) {
 }
 
 function doRestoreFromHistory(patentNumber) {
-  // Re-trigger search for this patent
-  const historyAll = PatentCache.getHistoryAll();
-  const h = historyAll[patentNumber];
-  const office = h ? h.office : "";
+  searchMode = "dossier";
+  document.querySelectorAll(".search-mode-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.mode === "dossier");
+  });
+  if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
+  if (patentDetailSection) patentDetailSection.classList.add("hidden");
+  const _extSec = document.getElementById("extract-mode-section");
+  if (_extSec) _extSec.classList.add("hidden");
+  const appEl = document.getElementById("app");
+  if (appEl) appEl.classList.remove("home-mode");
+  resultSection.classList.remove("hidden");
   if (patentInput) patentInput.value = patentNumber;
+  const shouldDoSearch = _dossierNewTabFromSearch(patentNumber);
+  if (!shouldDoSearch) {
+    refreshHistoryList();
+    return;
+  }
   doSearch(patentNumber);
 }
 
 function doRestoreFromCache(patentNumber) {
   const entry = PatentCache.get(patentNumber);
   if (!entry) return;
+  searchMode = "dossier";
+  document.querySelectorAll(".search-mode-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.mode === "dossier");
+  });
+  if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
+  if (patentDetailSection) patentDetailSection.classList.add("hidden");
+  const _extSec = document.getElementById("extract-mode-section");
+  if (_extSec) _extSec.classList.add("hidden");
+  const appEl = document.getElementById("app");
+  if (appEl) appEl.classList.remove("home-mode");
+  resultSection.classList.remove("hidden");
+  const key = _dossierMakeKey(patentNumber);
+  const prep = _dossierPrepareTab(key, patentNumber);
+  if (prep.action === "abort") return;
+  if (prep.action === "existing") {
+    if (patentInput) patentInput.value = "";
+    refreshHistoryList();
+    updateFloatingBallsVisibility();
+    return;
+  }
   const success = PatentCache.restoreState(entry);
   if (success) {
+    _dossierRegisterCurrentTab();
     refreshHistoryList();
+    updateFloatingBallsVisibility();
   } else {
     showError("恢复缓存状态失败");
   }
@@ -15368,15 +15538,16 @@ function restartExtract() {
 
 async function openExtractDocAndJump(patentNo, docIdx, cell) {
   showToast("正在打开文档...");
-  // Switch to dossier mode and restore from cache if available; otherwise trigger doSearch
   document.querySelectorAll(".search-mode-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === "dossier"));
   searchMode = "dossier";
   document.getElementById("extract-mode-section")?.classList.add("hidden");
   resultSection.classList.remove("hidden");
   if (patentInput) patentInput.value = patentNo;
   patentDetailSection.classList.add("hidden");
+  if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
+  const appEl = document.getElementById("app");
+  if (appEl) appEl.classList.remove("home-mode");
 
-  const cached = PatentCache.get(patentNo);
   const afterJump = () => {
     setTimeout(() => {
       if (typeof openReader === "function") openReader();
@@ -15394,11 +15565,16 @@ async function openExtractDocAndJump(patentNo, docIdx, cell) {
       }, 1500);
     }, 500);
   };
+
+  const cached = PatentCache.get(patentNo);
   if (cached && cached.kanbanState) {
-    restoreFromCache(patentNo);
+    doRestoreFromCache(patentNo);
     afterJump();
   } else {
-    await doSearch(patentNo);
+    const shouldDoSearch = _dossierNewTabFromSearch(patentNo);
+    if (shouldDoSearch) {
+      await doSearch(patentNo);
+    }
     afterJump();
   }
 }

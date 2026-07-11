@@ -1,3 +1,14 @@
+/*!
+ * PatentLens - 专利审查文档智能梳理工具 (Tauri版)
+ * Copyright (c) 2026 Alfred Shi. All rights reserved.
+ *
+ * 本软件仅供内部使用，未经授权不得对外传播、复制或分发。
+ * This software is for internal use only. Unauthorized distribution
+ * or reproduction is strictly prohibited.
+ *
+ * @author Alfred Shi
+ * @version 260710
+ */
 export type AIProviderType = "zhipu" | "deepseek" | "openai";
 
 export interface AIProviderConfig {
