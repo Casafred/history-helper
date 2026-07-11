@@ -1376,7 +1376,7 @@ function createWindow(port) {
         unsavedAnnotationsSummary.forEach((s, i) => {
           const pn = s.patentNumber || "未知专利";
           const pt = s.patentTitle ? " - " + s.patentTitle : "";
-          const dt = s.docTitle ? "\n      文档：" + s.docTitle : "";
+          const dt = s.docTitle ? "\n    ▸ " + s.docTitle : "";
           const cnt = s.count ? "（" + s.count + " 条标注）" : "";
           detail += "\n  " + (i+1) + ". " + pn + pt + dt + (dt ? "" : " ") + cnt;
         });

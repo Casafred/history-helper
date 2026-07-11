@@ -396,7 +396,7 @@ function _dossierGetTabAnnotSummary(tab) {
       const list = pdfViewState.annotList[docKey];
       if (list && list.length > 0) {
         results.push({
-          docTitle: d.title || d.docIdentifier || ("文档 " + d.idx),
+          docTitle: (d.name || "") + (d.desc ? " - " + d.desc : "") || d.docId || ("文档 " + d.idx),
           count: list.length,
         });
       }
@@ -8314,10 +8314,11 @@ async function renderPdfView(idx) {
   }
   // Register metadata for close-warning summary
   const _pt = (currentData.family && currentData.family.list && currentData.family.list.length > 0 && currentData.family.list[0].title) || "";
+  const _docTitle = (it.name || "") + (it.desc ? " - " + it.desc : "") || it.docId || ("文档 " + idx);
   pdfViewState.annotDocMeta[cacheKey] = {
     patentNumber: currentData.raw || (currentData.office + currentData.applicationNumber),
     patentTitle: _pt,
-    docTitle: it.title || it.docIdentifier || ("文档 " + idx),
+    docTitle: _docTitle,
     docId: it.docId || "",
   };
   _updateAnnotCloseFlag();
@@ -13888,15 +13889,16 @@ if (batchSearchBtn) {
     _renderPdTabs();
 
     batchResultsGrid.innerHTML = "";
+    // Force reflow after showing the section so grid has correct width before adding cards
+    void batchResultsSection.offsetHeight;
+
     const cards = {};
     numbers.forEach(pn => {
       const card = document.createElement("div");
-      // Check cache first - session cache or localStorage GP cache
       const sessionCached = _pdPatentCache[pn];
       const lsCached = GPCache.get(pn);
 
       if (sessionCached || lsCached) {
-        // Cache hit - show done state immediately
         const data = sessionCached || lsCached;
         if (!sessionCached && lsCached) _pdPatentCache[pn] = lsCached;
         card.className = "batch-result-card done cached";
@@ -13904,7 +13906,6 @@ if (batchSearchBtn) {
         cards[pn] = card;
         batchResultsGrid.appendChild(card);
         _updateBatchCardDone(card, pn, data);
-        // Update "cached" badge
         const statusEl = card.querySelector(".batch-card-status");
         if (statusEl) {
           statusEl.textContent = "缓存";
@@ -13943,7 +13944,6 @@ if (batchSearchBtn) {
       const pn = numbers[i];
       const card = cards[pn];
 
-      // Skip if already loaded from cache
       if (_pdPatentCache[pn]) {
         completed++;
         succeeded++;
