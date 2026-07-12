@@ -102,6 +102,8 @@ var AgentLLM = (function () {
     var currentReasoning = "";
     var currentToolCalls = [];
     var toolCallArgsMap = {};
+    var rawChunkCount = 0;
+    var hasLoggedRaw = false;
 
     while (true) {
       var result = await reader.read();
@@ -126,7 +128,18 @@ var AgentLLM = (function () {
         }
         try {
           var parsed = JSON.parse(dataStr);
-          var delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
+          rawChunkCount++;
+          // 记录前3个原始chunk用于调试
+          if (rawChunkCount <= 3 && !hasLoggedRaw) {
+            console.log("[AgentLLM] raw chunk#" + rawChunkCount + ":", JSON.stringify(parsed).substring(0, 500));
+            if (rawChunkCount === 3) hasLoggedRaw = true;
+          }
+          var choice = parsed.choices && parsed.choices[0];
+          var delta = choice && choice.delta;
+          // 检查finish_reason
+          if (choice && choice.finish_reason) {
+            console.log("[AgentLLM] finish_reason:", choice.finish_reason, "contentLen:", currentContent.length, "toolCalls:", currentToolCalls.length);
+          }
           if (!delta) continue;
 
           // reasoning_content (DeepSeek reasoner / 智谱 thinking)
