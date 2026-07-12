@@ -159,8 +159,8 @@ var AgentUI = (function () {
       appendAssistantChunk(data.content);
     });
 
-    BUS.on(EVT.ASSISTANT_END, function () {
-      finishAssistantBubble();
+    BUS.on(EVT.ASSISTANT_END, function (data) {
+      finishAssistantBubble(data && data.content ? data.content : null);
     });
 
     BUS.on(EVT.USER_QUESTION, function (data) {
@@ -246,10 +246,16 @@ var AgentUI = (function () {
     scrollToBottom();
   }
 
-  function finishAssistantBubble() {
+  function finishAssistantBubble(finalContent) {
     if (currentAssistantBubble) {
       var typing = currentAssistantBubble.parentElement.querySelector(".agent-typing");
       if (typing) typing.remove();
+      if (finalContent && !currentAssistantBubble.textContent) {
+        currentAssistantBubble.textContent = finalContent;
+      }
+      if (!currentAssistantBubble.textContent) {
+        currentAssistantBubble.parentElement.parentElement.style.display = "none";
+      }
     }
     currentAssistantBubble = null;
   }
@@ -267,11 +273,12 @@ var AgentUI = (function () {
         '</div>' +
       '</div>';
     messagesEl.appendChild(msg);
-    currentThinkingBubble = msg.querySelector(".agent-msg-thinking");
-    var toggle = currentThinkingBubble.querySelector(".thinking-toggle");
+    var thinkingEl = msg.querySelector(".agent-msg-thinking");
+    currentThinkingBubble = thinkingEl;
+    var toggle = thinkingEl.querySelector(".thinking-toggle");
     toggle.addEventListener("click", function () {
-      currentThinkingBubble.classList.toggle("collapsed");
-      toggle.textContent = currentThinkingBubble.classList.contains("collapsed") ? "展开" : "收起";
+      thinkingEl.classList.toggle("collapsed");
+      toggle.textContent = thinkingEl.classList.contains("collapsed") ? "展开" : "收起";
     });
     scrollToBottom();
   }
