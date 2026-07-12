@@ -254,11 +254,23 @@ var AgentCore = (function () {
           }
         }
 
-        // 如果没有工具调用但有内容，视为最终回答
+        // 如果没有工具调用但有内容
         if ((!gotToolCall && finalToolCalls.length === 0) && finalContent) {
           BUS.emit(EVT.ASSISTANT_END, { content: finalContent });
           assistantMsg.content = finalContent;
           memory.push(assistantMsg);
+
+          // nudge机制：前2次迭代如果AI只回复文本但不调用工具，
+          // 追加一条system消息推动AI实际使用工具
+          if (iteration <= 2 && _shouldNudge(userMessage, finalContent)) {
+            console.log("[AgentCore] nudging AI to use tools (iteration " + iteration + ")");
+            memory.push({
+              role: "user",
+              content: "请直接使用工具来完成任务，不要只用文字描述你的计划。例如，如果要查询专利，请直接调用 fetch_patent 工具。",
+            });
+            continue;
+          }
+
           finalAnswer = finalContent;
           break;
         }
@@ -347,6 +359,21 @@ var AgentCore = (function () {
   function updateTodos(todos) {
     sessionContext.todos = todos;
     BUS.emit(EVT.TODOS_UPDATED, { todos: todos });
+  }
+
+  // === nudge机制：判断是否需要推动AI使用工具 ===
+
+  function _shouldNudge(userMessage, aiResponse) {
+    if (!userMessage || !aiResponse) return false;
+    var um = userMessage.toLowerCase();
+    var ar = aiResponse.toLowerCase();
+    // 用户消息包含专利号模式（如EP4008488B1, US12345678, CN10...）
+    var hasPatentNum = /[a-z]{2}\d+[a-z]?/i.test(userMessage);
+    // AI回复中包含"查询"、"帮你"、"我来"等意图描述但没有实际调用工具
+    var hasIntent = /(查询|帮你|我来|开始|首先|计划|调用|执行)/.test(aiResponse);
+    // AI回复较短（不是完整答案）
+    var isShort = aiResponse.length < 200;
+    return (hasPatentNum || /专利|patent/i.test(um)) && hasIntent && isShort;
   }
 
   // === 降级模式辅助函数 ===
