@@ -194,12 +194,64 @@ var AgentCore = (function () {
 
         console.log("[AgentCore] iteration", iteration, "done. contentLen:", (finalContent||"").length, "toolCalls:", finalToolCalls ? finalToolCalls.length : 0);
 
-        // 如果AI没有返回内容也没有工具调用，说明出问题了
+        // 如果AI没有返回内容也没有工具调用，可能是API不支持tools参数
         if (!finalContent && (!finalToolCalls || finalToolCalls.length === 0)) {
-          console.warn("[AgentCore] Empty response from LLM, ending session");
+          console.warn("[AgentCore] Empty response, trying fallback without tools parameter...");
           BUS.emit(EVT.ASSISTANT_END, { content: "" });
-          finalAnswer = "（AI未返回有效内容，请检查API配置或重试）";
-          break;
+
+          // 降级：不带tools参数重试，将工具描述放入system prompt
+          var fallbackPrompt = systemPrompt + "\n\n" + _buildManualToolsPrompt(tools);
+          var fallbackContent = "";
+          var fallbackReasoning = "";
+          BUS.emit(EVT.ASSISTANT_START, {});
+          thinkStarted = false;
+
+          try {
+            var fbGen = AgentLLM.streamWithTools(fallbackPrompt, memory, [], options || {}, signal);
+            var fbResult = await fbGen.next();
+            while (!fbResult.done) {
+              var fbChunk = fbResult.value;
+              if (fbChunk.type === "reasoning") {
+                if (!thinkStarted) { BUS.emit(EVT.THINK_START, {}); thinkStarted = true; }
+                fallbackReasoning += fbChunk.content;
+                BUS.emit(EVT.THINK_CHUNK, { content: fbChunk.content });
+              } else if (fbChunk.type === "content") {
+                fallbackContent += fbChunk.content;
+                BUS.emit(EVT.ASSISTANT_CHUNK, { content: fbChunk.content });
+              }
+              fbResult = await fbGen.next();
+            }
+            if (thinkStarted) BUS.emit(EVT.THINK_END, { content: fallbackReasoning });
+            BUS.emit(EVT.ASSISTANT_END, { content: fallbackContent });
+          } catch (fbErr) {
+            console.error("[AgentCore] fallback also failed:", fbErr);
+            BUS.emit(EVT.ASSISTANT_END, { content: "" });
+          }
+
+          if (fallbackContent) {
+            // 尝试从回复中解析手动工具调用
+            var parsedCalls = _parseManualToolCalls(fallbackContent);
+            if (parsedCalls && parsedCalls.length > 0) {
+              console.log("[AgentCore] fallback parsed tool calls:", parsedCalls.length);
+              finalToolCalls = parsedCalls;
+              finalContent = "";
+              // 提取工具调用之外的文本
+              var textBefore = _extractTextBeforeToolCall(fallbackContent);
+              if (textBefore) {
+                finalContent = textBefore;
+                assistantMsg.content = textBefore;
+              }
+            } else {
+              // 没有工具调用，直接作为最终回答
+              finalAnswer = fallbackContent;
+              assistantMsg.content = fallbackContent;
+              memory.push(assistantMsg);
+              break;
+            }
+          } else {
+            finalAnswer = "（AI未返回有效内容。可能原因：1.API Key未配置 2.模型不支持工具调用 3.网络问题。请检查AI设置）";
+            break;
+          }
         }
 
         // 如果没有工具调用但有内容，视为最终回答
@@ -295,6 +347,78 @@ var AgentCore = (function () {
   function updateTodos(todos) {
     sessionContext.todos = todos;
     BUS.emit(EVT.TODOS_UPDATED, { todos: todos });
+  }
+
+  // === 降级模式辅助函数 ===
+
+  function _buildManualToolsPrompt(tools) {
+    var lines = [
+      "",
+      "## 可用工具（手动模式）",
+      "由于API不支持原生工具调用，请用以下JSON格式输出工具调用：",
+      "```json",
+      '{"tool": "工具名", "arguments": {...参数...}}',
+      "```",
+      "可以先用自然语言思考，然后在最后一行输出工具调用JSON。",
+      "如果不需要调用工具，直接用自然语言回答即可。",
+      "",
+      "### 工具列表",
+    ];
+    for (var i = 0; i < tools.length; i++) {
+      var t = tools[i].function || tools[i];
+      lines.push("- " + t.name + ": " + (t.description || ""));
+      if (t.parameters && t.parameters.properties) {
+        var props = t.parameters.properties;
+        for (var pk in props) {
+          lines.push("  - " + pk + ": " + (props[pk].description || props[pk].type || ""));
+        }
+      }
+    }
+    return lines.join("\n");
+  }
+
+  function _parseManualToolCalls(text) {
+    if (!text) return null;
+    // 尝试匹配 ```json ... ``` 格式
+    var jsonBlockMatch = text.match(/```json\s*([\s\S]*?)```/);
+    if (jsonBlockMatch) {
+      try {
+        var parsed = JSON.parse(jsonBlockMatch[1].trim());
+        if (parsed.tool) {
+          return [{
+            id: "manual_" + Date.now(),
+            name: parsed.tool,
+            arguments: parsed.arguments || {},
+          }];
+        }
+      } catch (e) { /* ignore */ }
+    }
+    // 尝试匹配裸JSON {"tool": "...", ...}
+    var jsonMatch = text.match(/\{[^{}]*"tool"\s*:\s*"[^"]+"[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        var parsed2 = JSON.parse(jsonMatch[0]);
+        if (parsed2.tool) {
+          return [{
+            id: "manual_" + Date.now(),
+            name: parsed2.tool,
+            arguments: parsed2.arguments || {},
+          }];
+        }
+      } catch (e2) { /* ignore */ }
+    }
+    return null;
+  }
+
+  function _extractTextBeforeToolCall(text) {
+    if (!text) return "";
+    var idx = text.indexOf("```json");
+    if (idx === -1) {
+      var m = text.match(/\{[^{}]*"tool"\s*:/);
+      if (m) idx = m.index;
+    }
+    if (idx > 0) return text.substring(0, idx).trim();
+    return "";
   }
 
   return {

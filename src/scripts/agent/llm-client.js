@@ -56,7 +56,7 @@ var AgentLLM = (function () {
     }
 
     if (tools && tools.length > 0) {
-      body.tools = tools.map(function (t) { return t.schema; });
+      body.tools = tools;
       body.tool_choice = (options && options.toolChoice) ? options.toolChoice : "auto";
     }
 
