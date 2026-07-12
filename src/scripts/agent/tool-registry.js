@@ -8,11 +8,14 @@ var AgentTools = (function () {
 
   function normalizeParameters(params) {
     if (!params) {
-      return { type: "object", properties: {}, required: [] };
+      return { type: "object", properties: {} };
     }
     if (!params.type) params.type = "object";
     if (!params.properties) params.properties = {};
-    if (!params.required) params.required = [];
+    // required 只在有值时保留，空数组会导致DeepSeek等API报400
+    if (!params.required || (Array.isArray(params.required) && params.required.length === 0)) {
+      delete params.required;
+    }
     return params;
   }
 
