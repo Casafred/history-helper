@@ -54,7 +54,8 @@
           "scripts/fontkit.umd.min.js",
           "scripts/web-ai.js",
           "scripts/patent-status.js",
-          "scripts/web-app.js"
+          "scripts/web-app.js",
+          "scripts/agent/**"
         ]
       }
     ],
