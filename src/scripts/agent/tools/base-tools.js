@@ -87,31 +87,6 @@ var AgentBaseTools = (function () {
     });
 
     AgentTools.register({
-      name: "switch_to_tab",
-      description: "自动切换应用界面的标签页，让用户直接看到对应的数据。可选标签：overview(概览), family(同族), documents(审查文档), ai-summary(AI梳理)。",
-      parameters: {
-        type: "object",
-        properties: {
-          tab: {
-            type: "string",
-            enum: ["overview", "family", "documents", "ai-summary"],
-            description: "要切换到的标签页名称",
-          },
-        },
-        required: ["tab"],
-      },
-      execute: function (args) {
-        var tabName = args.tab;
-        var tabBtn = document.querySelector('.tab-btn[data-tab="' + tabName + '"]');
-        if (tabBtn) {
-          tabBtn.click();
-        }
-        BUS.emit(EVT.TAB_SWITCH, { tab: tabName });
-        return Promise.resolve({ ok: true, switchedTo: tabName });
-      },
-    });
-
-    AgentTools.register({
       name: "ask_user",
       description: "当你需要用户提供更多信息、做出选择或确认某个操作时，使用这个工具向用户提问。这会暂停当前流程等待用户回答。",
       parameters: {

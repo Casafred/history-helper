@@ -20,10 +20,10 @@ var AgentUI = (function () {
   var currentThinkingBubble = null;
 
   var SUGGESTIONS = [
-    "查询 US14412875 的基本信息和摘要",
-    "帮我查一下这个专利的权利要求书",
+    "查询 US14412875 的审查信息",
+    "帮我查一下这个专利的同族专利",
     "分析这个专利的审查文档列表",
-    "查完后切换到概览页面",
+    "查完后切换到审查看板",
   ];
 
   function createPanel() {
@@ -203,7 +203,7 @@ var AgentUI = (function () {
       var cls = "agent-todo-item " + (t.status === "completed" ? "completed" : t.status === "in_progress" ? "in-progress" : "");
       var icon = "";
       if (t.status === "completed") icon = "✅";
-      else if (t.status === "in_progress") icon = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #6366f1;border-top-color:transparent;border-radius:50%;animation:agent-spin 0.8s linear infinite"></span>';
+      else if (t.status === "in_progress") icon = '<span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent, #22c55e);border-top-color:transparent;border-radius:50%;animation:agent-spin 0.8s linear infinite"></span>';
       else icon = "⏳";
       html += '<div class="' + cls + '"><span class="todo-status">' + icon + '</span><span>' + escapeHtml(t.content) + '</span></div>';
     });
@@ -329,7 +329,7 @@ var AgentUI = (function () {
     msg.className = "agent-msg bot";
     msg.innerHTML =
       '<div class="agent-msg-avatar">❌</div>' +
-      '<div class="agent-msg-body"><div class="agent-msg-bubble" style="background:#fef2f2;color:#991b1b;border-left:3px solid #ef4444">' + escapeHtml(text) + '</div></div>';
+      '<div class="agent-msg-body"><div class="agent-msg-bubble" style="background:rgba(248,113,113,0.1);color:var(--danger,#f87171);border-left:3px solid var(--danger,#f87171);border-top-left-radius:4px">' + escapeHtml(text) + '</div></div>';
     messagesEl.appendChild(msg);
     scrollToBottom();
   }
@@ -337,7 +337,7 @@ var AgentUI = (function () {
   function addSystemMessage(text) {
     var msg = document.createElement("div");
     msg.style.textAlign = "center";
-    msg.style.color = "#94a3b8";
+    msg.style.color = "var(--text-muted)";
     msg.style.fontSize = "12px";
     msg.style.padding = "4px 0";
     msg.textContent = text;
@@ -375,7 +375,7 @@ var AgentUI = (function () {
           b.disabled = true;
           b.style.opacity = "0.5";
         });
-        btn.style.background = "#3b82f6";
+        btn.style.background = "var(--accent)";
         btn.style.color = "#fff";
         if (pendingQuestionCallback) {
           var cb = pendingQuestionCallback;
