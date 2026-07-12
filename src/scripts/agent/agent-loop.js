@@ -153,6 +153,7 @@ var AgentCore = (function () {
           throw streamErr;
         }
 
+        var doneChunk = null;
         while (!streamResult.done) {
           var chunk = streamResult.value;
 
@@ -168,6 +169,9 @@ var AgentCore = (function () {
             BUS.emit(EVT.ASSISTANT_CHUNK, { content: chunk.content });
           } else if (chunk.type === "tool_call_delta") {
             gotToolCall = true;
+          } else if (chunk.type === "done") {
+            // 捕获done事件中的最终结果（content和toolCalls）
+            doneChunk = chunk;
           }
 
           try {
@@ -183,7 +187,8 @@ var AgentCore = (function () {
 
         clearTimeout(timeoutId);
 
-        var finalChunk = streamResult.value || {};
+        // 优先使用done chunk中的结果，其次使用generator返回值，最后回退到累积buffer
+        var finalChunk = doneChunk || streamResult.value || {};
 
         if (thinkStarted) {
           BUS.emit(EVT.THINK_END, { content: reasoningBuf });
@@ -192,7 +197,7 @@ var AgentCore = (function () {
         var finalContent = finalChunk.content || contentBuf;
         var finalToolCalls = finalChunk.toolCalls || [];
 
-        console.log("[AgentCore] iteration", iteration, "done. contentLen:", (finalContent||"").length, "toolCalls:", finalToolCalls ? finalToolCalls.length : 0);
+        console.log("[AgentCore] iteration", iteration, "done. contentLen:", (finalContent||"").length, "toolCalls:", finalToolCalls ? finalToolCalls.length : 0, "gotToolCall:", gotToolCall, "doneChunk:", !!doneChunk);
 
         // 如果AI没有返回内容也没有工具调用，可能是API不支持tools参数
         if (!finalContent && (!finalToolCalls || finalToolCalls.length === 0)) {
