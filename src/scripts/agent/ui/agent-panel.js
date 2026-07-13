@@ -459,6 +459,72 @@ var AgentUI = (function () {
     scheduleRender();
   }
 
+  function openPatentInApp(patentNumber, isFulltext) {
+    if (!patentNumber) return;
+    try {
+      var patentBtn = document.querySelector('.search-mode-btn[data-mode="patent"]');
+      var dossierBtn = document.querySelector('.search-mode-btn[data-mode="dossier"]');
+
+      if (isFulltext && typeof searchPatentDetail === "function") {
+        if (patentBtn) patentBtn.click();
+        setTimeout(function () {
+          var input = document.getElementById("patent-input");
+          if (input) input.value = patentNumber;
+          searchPatentDetail(patentNumber);
+        }, 100);
+      } else if (typeof doSearch === "function") {
+        if (dossierBtn) dossierBtn.click();
+        setTimeout(function () {
+          var input = document.getElementById("patent-input");
+          if (input) input.value = patentNumber;
+          doSearch(patentNumber);
+        }, 100);
+      }
+
+      setTimeout(function () {
+        var panel = document.getElementById("agent-panel");
+        if (panel) panel.classList.remove("open");
+        isOpen = false;
+      }, 200);
+    } catch (e) {
+      console.error("openPatentInApp error:", e);
+    }
+  }
+
+  function extractPatentNumbers(text) {
+    if (!text) return [];
+    var patterns = [
+      /\b(CN|US|EP|WO|DE|JP|KR|GB|FR|AU|CA)\d{6,14}[A-Z]?\d?\b/gi,
+      /\bCN\d{9,10}[AB]\b/gi,
+    ];
+    var nums = [];
+    var seen = new Set();
+    patterns.forEach(function (p) {
+      var matches = text.match(p);
+      if (matches) {
+        matches.forEach(function (m) {
+          var upper = m.toUpperCase();
+          if (!seen.has(upper)) {
+            seen.add(upper);
+            nums.push(upper);
+          }
+        });
+      }
+    });
+    return nums;
+  }
+
+  function appendActionButton(bubble, text, onClick, iconSvg) {
+    var btn = document.createElement("button");
+    btn.className = "agent-action-btn";
+    btn.innerHTML = (iconSvg || '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>') + '<span>' + escapeHtml(text) + '</span>';
+    btn.addEventListener("click", onClick);
+    var wrapper = document.createElement("div");
+    wrapper.style.marginTop = "8px";
+    wrapper.appendChild(btn);
+    bubble.appendChild(wrapper);
+  }
+
   function finishAssistantBubble(finalContent) {
     if (renderTimeout) {
       clearTimeout(renderTimeout);
@@ -472,6 +538,35 @@ var AgentUI = (function () {
       }
       if (currentAssistantRawText) {
         currentAssistantBubble.innerHTML = renderMarkdown(currentAssistantRawText);
+
+        var ctx = (typeof AgentCore !== "undefined" && AgentCore.getContext) ? AgentCore.getContext() : null;
+        var patentNum = null;
+        var isFulltext = false;
+
+        if (ctx) {
+          if (ctx.patentNumber) {
+            patentNum = ctx.patentNumber;
+            isFulltext = !!ctx.patentFulltextData;
+          }
+        }
+
+        if (!patentNum) {
+          var foundNums = extractPatentNumbers(currentAssistantRawText);
+          if (foundNums.length > 0) {
+            patentNum = foundNums[0];
+            isFulltext = true;
+          }
+        }
+
+        if (patentNum) {
+          var label = isFulltext ? "在应用内查看专利原文" : "在应用内查看专利详情";
+          appendActionButton(
+            currentAssistantBubble,
+            label + ": " + patentNum,
+            function () { openPatentInApp(patentNum, isFulltext); },
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>'
+          );
+        }
       } else {
         currentAssistantBubble.parentElement.parentElement.style.display = "none";
       }

@@ -2005,58 +2005,12 @@ function renderPatentDetail(data) {
 
   // ─── Tab 2: Claims ───
   html += '<div class="pd-tab-panel" data-panel="claims">';
-  if (data.claims && data.claims.length > 0) {
-    html += '<div class="pd-panel-header">';
-    html += '<span class="pd-panel-title">权利要求 (' + data.claims.length + ')</span>';
-    html += '<div class="pd-panel-actions">';
-    html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'claims\')">复制</button>';
-    html += '</div></div>';
-    html += '<div class="pd-claims-list" data-section-type="claims">';
-    // Group claims: each independent claim starts a new group, dependent claims follow
-    let currentGroup = null;
-    data.claims.forEach((c, i) => {
-      const claimType = c.type === 'independent' ? 'independent' : 'dependent';
-      const claimClass = c.type === 'independent' ? 'claim-independent' : 'claim-dependent';
-      // Start a new group for independent claims
-      if (c.type === 'independent') {
-        if (currentGroup !== null) {
-          html += '</div>'; // close previous group
-        }
-        currentGroup = i;
-        html += '<div class="pd-claim-group">';
-        html += '<div class="pd-claim-group-header">独立权利要求 ' + escapeHtml(String(c.num || (i + 1))) + '</div>';
-      }
-      html += '<div class="pd-claim-item ' + claimClass + '" data-claim-index="' + i + '">';
-      html += '<div class="pd-claim-main" style="display:flex;align-items:flex-start;gap:4px;">';
-      html += '<span class="pd-claim-num">' + escapeHtml(String(c.num || (i + 1))) + '.</span>';
-      html += '<span class="pd-claim-type ' + claimType + '">' + (c.type === 'independent' ? '独立' : '从属') + '</span>';
-      html += '<span class="pd-claim-text">' + escapeHtml(c.text) + '</span>';
-      html += '<button class="pd-claim-translate-btn" data-claim-index="' + i + '" title="AI 翻译此条权利要求">译</button>';
-      html += '</div>';
-      html += '<div class="pd-claim-translation" data-claim-translation="' + i + '" style="display:none;margin-top:4px;padding:4px 8px;background:#f0f7ff;border-radius:4px;font-size:13px;color:#333;border-left:3px solid var(--accent);"></div>';
-      html += '</div>';
-    });
-    if (currentGroup !== null) {
-      html += '</div>'; // close last group
-    }
-    html += '</div>';
-  } else {
-    html += '<div class="pd-empty">暂无权利要求数据</div>';
-  }
+  html += renderClaimsListHtml(data.claims, 'detail');
   html += '</div>'; // panel claims
 
   // ─── Tab 3: Description ───
   html += '<div class="pd-tab-panel" data-panel="description">';
-  if (data.description) {
-    html += '<div class="pd-panel-header">';
-    html += '<span class="pd-panel-title">说明书</span>';
-    html += '<div class="pd-panel-actions">';
-    html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'description\')">复制</button>';
-    html += '</div></div>';
-    html += '<div class="pd-description-text" data-section-type="description">' + renderDescriptionHtml(data.description) + '</div>';
-  } else {
-    html += '<div class="pd-empty">暂无说明书数据</div>';
-  }
+  html += renderDescriptionPanelHtml(data.description ? renderDescriptionHtml(data.description) : null, 'detail');
   html += '</div>'; // panel description
 
   // ─── Tab 4: References ───
@@ -3143,58 +3097,12 @@ function renderPatentPopupContent(data) {
 
   // ─── Tab 2: Claims ───
   html += '<div class="pd-tab-panel" data-panel="claims">';
-  if (data.claims && data.claims.length > 0) {
-    html += '<div class="pd-panel-header">';
-    html += '<span class="pd-panel-title">权利要求 (' + data.claims.length + ')</span>';
-    html += '<div class="pd-panel-actions">';
-    html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'claims\')">复制</button>';
-    html += '</div></div>';
-    html += '<div class="pd-claims-list" data-section-type="claims">';
-    // Group claims: each independent claim starts a new group, dependent claims follow
-    let currentGroup = null;
-    data.claims.forEach((c, i) => {
-      const claimType = c.type === 'independent' ? 'independent' : 'dependent';
-      const claimClass = c.type === 'independent' ? 'claim-independent' : 'claim-dependent';
-      // Start a new group for independent claims
-      if (c.type === 'independent') {
-        if (currentGroup !== null) {
-          html += '</div>'; // close previous group
-        }
-        currentGroup = i;
-        html += '<div class="pd-claim-group">';
-        html += '<div class="pd-claim-group-header">独立权利要求 ' + escapeHtml(String(c.num || (i + 1))) + '</div>';
-      }
-      html += '<div class="pd-claim-item ' + claimClass + '" data-claim-index="' + i + '">';
-      html += '<div class="pd-claim-main" style="display:flex;align-items:flex-start;gap:4px;">';
-      html += '<span class="pd-claim-num">' + escapeHtml(String(c.num || (i + 1))) + '.</span>';
-      html += '<span class="pd-claim-type ' + claimType + '">' + (c.type === 'independent' ? '独立' : '从属') + '</span>';
-      html += '<span class="pd-claim-text">' + escapeHtml(c.text) + '</span>';
-      html += '<button class="pd-claim-translate-btn" data-claim-index="' + i + '" title="AI 翻译此条权利要求">译</button>';
-      html += '</div>';
-      html += '<div class="pd-claim-translation" data-claim-translation="' + i + '" style="display:none;margin-top:4px;padding:4px 8px;background:#f0f7ff;border-radius:4px;font-size:13px;color:#333;border-left:3px solid var(--accent);"></div>';
-      html += '</div>';
-    });
-    if (currentGroup !== null) {
-      html += '</div>'; // close last group
-    }
-    html += '</div>';
-  } else {
-    html += '<div class="pd-empty">暂无权利要求数据</div>';
-  }
+  html += renderClaimsListHtml(data.claims, 'popup');
   html += '</div>'; // panel claims
 
   // ─── Tab 3: Description ───
   html += '<div class="pd-tab-panel" data-panel="description">';
-  if (data.description) {
-    html += '<div class="pd-panel-header">';
-    html += '<span class="pd-panel-title">说明书</span>';
-    html += '<div class="pd-panel-actions">';
-    html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'description\')">复制</button>';
-    html += '</div></div>';
-    html += '<div class="pd-description-text" data-section-type="description">' + renderDescriptionHtml(data.description) + '</div>';
-  } else {
-    html += '<div class="pd-empty">暂无说明书数据</div>';
-  }
+  html += renderDescriptionPanelHtml(data.description ? renderDescriptionHtml(data.description) : null, 'popup');
   html += '</div>'; // panel description
 
   // ─── Tab 4: References ───
@@ -4987,6 +4895,187 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
+}
+
+function renderClaimsListHtml(claims, scope) {
+  if (!claims || claims.length === 0) {
+    return '<div class="pd-empty">暂无权利要求数据</div>';
+  }
+  const independentCount = claims.filter(c => c.type === 'independent' || !c.dependent_on).length;
+  const dependentCount = claims.length - independentCount;
+  let html = '';
+  html += '<div class="pd-panel-header">';
+  html += '<span class="pd-panel-title">权利要求 (' + claims.length + ')<span class="pd-dependent-count-badge">' + independentCount + '项独权' + (dependentCount > 0 ? ' · ' + dependentCount + '项从权' : '') + '</span></span>';
+  html += '<div class="pd-panel-actions">';
+  if (dependentCount > 0) {
+    html += '<button class="pd-claim-expand-btn" onclick="toggleClaimExpand(this, \'' + scope + '\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>展开全部从权</button>';
+  }
+  html += '<button class="pd-compare-btn" onclick="toggleSplitView(\'claims\', \'' + scope + '\')" data-split-btn="claims"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg>图文对照</button>';
+  html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'claims\')">复制</button>';
+  html += '</div></div>';
+  html += '<div class="pd-tab-panel-body" data-panel-body="claims">';
+  html += '<div class="pd-claims-list" data-section-type="claims">';
+  let currentGroup = null;
+  let pendingDependentCount = 0;
+  let groupDepHtml = '';
+  claims.forEach((c, i) => {
+    const claimType = c.type === 'independent' ? 'independent' : 'dependent';
+    const claimClass = c.type === 'independent' ? 'claim-independent' : 'claim-dependent';
+    if (c.type === 'independent') {
+      if (currentGroup !== null) {
+        if (pendingDependentCount > 0) {
+          html += '<div class="pd-claim-dependent-count" onclick="toggleClaimExpand(this.closest(\'.pd-tab-panel\').querySelector(\'.pd-claim-expand-btn\'), \'' + scope + '\')">';
+          html += '<span>点击展开 ' + pendingDependentCount + ' 项从属权利要求 ▼</span>';
+          html += '</div>';
+        }
+        html += groupDepHtml;
+        html += '</div>';
+      }
+      currentGroup = i;
+      pendingDependentCount = 0;
+      groupDepHtml = '';
+      html += '<div class="pd-claim-group">';
+      html += '<div class="pd-claim-group-header">独立权利要求 ' + escapeHtml(String(c.num || (i + 1))) + '</div>';
+      html += '<div class="pd-claim-item ' + claimClass + '" data-claim-index="' + i + '">';
+      html += '<div class="pd-claim-main" style="display:flex;align-items:flex-start;gap:4px;width:100%;">';
+      html += '<span class="pd-claim-num">' + escapeHtml(String(c.num || (i + 1))) + '.</span>';
+      html += '<span class="pd-claim-type ' + claimType + '">' + (c.type === 'independent' ? '独立' : '从属') + '</span>';
+      html += '<span class="pd-claim-text">' + escapeHtml(c.text) + '</span>';
+      html += '<button class="pd-claim-translate-btn" data-claim-index="' + i + '" title="AI 翻译此条权利要求">译</button>';
+      html += '</div>';
+      html += '<div class="pd-claim-translation" data-claim-translation="' + i + '" style="display:none;margin-top:4px;padding:4px 8px;background:#f0f7ff;border-radius:4px;font-size:13px;color:#333;border-left:3px solid var(--accent);"></div>';
+      html += '</div>';
+    } else {
+      pendingDependentCount++;
+      groupDepHtml += '<div class="pd-claim-item ' + claimClass + '" data-claim-index="' + i + '">';
+      groupDepHtml += '<div class="pd-claim-main" style="display:flex;align-items:flex-start;gap:4px;width:100%;">';
+      groupDepHtml += '<span class="pd-claim-num">' + escapeHtml(String(c.num || (i + 1))) + '.</span>';
+      groupDepHtml += '<span class="pd-claim-type ' + claimType + '">' + (c.type === 'independent' ? '独立' : '从属') + '</span>';
+      groupDepHtml += '<span class="pd-claim-text">' + escapeHtml(c.text) + '</span>';
+      groupDepHtml += '<button class="pd-claim-translate-btn" data-claim-index="' + i + '" title="AI 翻译此条权利要求">译</button>';
+      groupDepHtml += '</div>';
+      groupDepHtml += '<div class="pd-claim-translation" data-claim-translation="' + i + '" style="display:none;margin-top:4px;padding:4px 8px;background:#f0f7ff;border-radius:4px;font-size:13px;color:#333;border-left:3px solid var(--accent);"></div>';
+      groupDepHtml += '</div>';
+    }
+  });
+  if (currentGroup !== null) {
+    if (pendingDependentCount > 0) {
+      html += '<div class="pd-claim-dependent-count" onclick="toggleClaimExpand(this.closest(\'.pd-tab-panel\').querySelector(\'.pd-claim-expand-btn\'), \'' + scope + '\')">';
+      html += '<span>点击展开 ' + pendingDependentCount + ' 项从属权利要求 ▼</span>';
+      html += '</div>';
+    }
+    html += groupDepHtml;
+    html += '</div>';
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function renderDescriptionPanelHtml(descriptionHtml, scope) {
+  if (!descriptionHtml) {
+    return '<div class="pd-empty">暂无说明书数据</div>';
+  }
+  let html = '';
+  html += '<div class="pd-panel-header">';
+  html += '<span class="pd-panel-title">说明书</span>';
+  html += '<div class="pd-panel-actions">';
+  html += '<button class="pd-compare-btn" onclick="toggleSplitView(\'description\', \'' + scope + '\')" data-split-btn="description"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg>图文对照</button>';
+  html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'description\')">复制</button>';
+  html += '</div></div>';
+  html += '<div class="pd-tab-panel-body" data-panel-body="description">';
+  html += '<div class="pd-description-text" data-section-type="description">' + descriptionHtml + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function getDrawingsHtml(drawings) {
+  if (!drawings || drawings.length === 0) {
+    return '<div class="pd-split-drawings-empty">暂无附图</div>';
+  }
+  let html = '';
+  html += '<div class="pd-split-drawings-title"><span>附图 (' + drawings.length + ')</span></div>';
+  drawings.forEach((url, i) => {
+    html += '<div class="pd-split-drawing-item" data-drawing-index="' + i + '" onclick="openPatentImageViewerFromScope(this)">';
+    html += '<img src="' + escapeHtml(url) + '" alt="Figure ' + (i + 1) + '" loading="lazy">';
+    html += '<span class="pd-split-drawing-label">图 ' + (i + 1) + '</span>';
+    html += '</div>';
+  });
+  return html;
+}
+
+function toggleClaimExpand(btn, scope) {
+  var panel = btn.closest('.pd-tab-panel');
+  var list = panel.querySelector('.pd-claims-list');
+  var isExpanded = list.classList.contains('expanded-all');
+  list.classList.toggle('expanded-all');
+  if (isExpanded) {
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>展开全部从权';
+  } else {
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>收起从权';
+  }
+}
+
+function toggleSplitView(tabName, scope) {
+  var panel, data;
+  if (scope === 'popup') {
+    panel = document.querySelector('#ppv-content .pd-tab-panel[data-panel="' + tabName + '"]');
+    data = window._patentPopupData;
+  } else {
+    panel = document.querySelector('#patent-detail-content .pd-tab-panel[data-panel="' + tabName + '"]');
+    data = window._currentPatentData;
+  }
+  if (!panel) return;
+  var btn = panel.querySelector('.pd-compare-btn[data-split-btn="' + tabName + '"]');
+  var isSplit = panel.classList.contains('pd-split-view');
+  if (isSplit) {
+    panel.classList.remove('pd-split-view');
+    if (btn) btn.classList.remove('active');
+    var drawingsPanel = panel.querySelector('.pd-split-drawings');
+    if (drawingsPanel) drawingsPanel.remove();
+    var textWrap = panel.querySelector('.pd-split-text');
+    if (textWrap) {
+      while (textWrap.firstChild) {
+        panel.insertBefore(textWrap.firstChild, textWrap);
+      }
+      textWrap.remove();
+    }
+  } else {
+    panel.classList.add('pd-split-view');
+    if (btn) btn.classList.add('active');
+    var body = panel.querySelector('.pd-tab-panel-body');
+    if (!body) {
+      var existingContent = panel.innerHTML;
+      panel.innerHTML = '';
+      var textDiv = document.createElement('div');
+      textDiv.className = 'pd-split-text';
+      textDiv.innerHTML = existingContent;
+      panel.appendChild(textDiv);
+    } else {
+      var textDiv2 = document.createElement('div');
+      textDiv2.className = 'pd-split-text';
+      while (body.firstChild) {
+        textDiv2.appendChild(body.firstChild);
+      }
+      panel.insertBefore(textDiv2, body.nextSibling);
+      body.remove();
+    }
+    var drawingsDiv = document.createElement('div');
+    drawingsDiv.className = 'pd-split-drawings';
+    drawingsDiv.innerHTML = getDrawingsHtml(data && data.drawings);
+    panel.appendChild(drawingsDiv);
+  }
+}
+
+function openPatentImageViewerFromScope(item) {
+  var idx = parseInt(item.dataset.drawingIndex);
+  var container = item.closest('.pd-split-drawings');
+  var panel = container.closest('.pd-tab-panel');
+  var scope = panel.closest('#ppv-content') ? 'popup' : 'detail';
+  var data = scope === 'popup' ? window._patentPopupData : window._currentPatentData;
+  if (data && data.drawings) {
+    openPatentImageViewer(data.drawings, isNaN(idx) ? 0 : idx);
+  }
 }
 
 function renderDescriptionHtml(text) {
