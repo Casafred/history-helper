@@ -7574,10 +7574,12 @@ body {
   transform-origin: center center;
   transition: none;
   pointer-events: none;
-  will-change: transform;
 }
-.pd-split-main-image.can-zoom {
+.pd-split-main-image .split-img-stage {
   cursor: grab;
+}
+.pd-split-main-image.panning .split-img-stage {
+  cursor: grabbing;
 }
 .pd-split-main-image.can-pan img {
   cursor: grab;
@@ -7733,36 +7735,13 @@ body {
 }
 
 /* ── 图片标号标注和说明书原文抽取跳转高亮模式 ── */
-/* Wrapper carries the transform so the annotation overlay moves/zooms with the image */
-.pd-split-main-image .split-img-wrapper {
-  display: inline-block;
-  position: relative;
-  max-width: 100%;
-  max-height: 100%;
-  transform-origin: center center;
-  transition: none;
-  will-change: transform;
-  line-height: 0; /* avoid inline-block whitespace gaps */
-}
-.pd-split-main-image .split-img-wrapper > img {
-  display: block;
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  pointer-events: none;
-  transform: none; /* wrapper carries the transform now */
-}
-/* Annotation overlay layer — matches wrapper box, click-through except on markers */
+/* Annotation overlay layer — absolutely positioned to match the image rect,
+   synced via JS (syncAnnoLayer). Same transform applied as the img. */
 .img-anno-layer {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
   pointer-events: none;
   z-index: 5;
+  transform-origin: center center;
 }
 .pd-split-main-image.anno-mode .img-anno-layer {
   pointer-events: auto;
@@ -7781,51 +7760,55 @@ body.anno-mode-active .pd-split-img-btn.anno-toggle-btn:hover {
   position: absolute;
   transform: translate(-50%, -50%);
   pointer-events: auto;
-  cursor: pointer;
+  cursor: grab;
   z-index: 6;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
-  max-width: 180px;
+  gap: 3px;
+  max-width: 200px;
   line-height: 1.3;
+}
+.img-anno-marker.dragging {
+  cursor: grabbing;
+  z-index: 7;
 }
 .img-anno-marker-dot {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 11px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 14px;
   background: #ef4444;
   color: #fff;
   font-weight: 700;
-  font-size: 12px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
-  border: 1.5px solid #fff;
+  font-size: inherit; /* inherit from marker element, set via inline style */
+  box-shadow: 0 2px 6px rgba(0,0,0,0.55);
+  border: 2px solid #fff;
   white-space: nowrap;
   transition: transform 0.12s;
 }
 .img-anno-marker:hover .img-anno-marker-dot {
-  transform: scale(1.12);
+  transform: scale(1.15);
 }
 .img-anno-marker-num {
   pointer-events: none;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.7);
 }
 .img-anno-marker-comment {
   pointer-events: none;
-  background: rgba(0,0,0,0.72);
+  background: rgba(0,0,0,0.78);
   color: #fff;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 11px;
-  max-width: 170px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: inherit;
+  max-width: 190px;
   word-break: break-word;
   white-space: normal;
-  line-height: 1.35;
-  border: 1px solid rgba(255,255,255,0.18);
+  line-height: 1.4;
+  border: 1px solid rgba(255,255,255,0.2);
 }
 
 /* Badge on annotation toggle button */

@@ -2815,6 +2815,11 @@ function openPatentImageViewer(images, startIndex) {
     splitViewSelectImg(vid, startIdx, thumbs[startIdx] || null);
   }
 
+  // Apply annotation mode + sync overlay for the new viewer
+  if (typeof ImageAnnotations !== 'undefined') {
+    ImageAnnotations.applyAnnoModeToViewer(vid);
+  }
+
   function closeViewer() {
     viewer.style.display = 'none';
     if (_splitViewerState[vid]) delete _splitViewerState[vid];
@@ -5262,10 +5267,8 @@ function getDrawingsHtml(drawings, viewerId) {
   var html = '';
   html += '<div class="pd-split-main-image" data-split-viewer="' + vid + '" id="' + vid + '_main">';
   html += '<div class="split-img-stage" id="' + vid + '_stage">';
-  html += '<div class="split-img-wrapper" id="' + vid + '_wrapper">';
   html += '<img src="' + firstUrl + '" id="' + vid + '_img" alt="图1" draggable="false">';
   html += '<div class="img-anno-layer" id="' + vid + '_anno" data-vid="' + vid + '"></div>';
-  html += '</div>';
   html += '</div>';
   html += '<div class="pd-split-img-toolbar" onclick="event.stopPropagation()">';
   html += '<button class="pd-split-img-btn" onclick="splitViewZoomIn(\'' + vid + '\')" title="放大"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>';
@@ -5297,13 +5300,12 @@ function getDrawingsHtml(drawings, viewerId) {
 function applyImgTransform(vid) {
   var state = _splitViewerState[vid];
   if (!state) return;
-  var wrapper = document.getElementById(vid + '_wrapper');
   var img = document.getElementById(vid + '_img');
+  var overlay = document.getElementById(vid + '_anno');
   var zoomLabel = document.getElementById(vid + '_zoom');
-  // Apply transform to the wrapper (so the annotation overlay moves/zooms with the image)
   var tf = 'translate(' + state.tx + 'px, ' + state.ty + 'px) scale(' + state.scale + ') rotate(' + state.rotation + 'deg)';
-  if (wrapper) wrapper.style.transform = tf;
-  if (img) img.style.transform = ''; // wrapper now carries the transform
+  if (img) img.style.transform = tf;
+  if (overlay) overlay.style.transform = tf;
   if (zoomLabel) {
     zoomLabel.textContent = Math.round(state.scale * 100) + '%';
   }
@@ -5325,14 +5327,27 @@ function initViewerInteractions(vid) {
   var state = _splitViewerState[vid];
   if (!state) return;
 
-  // Render annotation markers once the image element loads (covers initial + thumb switches)
+  // Sync anno overlay size + render markers when image loads
   var imgEl = document.getElementById(vid + '_img');
   if (imgEl) {
-    imgEl.addEventListener('load', function() {
+    var onImgLoad = function() {
       if (typeof ImageAnnotations !== 'undefined') {
+        ImageAnnotations.syncAnnoLayer(vid);
         ImageAnnotations.renderMarkers(vid);
       }
+    };
+    if (imgEl.complete && imgEl.naturalWidth) {
+      onImgLoad();
+    } else {
+      imgEl.addEventListener('load', onImgLoad);
+    }
+  }
+  // Sync anno overlay on stage resize
+  if (typeof ResizeObserver !== 'undefined' && !stage._annoResizeObs) {
+    stage._annoResizeObs = new ResizeObserver(function() {
+      if (typeof ImageAnnotations !== 'undefined') ImageAnnotations.syncAnnoLayer(vid);
     });
+    stage._annoResizeObs.observe(stage);
   }
 
   stage.addEventListener('wheel', function(e) {
@@ -5352,7 +5367,7 @@ function initViewerInteractions(vid) {
 
   stage.addEventListener('mousedown', function(e) {
     if (e.button !== 0) return;
-    if (state.scale <= 1.01) return;
+    // Allow panning at any scale (not just zoomed in)
     state.isDragging = true;
     state.dragStartX = e.clientX;
     state.dragStartY = e.clientY;
@@ -5424,6 +5439,7 @@ function splitViewSelectImg(vid, idx, thumbEl) {
     var listPanel = document.querySelector('#' + vid + '_main .img-anno-list-panel');
     if (listPanel) listPanel.remove();
     ImageAnnotations.clearHighlight();
+    ImageAnnotations.syncAnnoLayer(vid);
     ImageAnnotations.renderMarkers(vid);
   }
   if (thumbEl) {

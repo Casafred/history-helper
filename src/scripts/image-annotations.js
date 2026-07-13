@@ -11,7 +11,8 @@ var ImageAnnotations = (function () {
   var activeHighlight = null; // { number, vid, markerId, occurrences: [], currentIdx: 0 }
   var markerEditorEl = null;
   var navBarEl = null;
-  var annoListPanelEl = null;
+  var _originalParaHtml = new Map(); // p element -> original innerHTML (for highlight restore)
+  var _wasDragging = false;
 
   // ── Storage ──
   function loadAll() {
@@ -136,6 +137,20 @@ var ImageAnnotations = (function () {
     };
   }
 
+  // ── Sync anno overlay position/size to match the untransformed image rect ──
+  function syncAnnoLayer(vid) {
+    var stage = document.getElementById(vid + "_stage");
+    var overlay = document.getElementById(vid + "_anno");
+    if (!stage || !overlay) return;
+    var rect = getUntransformedImageRect(vid);
+    if (!rect || rect.width <= 0 || rect.height <= 0) return;
+    var stageRect = stage.getBoundingClientRect();
+    overlay.style.left = (rect.left - stageRect.left) + "px";
+    overlay.style.top = (rect.top - stageRect.top) + "px";
+    overlay.style.width = rect.width + "px";
+    overlay.style.height = rect.height + "px";
+  }
+
   function getClickPctOnImage(e, vid) {
     var state = _splitViewerState[vid];
     var imgRect = getUntransformedImageRect(vid);
@@ -177,6 +192,13 @@ var ImageAnnotations = (function () {
     return annotationMode;
   }
 
+  // Apply anno-mode class to a newly opened viewer if annotation mode is active
+  function applyAnnoModeToViewer(vid) {
+    if (!annotationMode) return;
+    var main = document.getElementById(vid + "_main");
+    if (main) main.classList.add("anno-mode");
+  }
+
   // ── Marker rendering ──
   function renderMarkers(vid) {
     var state = _splitViewerState[vid];
@@ -201,13 +223,22 @@ var ImageAnnotations = (function () {
     el.style.left = (marker.x * 100) + "%";
     el.style.top = (marker.y * 100) + "%";
     el.style.color = marker.color || "#ef4444";
-    el.style.fontSize = (marker.fontSize || 14) + "px";
+    el.style.fontSize = (marker.fontSize || 16) + "px";
     el.innerHTML =
       '<div class="img-anno-marker-dot" style="background:' + (marker.color || "#ef4444") + '">' +
       '<span class="img-anno-marker-num">' + escapeHtmlAnno(marker.number) + "</span></div>" +
       (marker.comment ? '<div class="img-anno-marker-comment">' + escapeHtmlAnno(marker.comment) + "</div>" : "");
 
+    // Drag-to-move
+    makeMarkerDraggable(el, marker, vid);
+
     el.addEventListener("click", function (e) {
+      if (_wasDragging) {
+        e.stopPropagation();
+        e.preventDefault();
+        _wasDragging = false;
+        return;
+      }
       e.stopPropagation();
       e.preventDefault();
       onMarkerClick(marker, vid);
@@ -218,6 +249,75 @@ var ImageAnnotations = (function () {
       showMarkerContextMenu(e.clientX, e.clientY, marker, vid);
     });
     return el;
+  }
+
+  // ── Marker drag-to-move ──
+  function makeMarkerDraggable(el, marker, vid) {
+    var DRAG_THRESHOLD = 4;
+
+    el.addEventListener("mousedown", function (e) {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+
+      var startX = e.clientX;
+      var startY = e.clientY;
+      var moved = false;
+
+      function onMove(ev) {
+        var dx = ev.clientX - startX;
+        var dy = ev.clientY - startY;
+        if (!moved && (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD)) {
+          moved = true;
+          el.classList.add("dragging");
+        }
+        if (moved) {
+          updatePos(ev);
+        }
+      }
+
+      function updatePos(ev) {
+        var state = _splitViewerState[vid];
+        if (!state) return;
+        var imgRect = getUntransformedImageRect(vid);
+        if (!imgRect) return;
+
+        var dx = (ev.clientX - startX) / (state.scale || 1) / imgRect.width;
+        var dy = (ev.clientY - startY) / (state.scale || 1) / imgRect.height;
+
+        var rot = -((state.rotation || 0) * Math.PI) / 180;
+        var cos = Math.cos(rot);
+        var sin = Math.sin(rot);
+        var rx = dx * cos - dy * sin;
+        var ry = dx * sin + dy * cos;
+
+        var newX = Math.max(0, Math.min(1, marker.x + rx));
+        var newY = Math.max(0, Math.min(1, marker.y + ry));
+
+        el.style.left = (newX * 100) + "%";
+        el.style.top = (newY * 100) + "%";
+      }
+
+      function onUp() {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        if (moved) {
+          el.classList.remove("dragging");
+          var newX = parseFloat(el.style.left) / 100;
+          var newY = parseFloat(el.style.top) / 100;
+          var pn = getCurrentPatentNumber();
+          var state = _splitViewerState[vid];
+          if (pn && state) {
+            updateMarker(pn, state.currentIdx, marker.id, { x: newX, y: newY });
+            marker.x = newX;
+            marker.y = newY;
+          }
+          _wasDragging = true;
+        }
+      }
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
   }
 
   function escapeHtmlAnno(text) {
@@ -244,7 +344,7 @@ var ImageAnnotations = (function () {
       number: "",
       comment: "",
       color: "#ef4444",
-      fontSize: 14,
+      fontSize: 16,
     };
 
     markerEditorEl = document.createElement("div");
@@ -262,7 +362,7 @@ var ImageAnnotations = (function () {
       "</div>" +
       '<div class="anno-editor-field anno-editor-row">' +
       "<div><label>颜色</label><input type=\"color\" id=\"anno-edit-color\" value=\"" + (m.color || "#ef4444") + "\"></div>" +
-      "<div><label>字号</label><input type=\"number\" id=\"anno-edit-fontsize\" value=\"" + (m.fontSize || 14) + "\" min=\"10\" max=\"28\"></div>" +
+      "<div><label>字号</label><input type=\"number\" id=\"anno-edit-fontsize\" value=\"" + (m.fontSize || 16) + "\" min=\"12\" max=\"32\"></div>" +
       "</div>" +
       '<div class="anno-editor-actions">' +
       (isEdit ? '<button class="btn-danger-sm" id="anno-edit-delete">删除</button>' : "") +
@@ -275,7 +375,7 @@ var ImageAnnotations = (function () {
 
     var box = markerEditorEl.querySelector(".anno-editor-box");
     box.style.left = Math.min(screenX, window.innerWidth - 360) + "px";
-    box.style.top = Math.min(screenY, window.innerHeight - 320) + "px";
+    box.style.top = Math.min(screenY, window.innerHeight - 340) + "px";
 
     markerEditorEl.querySelector("#anno-edit-cancel").addEventListener("click", closeMarkerEditor);
     markerEditorEl.querySelector("#anno-edit-save").addEventListener("click", function () {
@@ -283,7 +383,7 @@ var ImageAnnotations = (function () {
       if (!number) { markerEditorEl.querySelector("#anno-edit-number").focus(); return; }
       var comment = markerEditorEl.querySelector("#anno-edit-comment").value.trim();
       var color = markerEditorEl.querySelector("#anno-edit-color").value;
-      var fontSize = parseInt(markerEditorEl.querySelector("#anno-edit-fontsize").value, 10) || 14;
+      var fontSize = parseInt(markerEditorEl.querySelector("#anno-edit-fontsize").value, 10) || 16;
 
       var pn = getCurrentPatentNumber();
       var state = _splitViewerState[vid];
@@ -293,6 +393,11 @@ var ImageAnnotations = (function () {
         updateMarker(pn, state.currentIdx, existingMarker.id, {
           number: number, comment: comment, color: color, fontSize: fontSize,
         });
+        // Update the in-memory marker object too (for list panel references)
+        existingMarker.number = number;
+        existingMarker.comment = comment;
+        existingMarker.color = color;
+        existingMarker.fontSize = fontSize;
       } else {
         var newMarker = {
           id: "m_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6),
@@ -324,6 +429,8 @@ var ImageAnnotations = (function () {
     markerEditorEl.addEventListener("click", function (e) {
       if (e.target === markerEditorEl) closeMarkerEditor();
     });
+    // Prevent mousedown from propagating to stage (which starts panning)
+    markerEditorEl.addEventListener("mousedown", function (e) { e.stopPropagation(); });
     setTimeout(function () {
       var inp = markerEditorEl.querySelector("#anno-edit-number");
       if (inp) { inp.focus(); inp.select(); }
@@ -350,6 +457,7 @@ var ImageAnnotations = (function () {
       '<div class="anno-ctx-item anno-ctx-danger" data-action="delete">删除标记</div>';
     document.body.appendChild(menu);
 
+    menu.addEventListener("mousedown", function (e) { e.stopPropagation(); });
     menu.addEventListener("click", function (e) {
       var item = e.target.closest(".anno-ctx-item");
       if (!item) return;
@@ -378,13 +486,28 @@ var ImageAnnotations = (function () {
     if (existing) existing.remove();
   }
 
-  // ── Marker click → highlight description ──
-  function onMarkerClick(marker, vid) {
-    if (activeHighlight && activeHighlight.number === marker.number && activeHighlight.vid === vid) {
-      clearHighlight();
+  // ── Switch to description tab (so highlights are visible) ──
+  function showDescriptionTab() {
+    // Patent detail tab layout
+    var bmTab = document.querySelector('.pd-bookmark-tab[data-tab="description"]');
+    if (bmTab && typeof switchPatentTab === "function") {
+      switchPatentTab("description");
       return;
     }
+    // Popup viewer tab layout
+    var ppvBmTab = document.querySelector('.ppv-bm-tab[data-tab="description"]');
+    if (ppvBmTab && typeof switchPpvTab === "function") {
+      switchPpvTab("description");
+      return;
+    }
+  }
+
+  // ── Marker click → highlight description ──
+  function onMarkerClick(marker, vid) {
+    // Always clear previous highlight first
     clearHighlight();
+    // Switch to description tab so the highlight is visible
+    showDescriptionTab();
     var occurrences = highlightNumberInDescription(marker.number);
     activeHighlight = {
       number: marker.number,
@@ -395,28 +518,22 @@ var ImageAnnotations = (function () {
     };
     if (occurrences.length > 0) {
       showNavBar(vid, marker.number, occurrences.length, 0);
-      scrollToOccurrence(0);
+      // Delay scroll to allow tab switch to render
+      setTimeout(function () { scrollToOccurrence(0); }, 100);
     } else {
       showNavBar(vid, marker.number, 0, 0);
     }
   }
 
-  // ── Text highlighting in description ──
+  // ── Text highlighting in description (TreeWalker-based, robust) ──
   function getDescriptionContainers() {
     var containers = [];
     var selectors = [".pd-description-text", ".pd-claims-list", ".pd-claim-item"];
     selectors.forEach(function (sel) {
       document.querySelectorAll(sel).forEach(function (el) {
-        if (el.offsetParent !== null || el.offsetHeight > 0) {
-          containers.push(el);
-        }
-      });
-    });
-    if (containers.length === 0) {
-      document.querySelectorAll(".pd-description-text").forEach(function (el) {
         containers.push(el);
       });
-    }
+    });
     return containers;
   }
 
@@ -425,19 +542,64 @@ var ImageAnnotations = (function () {
     var containers = getDescriptionContainers();
     var occurrences = [];
     var numEscaped = number.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    var numGlobalRegex = new RegExp("(^|[^0-9a-zA-Z])(" + numEscaped + ")([^0-9a-zA-Z]|$)", "g");
+    var numRegex = new RegExp("(^|[^0-9a-zA-Z])(" + numEscaped + ")(?=[^0-9a-zA-Z]|$)", "g");
 
     containers.forEach(function (container) {
       var paragraphs = container.querySelectorAll("p");
       paragraphs.forEach(function (p) {
-        var html = p.innerHTML;
+        // Store original HTML if not already stored; restore first if already highlighted
+        if (!_originalParaHtml.has(p)) {
+          _originalParaHtml.set(p, p.innerHTML);
+        } else {
+          p.innerHTML = _originalParaHtml.get(p);
+        }
+
         var found = false;
-        var replacedHtml = html.replace(numGlobalRegex, function (match, pre, num, post) {
-          found = true;
-          return pre + '<span class="anno-highlight-num" data-anno-num="' + escapeHtmlAnno(number) + '">' + num + "</span>" + post;
+        // Walk text nodes and wrap matches in spans
+        var walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT, null, false);
+        var textNodes = [];
+        var node;
+        while (node = walker.nextNode()) {
+          textNodes.push(node);
+        }
+
+        textNodes.forEach(function (textNode) {
+          var text = textNode.nodeValue;
+          numRegex.lastIndex = 0;
+          var match;
+          var lastIndex = 0;
+          var fragments = [];
+          var hasMatch = false;
+          while ((match = numRegex.exec(text)) !== null) {
+            hasMatch = true;
+            found = true;
+            if (match.index > lastIndex) {
+              fragments.push(document.createTextNode(text.substring(lastIndex, match.index)));
+            }
+            if (match[1]) {
+              fragments.push(document.createTextNode(match[1]));
+            }
+            var span = document.createElement("span");
+            span.className = "anno-highlight-num";
+            span.dataset.annoNum = number;
+            span.textContent = match[2];
+            fragments.push(span);
+            lastIndex = match.index + match[0].length;
+            if (match[0].length === 0) numRegex.lastIndex++;
+          }
+          if (hasMatch) {
+            if (lastIndex < text.length) {
+              fragments.push(document.createTextNode(text.substring(lastIndex)));
+            }
+            var parent = textNode.parentNode;
+            for (var i = 0; i < fragments.length; i++) {
+              parent.insertBefore(fragments[i], textNode);
+            }
+            parent.removeChild(textNode);
+          }
         });
+
         if (found) {
-          p.innerHTML = replacedHtml;
           p.classList.add("anno-highlight-sentence");
           p.dataset.annoNum = number;
           occurrences.push(p);
@@ -448,11 +610,14 @@ var ImageAnnotations = (function () {
   }
 
   function clearHighlight() {
-    document.querySelectorAll(".anno-highlight-num").forEach(function (el) {
-      var parent = el.parentNode;
-      parent.replaceChild(document.createTextNode(el.textContent), el);
-      parent.normalize();
+    // Restore original HTML for all highlighted paragraphs
+    _originalParaHtml.forEach(function (html, p) {
+      if (p && p.parentNode) {
+        p.innerHTML = html;
+      }
     });
+    _originalParaHtml.clear();
+
     document.querySelectorAll(".anno-highlight-sentence").forEach(function (el) {
       el.classList.remove("anno-highlight-sentence", "anno-highlight-active");
       delete el.dataset.annoNum;
@@ -498,9 +663,10 @@ var ImageAnnotations = (function () {
       '<button class="anno-nav-btn anno-nav-close" title="关闭">✕</button>' +
       "</div>";
     document.body.appendChild(navBarEl);
-    navBarEl.querySelector("#anno-nav-prev").addEventListener("click", function () { navigateHighlight(-1); });
-    navBarEl.querySelector("#anno-nav-next").addEventListener("click", function () { navigateHighlight(1); });
-    navBarEl.querySelector(".anno-nav-close").addEventListener("click", clearHighlight);
+    navBarEl.addEventListener("mousedown", function (e) { e.stopPropagation(); });
+    navBarEl.querySelector("#anno-nav-prev").addEventListener("click", function (e) { e.stopPropagation(); navigateHighlight(-1); });
+    navBarEl.querySelector("#anno-nav-next").addEventListener("click", function (e) { e.stopPropagation(); navigateHighlight(1); });
+    navBarEl.querySelector(".anno-nav-close").addEventListener("click", function (e) { e.stopPropagation(); clearHighlight(); });
   }
 
   function updateNavBar() {
@@ -538,7 +704,14 @@ var ImageAnnotations = (function () {
     btn.style.top = (y + 10) + "px";
     btn.innerHTML = "→ 发送到标记 " + escapeHtmlAnno(highlight.number) + " 注释";
     document.body.appendChild(btn);
-    btn.addEventListener("click", function () {
+    // Prevent mousedown from propagating (avoids stage panning & document-click dismissal)
+    btn.addEventListener("mousedown", function (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    });
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      e.preventDefault();
       var pn = getCurrentPatentNumber();
       var state = _splitViewerState[highlight.vid];
       if (pn && state) {
@@ -548,6 +721,8 @@ var ImageAnnotations = (function () {
             var existing = markers[i].comment || "";
             var newComment = existing ? existing + "；" + text : text;
             updateMarker(pn, state.currentIdx, highlight.markerId, { comment: newComment });
+            // Update in-memory copy
+            markers[i].comment = newComment;
             renderMarkers(highlight.vid);
             break;
           }
@@ -555,8 +730,15 @@ var ImageAnnotations = (function () {
       }
       closeSendToAnnotationBtn();
     });
+    // Close on outside click, but exclude the button itself
+    var outsideClickHandler = function (ev) {
+      if (ev.target !== btn && !btn.contains(ev.target)) {
+        closeSendToAnnotationBtn();
+        document.removeEventListener("mousedown", outsideClickHandler);
+      }
+    };
     setTimeout(function () {
-      document.addEventListener("click", closeSendToAnnotationBtn, { once: true });
+      document.addEventListener("mousedown", outsideClickHandler);
     }, 0);
   }
 
@@ -580,6 +762,7 @@ var ImageAnnotations = (function () {
     var markers = getMarkers(pn, state.currentIdx);
     var panel = document.createElement("div");
     panel.className = "img-anno-list-panel";
+    panel.addEventListener("mousedown", function (e) { e.stopPropagation(); });
     if (markers.length === 0) {
       panel.innerHTML = '<div class="img-anno-list-empty">当前图暂无标记</div>';
     } else {
@@ -603,21 +786,23 @@ var ImageAnnotations = (function () {
         var markerId = item.dataset.markerId;
         var marker = markers.find(function (m) { return m.id === markerId; });
         if (!marker) return;
-        item.querySelector('[data-action="goto"]').addEventListener("click", function () {
+        item.querySelector('[data-action="goto"]').addEventListener("click", function (e) {
+          e.stopPropagation();
           onMarkerClick(marker, vid);
         });
-        item.querySelector('[data-action="edit"]').addEventListener("click", function () {
+        item.querySelector('[data-action="edit"]').addEventListener("click", function (e) {
+          e.stopPropagation();
           var rect = item.getBoundingClientRect();
           showMarkerEditor(rect.left, rect.top, vid, marker, null);
         });
-        item.querySelector('[data-action="delete"]').addEventListener("click", function () {
+        item.querySelector('[data-action="delete"]').addEventListener("click", function (e) {
+          e.stopPropagation();
           removeMarker(pn, state.currentIdx, markerId);
           renderMarkers(vid);
-          toggleMarkerList(vid);
-          if (!document.querySelector(".img-anno-list-panel")) {
-            setTimeout(function () { toggleMarkerList(vid); }, 10);
-          }
           if (activeHighlight && activeHighlight.markerId === markerId) clearHighlight();
+          // Refresh panel
+          var p = main.querySelector(".img-anno-list-panel");
+          if (p) { p.remove(); toggleMarkerList(vid); }
         });
       });
     }
@@ -655,8 +840,10 @@ var ImageAnnotations = (function () {
     init: init,
     isAnnotationMode: isAnnotationMode,
     toggleAnnotationMode: toggleAnnotationMode,
+    applyAnnoModeToViewer: applyAnnoModeToViewer,
     handleDblClick: handleDblClick,
     renderMarkers: renderMarkers,
+    syncAnnoLayer: syncAnnoLayer,
     onMarkerClick: onMarkerClick,
     toggleMarkerList: toggleMarkerList,
     clearHighlight: clearHighlight,
