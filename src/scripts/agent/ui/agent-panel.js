@@ -323,6 +323,7 @@ var AgentUI = (function () {
       toggleBtn.classList.remove("running");
       if (currentAssistantBubble) currentAssistantBubble = null;
       if (currentThinkingBubble) currentThinkingBubble = null;
+      finishAllSteps();
     });
 
     BUS.on(EVT.SESSION_ERROR, function (data) {
@@ -330,6 +331,7 @@ var AgentUI = (function () {
       updateButtons();
       toggleBtn.classList.remove("running");
       addErrorMessage(data.error || "发生错误");
+      finishAllSteps();
     });
 
     BUS.on(EVT.SESSION_ABORTED, function () {
@@ -376,7 +378,6 @@ var AgentUI = (function () {
     });
 
     BUS.on(EVT.ASSISTANT_END, function (data) {
-      finishAllSteps();
       finishAssistantBubble(data && data.content ? data.content : null);
     });
 
@@ -658,8 +659,12 @@ var AgentUI = (function () {
       countEl.textContent = completedSteps + "/" + stepsCount + " 步";
     }
     var titleEl = currentStepsBubble.querySelector(".steps-title");
-    if (titleEl && completedSteps === stepsCount && stepsCount > 0) {
-      titleEl.textContent = "✅ 执行完成";
+    if (titleEl && stepsCount > 0) {
+      if (completedSteps >= stepsCount) {
+        titleEl.textContent = "✅ 执行完成";
+      } else {
+        titleEl.textContent = "⚙️ 执行步骤";
+      }
     }
   }
 
@@ -765,13 +770,21 @@ var AgentUI = (function () {
   function finishAllSteps() {
     if (currentStepsBubble) {
       var titleEl = currentStepsBubble.querySelector(".steps-title");
-      if (titleEl && completedSteps === stepsCount && stepsCount > 0) {
-        titleEl.textContent = "✅ 执行步骤";
+      if (titleEl && stepsCount > 0) {
+        if (completedSteps >= stepsCount) {
+          titleEl.textContent = "✅ 执行步骤（全部完成）";
+        } else {
+          titleEl.textContent = "⚠️ 执行步骤（" + completedSteps + "/" + stepsCount + "）";
+        }
       }
-      var toggle = currentStepsBubble.querySelector(".steps-toggle");
-      if (toggle && stepsCount > 0) {
-        currentStepsBubble.classList.add("collapsed");
-        toggle.textContent = "展开";
+      var countEl = currentStepsBubble.querySelector(".steps-count");
+      if (countEl) {
+        countEl.textContent = completedSteps + "/" + stepsCount + " 步";
+      }
+      var spinnerEl = currentStepsBubble.querySelector(".step-icon.spinner");
+      if (spinnerEl && completedSteps >= stepsCount) {
+        spinnerEl.classList.remove("spinner");
+        spinnerEl.textContent = "✅";
       }
     }
     currentStepsBubble = null;

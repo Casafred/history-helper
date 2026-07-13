@@ -45,6 +45,12 @@ var AgentPatentTools = (function () {
     });
   }
 
+  function normalizePatentNumber(input) {
+    if (!input) return "";
+    var pn = String(input).trim().toUpperCase().replace(/[\s\/\-]/g, "");
+    return pn;
+  }
+
   function getCurrentPatentData() {
     try {
       if (typeof currentData !== "undefined" && currentData) {
@@ -131,11 +137,21 @@ var AgentPatentTools = (function () {
           return { error: "找不到搜索输入框" };
         }
 
-        patentInput.value = args.patent_number;
+        var normalizedPn = normalizePatentNumber(args.patent_number);
+        if (!normalizedPn) {
+          return { error: "专利号不能为空" };
+        }
+
+        if (typeof searchMode !== "undefined" && searchMode !== "dossier") {
+          var dossierBtn = document.querySelector('.search-mode-btn[data-mode="dossier"]');
+          if (dossierBtn) dossierBtn.click();
+        }
+
+        patentInput.value = normalizedPn;
 
         if (typeof doSearch === "function") {
           try {
-            await doSearch(args.patent_number);
+            await doSearch(normalizedPn);
           } catch (e) {
             return { error: "查询失败: " + e.message };
           }
@@ -148,7 +164,7 @@ var AgentPatentTools = (function () {
 
         var data = getCurrentPatentData();
         if (data && data.patentNumber) {
-          AgentCore.updateContext({ patentData: data, patentNumber: args.patent_number });
+          AgentCore.updateContext({ patentData: data, patentNumber: normalizedPn });
 
           switchToTab("overview");
 
@@ -174,7 +190,7 @@ var AgentPatentTools = (function () {
           };
         }
 
-        return { ok: false, error: "查询完成但未获取到数据，可能是专利号格式不支持或网络问题" };
+        return { ok: false, error: "查询完成但未获取到数据，可能是专利号格式不支持或网络问题。请确认专利号格式正确，如 US14412875, EP1234567B1, WO2023123456" };
       },
     });
 
@@ -298,18 +314,21 @@ var AgentPatentTools = (function () {
           return { error: "找不到搜索输入框" };
         }
 
-        if (typeof searchMode !== "undefined") {
-          searchMode = "patent";
-          document.querySelectorAll(".search-mode-btn").forEach(function (b) {
-            b.classList.toggle("active", b.dataset.mode === "patent");
-          });
+        var normalizedPn = normalizePatentNumber(args.patent_number);
+        if (!normalizedPn) {
+          return { error: "专利号不能为空" };
         }
 
-        patentInput.value = args.patent_number;
+        if (typeof searchMode !== "undefined" && searchMode !== "patent") {
+          var patentModeBtn = document.querySelector('.search-mode-btn[data-mode="patent"]');
+          if (patentModeBtn) patentModeBtn.click();
+        }
+
+        patentInput.value = normalizedPn;
 
         if (typeof searchPatentDetail === "function") {
           try {
-            await searchPatentDetail(args.patent_number);
+            await searchPatentDetail(normalizedPn);
           } catch (e) {
             return { error: "查询失败: " + e.message };
           }
@@ -561,14 +580,16 @@ var AgentPatentTools = (function () {
       execute: async function (args) {
         var patentInput = document.getElementById("patent-input");
         if (!patentInput) return { error: "找不到搜索输入框" };
-        if (typeof searchMode !== "undefined") {
+        var normalizedPn = normalizePatentNumber(args.patent_number);
+        if (!normalizedPn) return { error: "专利号不能为空" };
+        if (typeof searchMode !== "undefined" && searchMode !== "dossier") {
           var dossierBtn = document.querySelector('.search-mode-btn[data-mode="dossier"]');
           if (dossierBtn) dossierBtn.click();
         }
-        patentInput.value = args.patent_number;
+        patentInput.value = normalizedPn;
         if (typeof doSearch === "function") {
           try {
-            await doSearch(args.patent_number);
+            await doSearch(normalizedPn);
           } catch (e) {
             return { error: "查询失败: " + e.message };
           }
@@ -580,7 +601,7 @@ var AgentPatentTools = (function () {
         await new Promise(function (r) { return setTimeout(r, 1500); });
         var data = getCurrentPatentData();
         if (!data) {
-          return { ok: false, error: "查询失败，未获取到专利数据" };
+          return { ok: false, error: "查询失败，未获取到专利数据。请确认专利号格式正确，如 US14412875, EP1234567B1, WO2023123456" };
         }
         AgentCore.updateContext({ patentData: data, patentNumber: args.patent_number });
         var docCount = 0;
