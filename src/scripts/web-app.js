@@ -2773,8 +2773,9 @@ function toggleGoogleTranslate() {
   document.head.appendChild(script);
 }
 
-// Simple fullscreen image viewer for patent drawings
+// Fullscreen image viewer for patent drawings — reuses split-view controls & state
 function openPatentImageViewer(images, startIndex) {
+  if (!images || images.length === 0) return;
   let viewer = document.getElementById("patent-image-viewer");
   if (!viewer) {
     viewer = document.createElement("div");
@@ -2782,32 +2783,63 @@ function openPatentImageViewer(images, startIndex) {
     viewer.className = "patent-image-viewer";
     document.body.appendChild(viewer);
   }
-  let currentIdx = startIndex || 0;
+  // Clean up previous viewer state to avoid leaks
+  if (viewer._currentVid && _splitViewerState[viewer._currentVid]) {
+    delete _splitViewerState[viewer._currentVid];
+  }
+  var vid = 'piv_' + Date.now();
+  viewer._currentVid = vid;
 
-  function render() {
-    viewer.innerHTML = '';
-    viewer.style.display = 'flex';
-    const img = document.createElement("img");
-    img.src = images[currentIdx];
-    img.className = "piv-image";
-    img.alt = "Figure " + (currentIdx + 1);
-    viewer.appendChild(img);
+  // Build content using the same split-view HTML (toolbar, zoom, nav, thumbnails)
+  viewer.innerHTML = '<div class="piv-inner">' + getDrawingsHtml(images, vid) + '</div>';
+  viewer.style.display = 'flex';
 
-    const controls = document.createElement("div");
-    controls.className = "piv-controls";
-    controls.innerHTML = '<button class="piv-btn piv-prev"' + (currentIdx <= 0 ? ' disabled' : '') + '>&#9664; 上一张</button>'
-      + '<span class="piv-counter">' + (currentIdx + 1) + ' / ' + images.length + '</span>'
-      + '<button class="piv-btn piv-next"' + (currentIdx >= images.length - 1 ? ' disabled' : '') + '>下一张 &#9654;</button>'
-      + '<button class="piv-btn piv-close" style="display:flex;align-items:center;gap:4px;">' + icon('close') + ' 关闭</button>';
-    viewer.appendChild(controls);
-
-    controls.querySelector(".piv-prev").addEventListener("click", (e) => { e.stopPropagation(); if (currentIdx > 0) { currentIdx--; render(); } });
-    controls.querySelector(".piv-next").addEventListener("click", (e) => { e.stopPropagation(); if (currentIdx < images.length - 1) { currentIdx++; render(); } });
-    controls.querySelector(".piv-close").addEventListener("click", (e) => { e.stopPropagation(); viewer.style.display = 'none'; });
+  // Append a close button to the toolbar
+  var toolbar = viewer.querySelector('.pd-split-img-toolbar');
+  if (toolbar) {
+    var divider = document.createElement('div');
+    divider.className = 'pd-split-img-toolbar-divider';
+    toolbar.appendChild(divider);
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'pd-split-img-btn';
+    closeBtn.title = '关闭';
+    closeBtn.innerHTML = icon('close');
+    closeBtn.addEventListener('click', function(e) { e.stopPropagation(); closeViewer(); });
+    toolbar.appendChild(closeBtn);
   }
 
-  render();
-  viewer.addEventListener("click", (e) => { if (e.target === viewer) viewer.style.display = 'none'; });
+  // Jump to the requested start index (defaults to 0)
+  var startIdx = startIndex || 0;
+  if (startIdx > 0 && startIdx < images.length) {
+    var thumbs = viewer.querySelectorAll('.pd-split-thumb');
+    splitViewSelectImg(vid, startIdx, thumbs[startIdx] || null);
+  }
+
+  function closeViewer() {
+    viewer.style.display = 'none';
+    if (_splitViewerState[vid]) delete _splitViewerState[vid];
+    document.removeEventListener('keydown', onKey);
+    viewer._currentVid = null;
+  }
+  function onKey(e) {
+    if (e.key === 'Escape' && viewer.style.display !== 'none') {
+      closeViewer();
+    } else if (viewer.style.display !== 'none') {
+      if (e.key === 'ArrowLeft') { e.preventDefault(); splitViewPrevImg(vid); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); splitViewNextImg(vid); }
+    }
+  }
+  document.addEventListener('keydown', onKey);
+
+  // Close when clicking the backdrop
+  viewer.onclick = function(e) {
+    if (e.target === viewer || (e.target.classList && e.target.classList.contains('piv-inner'))) {
+      closeViewer();
+    }
+  };
+
+  // Initialize zoom/drag/wheel interactions
+  setTimeout(function() { initViewerInteractions(vid); }, 50);
 }
 
 // ── 在文本中识别专利号并转为可跳转链接 ──
@@ -5220,6 +5252,8 @@ function getDrawingsHtml(drawings, viewerId) {
   html += '<button class="pd-split-img-btn" onclick="splitViewRotateCCW(\'' + vid + '\')" title="逆时针旋转"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>';
   html += '<button class="pd-split-img-btn" onclick="splitViewRotateCW(\'' + vid + '\')" title="顺时针旋转"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>';
   html += '<div class="pd-split-img-toolbar-divider"></div>';
+  html += '<button class="pd-split-img-btn" onclick="splitViewDownloadImg(\'' + vid + '\')" title="下载当前图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>';
+  html += '<div class="pd-split-img-toolbar-divider"></div>';
   html += '<button class="pd-split-img-btn" onclick="openPatentImageViewerFromSplit(\'' + vid + '\')" title="全屏查看"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>';
   html += '</div>';
   html += '<div class="pd-split-zoom-level" id="' + vid + '_zoom">100%</div>';
@@ -5428,10 +5462,30 @@ function splitViewRotateCCW(vid) {
 function openPatentImageViewerFromSplit(vid) {
   var state = _splitViewerState[vid];
   if (!state || !state.drawings) return;
-  var main = document.getElementById(vid + '_main');
-  var scope = main && main.closest('#ppv-content') ? 'popup' : 'detail';
-  var data = scope === 'popup' ? window._patentPopupData : window._currentPatentData;
   openPatentImageViewer(state.drawings, state.currentIdx);
+}
+
+function splitViewDownloadImg(vid) {
+  var state = _splitViewerState[vid];
+  if (!state || !state.drawings) return;
+  var url = state.drawings[state.currentIdx];
+  if (!url) return;
+  var pn = (window._currentPatentData && window._currentPatentData.patentNumber) || (window._patentPopupData && window._patentPopupData.patentNumber) || 'patent';
+  var filename = pn + '_fig' + (state.currentIdx + 1) + '.png';
+  fetch(url)
+    .then(function(r) { return r.blob(); })
+    .then(function(blob) {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
+    })
+    .catch(function() {
+      window.open(url, '_blank');
+    });
 }
 
 function openPatentImageViewerFromScope(item) {
@@ -12980,6 +13034,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   document.addEventListener("mouseup", (e) => {
+    if (e.button === 2) return; // right-click is handled by contextmenu handler
     if (_contextMenu && _contextMenu.contains(e.target)) return;
     if (_selectionFloatingBtn && _selectionFloatingBtn.contains(e.target)) return;
     setTimeout(() => {
@@ -13001,18 +13056,17 @@ document.addEventListener("DOMContentLoaded", () => {
     hideContextMenu();
   });
   document.addEventListener("contextmenu", (e) => {
-    if (e.target.closest && (e.target.closest("#generic-translation-popup") || e.target.closest("#pd-selected-translation-popup") || e.target.closest("button") || e.target.closest("input") || e.target.closest("select") || e.target.closest("textarea"))) return;
-    setTimeout(() => {
-      const pos = _getSelectionBtnPos();
-      if (pos) {
-        e.preventDefault();
-        e.stopPropagation();
-        showSelectionActionBtn(pos.x, pos.y, pos.text);
-      } else {
-        hideSelectionMenu();
-        hideContextMenu();
-      }
-    }, 0);
+    if (e.target.closest && (e.target.closest("#generic-translation-popup") || e.target.closest("#pd-selected-translation-popup") || e.target.closest("button") || e.target.closest("input") || e.target.closest("select") || e.target.closest("textarea") || e.target.closest(".text-selection-context-menu"))) return;
+    const sel = window.getSelection();
+    const text = sel && sel.rangeCount > 0 ? sel.toString().trim() : "";
+    if (text && text.length > 1 && text.length < 2000) {
+      e.preventDefault();
+      e.stopPropagation();
+      showSelectionContextMenu(e.clientX, e.clientY + 4, text);
+    } else {
+      hideSelectionMenu();
+      hideContextMenu();
+    }
   }, true);
   document.addEventListener("scroll", () => { hideSelectionMenu(); hideContextMenu(); }, true);
   document.addEventListener("keydown", (e) => {

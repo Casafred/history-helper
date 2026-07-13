@@ -2718,6 +2718,7 @@
 
       // Listen for mouseup to detect selection
       document.addEventListener("mouseup", function(e) {
+        if (e.button === 2) return; // right-click is handled by contextmenu handler
         if (_popCtxMenu && _popCtxMenu.contains(e.target)) return;
         if (_popSelBtn && _popSelBtn.contains(e.target)) return;
         if (e.target.closest && (e.target.closest("#pop-translation-popup") || e.target.closest("button"))) return;
@@ -2745,19 +2746,16 @@
 
       document.addEventListener("contextmenu", function(e) {
         if (e.target.closest && (e.target.closest("#pop-translation-popup") || e.target.closest("button") || e.target.closest("input") || e.target.closest("select") || e.target.closest("textarea"))) return;
-        setTimeout(function() {
-          getSelectedText(function(text) {
-            text = (text || "").trim();
-            if (text && text.length > 1 && text.length < 5000) {
-              e.preventDefault();
-              e.stopPropagation();
-              showPopSelBtn(e.clientX, e.clientY - 36, text);
-            } else {
-              hidePopSelMenu();
-              hidePopCtxMenu();
-            }
-          });
-        }, 0);
+        var sel = window.getSelection();
+        var text = sel ? sel.toString().trim() : "";
+        if (text && text.length > 1 && text.length < 5000) {
+          e.preventDefault();
+          e.stopPropagation();
+          showPopCtxMenu(e.clientX, e.clientY, text);
+        } else {
+          hidePopSelMenu();
+          hidePopCtxMenu();
+        }
       }, true);
 
       document.addEventListener("scroll", function() { hidePopSelMenu(); hidePopCtxMenu(); }, true);
