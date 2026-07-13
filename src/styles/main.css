@@ -7732,6 +7732,438 @@ body {
   font-size: 13px;
 }
 
+/* ── 图片标号标注和说明书原文抽取跳转高亮模式 ── */
+/* Wrapper carries the transform so the annotation overlay moves/zooms with the image */
+.pd-split-main-image .split-img-wrapper {
+  display: inline-block;
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  transform-origin: center center;
+  transition: none;
+  will-change: transform;
+  line-height: 0; /* avoid inline-block whitespace gaps */
+}
+.pd-split-main-image .split-img-wrapper > img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  pointer-events: none;
+  transform: none; /* wrapper carries the transform now */
+}
+/* Annotation overlay layer — matches wrapper box, click-through except on markers */
+.img-anno-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+.pd-split-main-image.anno-mode .img-anno-layer {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+body.anno-mode-active .pd-split-img-btn.anno-toggle-btn {
+  background: var(--accent);
+  color: #fff;
+}
+body.anno-mode-active .pd-split-img-btn.anno-toggle-btn:hover {
+  background: var(--accent-hover);
+}
+
+/* Marker — positioned by percentage (left/top) on the overlay */
+.img-anno-marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 180px;
+  line-height: 1.3;
+}
+.img-anno-marker-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: #ef4444;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  border: 1.5px solid #fff;
+  white-space: nowrap;
+  transition: transform 0.12s;
+}
+.img-anno-marker:hover .img-anno-marker-dot {
+  transform: scale(1.12);
+}
+.img-anno-marker-num {
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
+.img-anno-marker-comment {
+  pointer-events: none;
+  background: rgba(0,0,0,0.72);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  max-width: 170px;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.35;
+  border: 1px solid rgba(255,255,255,0.18);
+}
+
+/* Badge on annotation toggle button */
+.anno-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  border: 1px solid #fff;
+}
+.pd-split-img-btn {
+  position: relative;
+}
+
+/* Marker editor dialog */
+.anno-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100150;
+  background: rgba(0,0,0,0.15);
+}
+.anno-editor-box {
+  position: fixed;
+  width: 320px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,0.3));
+  padding: 14px 16px 12px;
+  z-index: 100151;
+  color: var(--text-primary);
+}
+.anno-editor-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+}
+.anno-editor-field {
+  margin-bottom: 10px;
+}
+.anno-editor-field > label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+.anno-editor-field input[type="text"],
+.anno-editor-field input[type="number"],
+.anno-editor-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+}
+.anno-editor-field textarea {
+  resize: vertical;
+  min-height: 36px;
+}
+.anno-editor-row {
+  display: flex;
+  gap: 12px;
+}
+.anno-editor-row > div {
+  flex: 1;
+}
+.anno-editor-row input[type="color"] {
+  width: 100%;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  cursor: pointer;
+}
+.anno-editor-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+.anno-editor-actions .btn-primary-sm,
+.anno-editor-actions .btn-secondary-sm,
+.anno-editor-actions .btn-danger-sm {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.anno-editor-actions .btn-primary-sm {
+  background: var(--accent);
+  color: #fff;
+}
+.anno-editor-actions .btn-primary-sm:hover {
+  background: var(--accent-hover);
+}
+.anno-editor-actions .btn-secondary-sm {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.anno-editor-actions .btn-danger-sm {
+  background: transparent;
+  color: var(--danger, #ef4444);
+  border: 1px solid var(--danger, #ef4444);
+}
+
+/* Navigation bar (prev/next occurrence) */
+.anno-nav-bar {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100140;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 6px 8px 6px 14px;
+  box-shadow: var(--shadow-lg, 0 6px 20px rgba(0,0,0,0.3));
+}
+.anno-nav-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+.anno-nav-num {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 12px;
+}
+.anno-nav-count {
+  color: var(--text-muted);
+}
+.anno-nav-btns {
+  display: flex;
+  gap: 4px;
+}
+.anno-nav-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  transition: background 0.15s;
+}
+.anno-nav-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.anno-nav-close:hover {
+  background: var(--danger, #ef4444);
+}
+
+/* Marker right-click context menu */
+.anno-ctx-menu {
+  position: fixed;
+  z-index: 100160;
+  min-width: 130px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg, 0 6px 20px rgba(0,0,0,0.3));
+  padding: 4px 0;
+  overflow: hidden;
+}
+.anno-ctx-item {
+  padding: 7px 14px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.anno-ctx-item:hover {
+  background: var(--bg-hover);
+}
+.anno-ctx-danger {
+  color: var(--danger, #ef4444);
+}
+.anno-ctx-danger:hover {
+  background: var(--danger, #ef4444);
+  color: #fff;
+}
+
+/* Send-to-annotation floating button */
+.anno-send-btn {
+  position: fixed;
+  z-index: 100160;
+  background: var(--accent);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-lg, 0 4px 14px rgba(0,0,0,0.3));
+  white-space: nowrap;
+}
+.anno-send-btn:hover {
+  background: var(--accent-hover);
+}
+
+/* Marker list panel */
+.img-anno-list-panel {
+  position: absolute;
+  top: 44px;
+  right: 8px;
+  width: 240px;
+  max-height: calc(100% - 60px);
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg, 0 6px 20px rgba(0,0,0,0.3));
+  z-index: 20;
+  padding: 6px;
+}
+.img-anno-list-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 6px 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.img-anno-list-empty {
+  padding: 10px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.img-anno-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.img-anno-list-item:hover {
+  background: var(--bg-hover);
+}
+.img-anno-list-item-num {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+  min-width: 44px;
+}
+.img-anno-list-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.img-anno-list-item-comment {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.img-anno-list-item-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.img-anno-list-btn {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+.img-anno-list-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Description text highlighting */
+.anno-highlight-num {
+  background: rgba(250, 204, 21, 0.55);
+  color: inherit;
+  font-weight: 700;
+  border-radius: 3px;
+  padding: 0 2px;
+  box-shadow: 0 0 0 1px rgba(202, 138, 4, 0.6);
+  cursor: pointer;
+}
+.anno-highlight-sentence {
+  background: rgba(250, 204, 21, 0.12);
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+.anno-highlight-active {
+  background: rgba(34, 197, 94, 0.22);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+
 /* ── 图文对照模式下的tab panel ── */
 .pd-tab-panel.active.pd-split-view {
   display: flex !important;

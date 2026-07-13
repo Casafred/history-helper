@@ -4352,7 +4352,19 @@ function refreshHistoryList() {
   const cachePatentList = document.getElementById("cache-patent-list");
   if (cacheOverview) {
     const size = PatentCache.getSize();
-    cacheOverview.textContent = `${cachedEntries.length} 条缓存，共 ${PatentCache.formatSize(size)}`;
+    let annoCount = 0;
+    try {
+      if (typeof ImageAnnotations !== "undefined") {
+        ImageAnnotations.getAllAnnotatedPatents().forEach(function (p) {
+          annoCount += ImageAnnotations.getAnnotationCount(p);
+        });
+      }
+    } catch (e) { /* ignore */ }
+    let overviewText = `${cachedEntries.length} 条缓存，共 ${PatentCache.formatSize(size)}`;
+    if (annoCount > 0) {
+      overviewText += ` · 附图标注 ${annoCount} 条`;
+    }
+    cacheOverview.textContent = overviewText;
   }
   if (cachePatentList) {
     if (cachedEntries.length === 0) {
@@ -4380,6 +4392,7 @@ function refreshHistoryList() {
           PatentCache.remove(pn);
           PatentCache.removeHistory(pn);
           PatentCache.removePatentHistory(pn);
+          try { if (typeof ImageAnnotations !== "undefined") ImageAnnotations.clearAnnotations(pn); } catch (e) { /* ignore */ }
           refreshHistoryList();
         });
       });
@@ -5249,7 +5262,10 @@ function getDrawingsHtml(drawings, viewerId) {
   var html = '';
   html += '<div class="pd-split-main-image" data-split-viewer="' + vid + '" id="' + vid + '_main">';
   html += '<div class="split-img-stage" id="' + vid + '_stage">';
+  html += '<div class="split-img-wrapper" id="' + vid + '_wrapper">';
   html += '<img src="' + firstUrl + '" id="' + vid + '_img" alt="图1" draggable="false">';
+  html += '<div class="img-anno-layer" id="' + vid + '_anno" data-vid="' + vid + '"></div>';
+  html += '</div>';
   html += '</div>';
   html += '<div class="pd-split-img-toolbar" onclick="event.stopPropagation()">';
   html += '<button class="pd-split-img-btn" onclick="splitViewZoomIn(\'' + vid + '\')" title="放大"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>';
@@ -5261,6 +5277,9 @@ function getDrawingsHtml(drawings, viewerId) {
   html += '<button class="pd-split-img-btn" onclick="splitViewRotateCW(\'' + vid + '\')" title="顺时针旋转"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>';
   html += '<div class="pd-split-img-toolbar-divider"></div>';
   html += '<button class="pd-split-img-btn" onclick="splitViewDownloadImg(\'' + vid + '\')" title="下载当前图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>';
+  html += '<div class="pd-split-img-toolbar-divider"></div>';
+  html += '<button class="pd-split-img-btn anno-toggle-btn" onclick="ImageAnnotations.toggleAnnotationMode()" title="标注模式：开启后双击图片添加标号"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg><span class="anno-badge" data-anno-badge="' + vid + '" style="display:none;"></span></button>';
+  html += '<button class="pd-split-img-btn" onclick="ImageAnnotations.toggleMarkerList(\'' + vid + '\')" title="标记列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></button>';
   html += '<div class="pd-split-img-toolbar-divider"></div>';
   html += '<button class="pd-split-img-btn" onclick="openPatentImageViewerFromSplit(\'' + vid + '\')" title="全屏查看"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>';
   html += '</div>';
@@ -5278,11 +5297,13 @@ function getDrawingsHtml(drawings, viewerId) {
 function applyImgTransform(vid) {
   var state = _splitViewerState[vid];
   if (!state) return;
+  var wrapper = document.getElementById(vid + '_wrapper');
   var img = document.getElementById(vid + '_img');
   var zoomLabel = document.getElementById(vid + '_zoom');
-  if (img) {
-    img.style.transform = 'translate(' + state.tx + 'px, ' + state.ty + 'px) scale(' + state.scale + ') rotate(' + state.rotation + 'deg)';
-  }
+  // Apply transform to the wrapper (so the annotation overlay moves/zooms with the image)
+  var tf = 'translate(' + state.tx + 'px, ' + state.ty + 'px) scale(' + state.scale + ') rotate(' + state.rotation + 'deg)';
+  if (wrapper) wrapper.style.transform = tf;
+  if (img) img.style.transform = ''; // wrapper now carries the transform
   if (zoomLabel) {
     zoomLabel.textContent = Math.round(state.scale * 100) + '%';
   }
@@ -5303,6 +5324,16 @@ function initViewerInteractions(vid) {
   stage._initialized = true;
   var state = _splitViewerState[vid];
   if (!state) return;
+
+  // Render annotation markers once the image element loads (covers initial + thumb switches)
+  var imgEl = document.getElementById(vid + '_img');
+  if (imgEl) {
+    imgEl.addEventListener('load', function() {
+      if (typeof ImageAnnotations !== 'undefined') {
+        ImageAnnotations.renderMarkers(vid);
+      }
+    });
+  }
 
   stage.addEventListener('wheel', function(e) {
     e.preventDefault();
@@ -5351,6 +5382,10 @@ function initViewerInteractions(vid) {
   stage.addEventListener('dblclick', function(e) {
     e.preventDefault();
     if (!state) return;
+    // Annotation mode: double-click inserts a marker instead of zoom toggle
+    if (typeof ImageAnnotations !== 'undefined' && ImageAnnotations.isAnnotationMode()) {
+      if (ImageAnnotations.handleDblClick(e, vid)) return;
+    }
     if (state.scale > 1.01) {
       splitViewResetZoom(vid);
     } else {
@@ -5384,6 +5419,13 @@ function splitViewSelectImg(vid, idx, thumbEl) {
   if (prevBtn) prevBtn.disabled = idx === 0;
   if (nextBtn) nextBtn.disabled = idx === state.drawings.length - 1;
   applyImgTransform(vid);
+  // Re-render annotation markers for the newly selected image and close any list panel
+  if (typeof ImageAnnotations !== 'undefined') {
+    var listPanel = document.querySelector('#' + vid + '_main .img-anno-list-panel');
+    if (listPanel) listPanel.remove();
+    ImageAnnotations.clearHighlight();
+    ImageAnnotations.renderMarkers(vid);
+  }
   if (thumbEl) {
     var allThumbs = thumbEl.parentElement.querySelectorAll('.pd-split-thumb');
     allThumbs.forEach(function(t) { t.classList.remove('active'); });
@@ -12335,6 +12377,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   loadAISettingsToForm();
 
+  // Initialize image annotation module (double-click markers + description highlighting)
+  if (typeof ImageAnnotations !== "undefined") {
+    try { ImageAnnotations.init(); } catch (e) { console.warn("[ImageAnnotations] init failed:", e); }
+  }
+
   // ── 监听浏览器插件发送的数据（通过 Electron 主进程注入） ──
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
@@ -14099,6 +14146,7 @@ if (cacheClearBtn) {
     if (confirm("确定要清除全部缓存和历史记录吗？此操作不可撤销。")) {
       PatentCache.clearAll();
       PatentCache.clearAllHistory();
+      try { if (typeof ImageAnnotations !== "undefined") ImageAnnotations.clearAllAnnotations(); } catch (e) { /* ignore */ }
       refreshHistoryList();
     }
   });
