@@ -1895,6 +1895,31 @@ app.whenReady().then(async () => {
     }
   });
 
+  // IPC: 渲染进程请求下载文件（避免 window.open 被 setWindowOpenHandler 拦截成弹窗）
+  let _pendingDownloadFilename = null;
+  ipcMain.on("download-file", (_event, url, filename) => {
+    if (!mainWindow || typeof url !== "string") return;
+    _pendingDownloadFilename = filename || null;
+    mainWindow.webContents.downloadURL(url);
+  });
+  session.defaultSession.on("will-download", (_event, item) => {
+    if (_pendingDownloadFilename) {
+      const savePath = dialog.showSaveDialogSync(mainWindow, {
+        defaultPath: _pendingDownloadFilename,
+        filters: [
+          { name: "Images", extensions: ["png", "jpg", "jpeg", "tif", "tiff", "gif", "bmp"] },
+          { name: "All Files", extensions: ["*"] },
+        ],
+      });
+      if (savePath) {
+        item.setSavePath(savePath);
+      } else {
+        item.cancel();
+      }
+      _pendingDownloadFilename = null;
+    }
+  });
+
   // IPC: 获取沉浸式翻译用户脚本（供渲染进程注入到webview中）
   ipcMain.handle("get-immersive-translate-status", async () => {
     await prepareImmersiveTranslate();

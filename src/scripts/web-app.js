@@ -5472,6 +5472,12 @@ function splitViewDownloadImg(vid) {
   if (!url) return;
   var pn = (window._currentPatentData && window._currentPatentData.patentNumber) || (window._patentPopupData && window._patentPopupData.patentNumber) || 'patent';
   var filename = pn + '_fig' + (state.currentIdx + 1) + '.png';
+  // Electron: use native download (shows save dialog, avoids window.open → popout interception)
+  if (window.electronAPI && typeof window.electronAPI.downloadFile === 'function') {
+    window.electronAPI.downloadFile(url, filename);
+    return;
+  }
+  // Browser: fetch as blob then trigger download
   fetch(url)
     .then(function(r) { return r.blob(); })
     .then(function(blob) {
@@ -5484,7 +5490,8 @@ function splitViewDownloadImg(vid) {
       setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
     })
     .catch(function() {
-      window.open(url, '_blank');
+      // Browser-only fallback (in Electron, window.open is intercepted → popout)
+      if (!window.electronAPI) window.open(url, '_blank');
     });
 }
 
