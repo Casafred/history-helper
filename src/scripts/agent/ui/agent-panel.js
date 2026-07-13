@@ -20,6 +20,10 @@ var AgentUI = (function () {
   var currentThinkingBubble = null;
   var currentAssistantRawText = "";
   var renderTimeout = null;
+  var currentStepsBubble = null;
+  var currentStepsList = null;
+  var stepsCount = 0;
+  var completedSteps = 0;
 
   function renderMarkdown(text) {
     if (typeof marked !== "undefined") {
@@ -372,6 +376,7 @@ var AgentUI = (function () {
     });
 
     BUS.on(EVT.ASSISTANT_END, function (data) {
+      finishAllSteps();
       finishAssistantBubble(data && data.content ? data.content : null);
     });
 
@@ -612,38 +617,155 @@ var AgentUI = (function () {
     }
   }
 
-  function addToolCallStart(name, args) {
+  function startStepsBubble() {
+    if (currentStepsBubble) return;
     var msg = document.createElement("div");
     msg.className = "agent-msg bot";
     msg.innerHTML =
       '<div class="agent-msg-avatar">🔧</div>' +
       '<div class="agent-msg-body">' +
-        '<div class="agent-tool-call" data-tool="' + escapeHtml(name) + '">' +
-          '<span style="font-size:14px">⚙️</span>' +
-          '<span>正在调用 <span class="agent-tool-name">' + escapeHtml(name) + '</span>...</span>' +
+        '<div class="agent-steps" data-steps>' +
+          '<div class="steps-header">' +
+            '<span class="steps-title">⚙️ 执行步骤</span>' +
+            '<span class="steps-count">0 步</span>' +
+            '<span class="steps-toggle">折叠</span>' +
+          '</div>' +
+          '<div class="steps-list"></div>' +
         '</div>' +
       '</div>';
     messagesEl.appendChild(msg);
-    msg._toolResult = true;
+    currentStepsBubble = msg.querySelector(".agent-steps");
+    currentStepsList = msg.querySelector(".steps-list");
+    stepsCount = 0;
+    completedSteps = 0;
+    var header = msg.querySelector(".steps-header");
+    var toggle = msg.querySelector(".steps-toggle");
+    function toggleSteps() {
+      var isCollapsed = currentStepsBubble.classList.toggle("collapsed");
+      toggle.textContent = isCollapsed ? "展开" : "折叠";
+    }
+    header.addEventListener("click", function (e) {
+      toggleSteps();
+    });
+    currentStepsBubble._toggleSteps = toggleSteps;
+    scrollToBottom();
+  }
+
+  function updateStepsCount() {
+    if (!currentStepsBubble) return;
+    var countEl = currentStepsBubble.querySelector(".steps-count");
+    if (countEl) {
+      countEl.textContent = completedSteps + "/" + stepsCount + " 步";
+    }
+    var titleEl = currentStepsBubble.querySelector(".steps-title");
+    if (titleEl && completedSteps === stepsCount && stepsCount > 0) {
+      titleEl.textContent = "✅ 执行完成";
+    }
+  }
+
+  function addToolCallStart(name, args) {
+    if (!currentStepsBubble) startStepsBubble();
+    stepsCount++;
+    var stepItem = document.createElement("div");
+    stepItem.className = "step-item running";
+    stepItem.dataset.tool = name;
+    stepItem.dataset.stepIdx = stepsCount - 1;
+    var argsPreview = "";
+    if (args) {
+      try {
+        var keys = Object.keys(args);
+        if (keys.length > 0) {
+          argsPreview = keys.slice(0, 2).map(function(k) {
+            var v = args[k];
+            if (typeof v === "string" && v.length > 20) v = v.substring(0, 20) + "...";
+            return k + ": " + v;
+          }).join(", ");
+          if (keys.length > 2) argsPreview += "...";
+        }
+      } catch(e) {}
+    }
+    stepItem.innerHTML =
+      '<span class="step-icon spinner">⚙️</span>' +
+      '<span class="step-text"><span class="step-tool-name">' + escapeHtml(name) + '</span>' +
+      (argsPreview ? ' <span class="step-args">' + escapeHtml(argsPreview) + '</span>' : '') +
+      ' <span class="step-status">执行中...</span></span>';
+    currentStepsList.appendChild(stepItem);
+    updateStepsCount();
     scrollToBottom();
   }
 
   function finishToolCall(name, result) {
-    var lastTool = messagesEl.querySelector('.agent-tool-call[data-tool="' + name + '"]:last-child');
-    if (lastTool) {
-      var isError = result && result.error;
+    if (!currentStepsBubble) return;
+    var steps = currentStepsList.querySelectorAll(".step-item[data-tool='" + name + "'].running");
+    var stepItem = steps.length > 0 ? steps[steps.length - 1] : null;
+    var isError = result && result.error;
+    completedSteps++;
+    if (stepItem) {
+      stepItem.classList.remove("running");
       if (isError) {
-        lastTool.classList.add("error");
-        lastTool.innerHTML = '<span style="font-size:14px">❌</span><span><span class="agent-tool-name">' + escapeHtml(name) + '</span> 调用失败: ' + escapeHtml(result.error) + '</span>';
+        stepItem.classList.add("error");
+        stepItem.innerHTML =
+          '<span class="step-icon error">❌</span>' +
+          '<span class="step-text"><span class="step-tool-name">' + escapeHtml(name) + '</span>' +
+          ' <span class="step-status error">失败: ' + escapeHtml(result.error) + '</span></span>';
       } else {
-        lastTool.innerHTML = '<span style="font-size:14px">✅</span><span><span class="agent-tool-name">' + escapeHtml(name) + '</span> 执行完成</span>';
+        stepItem.classList.add("done");
+        var resultSummary = getToolResultSummary(name, result);
+        stepItem.innerHTML =
+          '<span class="step-icon done">✅</span>' +
+          '<span class="step-text"><span class="step-tool-name">' + escapeHtml(name) + '</span>' +
+          (resultSummary ? ' <span class="step-result">' + escapeHtml(resultSummary) + '</span>' : '') +
+          '</span>';
       }
     }
+    updateStepsCount();
     scrollToBottom();
+  }
+
+  function getToolResultSummary(name, result) {
+    if (!result) return "";
+    if (name === "fetch_patent" || name === "fetch_patent_fulltext") {
+      if (result.patentNumber) return result.patentNumber;
+      if (result.ok && result.title) return result.title.length > 30 ? result.title.substring(0, 30) + "..." : result.title;
+    }
+    if (name === "get_patent_claims") {
+      return result.totalClaims + "项权利要求（" + result.independentClaims + "项独权）";
+    }
+    if (name === "get_patent_basic_info") {
+      return result.patentNumber || result.title || "";
+    }
+    if (name === "get_patent_abstract") {
+      return result.patentNumber || "";
+    }
+    if (name === "switch_tab") {
+      return "切换到 " + (result.tab || result.targetTab || "");
+    }
+    if (name === "search") {
+      return result.count ? result.count + "条结果" : "搜索完成";
+    }
+    return result.ok ? "完成" : "";
   }
 
   function finishToolCallError(name, error) {
     finishToolCall(name, { error: error });
+  }
+
+  function finishAllSteps() {
+    if (currentStepsBubble) {
+      var titleEl = currentStepsBubble.querySelector(".steps-title");
+      if (titleEl && completedSteps === stepsCount) {
+        titleEl.textContent = "✅ 执行完成";
+      }
+      var toggle = currentStepsBubble.querySelector(".steps-toggle");
+      if (toggle) toggle.textContent = "展开";
+      if (completedSteps > 0) {
+        currentStepsBubble.classList.add("collapsed");
+      }
+    }
+    currentStepsBubble = null;
+    currentStepsList = null;
+    stepsCount = 0;
+    completedSteps = 0;
   }
 
   function addErrorMessage(text) {
@@ -737,6 +859,10 @@ var AgentUI = (function () {
     todosEl.style.display = "none";
     currentAssistantBubble = null;
     currentThinkingBubble = null;
+    currentStepsBubble = null;
+    currentStepsList = null;
+    stepsCount = 0;
+    completedSteps = 0;
     pendingQuestionCallback = null;
     isProcessing = false;
     updateButtons();
