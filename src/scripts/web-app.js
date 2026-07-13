@@ -4897,15 +4897,30 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+function isIndependentClaim(c) {
+  if (!c) return false;
+  if (c.type === 'independent') return true;
+  if (c.type === 'dependent') return false;
+  if (c.dependent_on !== undefined && c.dependent_on !== null && c.dependent_on !== '' && c.dependent_on !== false) return false;
+  var text = (c.text || '').toLowerCase().trim();
+  if (/^(根据|如|按照|依据).*(权利要求|权项|claim|claims)/.test(text)) return false;
+  if (/^(the|a|an)\s+claim\s+\d+/.test(text)) return false;
+  return true;
+}
+
 function renderClaimsListHtml(claims, scope) {
   if (!claims || claims.length === 0) {
     return '<div class="pd-empty">暂无权利要求数据</div>';
   }
-  const independentCount = claims.filter(c => c.type === 'independent' || !c.dependent_on).length;
-  const dependentCount = claims.length - independentCount;
-  let html = '';
+  var normalizedClaims = claims.map(function(c, i) {
+    var isInd = isIndependentClaim(c);
+    return Object.assign({}, c, { _isIndependent: isInd, _idx: i });
+  });
+  var independentCount = normalizedClaims.filter(function(c) { return c._isIndependent; }).length;
+  var dependentCount = normalizedClaims.length - independentCount;
+  var html = '';
   html += '<div class="pd-panel-header">';
-  html += '<span class="pd-panel-title">权利要求 (' + claims.length + ')<span class="pd-dependent-count-badge">' + independentCount + '项独权' + (dependentCount > 0 ? ' · ' + dependentCount + '项从权' : '') + '</span></span>';
+  html += '<span class="pd-panel-title">权利要求 (' + normalizedClaims.length + ')<span class="pd-dependent-count-badge">' + independentCount + '项独权' + (dependentCount > 0 ? ' · ' + dependentCount + '项从权' : '') + '</span></span>';
   html += '<div class="pd-panel-actions">';
   if (dependentCount > 0) {
     html += '<button class="pd-claim-expand-btn" data-action="expand-all" onclick="toggleAllClaimGroups(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>展开全部从权</button>';
@@ -4915,14 +4930,23 @@ function renderClaimsListHtml(claims, scope) {
   html += '</div></div>';
   html += '<div class="pd-tab-panel-body" data-panel-body="claims">';
   html += '<div class="pd-claims-list" data-section-type="claims">';
-  let currentGroup = null;
-  let pendingDependentCount = 0;
-  let groupDepHtml = '';
-  let groupIdx = 0;
-  claims.forEach((c, i) => {
-    const claimType = c.type === 'independent' ? 'independent' : 'dependent';
-    const claimClass = c.type === 'independent' ? 'claim-independent' : 'claim-dependent';
-    if (c.type === 'independent') {
+  var currentGroup = null;
+  var pendingDependentCount = 0;
+  var groupDepHtml = '';
+  var groupIdx = 0;
+  normalizedClaims.forEach(function(c, i) {
+    var claimType = c._isIndependent ? 'independent' : 'dependent';
+    var claimClass = c._isIndependent ? 'claim-independent' : 'claim-dependent';
+    var claimItemHtml = '<div class="pd-claim-item ' + claimClass + '" data-claim-index="' + c._idx + '">';
+    claimItemHtml += '<div class="pd-claim-main" style="display:flex;align-items:flex-start;gap:4px;width:100%;">';
+    claimItemHtml += '<span class="pd-claim-num">' + escapeHtml(String(c.num || (i + 1))) + '.</span>';
+    claimItemHtml += '<span class="pd-claim-type ' + claimType + '">' + (c._isIndependent ? '独立' : '从属') + '</span>';
+    claimItemHtml += '<span class="pd-claim-text">' + escapeHtml(c.text) + '</span>';
+    claimItemHtml += '<button class="pd-claim-translate-btn" data-claim-index="' + c._idx + '" title="AI 翻译此条权利要求">译</button>';
+    claimItemHtml += '</div>';
+    claimItemHtml += '<div class="pd-claim-translation" data-claim-translation="' + c._idx + '" style="display:none;margin-top:4px;padding:4px 8px;background:#f0f7ff;border-radius:4px;font-size:13px;color:#333;border-left:3px solid var(--accent);"></div>';
+    claimItemHtml += '</div>';
+    if (c._isIndependent) {
       if (currentGroup !== null) {
         if (pendingDependentCount > 0) {
           html += '<div class="pd-claim-dependent-count" onclick="toggleClaimGroup(this)" data-group-idx="' + groupIdx + '">';
@@ -4930,6 +4954,9 @@ function renderClaimsListHtml(claims, scope) {
           html += '</div>';
           html += '<div class="pd-claim-dependents" data-dependents="' + groupIdx + '">';
           html += groupDepHtml;
+          html += '</div>';
+          html += '<div class="pd-claim-collapse-btn" onclick="toggleClaimGroup(this)" data-collapse-group="' + groupIdx + '" style="display:none;">';
+          html += '<span>点击收起从属权利要求 ▲</span>';
           html += '</div>';
         }
         html += '</div>';
@@ -4940,26 +4967,10 @@ function renderClaimsListHtml(claims, scope) {
       groupDepHtml = '';
       html += '<div class="pd-claim-group" data-claim-group="' + groupIdx + '">';
       html += '<div class="pd-claim-group-header">独立权利要求 ' + escapeHtml(String(c.num || (i + 1))) + '</div>';
-      html += '<div class="pd-claim-item ' + claimClass + '" data-claim-index="' + i + '">';
-      html += '<div class="pd-claim-main" style="display:flex;align-items:flex-start;gap:4px;width:100%;">';
-      html += '<span class="pd-claim-num">' + escapeHtml(String(c.num || (i + 1))) + '.</span>';
-      html += '<span class="pd-claim-type ' + claimType + '">' + (c.type === 'independent' ? '独立' : '从属') + '</span>';
-      html += '<span class="pd-claim-text">' + escapeHtml(c.text) + '</span>';
-      html += '<button class="pd-claim-translate-btn" data-claim-index="' + i + '" title="AI 翻译此条权利要求">译</button>';
-      html += '</div>';
-      html += '<div class="pd-claim-translation" data-claim-translation="' + i + '" style="display:none;margin-top:4px;padding:4px 8px;background:#f0f7ff;border-radius:4px;font-size:13px;color:#333;border-left:3px solid var(--accent);"></div>';
-      html += '</div>';
+      html += claimItemHtml;
     } else {
       pendingDependentCount++;
-      groupDepHtml += '<div class="pd-claim-item ' + claimClass + '" data-claim-index="' + i + '">';
-      groupDepHtml += '<div class="pd-claim-main" style="display:flex;align-items:flex-start;gap:4px;width:100%;">';
-      groupDepHtml += '<span class="pd-claim-num">' + escapeHtml(String(c.num || (i + 1))) + '.</span>';
-      groupDepHtml += '<span class="pd-claim-type ' + claimType + '">' + (c.type === 'independent' ? '独立' : '从属') + '</span>';
-      groupDepHtml += '<span class="pd-claim-text">' + escapeHtml(c.text) + '</span>';
-      groupDepHtml += '<button class="pd-claim-translate-btn" data-claim-index="' + i + '" title="AI 翻译此条权利要求">译</button>';
-      groupDepHtml += '</div>';
-      groupDepHtml += '<div class="pd-claim-translation" data-claim-translation="' + i + '" style="display:none;margin-top:4px;padding:4px 8px;background:#f0f7ff;border-radius:4px;font-size:13px;color:#333;border-left:3px solid var(--accent);"></div>';
-      groupDepHtml += '</div>';
+      groupDepHtml += claimItemHtml;
     }
   });
   if (currentGroup !== null) {
@@ -4969,6 +4980,9 @@ function renderClaimsListHtml(claims, scope) {
       html += '</div>';
       html += '<div class="pd-claim-dependents" data-dependents="' + groupIdx + '">';
       html += groupDepHtml;
+      html += '</div>';
+      html += '<div class="pd-claim-collapse-btn" onclick="toggleClaimGroup(this)" data-collapse-group="' + groupIdx + '" style="display:none;">';
+      html += '<span>点击收起从属权利要求 ▲</span>';
       html += '</div>';
     }
     html += '</div>';
@@ -4982,15 +4996,21 @@ function toggleClaimGroup(btn) {
   var group = btn.closest('.pd-claim-group');
   if (!group) return;
   var isExpanded = group.classList.toggle('expanded');
-  var span = btn.querySelector('span');
-  if (span) {
-    var match = span.textContent.match(/(\d+)/);
-    var count = match ? match[1] : '';
-    if (isExpanded) {
-      span.textContent = '点击收起 ' + count + ' 项从属权利要求 ▲';
-    } else {
+  var countBtn = group.querySelector('.pd-claim-dependent-count');
+  var collapseBtn = group.querySelector('.pd-claim-collapse-btn');
+  if (countBtn) {
+    var span = countBtn.querySelector('span');
+    if (span && isExpanded) {
+      span.textContent = '点击收起从属权利要求 ▲';
+    } else if (span) {
+      var match = span.textContent.match(/(\d+)/);
+      var count = match ? match[1] : '';
       span.textContent = '点击展开 ' + count + ' 项从属权利要求 ▼';
     }
+    countBtn.style.display = isExpanded ? 'none' : '';
+  }
+  if (collapseBtn) {
+    collapseBtn.style.display = isExpanded ? '' : 'none';
   }
   updateExpandAllBtn(btn);
 }
@@ -5009,18 +5029,23 @@ function toggleAllClaimGroups(btn) {
     } else {
       g.classList.remove('expanded');
     }
-  });
-  var depCounts = list.querySelectorAll('.pd-claim-dependent-count');
-  depCounts.forEach(function(dc) {
-    var span = dc.querySelector('span');
-    if (span) {
-      var match = span.textContent.match(/(\d+)/);
-      var count = match ? match[1] : '';
-      if (!isAllExpanded) {
-        span.textContent = '点击收起 ' + count + ' 项从属权利要求 ▲';
-      } else {
-        span.textContent = '点击展开 ' + count + ' 项从属权利要求 ▼';
+    var countBtn = g.querySelector('.pd-claim-dependent-count');
+    var collapseBtn = g.querySelector('.pd-claim-collapse-btn');
+    if (countBtn) {
+      var span = countBtn.querySelector('span');
+      if (span) {
+        var match = span.textContent.match(/(\d+)/);
+        var count = match ? match[1] : '';
+        if (!isAllExpanded) {
+          span.textContent = '点击收起从属权利要求 ▲';
+        } else {
+          span.textContent = '点击展开 ' + count + ' 项从属权利要求 ▼';
+        }
       }
+      countBtn.style.display = !isAllExpanded ? 'none' : '';
+    }
+    if (collapseBtn) {
+      collapseBtn.style.display = !isAllExpanded ? '' : 'none';
     }
   });
   if (isAllExpanded) {
@@ -5067,6 +5092,32 @@ function renderDescriptionPanelHtml(descriptionHtml, scope) {
 }
 
 var _splitViewerState = {};
+var _splitResizerState = null;
+
+function initSplitResizer(resizerEl) {
+  if (!resizerEl || resizerEl._initialized) return;
+  resizerEl._initialized = true;
+  resizerEl.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    var drawings = resizerEl.parentElement;
+    if (!drawings) return;
+    var startX = e.clientX;
+    var startW = drawings.offsetWidth;
+    resizerEl.classList.add('active');
+    function onMove(ev) {
+      var dx = startX - ev.clientX;
+      var newW = Math.max(260, Math.min(window.innerWidth * 0.7, startW + dx));
+      drawings.style.width = newW + 'px';
+    }
+    function onUp() {
+      resizerEl.classList.remove('active');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
 
 function toggleSplitView(tabName, scope) {
   var panel, data;
@@ -5110,9 +5161,20 @@ function toggleSplitView(tabName, scope) {
     panel.appendChild(textDiv);
     var drawingsDiv = document.createElement('div');
     drawingsDiv.className = 'pd-split-drawings';
+    var resizer = document.createElement('div');
+    resizer.className = 'pd-split-resizer';
+    drawingsDiv.appendChild(resizer);
     var viewerId = 'sv_' + scope + '_' + tabName;
-    drawingsDiv.innerHTML = getDrawingsHtml(data && data.drawings, viewerId);
+    var drawingsWrap = document.createElement('div');
+    drawingsWrap.style.flex = '1';
+    drawingsWrap.style.display = 'flex';
+    drawingsWrap.style.flexDirection = 'column';
+    drawingsWrap.style.minHeight = '0';
+    drawingsWrap.innerHTML = getDrawingsHtml(data && data.drawings, viewerId);
+    drawingsDiv.appendChild(drawingsWrap);
     panel.appendChild(drawingsDiv);
+    initSplitResizer(resizer);
+    setTimeout(function() { initViewerInteractions(viewerId); }, 50);
   }
 }
 
@@ -5121,7 +5183,15 @@ function getDrawingsHtml(drawings, viewerId) {
     return '<div class="pd-split-drawings-empty">暂无附图</div>';
   }
   var vid = viewerId || ('sv_' + Math.random().toString(36).substr(2, 9));
-  _splitViewerState[vid] = { drawings: drawings, currentIdx: 0, zoomed: false };
+  _splitViewerState[vid] = {
+    drawings: drawings,
+    currentIdx: 0,
+    scale: 1,
+    rotation: 0,
+    tx: 0,
+    ty: 0,
+    isDragging: false
+  };
   var firstUrl = escapeHtml(drawings[0]);
   var thumbsHtml = '';
   drawings.forEach(function(url, i) {
@@ -5132,30 +5202,133 @@ function getDrawingsHtml(drawings, viewerId) {
     thumbsHtml += '</div>';
   });
   var html = '';
-  html += '<div class="pd-split-main-image" data-split-viewer="' + vid + '" id="' + vid + '_main" onclick="splitViewToggleZoom(\'' + vid + '\',event)">';
-  html += '<img src="' + firstUrl + '" id="' + vid + '_img" alt="图1">';
-  html += '<div class="pd-split-img-toolbar">';
-  html += '<button class="pd-split-img-btn" onclick="event.stopPropagation();splitViewZoomIn(\'' + vid + '\')" title="放大"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>';
-  html += '<button class="pd-split-img-btn" onclick="event.stopPropagation();splitViewZoomOut(\'' + vid + '\')" title="缩小"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>';
-  html += '<button class="pd-split-img-btn" onclick="event.stopPropagation();splitViewResetZoom(\'' + vid + '\')" title="适应窗口"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>';
-  html += '<button class="pd-split-img-btn" onclick="event.stopPropagation();openPatentImageViewerFromSplit(\'' + vid + '\')" title="全屏查看"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>';
+  html += '<div class="pd-split-main-image" data-split-viewer="' + vid + '" id="' + vid + '_main">';
+  html += '<div class="split-img-stage" id="' + vid + '_stage">';
+  html += '<img src="' + firstUrl + '" id="' + vid + '_img" alt="图1" draggable="false">';
   html += '</div>';
+  html += '<div class="pd-split-img-toolbar" onclick="event.stopPropagation()">';
+  html += '<button class="pd-split-img-btn" onclick="splitViewZoomIn(\'' + vid + '\')" title="放大"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>';
+  html += '<button class="pd-split-img-btn" onclick="splitViewZoomOut(\'' + vid + '\')" title="缩小"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>';
+  html += '<button class="pd-split-img-btn" onclick="splitViewActualSize(\'' + vid + '\')" title="1:1实际大小" style="font-size:11px;font-weight:bold;">1:1</button>';
+  html += '<button class="pd-split-img-btn" onclick="splitViewResetZoom(\'' + vid + '\')" title="适应窗口"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>';
+  html += '<div class="pd-split-img-toolbar-divider"></div>';
+  html += '<button class="pd-split-img-btn" onclick="splitViewRotateCCW(\'' + vid + '\')" title="逆时针旋转"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>';
+  html += '<button class="pd-split-img-btn" onclick="splitViewRotateCW(\'' + vid + '\')" title="顺时针旋转"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>';
+  html += '<div class="pd-split-img-toolbar-divider"></div>';
+  html += '<button class="pd-split-img-btn" onclick="openPatentImageViewerFromSplit(\'' + vid + '\')" title="全屏查看"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>';
+  html += '</div>';
+  html += '<div class="pd-split-zoom-level" id="' + vid + '_zoom">100%</div>';
   html += '<div class="pd-split-img-nav" onclick="event.stopPropagation()">';
-  html += '<button class="pd-split-img-nav-btn" onclick="splitViewPrevImg(\'' + vid + '\')" id="' + vid + '_prev" disabled title="上一张"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>';
+  html += '<button class="pd-split-img-nav-btn" onclick="splitViewPrevImg(\'' + vid + '\')" id="' + vid + '_prev" disabled title="上一张"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>';
   html += '<span id="' + vid + '_counter">1 / ' + drawings.length + '</span>';
-  html += '<button class="pd-split-img-nav-btn" onclick="splitViewNextImg(\'' + vid + '\')" id="' + vid + '_next"' + (drawings.length <= 1 ? ' disabled' : '') + ' title="下一张"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></button>';
+  html += '<button class="pd-split-img-nav-btn" onclick="splitViewNextImg(\'' + vid + '\')" id="' + vid + '_next"' + (drawings.length <= 1 ? ' disabled' : '') + ' title="下一张"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>';
   html += '</div>';
   html += '</div>';
   html += '<div class="pd-split-thumbs">' + thumbsHtml + '</div>';
   return html;
 }
 
+function applyImgTransform(vid) {
+  var state = _splitViewerState[vid];
+  if (!state) return;
+  var img = document.getElementById(vid + '_img');
+  var zoomLabel = document.getElementById(vid + '_zoom');
+  if (img) {
+    img.style.transform = 'translate(' + state.tx + 'px, ' + state.ty + 'px) scale(' + state.scale + ') rotate(' + state.rotation + 'deg)';
+  }
+  if (zoomLabel) {
+    zoomLabel.textContent = Math.round(state.scale * 100) + '%';
+  }
+  var main = document.getElementById(vid + '_main');
+  if (main) {
+    if (state.scale > 1.01) {
+      main.classList.add('can-zoom');
+    } else {
+      main.classList.remove('can-zoom');
+    }
+  }
+}
+
+function initViewerInteractions(vid) {
+  var stage = document.getElementById(vid + '_stage');
+  var main = document.getElementById(vid + '_main');
+  if (!stage || !main || stage._initialized) return;
+  stage._initialized = true;
+  var state = _splitViewerState[vid];
+  if (!state) return;
+
+  stage.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    if (!state) return;
+    var rect = stage.getBoundingClientRect();
+    var mx = e.clientX - rect.left - rect.width / 2;
+    var my = e.clientY - rect.top - rect.height / 2;
+    var delta = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    var newScale = Math.max(0.3, Math.min(8, state.scale * delta));
+    var ratio = newScale / state.scale;
+    state.tx = mx - (mx - state.tx) * ratio;
+    state.ty = my - (my - state.ty) * ratio;
+    state.scale = newScale;
+    applyImgTransform(vid);
+  }, { passive: false });
+
+  stage.addEventListener('mousedown', function(e) {
+    if (e.button !== 0) return;
+    if (state.scale <= 1.01) return;
+    state.isDragging = true;
+    state.dragStartX = e.clientX;
+    state.dragStartY = e.clientY;
+    state.dragStartTx = state.tx;
+    state.dragStartTy = state.ty;
+    main.classList.add('panning');
+    e.preventDefault();
+  });
+
+  function onMouseMove(e) {
+    if (!state || !state.isDragging) return;
+    state.tx = state.dragStartTx + (e.clientX - state.dragStartX);
+    state.ty = state.dragStartTy + (e.clientY - state.dragStartY);
+    applyImgTransform(vid);
+  }
+
+  function onMouseUp() {
+    if (state && state.isDragging) {
+      state.isDragging = false;
+      main.classList.remove('panning');
+    }
+  }
+
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+
+  stage.addEventListener('dblclick', function(e) {
+    e.preventDefault();
+    if (!state) return;
+    if (state.scale > 1.01) {
+      splitViewResetZoom(vid);
+    } else {
+      var rect = stage.getBoundingClientRect();
+      var mx = e.clientX - rect.left - rect.width / 2;
+      var my = e.clientY - rect.top - rect.height / 2;
+      var newScale = 2.5;
+      var ratio = newScale / state.scale;
+      state.tx = mx - (mx - state.tx) * ratio;
+      state.ty = my - (my - state.ty) * ratio;
+      state.scale = newScale;
+      applyImgTransform(vid);
+    }
+  });
+}
+
 function splitViewSelectImg(vid, idx, thumbEl) {
   var state = _splitViewerState[vid];
   if (!state) return;
   state.currentIdx = idx;
+  state.scale = 1;
+  state.rotation = 0;
+  state.tx = 0;
+  state.ty = 0;
   var img = document.getElementById(vid + '_img');
-  var main = document.getElementById(vid + '_main');
   if (img) img.src = state.drawings[idx];
   var counter = document.getElementById(vid + '_counter');
   if (counter) counter.textContent = (idx + 1) + ' / ' + state.drawings.length;
@@ -5163,13 +5336,7 @@ function splitViewSelectImg(vid, idx, thumbEl) {
   var nextBtn = document.getElementById(vid + '_next');
   if (prevBtn) prevBtn.disabled = idx === 0;
   if (nextBtn) nextBtn.disabled = idx === state.drawings.length - 1;
-  if (main) {
-    main.classList.remove('zoomed');
-    state.zoomed = false;
-    img.style.transform = '';
-    main.scrollTop = 0;
-    main.scrollLeft = 0;
-  }
+  applyImgTransform(vid);
   if (thumbEl) {
     var allThumbs = thumbEl.parentElement.querySelectorAll('.pd-split-thumb');
     allThumbs.forEach(function(t) { t.classList.remove('active'); });
@@ -5194,59 +5361,63 @@ function splitViewPrevImg(vid) {
   splitViewSelectImg(vid, state.currentIdx - 1, thumbs[state.currentIdx - 1] || null);
 }
 
-function splitViewToggleZoom(vid, e) {
-  var state = _splitViewerState[vid];
-  if (!state) return;
-  var main = document.getElementById(vid + '_main');
-  if (!main) return;
-  state.zoomed = !state.zoomed;
-  main.classList.toggle('zoomed', state.zoomed);
-  var img = document.getElementById(vid + '_img');
-  if (img) {
-    img.style.transform = state.zoomed ? 'scale(2)' : '';
-  }
-}
-
 function splitViewZoomIn(vid) {
   var state = _splitViewerState[vid];
   if (!state) return;
-  var main = document.getElementById(vid + '_main');
-  var img = document.getElementById(vid + '_img');
-  if (!main || !img) return;
-  state.zoomed = true;
-  main.classList.add('zoomed');
-  var currentScale = parseFloat(img.style.transform.replace(/[^0-9.]/g, '')) || 1;
-  var newScale = Math.min(currentScale + 0.5, 5);
-  img.style.transform = 'scale(' + newScale + ')';
+  var newScale = Math.min(8, state.scale * 1.25);
+  var ratio = newScale / state.scale;
+  state.tx = state.tx * ratio;
+  state.ty = state.ty * ratio;
+  state.scale = newScale;
+  applyImgTransform(vid);
 }
 
 function splitViewZoomOut(vid) {
   var state = _splitViewerState[vid];
   if (!state) return;
-  var main = document.getElementById(vid + '_main');
-  var img = document.getElementById(vid + '_img');
-  if (!main || !img) return;
-  var currentScale = parseFloat(img.style.transform.replace(/[^0-9.]/g, '')) || 1;
-  var newScale = Math.max(currentScale - 0.5, 1);
-  img.style.transform = 'scale(' + newScale + ')';
+  var newScale = Math.max(0.3, state.scale / 1.25);
+  var ratio = newScale / state.scale;
+  state.tx = state.tx * ratio;
+  state.ty = state.ty * ratio;
+  state.scale = newScale;
   if (newScale <= 1) {
-    state.zoomed = false;
-    main.classList.remove('zoomed');
-    img.style.transform = '';
+    state.tx = 0;
+    state.ty = 0;
   }
+  applyImgTransform(vid);
+}
+
+function splitViewActualSize(vid) {
+  var state = _splitViewerState[vid];
+  if (!state) return;
+  state.scale = 1;
+  state.tx = 0;
+  state.ty = 0;
+  applyImgTransform(vid);
 }
 
 function splitViewResetZoom(vid) {
   var state = _splitViewerState[vid];
   if (!state) return;
-  var main = document.getElementById(vid + '_main');
-  var img = document.getElementById(vid + '_img');
-  if (!main || !img) return;
-  state.zoomed = false;
-  main.classList.remove('zoomed');
-  img.style.transform = '';
-  main.scrollTop = 0;
-  main.scrollLeft = 0;
+  state.scale = 1;
+  state.rotation = 0;
+  state.tx = 0;
+  state.ty = 0;
+  applyImgTransform(vid);
+}
+
+function splitViewRotateCW(vid) {
+  var state = _splitViewerState[vid];
+  if (!state) return;
+  state.rotation = (state.rotation + 90) % 360;
+  applyImgTransform(vid);
+}
+
+function splitViewRotateCCW(vid) {
+  var state = _splitViewerState[vid];
+  if (!state) return;
+  state.rotation = (state.rotation - 90 + 360) % 360;
+  applyImgTransform(vid);
 }
 
 function openPatentImageViewerFromSplit(vid) {
