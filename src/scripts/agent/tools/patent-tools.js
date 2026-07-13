@@ -392,6 +392,226 @@ var AgentPatentTools = (function () {
         });
       },
     });
+
+    AgentTools.register({
+      name: "get_timeline",
+      description: "获取审查时间线信息，包括各审查节点（申请、公开、审查意见、授权等）的日期和事件。需要先调用fetch_patent。",
+      parameters: { type: "object", properties: {} },
+      execute: function () {
+        var data = getCurrentPatentData();
+        if (!data) return Promise.resolve({ error: "请先调用fetch_patent查询专利" });
+        var timeline = [];
+        try {
+          var timelineBoard = document.getElementById("timeline-board");
+          if (timelineBoard) {
+            var items = timelineBoard.querySelectorAll(".timeline-item");
+            items.forEach(function (item) {
+              var date = item.querySelector(".timeline-date");
+              var title = item.querySelector(".timeline-title");
+              var desc = item.querySelector(".timeline-desc");
+              timeline.push({
+                date: date ? date.textContent.trim() : "",
+                title: title ? title.textContent.trim() : "",
+                description: desc ? desc.textContent.trim() : "",
+              });
+            });
+          }
+        } catch (e) {}
+        if (timeline.length === 0 && data.documents) {
+          var docList = Array.isArray(data.documents) ? data.documents : (data.documents.list || []);
+          docList.forEach(function (d) {
+            if (d.date) {
+              timeline.push({
+                date: d.date || "",
+                title: d.type || d.docCode || "",
+                description: d.title || d.description || "",
+              });
+            }
+          });
+          timeline.sort(function (a, b) { return (a.date || "").localeCompare(b.date || ""); });
+        }
+        return Promise.resolve({
+          ok: true,
+          patentNumber: data.patentNumber,
+          eventCount: timeline.length,
+          events: timeline.slice(0, 50),
+        });
+      },
+    });
+
+    AgentTools.register({
+      name: "open_document_reader",
+      description: "在应用内打开审查文档阅读器查看特定文档。用户可以在阅读器中查看、翻译、OCR、标注文档。需要先调用fetch_patent。",
+      parameters: {
+        type: "object",
+        properties: {
+          document_index: {
+            type: "number",
+            description: "文档序号（从0开始），可通过get_documents_summary获取",
+          },
+        },
+        required: ["document_index"],
+      },
+      execute: function (args) {
+        var data = getCurrentPatentData();
+        if (!data) return Promise.resolve({ error: "请先调用fetch_patent查询专利" });
+        switchToTab("kanban");
+        var idx = args.document_index || 0;
+        setTimeout(function () {
+          try {
+            var docItems = document.querySelectorAll(".kanban-doc-item, .doc-list-item");
+            if (docItems[idx]) {
+              docItems[idx].click();
+              var viewBtn = docItems[idx].querySelector(".doc-view-btn, .kanban-doc-view, [title*='阅读'], [title*='查看']");
+              if (viewBtn) viewBtn.click();
+            }
+          } catch (e) {}
+          var readerBtn = document.getElementById("reader-btn");
+          if (readerBtn) readerBtn.click();
+        }, 500);
+        return Promise.resolve({
+          ok: true,
+          action: "已打开文档阅读器",
+          tip: "已为您切换到审查看板并打开阅读器",
+        });
+      },
+    });
+
+    AgentTools.register({
+      name: "run_ai_analysis",
+      description: "触发AI审查意见梳理，自动分析审查历史文档并生成结构化审查报告，包含审查意见总结、申请人答复要点、争议焦点等。分析完成后用户可在AI分析标签页查看结果并导出Word。需要先调用fetch_patent。",
+      parameters: {
+        type: "object",
+        properties: {
+          auto_select: {
+            type: "boolean",
+            description: "是否自动选择相关文档进行梳理（默认true）",
+          },
+        },
+      },
+      execute: function (args) {
+        var data = getCurrentPatentData();
+        if (!data) return Promise.resolve({ error: "请先调用fetch_patent查询专利" });
+        switchToTab("ai-analysis");
+        var autoSelect = args.auto_select !== false;
+        setTimeout(function () {
+          try {
+            var analyzeBtn = document.getElementById("kanban-manual-select-btn");
+            if (analyzeBtn && !analyzeBtn.disabled) {
+              analyzeBtn.click();
+              setTimeout(function () {
+                var confirmBtns = document.querySelectorAll(".ai-manual-select .btn-primary, #confirm-select-btn");
+                if (autoSelect && confirmBtns.length > 0) {
+                  var lastBtn = confirmBtns[confirmBtns.length - 1];
+                  lastBtn.click();
+                }
+              }, 800);
+            }
+          } catch (e) {}
+        }, 500);
+        return Promise.resolve({
+          ok: true,
+          action: "已触发AI审查意见梳理",
+          tip: "正在自动选择相关文档并启动AI分析，请稍候在AI分析标签页查看结果，分析完成后可导出Word文档",
+        });
+      },
+    });
+
+    AgentTools.register({
+      name: "get_analysis_result",
+      description: "获取已完成的AI审查分析结果文本（Markdown格式）。需要先调用run_ai_analysis并等待分析完成。",
+      parameters: { type: "object", properties: {} },
+      execute: function () {
+        try {
+          var analysisContent = document.getElementById("kanban-analysis-content");
+          if (analysisContent) {
+            var isHidden = analysisContent.classList.contains("hidden");
+            var text = analysisContent.textContent || "";
+            if (text.trim().length > 0) {
+              return Promise.resolve({
+                ok: true,
+                hasResult: !isHidden && text.trim().length > 0,
+                contentLength: text.length,
+                preview: text.substring(0, 500),
+              });
+            }
+          }
+        } catch (e) {}
+        return Promise.resolve({
+          ok: true,
+          hasResult: false,
+          message: "分析结果尚未生成，请先调用run_ai_analysis触发分析",
+        });
+      },
+    });
+
+    AgentTools.register({
+      name: "fetch_dossier_and_analyze",
+      description: "一站式查询专利审查档案并自动触发AI审查意见梳理：查询审查文档→获取时间线→自动选择文档→启动AI分析。这是最便捷的方式，适合用户直接要求\"梳理某专利审查意见\"等场景。",
+      parameters: {
+        type: "object",
+        properties: {
+          patent_number: {
+            type: "string",
+            description: "专利号",
+          },
+        },
+        required: ["patent_number"],
+      },
+      execute: async function (args) {
+        var patentInput = document.getElementById("patent-input");
+        if (!patentInput) return { error: "找不到搜索输入框" };
+        if (typeof searchMode !== "undefined") {
+          var dossierBtn = document.querySelector('.search-mode-btn[data-mode="dossier"]');
+          if (dossierBtn) dossierBtn.click();
+        }
+        patentInput.value = args.patent_number;
+        if (typeof doSearch === "function") {
+          try {
+            await doSearch(args.patent_number);
+          } catch (e) {
+            return { error: "查询失败: " + e.message };
+          }
+        } else {
+          var searchBtn = document.getElementById("search-btn");
+          if (searchBtn) searchBtn.click();
+          await waitForSearchComplete(30000);
+        }
+        await new Promise(function (r) { return setTimeout(r, 1500); });
+        var data = getCurrentPatentData();
+        if (!data) {
+          return { ok: false, error: "查询失败，未获取到专利数据" };
+        }
+        AgentCore.updateContext({ patentData: data, patentNumber: args.patent_number });
+        var docCount = 0;
+        if (data.documents) {
+          if (Array.isArray(data.documents)) docCount = data.documents.length;
+          else if (data.documents.list) docCount = data.documents.list.length;
+        }
+        setTimeout(function () {
+          switchToTab("ai-analysis");
+          setTimeout(function () {
+            var analyzeBtn = document.getElementById("kanban-manual-select-btn");
+            if (analyzeBtn && !analyzeBtn.disabled) analyzeBtn.click();
+            setTimeout(function () {
+              var confirmBtns = document.querySelectorAll(".ai-manual-select .btn-primary");
+              if (confirmBtns.length > 0) {
+                confirmBtns[confirmBtns.length - 1].click();
+              }
+            }, 1000);
+          }, 500);
+        }, 800);
+        return {
+          ok: true,
+          patentNumber: data.patentNumber,
+          title: data.title || "",
+          documentCount: docCount,
+          action: "已查询专利并自动启动AI审查梳理",
+          tip: "审查文档已加载，正在自动选择文档启动AI分析，完成后可在AI分析标签页查看报告并导出Word",
+          openInApp: { patentNumber: data.patentNumber, mode: "dossier" },
+        };
+      },
+    });
   }
 
   return { registerAll: registerAll };

@@ -4908,7 +4908,7 @@ function renderClaimsListHtml(claims, scope) {
   html += '<span class="pd-panel-title">权利要求 (' + claims.length + ')<span class="pd-dependent-count-badge">' + independentCount + '项独权' + (dependentCount > 0 ? ' · ' + dependentCount + '项从权' : '') + '</span></span>';
   html += '<div class="pd-panel-actions">';
   if (dependentCount > 0) {
-    html += '<button class="pd-claim-expand-btn" onclick="toggleClaimExpand(this, \'' + scope + '\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>展开全部从权</button>';
+    html += '<button class="pd-claim-expand-btn" data-action="expand-all" onclick="toggleAllClaimGroups(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>展开全部从权</button>';
   }
   html += '<button class="pd-compare-btn" onclick="toggleSplitView(\'claims\', \'' + scope + '\')" data-split-btn="claims"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg>图文对照</button>';
   html += '<button class="pd-copy-btn" onclick="copyPatentSectionText(\'claims\')">复制</button>';
@@ -4918,23 +4918,27 @@ function renderClaimsListHtml(claims, scope) {
   let currentGroup = null;
   let pendingDependentCount = 0;
   let groupDepHtml = '';
+  let groupIdx = 0;
   claims.forEach((c, i) => {
     const claimType = c.type === 'independent' ? 'independent' : 'dependent';
     const claimClass = c.type === 'independent' ? 'claim-independent' : 'claim-dependent';
     if (c.type === 'independent') {
       if (currentGroup !== null) {
         if (pendingDependentCount > 0) {
-          html += '<div class="pd-claim-dependent-count" onclick="toggleClaimExpand(this.closest(\'.pd-tab-panel\').querySelector(\'.pd-claim-expand-btn\'), \'' + scope + '\')">';
+          html += '<div class="pd-claim-dependent-count" onclick="toggleClaimGroup(this)" data-group-idx="' + groupIdx + '">';
           html += '<span>点击展开 ' + pendingDependentCount + ' 项从属权利要求 ▼</span>';
           html += '</div>';
+          html += '<div class="pd-claim-dependents" data-dependents="' + groupIdx + '">';
+          html += groupDepHtml;
+          html += '</div>';
         }
-        html += groupDepHtml;
         html += '</div>';
+        groupIdx++;
       }
       currentGroup = i;
       pendingDependentCount = 0;
       groupDepHtml = '';
-      html += '<div class="pd-claim-group">';
+      html += '<div class="pd-claim-group" data-claim-group="' + groupIdx + '">';
       html += '<div class="pd-claim-group-header">独立权利要求 ' + escapeHtml(String(c.num || (i + 1))) + '</div>';
       html += '<div class="pd-claim-item ' + claimClass + '" data-claim-index="' + i + '">';
       html += '<div class="pd-claim-main" style="display:flex;align-items:flex-start;gap:4px;width:100%;">';
@@ -4960,16 +4964,89 @@ function renderClaimsListHtml(claims, scope) {
   });
   if (currentGroup !== null) {
     if (pendingDependentCount > 0) {
-      html += '<div class="pd-claim-dependent-count" onclick="toggleClaimExpand(this.closest(\'.pd-tab-panel\').querySelector(\'.pd-claim-expand-btn\'), \'' + scope + '\')">';
+      html += '<div class="pd-claim-dependent-count" onclick="toggleClaimGroup(this)" data-group-idx="' + groupIdx + '">';
       html += '<span>点击展开 ' + pendingDependentCount + ' 项从属权利要求 ▼</span>';
       html += '</div>';
+      html += '<div class="pd-claim-dependents" data-dependents="' + groupIdx + '">';
+      html += groupDepHtml;
+      html += '</div>';
     }
-    html += groupDepHtml;
     html += '</div>';
   }
   html += '</div>';
   html += '</div>';
   return html;
+}
+
+function toggleClaimGroup(btn) {
+  var group = btn.closest('.pd-claim-group');
+  if (!group) return;
+  var isExpanded = group.classList.toggle('expanded');
+  var span = btn.querySelector('span');
+  if (span) {
+    var match = span.textContent.match(/(\d+)/);
+    var count = match ? match[1] : '';
+    if (isExpanded) {
+      span.textContent = '点击收起 ' + count + ' 项从属权利要求 ▲';
+    } else {
+      span.textContent = '点击展开 ' + count + ' 项从属权利要求 ▼';
+    }
+  }
+  updateExpandAllBtn(btn);
+}
+
+function toggleAllClaimGroups(btn) {
+  var panel = btn.closest('.pd-tab-panel');
+  if (!panel) return;
+  var list = panel.querySelector('.pd-claims-list');
+  if (!list) return;
+  var groups = list.querySelectorAll('.pd-claim-group');
+  var isAllExpanded = list.classList.contains('expanded-all');
+  list.classList.toggle('expanded-all', !isAllExpanded);
+  groups.forEach(function(g) {
+    if (!isAllExpanded) {
+      g.classList.add('expanded');
+    } else {
+      g.classList.remove('expanded');
+    }
+  });
+  var depCounts = list.querySelectorAll('.pd-claim-dependent-count');
+  depCounts.forEach(function(dc) {
+    var span = dc.querySelector('span');
+    if (span) {
+      var match = span.textContent.match(/(\d+)/);
+      var count = match ? match[1] : '';
+      if (!isAllExpanded) {
+        span.textContent = '点击收起 ' + count + ' 项从属权利要求 ▲';
+      } else {
+        span.textContent = '点击展开 ' + count + ' 项从属权利要求 ▼';
+      }
+    }
+  });
+  if (isAllExpanded) {
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>展开全部从权';
+  } else {
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>收起全部从权';
+  }
+}
+
+function updateExpandAllBtn(btn) {
+  var panel = btn.closest('.pd-tab-panel');
+  if (!panel) return;
+  var list = panel.querySelector('.pd-claims-list');
+  if (!list) return;
+  var expandBtn = panel.querySelector('.pd-claim-expand-btn');
+  if (!expandBtn) return;
+  var groups = list.querySelectorAll('.pd-claim-group');
+  var expandedGroups = list.querySelectorAll('.pd-claim-group.expanded');
+  var allExpanded = groups.length > 0 && expandedGroups.length === groups.length;
+  if (allExpanded) {
+    list.classList.add('expanded-all');
+    expandBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>收起全部从权';
+  } else {
+    list.classList.remove('expanded-all');
+    expandBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>展开全部从权';
+  }
 }
 
 function renderDescriptionPanelHtml(descriptionHtml, scope) {
@@ -4989,32 +5066,7 @@ function renderDescriptionPanelHtml(descriptionHtml, scope) {
   return html;
 }
 
-function getDrawingsHtml(drawings) {
-  if (!drawings || drawings.length === 0) {
-    return '<div class="pd-split-drawings-empty">暂无附图</div>';
-  }
-  let html = '';
-  html += '<div class="pd-split-drawings-title"><span>附图 (' + drawings.length + ')</span></div>';
-  drawings.forEach((url, i) => {
-    html += '<div class="pd-split-drawing-item" data-drawing-index="' + i + '" onclick="openPatentImageViewerFromScope(this)">';
-    html += '<img src="' + escapeHtml(url) + '" alt="Figure ' + (i + 1) + '" loading="lazy">';
-    html += '<span class="pd-split-drawing-label">图 ' + (i + 1) + '</span>';
-    html += '</div>';
-  });
-  return html;
-}
-
-function toggleClaimExpand(btn, scope) {
-  var panel = btn.closest('.pd-tab-panel');
-  var list = panel.querySelector('.pd-claims-list');
-  var isExpanded = list.classList.contains('expanded-all');
-  list.classList.toggle('expanded-all');
-  if (isExpanded) {
-    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>展开全部从权';
-  } else {
-    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>收起从权';
-  }
-}
+var _splitViewerState = {};
 
 function toggleSplitView(tabName, scope) {
   var panel, data;
@@ -5032,39 +5084,178 @@ function toggleSplitView(tabName, scope) {
     panel.classList.remove('pd-split-view');
     if (btn) btn.classList.remove('active');
     var drawingsPanel = panel.querySelector('.pd-split-drawings');
-    if (drawingsPanel) drawingsPanel.remove();
+    if (drawingsPanel) {
+      var mainImg = drawingsPanel.querySelector('.pd-split-main-image');
+      if (mainImg && mainImg.id) {
+        var vidKey = mainImg.id.replace('_main', '');
+        delete _splitViewerState[vidKey];
+      }
+      drawingsPanel.remove();
+    }
     var textWrap = panel.querySelector('.pd-split-text');
     if (textWrap) {
       while (textWrap.firstChild) {
-        panel.insertBefore(textWrap.firstChild, textWrap);
+        panel.appendChild(textWrap.firstChild);
       }
       textWrap.remove();
     }
   } else {
     panel.classList.add('pd-split-view');
     if (btn) btn.classList.add('active');
-    var body = panel.querySelector('.pd-tab-panel-body');
-    if (!body) {
-      var existingContent = panel.innerHTML;
-      panel.innerHTML = '';
-      var textDiv = document.createElement('div');
-      textDiv.className = 'pd-split-text';
-      textDiv.innerHTML = existingContent;
-      panel.appendChild(textDiv);
-    } else {
-      var textDiv2 = document.createElement('div');
-      textDiv2.className = 'pd-split-text';
-      while (body.firstChild) {
-        textDiv2.appendChild(body.firstChild);
-      }
-      panel.insertBefore(textDiv2, body.nextSibling);
-      body.remove();
+    var textDiv = document.createElement('div');
+    textDiv.className = 'pd-split-text';
+    while (panel.firstChild) {
+      textDiv.appendChild(panel.firstChild);
     }
+    panel.appendChild(textDiv);
     var drawingsDiv = document.createElement('div');
     drawingsDiv.className = 'pd-split-drawings';
-    drawingsDiv.innerHTML = getDrawingsHtml(data && data.drawings);
+    var viewerId = 'sv_' + scope + '_' + tabName;
+    drawingsDiv.innerHTML = getDrawingsHtml(data && data.drawings, viewerId);
     panel.appendChild(drawingsDiv);
   }
+}
+
+function getDrawingsHtml(drawings, viewerId) {
+  if (!drawings || drawings.length === 0) {
+    return '<div class="pd-split-drawings-empty">暂无附图</div>';
+  }
+  var vid = viewerId || ('sv_' + Math.random().toString(36).substr(2, 9));
+  _splitViewerState[vid] = { drawings: drawings, currentIdx: 0, zoomed: false };
+  var firstUrl = escapeHtml(drawings[0]);
+  var thumbsHtml = '';
+  drawings.forEach(function(url, i) {
+    var activeClass = i === 0 ? ' active' : '';
+    thumbsHtml += '<div class="pd-split-thumb' + activeClass + '" data-drawing-idx="' + i + '" onclick="splitViewSelectImg(\'' + vid + '\',' + i + ',this)">';
+    thumbsHtml += '<img src="' + escapeHtml(url) + '" alt="图' + (i + 1) + '" loading="lazy">';
+    thumbsHtml += '<span class="pd-split-thumb-label">' + (i + 1) + '</span>';
+    thumbsHtml += '</div>';
+  });
+  var html = '';
+  html += '<div class="pd-split-main-image" data-split-viewer="' + vid + '" id="' + vid + '_main" onclick="splitViewToggleZoom(\'' + vid + '\',event)">';
+  html += '<img src="' + firstUrl + '" id="' + vid + '_img" alt="图1">';
+  html += '<div class="pd-split-img-toolbar">';
+  html += '<button class="pd-split-img-btn" onclick="event.stopPropagation();splitViewZoomIn(\'' + vid + '\')" title="放大"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>';
+  html += '<button class="pd-split-img-btn" onclick="event.stopPropagation();splitViewZoomOut(\'' + vid + '\')" title="缩小"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>';
+  html += '<button class="pd-split-img-btn" onclick="event.stopPropagation();splitViewResetZoom(\'' + vid + '\')" title="适应窗口"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>';
+  html += '<button class="pd-split-img-btn" onclick="event.stopPropagation();openPatentImageViewerFromSplit(\'' + vid + '\')" title="全屏查看"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>';
+  html += '</div>';
+  html += '<div class="pd-split-img-nav" onclick="event.stopPropagation()">';
+  html += '<button class="pd-split-img-nav-btn" onclick="splitViewPrevImg(\'' + vid + '\')" id="' + vid + '_prev" disabled title="上一张"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>';
+  html += '<span id="' + vid + '_counter">1 / ' + drawings.length + '</span>';
+  html += '<button class="pd-split-img-nav-btn" onclick="splitViewNextImg(\'' + vid + '\')" id="' + vid + '_next"' + (drawings.length <= 1 ? ' disabled' : '') + ' title="下一张"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></button>';
+  html += '</div>';
+  html += '</div>';
+  html += '<div class="pd-split-thumbs">' + thumbsHtml + '</div>';
+  return html;
+}
+
+function splitViewSelectImg(vid, idx, thumbEl) {
+  var state = _splitViewerState[vid];
+  if (!state) return;
+  state.currentIdx = idx;
+  var img = document.getElementById(vid + '_img');
+  var main = document.getElementById(vid + '_main');
+  if (img) img.src = state.drawings[idx];
+  var counter = document.getElementById(vid + '_counter');
+  if (counter) counter.textContent = (idx + 1) + ' / ' + state.drawings.length;
+  var prevBtn = document.getElementById(vid + '_prev');
+  var nextBtn = document.getElementById(vid + '_next');
+  if (prevBtn) prevBtn.disabled = idx === 0;
+  if (nextBtn) nextBtn.disabled = idx === state.drawings.length - 1;
+  if (main) {
+    main.classList.remove('zoomed');
+    state.zoomed = false;
+    img.style.transform = '';
+    main.scrollTop = 0;
+    main.scrollLeft = 0;
+  }
+  if (thumbEl) {
+    var allThumbs = thumbEl.parentElement.querySelectorAll('.pd-split-thumb');
+    allThumbs.forEach(function(t) { t.classList.remove('active'); });
+    thumbEl.classList.add('active');
+    thumbEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }
+}
+
+function splitViewNextImg(vid) {
+  var state = _splitViewerState[vid];
+  if (!state || state.currentIdx >= state.drawings.length - 1) return;
+  var main = document.getElementById(vid + '_main');
+  var thumbs = main ? main.parentElement.querySelectorAll('.pd-split-thumb') : [];
+  splitViewSelectImg(vid, state.currentIdx + 1, thumbs[state.currentIdx + 1] || null);
+}
+
+function splitViewPrevImg(vid) {
+  var state = _splitViewerState[vid];
+  if (!state || state.currentIdx <= 0) return;
+  var main = document.getElementById(vid + '_main');
+  var thumbs = main ? main.parentElement.querySelectorAll('.pd-split-thumb') : [];
+  splitViewSelectImg(vid, state.currentIdx - 1, thumbs[state.currentIdx - 1] || null);
+}
+
+function splitViewToggleZoom(vid, e) {
+  var state = _splitViewerState[vid];
+  if (!state) return;
+  var main = document.getElementById(vid + '_main');
+  if (!main) return;
+  state.zoomed = !state.zoomed;
+  main.classList.toggle('zoomed', state.zoomed);
+  var img = document.getElementById(vid + '_img');
+  if (img) {
+    img.style.transform = state.zoomed ? 'scale(2)' : '';
+  }
+}
+
+function splitViewZoomIn(vid) {
+  var state = _splitViewerState[vid];
+  if (!state) return;
+  var main = document.getElementById(vid + '_main');
+  var img = document.getElementById(vid + '_img');
+  if (!main || !img) return;
+  state.zoomed = true;
+  main.classList.add('zoomed');
+  var currentScale = parseFloat(img.style.transform.replace(/[^0-9.]/g, '')) || 1;
+  var newScale = Math.min(currentScale + 0.5, 5);
+  img.style.transform = 'scale(' + newScale + ')';
+}
+
+function splitViewZoomOut(vid) {
+  var state = _splitViewerState[vid];
+  if (!state) return;
+  var main = document.getElementById(vid + '_main');
+  var img = document.getElementById(vid + '_img');
+  if (!main || !img) return;
+  var currentScale = parseFloat(img.style.transform.replace(/[^0-9.]/g, '')) || 1;
+  var newScale = Math.max(currentScale - 0.5, 1);
+  img.style.transform = 'scale(' + newScale + ')';
+  if (newScale <= 1) {
+    state.zoomed = false;
+    main.classList.remove('zoomed');
+    img.style.transform = '';
+  }
+}
+
+function splitViewResetZoom(vid) {
+  var state = _splitViewerState[vid];
+  if (!state) return;
+  var main = document.getElementById(vid + '_main');
+  var img = document.getElementById(vid + '_img');
+  if (!main || !img) return;
+  state.zoomed = false;
+  main.classList.remove('zoomed');
+  img.style.transform = '';
+  main.scrollTop = 0;
+  main.scrollLeft = 0;
+}
+
+function openPatentImageViewerFromSplit(vid) {
+  var state = _splitViewerState[vid];
+  if (!state || !state.drawings) return;
+  var main = document.getElementById(vid + '_main');
+  var scope = main && main.closest('#ppv-content') ? 'popup' : 'detail';
+  var data = scope === 'popup' ? window._patentPopupData : window._currentPatentData;
+  openPatentImageViewer(state.drawings, state.currentIdx);
 }
 
 function openPatentImageViewerFromScope(item) {

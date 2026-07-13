@@ -7413,11 +7413,19 @@ body {
 .extract-cell-actions button.btn-confirm { background: #16a34a; color: #fff; border-color: #16a34a; }
 
 /* ── 权利要求折叠从权 ── */
-.pd-claims-list .pd-claim-item.claim-dependent {
+.pd-claim-dependents {
   display: none;
 }
-.pd-claims-list.expanded-all .pd-claim-item.claim-dependent {
+.pd-claim-group.expanded .pd-claim-dependents,
+.pd-claims-list.expanded-all .pd-claim-dependents {
+  display: block;
+}
+.pd-claims-list .pd-claim-item.claim-dependent {
   display: flex;
+}
+.pd-claim-group.expanded .pd-claim-dependent-count,
+.pd-claims-list.expanded-all .pd-claim-dependent-count {
+  display: none;
 }
 .pd-claim-expand-btn {
   display: inline-flex;
@@ -7474,9 +7482,6 @@ body {
   font-size: 12px;
   color: var(--text-secondary);
 }
-.pd-claims-list.expanded-all .pd-claim-dependent-count {
-  display: none;
-}
 
 /* ── 图文对照模式按钮 ── */
 .pd-compare-btn {
@@ -7508,58 +7513,179 @@ body {
   height: 13px;
 }
 
-/* ── 图文对照布局（左文右图）── */
-.pd-split-drawings-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
+/* ── 图文对照布局（左文右图，主图+横向缩略图）── */
+.pd-split-drawings {
+  width: 340px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pd-split-main-image {
+  flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-}
-.pd-split-drawing-item {
+  justify-content: center;
+  background: var(--bg-secondary);
   border-radius: 8px;
   overflow: hidden;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  transition: all 0.2s;
-  background: #fff;
   position: relative;
+  cursor: zoom-in;
 }
-.pd-split-drawing-item:hover {
-  border-color: var(--accent);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+.pd-split-main-image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transition: transform 0.2s;
 }
-.pd-split-drawing-item img {
-  width: 100%;
+.pd-split-main-image.zoomed {
+  cursor: zoom-out;
+  overflow: auto;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+.pd-split-main-image.zoomed img {
+  max-width: none;
+  max-height: none;
+  width: auto;
   height: auto;
-  display: block;
+  cursor: grab;
 }
-.pd-split-drawing-label {
+.pd-split-main-image.zoomed.dragging img {
+  cursor: grabbing;
+}
+.pd-split-img-toolbar {
   position: absolute;
-  bottom: 4px;
-  left: 4px;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.pd-split-main-image:hover .pd-split-img-toolbar {
+  opacity: 1;
+}
+.pd-split-img-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
   background: rgba(0,0,0,0.6);
   color: #fff;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+.pd-split-img-btn:hover {
+  background: rgba(0,0,0,0.8);
+}
+.pd-split-img-btn svg {
+  width: 14px;
+  height: 14px;
+}
+.pd-split-img-nav {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0,0,0,0.6);
+  padding: 4px 10px;
+  border-radius: 16px;
+  color: #fff;
+  font-size: 12px;
+}
+.pd-split-img-nav-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+.pd-split-img-nav-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.35);
+}
+.pd-split-img-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pd-split-img-nav-btn svg {
+  width: 12px;
+  height: 12px;
+}
+.pd-split-thumbs {
+  display: flex;
+  gap: 6px;
+  padding: 10px 0 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-shrink: 0;
+}
+.pd-split-thumb {
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--bg-secondary);
+  transition: all 0.2s;
+  position: relative;
+}
+.pd-split-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pd-split-thumb:hover {
+  border-color: var(--border);
+}
+.pd-split-thumb.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.pd-split-thumb-label {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  background: rgba(0,0,0,0.6);
+  color: #fff;
+  font-size: 9px;
+  padding: 0 3px;
+  border-radius: 2px;
+  line-height: 1.4;
 }
 .pd-split-drawings-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   color: var(--text-muted);
   font-size: 13px;
-  padding: 40px 20px;
 }
 
 /* ── 图文对照模式下的tab panel ── */
 .pd-tab-panel.active.pd-split-view {
   display: flex !important;
   flex-direction: row;
-  gap: 16px;
+  gap: 0;
   height: calc(100vh - 280px);
   min-height: 400px;
   overflow: hidden;
@@ -7578,17 +7704,11 @@ body {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding-right: 8px;
+  padding: 0 12px 0 0;
 }
-.pd-split-drawings {
-  width: 300px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--border);
-  padding-left: 16px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.pd-split-text .pd-panel-header {
+  margin-top: 0;
+  padding-top: 0;
 }
 
 /* ── Agent 应用内跳转按钮 ── */

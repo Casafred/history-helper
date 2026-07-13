@@ -645,9 +645,9 @@ var AgentUI = (function () {
       toggle.textContent = isCollapsed ? "展开" : "折叠";
     }
     header.addEventListener("click", function (e) {
+      e.stopPropagation();
       toggleSteps();
     });
-    currentStepsBubble._toggleSteps = toggleSteps;
     scrollToBottom();
   }
 
@@ -743,6 +743,18 @@ var AgentUI = (function () {
     if (name === "search") {
       return result.count ? result.count + "条结果" : "搜索完成";
     }
+    if (name === "get_timeline") {
+      return result.eventCount + "个审查节点";
+    }
+    if (name === "run_ai_analysis" || name === "fetch_dossier_and_analyze") {
+      return result.documentCount ? result.documentCount + "篇文档，AI分析已启动" : (result.tip || "分析已启动");
+    }
+    if (name === "open_document_reader") {
+      return "文档阅读器已打开";
+    }
+    if (name === "get_documents_summary") {
+      return result.documentCount + "篇审查文档";
+    }
     return result.ok ? "完成" : "";
   }
 
@@ -753,13 +765,13 @@ var AgentUI = (function () {
   function finishAllSteps() {
     if (currentStepsBubble) {
       var titleEl = currentStepsBubble.querySelector(".steps-title");
-      if (titleEl && completedSteps === stepsCount) {
-        titleEl.textContent = "✅ 执行完成";
+      if (titleEl && completedSteps === stepsCount && stepsCount > 0) {
+        titleEl.textContent = "✅ 执行步骤";
       }
       var toggle = currentStepsBubble.querySelector(".steps-toggle");
-      if (toggle) toggle.textContent = "展开";
-      if (completedSteps > 0) {
+      if (toggle && stepsCount > 0) {
         currentStepsBubble.classList.add("collapsed");
+        toggle.textContent = "展开";
       }
     }
     currentStepsBubble = null;
