@@ -59,22 +59,22 @@ var AgentUI = (function () {
 
   function loadPosition() {
     try {
-      var pos = localStorage.getItem("patentlens_agent_position");
+      var pos = localStorage.getItem("patentlens_agent_position_v2");
       if (pos) {
         pos = JSON.parse(pos);
         if (toggleBtn) {
           toggleBtn.style.left = pos.toggleLeft || "";
-          toggleBtn.style.top = pos.toggleTop || "";
+          toggleBtn.style.top = pos.toggleTop || "20px";
           toggleBtn.style.right = pos.toggleRight || "20px";
-          toggleBtn.style.bottom = pos.toggleBottom || "20px";
+          toggleBtn.style.bottom = pos.toggleBottom || "";
         }
         if (panelEl && pos.panelWidth) {
           panelEl.style.width = pos.panelWidth + "px";
           panelEl.style.height = pos.panelHeight + "px";
           panelEl.style.left = pos.panelLeft || "";
-          panelEl.style.top = pos.panelTop || "";
+          panelEl.style.top = pos.panelTop || "90px";
           panelEl.style.right = pos.panelRight || "20px";
-          panelEl.style.bottom = pos.panelBottom || "90px";
+          panelEl.style.bottom = pos.panelBottom || "";
         }
       }
     } catch (e) {}
@@ -86,15 +86,15 @@ var AgentUI = (function () {
         toggleLeft: toggleBtn.style.left,
         toggleTop: toggleBtn.style.top,
         toggleRight: toggleBtn.style.right || "20px",
-        toggleBottom: toggleBtn.style.bottom || "20px",
+        toggleBottom: toggleBtn.style.bottom || "",
         panelWidth: panelEl.offsetWidth,
         panelHeight: panelEl.offsetHeight,
         panelLeft: panelEl.style.left,
         panelTop: panelEl.style.top,
         panelRight: panelEl.style.right || "20px",
-        panelBottom: panelEl.style.bottom || "90px",
+        panelBottom: panelEl.style.bottom || "",
       };
-      localStorage.setItem("patentlens_agent_position", JSON.stringify(pos));
+      localStorage.setItem("patentlens_agent_position_v2", JSON.stringify(pos));
     } catch (e) {}
   }
 

@@ -2844,26 +2844,34 @@ function openPatentImageViewer(images, startIndex) {
 
 // ── 在文本中识别专利号并转为可跳转链接 ──
 function linkifyPatentNumbers(text) {
-  // Match patent numbers in two formats:
+  // Match patent numbers in multiple formats:
   // 1. Compact: US12345678B2, EP4252965A3, CN119052083A, WO2024123456A1
-  // 2. Spaced: US 2019/0009398, US 2019/0308309, EP 4252965 A3
+  // 2. Spaced with slash: US 2019/0009398, US 2019/0308309
+  // 3. Spaced without slash (single group): EP 4252965 A3, US 20190308309
+  // 4. Multi-spaced (digit groups separated by spaces): DE 42 39 799 A1, JP 2005 066804 A, EP 2 368 670 A2
   // Only replace in text nodes, not inside HTML tags
   const parts = text.split(/(<[^>]+>)/);
   return parts.map((part, i) => {
     if (i % 2 === 1) return part; // HTML tag, skip
-    // First handle spaced format: "US 2019/0009398" → "US20190009398"
+    // 1. Spaced with slash: "US 2019/0009398" → "US20190009398"
     let result = part.replace(/\b([A-Z]{2})\s+(\d{4})\s*\/\s*(\d{4,7})\s*([A-Z]\d?)?\b/g, (match, country, year, num, kind) => {
       const pn = country + year + num + (kind || '');
       return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + match + '</a>';
     });
-    // Then handle spaced format without slash: "US 20190308309" or "EP 4252965 A3"
+    // 2. Multi-spaced format: "DE 42 39 799 A1", "JP 2005 066804 A", "EP 2 368 670 A2"
+    //    Requires at least 2 digit groups separated by spaces (e.g. "42 39 799")
+    result = result.replace(/\b([A-Z]{2})\s+(\d{1,4}(?:\s+\d{1,7}){1,4})\s*([A-Z]\d?)?\b/g, (match, country, numGroup, kind) => {
+      const pn = country + numGroup.replace(/\s+/g, '') + (kind || '');
+      return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + match + '</a>';
+    });
+    // 3. Spaced without slash (single group): "US 20190308309" or "EP 4252965 A3"
     result = result.replace(/\b([A-Z]{2})\s+(\d{5,})\s*([A-Z]\d?)?\b/g, (match, country, num, kind) => {
       // Skip if already wrapped in a link
       if (match.length < 7) return match;
       const pn = country + num + (kind || '');
       return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + match + '</a>';
     });
-    // Finally handle compact format: US12345678B2
+    // 4. Compact format: US12345678B2
     // Track positions already inside links to avoid double-wrapping
     const linkRanges = [];
     const linkRegex = /<a[^>]*class="pd-patent-link-inline"[^>]*>/g;

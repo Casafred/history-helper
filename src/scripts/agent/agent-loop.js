@@ -6,7 +6,7 @@ var AgentCore = (function () {
   var BUS = AgentEventBus;
   var EVT = BUS.EVENTS;
 
-  var MAX_ITERATIONS = 25;
+  var MAX_ITERATIONS = 40;
   var LLM_TIMEOUT_MS = 120000; // 单次LLM调用超时：2分钟
   var currentAbortController = null;
   var isRunning = false;
@@ -24,14 +24,26 @@ var AgentCore = (function () {
     "",
     "## 可用工具",
     "1. fetch_patent(patent_number) — 查询专利审查信息，自动展示在界面上。返回：专利号、标题、申请人、专利局、文档数、同族数等摘要",
-    "2. get_patent_basic_info() — 获取当前已查询专利的基本信息（需先fetch_patent）",
-    "3. get_documents_summary() — 获取审查文档列表摘要（需先fetch_patent）",
-    "4. get_family_summary() — 获取同族专利信息摘要（需先fetch_patent）",
-    "5. switch_to_tab(tab) — 切换界面标签页。tab可选：overview(概览)、family(同族)、kanban(审查看板)、ai-analysis(AI分析)",
-    "6. update_todos(todos) — 更新任务进度列表，让用户看到你的计划。每个todo含id/content/status(pending/in_progress/completed)",
-    "7. think(thought) — 记录你的思考过程，让用户了解你的意图",
-    "8. finish(summary) — 任务完成时调用，给出最终总结",
-    "9. ask_user(question, options) — 信息不足时向用户提问",
+    "2. fetch_patent_fulltext(patent_number) — 查询专利原文（Google Patents），返回权利要求、说明书等全文内容。当用户需要分析权利要求或技术方案时使用",
+    "3. get_patent_basic_info() — 获取当前已查询专利的基本信息（需先fetch_patent）",
+    "4. get_documents_summary() — 获取审查文档列表摘要，包含每篇文档的类型、日期、标题（需先fetch_patent）",
+    "5. get_family_summary() — 获取同族专利信息摘要（需先fetch_patent）",
+    "6. get_timeline() — 获取审查时间线，包含按时间排序的审查事件（日期+标题+描述）。这是回答「经历了几次审查」「审查历程」等问题的关键数据源（需先fetch_patent）",
+    "7. get_patent_claims() — 获取权利要求列表，含独立/从属标记和原文（需先fetch_patent_fulltext）",
+    "8. run_ai_analysis() — 触发AI审查意见梳理。注意：此工具会打开文档勾选面板，需要用户手动选择文档并确认后才会开始分析。仅当用户明确要求「AI梳理」「深度分析」「审查意见分析」时才调用，不要自动触发",
+    "9. get_analysis_result() — 获取AI分析结果。如果返回inProgress=true表示分析仍在进行中，此时不要继续轮询，应直接finish并告知用户稍后在AI分析标签页查看结果",
+    "10. switch_to_tab(tab) — 切换界面标签页。tab可选：overview(概览)、family(同族)、kanban(审查看板)、ai-analysis(AI分析)",
+    "11. update_todos(todos) — 更新任务进度列表，让用户看到你的计划。每个todo含id/content/status(pending/in_progress/completed)",
+    "12. think(thought) — 记录你的思考过程，让用户了解你的意图",
+    "13. finish(summary) — 任务完成时调用，给出最终总结",
+    "14. ask_user(question, options) — 信息不足时向用户提问",
+    "",
+    "## 决策原则（重要）",
+    "1. 用户询问「经历了几次审查/答复」「审查历程」「审查状态」等问题时，只需调用 fetch_patent → get_timeline → get_documents_summary，用时间线和文档列表直接回答。不要自动触发 run_ai_analysis",
+    "2. 只有当用户明确说出「AI梳理」「深度分析」「梳理审查意见」「分析审查意见」等关键词时，才调用 run_ai_analysis",
+    "3. run_ai_analysis 会弹出文档勾选面板等待用户操作，调用后应告知用户「请在弹出的面板中选择需要分析的文档，确认后AI将开始梳理」，然后直接 finish",
+    "4. 如果用户没有明确要求AI分析，不要调用 run_ai_analysis 和 get_analysis_result",
+    "5. 不要轮询 get_analysis_result 超过2次。如果返回 inProgress=true，直接 finish 并告知用户「分析正在进行中，稍后可在AI分析标签页查看结果」",
     "",
     "## 工作原则",
     "1. 收到用户消息后，先用think分析需求，再用update_todos制定计划（不要用固定模板，根据实际需求拆解）",
@@ -45,6 +57,7 @@ var AgentCore = (function () {
     "- 用中文回答",
     "- 专业但易懂，结构化呈现",
     "- 不要重复工具返回的原始JSON，提炼成用户能看懂的内容",
+    "- 回答审查历程时，按时间顺序列出关键审查事件（OA、答复、修改等），让用户一目了然",
   ].join("\n");
 
   function setSystemPrompt(prompt) {
@@ -105,6 +118,8 @@ var AgentCore = (function () {
     try {
       var iteration = 0;
       var finalAnswer = "";
+      var lastToolName = "";
+      var sameToolRepeatCount = 0;
 
       while (iteration < MAX_ITERATIONS) {
         iteration++;
@@ -319,6 +334,21 @@ var AgentCore = (function () {
           console.log("[AgentCore] tool result:", tc.name, JSON.stringify(toolResult).substring(0, 200));
           BUS.emit(EVT.TOOL_CALL_END, { name: tc.name, result: toolResult, id: tc.id });
 
+          // 停滞检测：如果同一个工具连续被调用超过3次，注入一条提醒让AI停止轮询
+          if (tc.name === lastToolName) {
+            sameToolRepeatCount++;
+          } else {
+            lastToolName = tc.name;
+            sameToolRepeatCount = 1;
+          }
+          if (sameToolRepeatCount >= 3) {
+            console.warn("[AgentCore] stall detected: tool '" + tc.name + "' called " + sameToolRepeatCount + " times in a row");
+            memory.push({
+              role: "user",
+              content: "你已经连续调用 " + tc.name + " 工具 " + sameToolRepeatCount + " 次了。请停止轮询，根据已有信息直接调用finish给出总结。如果分析仍在进行中，告知用户稍后查看结果即可。",
+            });
+          }
+
           var resultStr = typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult, null, 2);
           memory.push({
             role: "tool",
@@ -338,6 +368,30 @@ var AgentCore = (function () {
             }
           }
           break;
+        }
+
+        // 如果工具返回了 waitForUser=true，说明需要用户操作，自动结束并等待
+        var hasWaitForUser = finalToolCalls.some(function (tc) {
+          return tc.name === "run_ai_analysis" || tc.name === "fetch_dossier_and_analyze";
+        });
+        if (hasWaitForUser) {
+          // 检查工具结果是否包含 waitForUser
+          for (var wi = memory.length - 1; wi >= 0 && wi >= memory.length - finalToolCalls.length; wi--) {
+            var memEntry = memory[wi];
+            if (memEntry && memEntry.role === "tool" && memEntry.content) {
+              try {
+                var parsedResult = JSON.parse(memEntry.content);
+                if (parsedResult.waitForUser) {
+                  finalAnswer = parsedResult.tip || "已弹出文档选择面板，请在界面上选择需要分析的文档并确认。";
+                  var stubAssistantMsg = { role: "assistant", content: finalAnswer };
+                  memory.push(stubAssistantMsg);
+                  var shouldBreak = true;
+                  break;
+                }
+              } catch (e) {}
+            }
+          }
+          if (typeof shouldBreak !== "undefined" && shouldBreak) break;
         }
       }
 
