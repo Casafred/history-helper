@@ -7,6 +7,8 @@ var AgentPatentTools = (function () {
   var BUS = AgentEventBus;
   var EVT = BUS.EVENTS;
 
+  var currentFulltextData = null;
+
   function waitForSearchComplete(timeoutMs) {
     return new Promise(function (resolve) {
       var timeout = setTimeout(function () {
@@ -17,6 +19,24 @@ var AgentPatentTools = (function () {
         var loadingEl = document.getElementById("loading");
         var searchBtnEl = document.getElementById("search-btn");
         if (loadingEl && loadingEl.classList.contains("hidden") && searchBtnEl && !searchBtnEl.disabled) {
+          clearTimeout(timeout);
+          clearInterval(checkInterval);
+          resolve({ done: true });
+        }
+      }, 300);
+    });
+  }
+
+  function waitForFulltextComplete(timeoutMs) {
+    return new Promise(function (resolve) {
+      var timeout = setTimeout(function () {
+        resolve({ timedOut: true });
+      }, timeoutMs || 60000);
+
+      var checkInterval = setInterval(function () {
+        var searchBtnEl = document.getElementById("search-btn");
+        var detailSection = document.getElementById("patent-detail-section");
+        if (searchBtnEl && !searchBtnEl.disabled && detailSection && !detailSection.classList.contains("hidden")) {
           clearTimeout(timeout);
           clearInterval(checkInterval);
           resolve({ done: true });
@@ -53,6 +73,22 @@ var AgentPatentTools = (function () {
     return null;
   }
 
+  function getCurrentFulltextData() {
+    if (currentFulltextData) {
+      return currentFulltextData;
+    }
+    if (typeof window !== "undefined" && window._currentPatentData) {
+      return window._currentPatentData;
+    }
+    if (typeof _pdPatentCache !== "undefined") {
+      var keys = Object.keys(_pdPatentCache);
+      if (keys.length > 0) {
+        return _pdPatentCache[keys[keys.length - 1]];
+      }
+    }
+    return null;
+  }
+
   function switchToTab(tabName) {
     var tabMap = {
       "overview": "overview",
@@ -77,7 +113,7 @@ var AgentPatentTools = (function () {
 
     AgentTools.register({
       name: "fetch_patent",
-      description: "查询专利审查信息并在界面上展示。输入专利号后自动查询同族、审查文档列表等数据，并切换到概览页面显示。这是查询专利的主要入口，支持US/EP/WO/DE/KR等专利局。",
+      description: "查询专利审查档案/审查历史信息（dossier模式），获取同族专利、审查文档列表、审查时间线等审查流程相关数据。注意：此工具不包含权利要求书、说明书等专利全文内容。当用户需要：总结权利要求保护范围、查看专利全文、分析技术方案、查看说明书内容时，必须使用fetch_patent_fulltext工具。",
       parameters: {
         type: "object",
         properties: {
@@ -238,6 +274,121 @@ var AgentPatentTools = (function () {
           office: data.office,
           title: data.title || "(暂无标题)",
           applicantName: data.applicantName || "",
+        });
+      },
+    });
+
+    AgentTools.register({
+      name: "fetch_patent_fulltext",
+      description: "查询专利原文（Google Patents），获取完整的专利信息包括：标题、摘要、权利要求书、说明书、申请人、发明人、引证/被引信息等。当用户需要总结权利要求保护范围、分析专利技术方案、查看专利全文内容时，应使用此工具而非fetch_patent。",
+      parameters: {
+        type: "object",
+        properties: {
+          patent_number: {
+            type: "string",
+            description: "专利号，支持CN/US/EP/WO/DE/JP/KR等各国专利号，如 CN101172339B, US14412875, EP1234567B1",
+          },
+        },
+        required: ["patent_number"],
+      },
+      execute: async function (args) {
+        var patentInput = document.getElementById("patent-input");
+        var searchBtn = document.getElementById("search-btn");
+        if (!patentInput || !searchBtn) {
+          return { error: "找不到搜索输入框" };
+        }
+
+        if (typeof searchMode !== "undefined") {
+          searchMode = "patent";
+          document.querySelectorAll(".search-mode-btn").forEach(function (b) {
+            b.classList.toggle("active", b.dataset.mode === "patent");
+          });
+        }
+
+        patentInput.value = args.patent_number;
+
+        if (typeof searchPatentDetail === "function") {
+          try {
+            await searchPatentDetail(args.patent_number);
+          } catch (e) {
+            return { error: "查询失败: " + e.message };
+          }
+        } else {
+          return { error: "专利原文查询功能不可用" };
+        }
+
+        await new Promise(function (r) { return setTimeout(r, 1000); });
+
+        var data = getCurrentFulltextData();
+        if (data) {
+          currentFulltextData = data;
+          AgentCore.updateContext({ patentFulltextData: data, patentNumber: args.patent_number });
+
+          var result = {
+            ok: true,
+            patentNumber: data.patent_number || args.patent_number,
+            title: data.title || "(暂无标题)",
+            abstract: data.abstract || "",
+            assignees: data.assignees || [],
+            inventors: data.inventors || [],
+            publicationDate: data.publication_date || "",
+            filingDate: data.filing_date || "",
+            priorityDate: data.priority_date || "",
+            claimsCount: (data.claims || []).length,
+            hasDescription: !!(data.description && data.description.length > 0),
+            citationCount: (data.patent_citations || []).length,
+            citedByCount: (data.cited_by || []).length,
+          };
+
+          return result;
+        }
+
+        return { ok: false, error: "查询完成但未获取到专利原文数据，请检查专利号是否正确" };
+      },
+    });
+
+    AgentTools.register({
+      name: "get_patent_claims",
+      description: "获取已查询专利原文的权利要求书全文。必须先调用fetch_patent_fulltext获取专利原文。返回所有权利要求的编号、类型（独立/从属）和文本内容。",
+      parameters: { type: "object", properties: {} },
+      execute: function () {
+        var data = getCurrentFulltextData();
+        if (!data || !data.claims) {
+          return Promise.resolve({ error: "请先调用fetch_patent_fulltext查询专利原文" });
+        }
+        var claims = (data.claims || []).map(function (c, i) {
+          return {
+            num: c.num || (i + 1),
+            type: c.type || (c.dependent_on ? "dependent" : "independent"),
+            dependentOn: c.dependent_on || null,
+            text: c.text || "",
+          };
+        });
+        return Promise.resolve({
+          ok: true,
+          patentNumber: data.patent_number || "",
+          title: data.title || "",
+          totalClaims: claims.length,
+          independentClaims: claims.filter(function (c) { return c.type === "independent" || !c.dependentOn; }).length,
+          claims: claims,
+        });
+      },
+    });
+
+    AgentTools.register({
+      name: "get_patent_abstract",
+      description: "获取已查询专利原文的摘要。必须先调用fetch_patent_fulltext。",
+      parameters: { type: "object", properties: {} },
+      execute: function () {
+        var data = getCurrentFulltextData();
+        if (!data) {
+          return Promise.resolve({ error: "请先调用fetch_patent_fulltext查询专利原文" });
+        }
+        return Promise.resolve({
+          ok: true,
+          patentNumber: data.patent_number || "",
+          title: data.title || "",
+          abstract: data.abstract || "",
         });
       },
     });
