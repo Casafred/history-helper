@@ -51,6 +51,20 @@ var AgentPatentTools = (function () {
     return pn;
   }
 
+  function detectClaimType(text, idx) {
+    if (!text) return idx === 0 ? "independent" : "dependent";
+    var t = String(text).trim();
+    var head = t.substring(0, 300);
+    if (/^(根据|如|按照|依据).*(权利要求|权项|claim|claims)/i.test(head)) return "dependent";
+    if (/^the\s+(claimed|present)\s+invention/i.test(head)) return "independent";
+    if (/請求項\s*\d+/i.test(head)) return "dependent";
+    if (/に記載/.test(head)) return "dependent";
+    if (/のいずれか/.test(head)) return "dependent";
+    if (/前記|所述的/.test(t.substring(0, 80))) return "dependent";
+    if (/\bclaim\s+\d+/i.test(head)) return "dependent";
+    return idx === 0 ? "independent" : "dependent";
+  }
+
   function getCurrentPatentData() {
     try {
       if (typeof currentData !== "undefined" && currentData) {
@@ -190,7 +204,13 @@ var AgentPatentTools = (function () {
           };
         }
 
-        return { ok: false, error: "查询完成但未获取到数据，可能是专利号格式不支持或网络问题。请确认专利号格式正确，如 US14412875, EP1234567B1, WO2023123456" };
+        var pn = normalizedPn || "";
+        var office = pn.replace(/[0-9].*/, "").toUpperCase();
+        var hint = "请确认专利号格式正确，如 US14412875, EP1234567B1, WO2023123456";
+        if (office === "JP" || office === "CN" || office === "KR") {
+          hint = "该专利局可能不在Global Dossier覆盖范围内。请改用fetch_patent_fulltext工具查询专利原文（包含权利要求书、说明书等）";
+        }
+        return { ok: false, error: "审查档案查询未获取到数据。" + hint };
       },
     });
 
@@ -376,9 +396,10 @@ var AgentPatentTools = (function () {
           return Promise.resolve({ error: "请先调用fetch_patent_fulltext查询专利原文" });
         }
         var claims = (data.claims || []).map(function (c, i) {
+          var claimType = c.type === "dependent" ? "dependent" : (c.type === "independent" ? "independent" : detectClaimType(c.text, i));
           return {
             num: c.num || (i + 1),
-            type: c.type || (c.dependent_on ? "dependent" : "independent"),
+            type: claimType,
             dependentOn: c.dependent_on || null,
             text: c.text || "",
           };
@@ -388,7 +409,8 @@ var AgentPatentTools = (function () {
           patentNumber: data.patent_number || "",
           title: data.title || "",
           totalClaims: claims.length,
-          independentClaims: claims.filter(function (c) { return c.type === "independent" || !c.dependentOn; }).length,
+          independentClaims: claims.filter(function (c) { return c.type === "independent"; }).length,
+          dependentClaims: claims.filter(function (c) { return c.type === "dependent"; }).length,
           claims: claims,
         });
       },

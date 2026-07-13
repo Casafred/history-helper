@@ -82,6 +82,13 @@ var AgentBaseTools = (function () {
         required: ["summary"],
       },
       execute: function (args) {
+        var ctx = AgentCore.getContext();
+        if (ctx.todos && ctx.todos.length > 0) {
+          var completedTodos = ctx.todos.map(function (t) {
+            return Object.assign({}, t, { status: "completed" });
+          });
+          AgentCore.updateTodos(completedTodos);
+        }
         return Promise.resolve({ ok: true, finished: true, summary: args.summary });
       },
     });

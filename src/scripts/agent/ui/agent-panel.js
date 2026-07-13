@@ -323,6 +323,16 @@ var AgentUI = (function () {
       toggleBtn.classList.remove("running");
       if (currentAssistantBubble) currentAssistantBubble = null;
       if (currentThinkingBubble) currentThinkingBubble = null;
+      var ctx = AgentCore.getContext();
+      if (ctx.todos && ctx.todos.length > 0) {
+        var hasIncomplete = ctx.todos.some(function (t) { return t.status !== "completed"; });
+        if (hasIncomplete) {
+          var completedTodos = ctx.todos.map(function (t) {
+            return Object.assign({}, t, { status: "completed" });
+          });
+          AgentCore.updateTodos(completedTodos);
+        }
+      }
       finishAllSteps();
     });
 
@@ -331,6 +341,13 @@ var AgentUI = (function () {
       updateButtons();
       toggleBtn.classList.remove("running");
       addErrorMessage(data.error || "发生错误");
+      var ctx = AgentCore.getContext();
+      if (ctx.todos && ctx.todos.length > 0) {
+        var completedTodos = ctx.todos.map(function (t) {
+          return Object.assign({}, t, { status: t.status === "completed" ? "completed" : "pending" });
+        });
+        AgentCore.updateTodos(completedTodos);
+      }
       finishAllSteps();
     });
 
@@ -641,9 +658,11 @@ var AgentUI = (function () {
     completedSteps = 0;
     var header = msg.querySelector(".steps-header");
     var toggle = msg.querySelector(".steps-toggle");
+    var stepsBubbleEl = currentStepsBubble;
     function toggleSteps() {
-      var isCollapsed = currentStepsBubble.classList.toggle("collapsed");
-      toggle.textContent = isCollapsed ? "展开" : "折叠";
+      if (!stepsBubbleEl) return;
+      var isCollapsed = stepsBubbleEl.classList.toggle("collapsed");
+      if (toggle) toggle.textContent = isCollapsed ? "展开" : "折叠";
     }
     header.addEventListener("click", function (e) {
       e.stopPropagation();

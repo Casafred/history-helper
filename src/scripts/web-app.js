@@ -4897,15 +4897,20 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function isIndependentClaim(c) {
+function isIndependentClaim(c, idx) {
   if (!c) return false;
   if (c.type === 'independent') return true;
   if (c.type === 'dependent') return false;
   if (c.dependent_on !== undefined && c.dependent_on !== null && c.dependent_on !== '' && c.dependent_on !== false) return false;
-  var text = (c.text || '').toLowerCase().trim();
-  if (/^(根据|如|按照|依据).*(权利要求|权项|claim|claims)/.test(text)) return false;
-  if (/^(the|a|an)\s+claim\s+\d+/.test(text)) return false;
-  return true;
+  var text = (c.text || '').trim();
+  var head = text.substring(0, 300);
+  if (/^(根据|如|按照|依据).*(权利要求|权项|claim|claims)/i.test(head)) return false;
+  if (/請求項\s*\d+/i.test(head)) return false;
+  if (/に記載/.test(head)) return false;
+  if (/のいずれか/.test(head)) return false;
+  if (/前記|所述的/.test(text.substring(0, 80))) return false;
+  if (/\bclaim\s+\d+/i.test(head)) return false;
+  return idx === 0 ? true : false;
 }
 
 function renderClaimsListHtml(claims, scope) {
@@ -4913,7 +4918,7 @@ function renderClaimsListHtml(claims, scope) {
     return '<div class="pd-empty">暂无权利要求数据</div>';
   }
   var normalizedClaims = claims.map(function(c, i) {
-    var isInd = isIndependentClaim(c);
+    var isInd = isIndependentClaim(c, i);
     return Object.assign({}, c, { _isIndependent: isInd, _idx: i });
   });
   var independentCount = normalizedClaims.filter(function(c) { return c._isIndependent; }).length;
