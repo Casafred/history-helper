@@ -55,6 +55,7 @@
           "scripts/web-ai.js",
           "scripts/patent-status.js",
           "scripts/web-app.js",
+          "scripts/image-annotations.js",
           "scripts/agent/**"
         ]
       }
