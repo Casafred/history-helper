@@ -2165,6 +2165,9 @@ function _hideFindBarIfNeeded(tabName) {
 function autoTriggerGoogleTranslate(scope) {
   var patentData = (scope === 'popup') ? window._patentPopupData : window._currentPatentData;
   if (!patentData || !patentData.patent_number) return;
+  // Reset fig-link scope to the current tab — ensures correct container
+  // is targeted even if a previous patent's scope lingered.
+  _figLinkScope = scope;
   // Only auto-translate non-Chinese patents
   if (isCNPatent(patentData.patent_number)) {
     // For CN patents, text is already in Chinese — link figures immediately
@@ -2869,6 +2872,10 @@ function toggleGoogleTranslate() {
     }
     _setGoogTransCookie("");
     _googleTranslateActive = false;
+    // Stop any pending fig-link polling and clear scope so next GT activation
+    // re-detects the scope from scratch.
+    if (_figLinkPollTimer) { clearTimeout(_figLinkPollTimer); _figLinkPollTimer = null; }
+    _figLinkScope = null;
     return;
   }
 
@@ -2949,7 +2956,16 @@ function _dispatchComboChange(combo) {
 
 // Poll for the combo and auto-select the target language (fallback for cookie approach)
 function _pollSelectGoogleTranslateLang(targetLang, attempts) {
-  if (attempts > 20) return; // ~20 seconds max
+  if (attempts > 20) {
+    console.warn('[FigLink] _pollSelectGoogleTranslateLang exhausted, but checking DOM for translation anyway');
+    // Even if combo wasn't set, check if GT translated the DOM via cookie.
+    // If <font> tags appeared, treat as activated.
+    if (document.querySelector('font')) {
+      _googleTranslateActive = true;
+      _onGoogleTranslateActivated();
+    }
+    return;
+  }
   var combo = document.querySelector(".goog-te-combo");
   if (!combo) {
     setTimeout(function() { _pollSelectGoogleTranslateLang(targetLang, attempts + 1); }, 1000);
@@ -2965,6 +2981,12 @@ function _pollSelectGoogleTranslateLang(targetLang, attempts) {
   // Verify after a short delay; retry if not set
   setTimeout(function() {
     if (combo.value === targetLang || document.querySelector(".goog-te-banner-frame")) {
+      _googleTranslateActive = true;
+      _onGoogleTranslateActivated();
+    } else if (document.querySelector('font')) {
+      // Combo value didn't match, but <font> tags appeared — translation is
+      // happening via cookie. Treat as activated.
+      console.log('[FigLink] combo value mismatch, but <font> tags detected — activating');
       _googleTranslateActive = true;
       _onGoogleTranslateActivated();
     } else {
@@ -2996,8 +3018,22 @@ var _figLinkPollInterval = 1000; // ms between poll attempts
 var _figLinkPollMax = 20;       // max poll attempts (~20 seconds)
 var _figLinkPollCount = 0;
 var _figLinkLastTextSnapshot = '';
+
+// Auto-detect the active scope: prefer popup if it's visible, else main.
+function _detectFigLinkScope() {
+  var popup = document.getElementById('ppv-content');
+  if (popup && !popup.closest('.hidden') && popup.querySelector('.pd-description-text')) {
+    return 'popup';
+  }
+  return 'main';
+}
+
 function _onGoogleTranslateActivated() {
-  if (!_figLinkScope) return;
+  // Auto-detect scope if not explicitly set — ensures translation capture
+  // works regardless of how GT was triggered (auto / manual button / context menu).
+  if (!_figLinkScope) {
+    _figLinkScope = _detectFigLinkScope();
+  }
   console.log('[FigLink] GT activated, starting translation polling for scope:', _figLinkScope);
   // Reset poll state
   _figLinkPollCount = 0;
@@ -3105,6 +3141,8 @@ function _disableGoogleTranslateQuiet() {
     }
     _setGoogTransCookie("");
     _googleTranslateActive = false;
+    // Stop any pending poll timer
+    if (_figLinkPollTimer) { clearTimeout(_figLinkPollTimer); _figLinkPollTimer = null; }
     console.log('[FigLink] Google Translate disabled quietly');
   } catch(e) {
     console.warn('[FigLink] error disabling GT:', e);
