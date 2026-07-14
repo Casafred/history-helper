@@ -7,7 +7,7 @@
  * or reproduction is strictly prohibited.
  *
  * @author Alfred Shi
- * @version 260715
+ * @version 260716
  */
 :root {
   --bg-primary: #0f1713;
@@ -5910,6 +5910,25 @@ body {
   user-select: none;
 }
 
+/* ===== Figure reference auto-links in description ===== */
+.pd-fig-link {
+  color: var(--accent, #2563eb);
+  text-decoration: underline;
+  cursor: pointer;
+  font-weight: 500;
+  transition: color 0.15s, background 0.15s;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.pd-fig-link:hover {
+  color: #fff;
+  background: var(--accent, #2563eb);
+  text-decoration: none;
+}
+.pd-fig-link:active {
+  opacity: 0.7;
+}
+
 /* ===== AI 解读 区域 ===== */
 .pd-ai-interpret {
   background: linear-gradient(135deg, rgba(99,102,241,0.06), rgba(168,85,247,0.06));
@@ -7758,23 +7777,24 @@ body {
 .pd-split-main-image.anno-mode .img-anno-layer {
   pointer-events: none;
 }
-/* Hint bar shown when annotation mode is active */
+/* Hint bar shown when annotation mode is active — positioned at top of image area */
 .anno-hint-bar {
-  position: fixed;
-  top: 12px;
+  position: absolute;
+  top: 8px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 9999;
-  display: none;
+  z-index: 100;
+  display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 16px;
+  padding: 6px 16px;
   background: var(--accent, #2563eb);
   color: #fff;
-  border-radius: 8px;
-  font-size: 13px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+  border-radius: 20px;
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
   pointer-events: auto;
+  white-space: nowrap;
 }
 .anno-hint-bar .anno-hint-text { font-weight: 500; }
 .anno-hint-bar .anno-hint-exit {
@@ -7788,7 +7808,6 @@ body {
   white-space: nowrap;
 }
 .anno-hint-bar .anno-hint-exit:hover { background: rgba(255,255,255,0.35); }
-body.anno-mode-active .anno-hint-bar { display: flex; }
 body.anno-mode-active .pd-split-img-btn.anno-toggle-btn {
   background: var(--accent);
   color: #fff;

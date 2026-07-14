@@ -194,9 +194,18 @@ var ImageAnnotations = (function () {
   }
 
   // ── Hint bar: reminds user to double-click to insert a marker, with an exit button ──
+  // Positioned at the top of the active image area (not the page center)
   function _syncAnnoHintBar() {
     var bar = document.getElementById("anno-hint-bar");
     if (annotationMode) {
+      // Find the active split-view main image container
+      var targetMain = document.querySelector(".pd-split-main-image") ||
+        document.querySelector(".patent-image-viewer .pd-split-main-image");
+      if (!targetMain) {
+        // No image viewer open yet; defer until one opens
+        if (bar) bar.remove();
+        return;
+      }
       if (!bar) {
         bar = document.createElement("div");
         bar.id = "anno-hint-bar";
@@ -206,13 +215,16 @@ var ImageAnnotations = (function () {
           "标注模式：双击鼠标位置以插入标记" +
           "</span>" +
           '<button class="anno-hint-exit" type="button">退出标注</button>';
-        document.body.appendChild(bar);
         var exitBtn = bar.querySelector(".anno-hint-exit");
         if (exitBtn) {
           exitBtn.addEventListener("click", function () {
             if (annotationMode) toggleAnnotationMode();
           });
         }
+      }
+      // Append inside the image container so it positions relative to it
+      if (bar.parentNode !== targetMain) {
+        targetMain.appendChild(bar);
       }
     } else {
       if (bar) bar.remove();
@@ -224,6 +236,8 @@ var ImageAnnotations = (function () {
     if (!annotationMode) return;
     var main = document.getElementById(vid + "_main");
     if (main) main.classList.add("anno-mode");
+    // Re-sync hint bar into the newly opened viewer
+    _syncAnnoHintBar();
   }
 
   // ── Marker rendering ──
