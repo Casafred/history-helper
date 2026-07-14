@@ -51,8 +51,11 @@
     #po-find-count { font-size: 11px; color: #888; min-width: 80px; text-align: center; }
     #po-smart-bar {
       display: none; flex-wrap: wrap; align-items: center; gap: 6px;
-      background: #f0fdf4; border-bottom: 1px solid #bbf7d0;
-      padding: 6px 14px; font-size: 12px; color: #14532d; flex-shrink: 0;
+      position: fixed; top: 48px; left: 50%; transform: translateX(-50%);
+      background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 20px;
+      padding: 5px 16px; font-size: 12px; color: #14532d;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.12); z-index: 9998;
+      max-width: 92vw; max-height: 120px; overflow-y: auto;
     }
     #po-smart-bar .po-smart-label { font-weight: bold; color: #14532d; margin-right: 4px; }
     #po-smart-bar .po-smart-info { color: #166534; margin-right: 8px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1545,12 +1548,16 @@
             // This prevents smart bar flicker when scrolling the page
             var oldUrlNoHash = (currentUrl || "").split("#")[0];
             var newUrlNoHash = (newUrl || "").split("#")[0];
+            var hashOnlyChange = oldUrlNoHash === newUrlNoHash;
             currentUrl = newUrl;
             hideLoading();
-            updateJpBar();
-            updateCnBar();
-            scheduleNavButtonsUpdate();
-            if (!_smartBarDismissed && oldUrlNoHash !== newUrlNoHash) {
+            // Skip non-essential bar updates on hash-only changes (scroll)
+            if (!hashOnlyChange) {
+              updateJpBar();
+              updateCnBar();
+              scheduleNavButtonsUpdate();
+            }
+            if (!_smartBarDismissed && !hashOnlyChange) {
               setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
               setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
             }
