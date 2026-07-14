@@ -971,10 +971,49 @@ var AgentUI = (function () {
     renderWelcome();
   }
 
+  function positionPanelNearToggle() {
+    if (!toggleBtn || !panelEl) return;
+    var isHidden = panelEl.offsetWidth === 0 && panelEl.offsetHeight === 0;
+    var panelW, panelH;
+    if (isHidden) {
+      var cs = getComputedStyle(panelEl);
+      panelW = parseInt(cs.width, 10) || 420;
+      panelH = parseInt(cs.height, 10) || 600;
+    } else {
+      panelW = panelEl.offsetWidth;
+      panelH = panelEl.offsetHeight;
+    }
+    var btnRect = toggleBtn.getBoundingClientRect();
+    var margin = 8;
+    var newLeft, newTop;
+
+    if (btnRect.right + margin + panelW <= window.innerWidth) {
+      newLeft = btnRect.right + margin;
+    } else if (btnRect.left - margin - panelW >= 0) {
+      newLeft = btnRect.left - margin - panelW;
+    } else {
+      newLeft = Math.max(margin, (window.innerWidth - panelW) / 2);
+    }
+
+    if (btnRect.top + panelH <= window.innerHeight) {
+      newTop = btnRect.top;
+    } else if (btnRect.bottom - panelH >= 0) {
+      newTop = btnRect.bottom - panelH;
+    } else {
+      newTop = Math.max(margin, (window.innerHeight - panelH) / 2);
+    }
+
+    panelEl.style.left = newLeft + "px";
+    panelEl.style.top = newTop + "px";
+    panelEl.style.right = "auto";
+    panelEl.style.bottom = "auto";
+  }
+
   function togglePanel() {
     isOpen = !isOpen;
     panelEl.classList.toggle("open", isOpen);
     if (isOpen) {
+      positionPanelNearToggle();
       setTimeout(function () { inputEl.focus(); }, 100);
     }
   }
@@ -987,6 +1026,7 @@ var AgentUI = (function () {
   function openPanel() {
     isOpen = true;
     panelEl.classList.add("open");
+    positionPanelNearToggle();
     setTimeout(function () { inputEl.focus(); }, 100);
   }
 

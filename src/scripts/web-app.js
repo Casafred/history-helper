@@ -2181,8 +2181,10 @@ function autoTriggerGoogleTranslate(scope) {
   } catch(e) {}
   // Don't toggle off if translation is already active
   if (_googleTranslateActive) {
-    // Translation already active, just re-link figures
-    setTimeout(function() { linkFigureReferences(scope); }, 300);
+    // Translation already active for previous patent; for new content, set up
+    // observer and retry linking (the new description text is being translated)
+    _figLinkScope = scope;
+    _onGoogleTranslateActivated();
     return;
   }
   // Store scope so figure linking runs after translation completes
@@ -2948,6 +2950,7 @@ function _pollSelectGoogleTranslateLang(targetLang, attempts) {
   }
   if (combo.value === targetLang) {
     _googleTranslateActive = true;
+    _onGoogleTranslateActivated();
     return;
   }
   combo.value = targetLang;
@@ -2979,15 +2982,59 @@ function _selectGoogleTranslateLang(targetLang) {
 var _figLinkScope = null;
 var _figLinkTimer = null;
 var _figLinkRetries = 0;
+var _figLinkMaxRetries = 10;
+var _figLinkObserver = null;
 function _onGoogleTranslateActivated() {
   if (_figLinkScope) {
     if (_figLinkTimer) clearTimeout(_figLinkTimer);
     _figLinkRetries = 0;
-    // Wait for Google Translate to finish modifying the DOM, then retry
-    // a few times because translation of long documents can take many seconds
+    // Use MutationObserver to detect when Google Translate has modified the DOM
+    // (it wraps text in <font> tags), in addition to timeout-based retries.
+    _setupFigLinkObserver(_figLinkScope);
+    // Initial delayed run after a short wait for initial translation to complete
     _figLinkTimer = setTimeout(function() {
       _runFigLinkWithRetry(_figLinkScope);
-    }, 4000);
+    }, 3000);
+  }
+}
+
+function _setupFigLinkObserver(scope) {
+  if (_figLinkObserver) {
+    try { _figLinkObserver.disconnect(); } catch(e) {}
+    _figLinkObserver = null;
+  }
+  var container = _getDescriptionContainer(scope);
+  if (!container) return;
+  try {
+    _figLinkObserver = new MutationObserver(function(mutations) {
+      var hasFontChanges = false;
+      for (var i = 0; i < mutations.length; i++) {
+        var added = mutations[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var n = added[j];
+          if (n.nodeType === 1 && (n.tagName === 'FONT' || n.querySelector && n.querySelector('font'))) {
+            hasFontChanges = true;
+            break;
+          }
+        }
+        if (hasFontChanges) break;
+      }
+      if (hasFontChanges && _figLinkTimer) {
+        clearTimeout(_figLinkTimer);
+        _figLinkRetries = 0;
+        _figLinkTimer = setTimeout(function() {
+          _runFigLinkWithRetry(scope);
+        }, 2000);
+      }
+    });
+    _figLinkObserver.observe(container, { childList: true, subtree: true });
+  } catch(e) {}
+}
+
+function _stopFigLinkObserver() {
+  if (_figLinkObserver) {
+    try { _figLinkObserver.disconnect(); } catch(e) {}
+    _figLinkObserver = null;
   }
 }
 
@@ -2998,10 +3045,12 @@ function _runFigLinkWithRetry(scope) {
   _figLinkRetries++;
   // If no new links were created and we haven't exhausted retries, try again
   // (translation may still be in progress for long documents)
-  if (afterCount === beforeCount && _figLinkRetries < 4) {
+  if (afterCount === beforeCount && _figLinkRetries < _figLinkMaxRetries) {
     _figLinkTimer = setTimeout(function() {
       _runFigLinkWithRetry(scope);
     }, 3000);
+  } else {
+    _stopFigLinkObserver();
   }
 }
 
@@ -3068,157 +3117,157 @@ function linkFigureReferences(scope) {
   var isUS = _isUSPatentData(data);
   var totalImgs = data.drawings.length;
 
-  // Regex: 图 followed by optional space, then Arabic/full-width digits or Chinese numerals
-  var figRegex = /图\s*([0-9０-９]+|[一二两三四五六七八九十百零]+)/g;
+  // Regex: 图 followed by optional space/punctuation, then Arabic/full-width digits or Chinese numerals
+  // Matches: 图1, 图 1, 图.1, 图．1, 图１, 图一, 图十二, etc.
+  var figRegex = /图[\s.．。、·・]*([0-9０-９]+|[一二两三四五六七八九十百零]+)/g;
 
-  // Collect text nodes to process. After Google Translate, text is split across
-  // <font> tags, so we need to look at the concatenated text of each block element
-  // and then map matches back to the actual text nodes.
-  var blocks = container.querySelectorAll('p, div, span, li, td');
-  if (blocks.length === 0) blocks = [container];
-
-  blocks.forEach(function(block) {
-    // Skip blocks that already contain fig-links or are inside special elements
-    if (block.querySelector('a.pd-fig-link')) return;
-    if (block.closest('a.pd-fig-link, script, style, .pd-find-highlight')) return;
-
-    // Build a list of text nodes within this block (in document order)
-    var textNodes = [];
-    var walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
-      acceptNode: function(node) {
-        var p = node.parentNode;
-        if (!p) return NodeFilter.FILTER_REJECT;
-        if (p.closest('a.pd-fig-link, script, style, .pd-find-highlight')) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
+  // Collect ALL leaf elements that directly contain text (deepest elements).
+  // After Google Translate, text is wrapped in <font> tags at various nesting
+  // levels, so we need to collect text nodes across the entire container.
+  var allTextNodes = [];
+  var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+    acceptNode: function(node) {
+      var p = node.parentNode;
+      if (!p) return NodeFilter.FILTER_REJECT;
+      // Skip nodes already inside fig-links, scripts, styles, or highlights
+      if (p.closest && p.closest('a.pd-fig-link, script, style, .pd-find-highlight, .goog-te-spinner-pos, #goog-gt-tt')) {
+        return NodeFilter.FILTER_REJECT;
       }
-    });
-    var tn;
-    while (tn = walker.nextNode()) {
-      textNodes.push({ node: tn, text: tn.nodeValue });
-    }
-    if (textNodes.length === 0) return;
-
-    // Concatenate all text nodes to search across <font> tag boundaries
-    var fullText = textNodes.map(function(t) { return t.text; }).join('');
-    figRegex.lastIndex = 0;
-    var match;
-    var hasMatch = false;
-    while ((match = figRegex.exec(fullText)) !== null) {
-      var numStr = match[1];
-      var figureNum = _chineseNumToArabic(numStr);
-      if (figureNum < 1) continue;
-      var imgIdx = isUS ? figureNum : figureNum - 1;
-      if (imgIdx >= totalImgs) continue;
-      hasMatch = true;
-      break;
-    }
-    if (!hasMatch) return;
-
-    // Re-map matches to individual text nodes and wrap them
-    // Build offset map: for each text node, record its start offset in fullText
-    var offset = 0;
-    var offsetMap = [];
-    for (var i = 0; i < textNodes.length; i++) {
-      offsetMap.push({ node: textNodes[i].node, start: offset, end: offset + textNodes[i].text.length });
-      offset += textNodes[i].text.length;
-    }
-
-    // Find all matches in fullText
-    figRegex.lastIndex = 0;
-    var matches = [];
-    while ((match = figRegex.exec(fullText)) !== null) {
-      var numStr2 = match[1];
-      var figureNum2 = _chineseNumToArabic(numStr2);
-      if (figureNum2 < 1) continue;
-      var imgIdx2 = isUS ? figureNum2 : figureNum2 - 1;
-      if (imgIdx2 >= totalImgs) continue;
-      matches.push({
-        fullMatch: match[0],
-        figureNum: figureNum2,
-        start: match.index,
-        end: match.index + match[0].length
-      });
-    }
-    if (matches.length === 0) return;
-
-    // Process matches in reverse order so indices don't shift
-    for (var mi = matches.length - 1; mi >= 0; mi--) {
-      var m = matches[mi];
-      // Find which text nodes this match spans
-      var startNodeIdx = -1, endNodeIdx = -1;
-      var startOffsetInNode = 0, endOffsetInNode = 0;
-      for (var k = 0; k < offsetMap.length; k++) {
-        if (startNodeIdx === -1 && offsetMap[k].start <= m.start && offsetMap[k].end > m.start) {
-          startNodeIdx = k;
-          startOffsetInNode = m.start - offsetMap[k].start;
-        }
-        if (offsetMap[k].start < m.end && offsetMap[k].end >= m.end) {
-          endNodeIdx = k;
-          endOffsetInNode = m.end - offsetMap[k].start;
-          break;
-        }
-      }
-      if (startNodeIdx === -1 || endNodeIdx === -1) continue;
-
-      // If match is entirely within one text node — simple case
-      if (startNodeIdx === endNodeIdx) {
-        var targetNode = offsetMap[startNodeIdx].node;
-        var nodeText = targetNode.nodeValue;
-        var before = nodeText.substring(0, startOffsetInNode);
-        var matchText = nodeText.substring(startOffsetInNode, endOffsetInNode);
-        var after = nodeText.substring(endOffsetInNode);
-        var link = document.createElement('a');
-        link.className = 'pd-fig-link';
-        link.textContent = matchText;
-        link.title = '点击查看' + matchText;
-        link.href = 'javascript:void(0)';
-        (function(fn, sc) {
-          link.addEventListener('click', function(e) {
-            e.preventDefault();
-            jumpToFigure(fn, sc);
-          });
-        })(m.figureNum, scope);
-        var parent = targetNode.parentNode;
-        // Insert after, before, link in correct order
-        if (after) parent.insertBefore(document.createTextNode(after), targetNode.nextSibling);
-        parent.insertBefore(link, targetNode.nextSibling);
-        if (before) {
-          targetNode.nodeValue = before;
-        } else {
-          parent.removeChild(targetNode);
-        }
-      } else {
-        // Match spans multiple text nodes (e.g., across <font> tags)
-        // Wrap the entire range in a single link
-        var firstNode = offsetMap[startNodeIdx].node;
-        var lastNode = offsetMap[endNodeIdx].node;
-        var range = document.createRange();
-        range.setStart(firstNode, startOffsetInNode);
-        range.setEnd(lastNode, endOffsetInNode);
-        var link2 = document.createElement('a');
-        link2.className = 'pd-fig-link';
-        link2.title = '点击查看' + m.fullMatch;
-        link2.href = 'javascript:void(0)';
-        (function(fn, sc) {
-          link2.addEventListener('click', function(e) {
-            e.preventDefault();
-            jumpToFigure(fn, sc);
-          });
-        })(m.figureNum, scope);
-        try {
-          range.surroundContents(link2);
-        } catch(e) {
-          // surroundContents fails if range crosses element boundaries;
-          // fall back to extractContents + insert link
-          try {
-            var contents = range.extractContents();
-            link2.appendChild(contents);
-            range.insertNode(link2);
-          } catch(e2) {}
-        }
-      }
+      // Skip truly empty nodes
+      if (!node.nodeValue || node.nodeValue.length === 0) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
     }
   });
+  var tn;
+  while (tn = walker.nextNode()) {
+    allTextNodes.push({ node: tn, text: tn.nodeValue });
+  }
+  if (allTextNodes.length === 0) return;
+
+  // Concatenate all text nodes to search across <font>/<span> tag boundaries
+  var fullText = allTextNodes.map(function(t) { return t.text; }).join('');
+
+  // Quick pre-scan: are there any matches?
+  figRegex.lastIndex = 0;
+  var preMatch = figRegex.exec(fullText);
+  if (!preMatch) return;
+
+  // Build offset map: for each text node, record its start offset in fullText
+  var offset = 0;
+  var offsetMap = [];
+  for (var i = 0; i < allTextNodes.length; i++) {
+    offsetMap.push({
+      node: allTextNodes[i].node,
+      start: offset,
+      end: offset + allTextNodes[i].text.length
+    });
+    offset += allTextNodes[i].text.length;
+  }
+
+  // Find ALL valid matches in fullText
+  figRegex.lastIndex = 0;
+  var matches = [];
+  var match;
+  while ((match = figRegex.exec(fullText)) !== null) {
+    var numStr = match[1];
+    var figureNum = _chineseNumToArabic(numStr);
+    if (figureNum < 1) continue;
+    var imgIdx = isUS ? figureNum : figureNum - 1;
+    if (imgIdx >= totalImgs) continue;
+    matches.push({
+      fullMatch: match[0],
+      figureNum: figureNum,
+      start: match.index,
+      end: match.index + match[0].length
+    });
+  }
+  if (matches.length === 0) return;
+
+  // Process matches in reverse order so DOM modifications don't affect earlier indices
+  for (var mi = matches.length - 1; mi >= 0; mi--) {
+    var m = matches[mi];
+    _wrapFigMatch(m, offsetMap, scope);
+  }
+}
+
+// Helper: wrap a single figure reference match in a link
+function _wrapFigMatch(m, offsetMap, scope) {
+  // Find which text nodes this match spans
+  var startNodeIdx = -1, endNodeIdx = -1;
+  var startOffsetInNode = 0, endOffsetInNode = 0;
+  for (var k = 0; k < offsetMap.length; k++) {
+    if (startNodeIdx === -1 && offsetMap[k].start <= m.start && offsetMap[k].end > m.start) {
+      startNodeIdx = k;
+      startOffsetInNode = m.start - offsetMap[k].start;
+    }
+    if (offsetMap[k].start < m.end && offsetMap[k].end >= m.end) {
+      endNodeIdx = k;
+      endOffsetInNode = m.end - offsetMap[k].start;
+      break;
+    }
+  }
+  if (startNodeIdx === -1 || endNodeIdx === -1) return;
+
+  // Verify nodes are still in the DOM and their text content hasn't changed
+  var firstNode = offsetMap[startNodeIdx].node;
+  var lastNode = offsetMap[endNodeIdx].node;
+  if (!firstNode.parentNode || !lastNode.parentNode) return;
+
+  // Create the link element
+  var link = document.createElement('a');
+  link.className = 'pd-fig-link';
+  link.title = '点击查看' + m.fullMatch;
+  link.href = 'javascript:void(0)';
+  (function(fn, sc) {
+    link.addEventListener('click', function(e) {
+      e.preventDefault();
+      jumpToFigure(fn, sc);
+    });
+  })(m.figureNum, scope);
+
+  if (startNodeIdx === endNodeIdx) {
+    // Simple case: match within a single text node
+    var targetNode = firstNode;
+    var nodeText = targetNode.nodeValue;
+    // Verify the text still matches
+    var actualMatch = nodeText.substring(startOffsetInNode, endOffsetInNode);
+    var before = nodeText.substring(0, startOffsetInNode);
+    var matchText = actualMatch;
+    var after = nodeText.substring(endOffsetInNode);
+    var parent = targetNode.parentNode;
+    if (!parent) return;
+    if (after) parent.insertBefore(document.createTextNode(after), targetNode.nextSibling);
+    link.textContent = matchText;
+    parent.insertBefore(link, targetNode.nextSibling);
+    if (before) {
+      targetNode.nodeValue = before;
+    } else {
+      parent.removeChild(targetNode);
+    }
+  } else {
+    // Cross-node match (spanning <font> tags or other elements).
+    // Use Range.extractContents() which reliably handles crossing element
+    // boundaries by cloning ancestors, then insert the link.
+    var range = document.createRange();
+    try {
+      range.setStart(firstNode, startOffsetInNode);
+      range.setEnd(lastNode, endOffsetInNode);
+    } catch(e) {
+      return;
+    }
+    try {
+      var contents = range.extractContents();
+      link.appendChild(contents);
+      range.insertNode(link);
+    } catch(e) {
+      // Last resort fallback: simple text node insertion
+      try {
+        range.deleteContents();
+        link.textContent = m.fullMatch;
+        range.insertNode(link);
+      } catch(e2) {}
+    }
+  }
 }
 
 // Jump to a specific figure in the split-view image area
