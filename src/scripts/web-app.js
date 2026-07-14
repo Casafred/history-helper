@@ -1333,23 +1333,30 @@ async function searchPatentDetail(input) {
   // (移除了直接打开J-PlatPat的跳转，J-PlatPat仅用于审查文档模式)
 
   // 审查文档模式下的缓存恢复（专利原文模式不应恢复 kanbanState 缓存，否则拦截了 GP 查询）
-  const cachedEntry = PatentCache.get(raw);
-  if (cachedEntry && cachedEntry.kanbanState && searchMode === "dossier") {
-    // Restore from cache instead of re-fetching from API
-    if (currentData) {
-      const currentPatent = currentData.raw || (currentData.office + currentData.applicationNumber);
-      if (currentPatent !== raw && kanbanState.hasUnsavedWork) {
-        promptSaveCache(() => doRestoreFromCache(raw));
-        return;
+  // Only check for cache hit in dossier mode; load heavy fields (currentData,
+  // kanbanState with OCR/AI) async via getFullAsync.
+  if (searchMode === "dossier") {
+    const cachedMeta = PatentCache.get(raw);
+    if (cachedMeta) {
+      const cachedEntry = await PatentCache.getFullAsync(raw);
+      if (cachedEntry && cachedEntry.kanbanState) {
+        // Restore from cache instead of re-fetching from API
+        if (currentData) {
+          const currentPatent = currentData.raw || (currentData.office + currentData.applicationNumber);
+          if (currentPatent !== raw && kanbanState.hasUnsavedWork) {
+            promptSaveCache(() => doRestoreFromCache(raw));
+            return;
+          }
+        }
+        const success = PatentCache.restoreState(cachedEntry);
+        if (success) {
+          if (patentInput) patentInput.value = raw;
+          patentDetailSection.classList.remove("hidden");
+          refreshHistoryList();
+          showDataSourceBadge("本地缓存", "从缓存恢复，无需重新查询");
+          return;
+        }
       }
-    }
-    const success = PatentCache.restoreState(cachedEntry);
-    if (success) {
-      if (patentInput) patentInput.value = raw;
-      patentDetailSection.classList.remove("hidden");
-      refreshHistoryList();
-      showDataSourceBadge("本地缓存", "从缓存恢复，无需重新查询");
-      return;
     }
   }
 
@@ -4443,11 +4450,122 @@ let kanbanState = {
   hasUnsavedWork: false,
 };
 
+// ── PatentBlobDB - IndexedDB store for heavy cache fields (currentData, kanbanState) ──
+// Why: localStorage has a ~5-10MB quota. OCR results + AI analysis reports +
+// patent HTML easily exceed this for a handful of patents, which previously
+// caused silent eviction of the oldest cached entry (often losing valuable
+// OCR/AI work without warning). IndexedDB has a much larger quota (hundreds
+// of MB to GB) and is the right place for these large blobs.
+const PatentBlobDB = {
+  DB_NAME: "patentlens-blobs",
+  DB_VERSION: 1,
+  STORE_NAME: "patents",
+  _db: null,
+  _available: null, // tri-state: null=unknown, true=ok, false=unavailable
+
+  open() {
+    if (this._db) return Promise.resolve(this._db);
+    if (this._available === false) return Promise.reject(new Error("IndexedDB unavailable"));
+    if (typeof indexedDB === "undefined") {
+      this._available = false;
+      return Promise.reject(new Error("IndexedDB undefined"));
+    }
+    return new Promise((resolve, reject) => {
+      try {
+        const req = indexedDB.open(this.DB_NAME, this.DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(this.STORE_NAME)) {
+            db.createObjectStore(this.STORE_NAME, { keyPath: "patentNumber" });
+          }
+        };
+        req.onsuccess = (e) => {
+          this._db = e.target.result;
+          this._available = true;
+          resolve(this._db);
+        };
+        req.onerror = (e) => {
+          this._available = false;
+          reject(e.target.error || new Error("IndexedDB open error"));
+        };
+        req.onblocked = () => {
+          // Another tab holds an older version; downgrade to unavailable.
+          this._available = false;
+          reject(new Error("IndexedDB open blocked"));
+        };
+      } catch (e) {
+        this._available = false;
+        reject(e);
+      }
+    });
+  },
+
+  async put(patentNumber, blob) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.STORE_NAME, "readwrite");
+      tx.objectStore(this.STORE_NAME).put({ patentNumber, blob });
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error || new Error("IndexedDB put error"));
+      tx.onabort = () => reject(tx.error || new Error("IndexedDB put abort"));
+    });
+  },
+
+  async get(patentNumber) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.STORE_NAME, "readonly");
+      const req = tx.objectStore(this.STORE_NAME).get(patentNumber);
+      req.onsuccess = () => resolve(req.result ? req.result.blob : null);
+      req.onerror = () => reject(req.error || new Error("IndexedDB get error"));
+    });
+  },
+
+  async delete(patentNumber) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.STORE_NAME, "readwrite");
+      tx.objectStore(this.STORE_NAME).delete(patentNumber);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error || new Error("IndexedDB delete error"));
+    });
+  },
+
+  async clearAll() {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.STORE_NAME, "readwrite");
+      tx.objectStore(this.STORE_NAME).clear();
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error || new Error("IndexedDB clearAll error"));
+    });
+  },
+};
+
 // ── PatentCache - manages cached patent query states ──
+//
+// Storage strategy (since v260729):
+//   • Light metadata (patentNumber, office, timestamp, hasOCR, hasAnalysis,
+//     hasCitedRefs, activeInnerTab, heavyInIDB flag) -> localStorage
+//   • Heavy fields (currentData, kanbanState incl. extractions / analysis /
+//     traceIndex) -> IndexedDB via PatentBlobDB
+//
+// This split keeps the localStorage payload tiny (a few KB per entry at most)
+// so the history list renders instantly and quota exhaustion is rare. When
+// the user restores a cache entry, getFullAsync() re-joins the two halves.
+//
+// Eviction policy: when localStorage is full, _evictWithConfirmation() shows a
+// dialog listing any entries marked hasOCR/hasAnalysis/hasCitedRefs that would
+// be lost. The user must confirm before such valuable entries are discarded.
 const PatentCache = {
   STORAGE_KEY: "patentlens-cache",
   HISTORY_KEY: "patentlens-history",  // Lightweight history entries (no cache data)
   PATENT_HISTORY_KEY: "patentlens_patent_history",
+
+  // Field names that are stored in IndexedDB rather than localStorage.
+  // These are the large blobs: patent HTML/JSON data + kanban state
+  // (OCR extractions, AI analysis report, trace index, etc.).
+  HEAVY_FIELDS: ["currentData", "kanbanState"],
 
   getAll() {
     try {
@@ -4456,54 +4574,184 @@ const PatentCache = {
     } catch { return {}; }
   },
 
+  // Returns light metadata only (sync). Heavy fields are NOT included for
+  // entries created since the v260729 migration — use getFullAsync() to
+  // load them. Legacy entries (pre-migration) keep everything in localStorage
+  // and will be returned in full here for backward compatibility.
   get(patentNumber) {
     const all = this.getAll();
     return all[patentNumber] || null;
   },
 
+  // Returns the full cache entry: light metadata + heavy fields loaded from
+  // IndexedDB. Falls back to whatever's in localStorage if IDB is unavailable
+  // or the heavy blob is missing (e.g. legacy entries, or IDB write failure).
+  async getFullAsync(patentNumber) {
+    const meta = this.get(patentNumber);
+    if (!meta) return null;
+    if (!meta.heavyInIDB) {
+      // Legacy entry: everything was stored in localStorage
+      return meta;
+    }
+    try {
+      const heavy = await PatentBlobDB.get(patentNumber);
+      if (heavy) {
+        // Merge metadata with heavy fields; heavy overrides meta for any
+        // overlapping keys (shouldn't overlap in practice, but be safe).
+        return { ...meta, ...heavy };
+      }
+    } catch (e) {
+      console.error("[PatentCache] getFullAsync IDB get failed:", e);
+    }
+    // Heavy blob missing — return meta only; caller should detect missing
+    // kanbanState/currentData and re-fetch from API if needed.
+    return meta;
+  },
+
+  // Splits heavy fields out to IndexedDB; light metadata goes to localStorage.
+  // On localStorage quota error, prompts the user before evicting any
+  // entries that contain OCR / AI analysis / cited-refs work.
   save(patentNumber, data) {
+    // Separate heavy fields from light metadata
+    const heavy = {};
+    let hasHeavy = false;
+    for (const f of this.HEAVY_FIELDS) {
+      if (data[f] !== undefined) {
+        heavy[f] = data[f];
+        hasHeavy = true;
+      }
+    }
+    const meta = { ...data };
+    if (hasHeavy) {
+      delete meta.currentData;
+      delete meta.kanbanState;
+      meta.heavyInIDB = true;
+    }
+
+    // Write light metadata to localStorage (with eviction safeguard)
     const all = this.getAll();
-    all[patentNumber] = data;
+    all[patentNumber] = meta;
+    let metaSaved = false;
     try {
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+      metaSaved = true;
     } catch (e) {
-      // Quota exceeded - try removing oldest entries
-      if (e.name === "QuotaExceededError" || e.code === 22 || e.message.includes("quota")) {
-        const entries = Object.entries(all);
-        entries.sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
-        // Remove oldest entries until we can save
-        while (entries.length > 0) {
-          const oldest = entries.shift();
-          delete all[oldest[0]];
-          try {
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
-            // Try saving again with the new entry
-            all[patentNumber] = data;
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
-            return true;
-          } catch {
-            continue;
-          }
-        }
+      const isQuota = e && (e.name === "QuotaExceededError" || e.code === 22 ||
+                            (e.message && e.message.includes("quota")));
+      if (isQuota) {
+        metaSaved = this._evictWithConfirmation(all, patentNumber, meta);
       }
-      console.error("PatentCache save failed:", e);
-      return false;
+      if (!metaSaved) {
+        console.error("[PatentCache] save failed (localStorage):", e);
+        return false;
+      }
+    }
+
+    // Write heavy fields to IndexedDB (async, fire-and-forget with fallback)
+    if (hasHeavy) {
+      PatentBlobDB.put(patentNumber, heavy).then(() => {
+        // Heavy blob persisted successfully
+      }).catch((e) => {
+        console.error("[PatentCache] IDB put failed, attempting localStorage fallback:", e);
+        // Best-effort: write full entry (heavy + meta) back to localStorage
+        // and clear the heavyInIDB flag so future reads don't expect IDB.
+        try {
+          const all2 = this.getAll();
+          if (all2[patentNumber]) {
+            all2[patentNumber] = { ...all2[patentNumber], ...heavy };
+            delete all2[patentNumber].heavyInIDB;
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all2));
+          }
+        } catch (e2) {
+          console.error("[PatentCache] localStorage fallback also failed:", e2);
+          showError("缓存保存失败：IndexedDB 与 localStorage 均不可用");
+        }
+      });
+    } else {
+      // No heavy fields — clean up any stale IDB entry from a previous version
+      PatentBlobDB.delete(patentNumber).catch(() => { /* ignore */ });
     }
     return true;
   },
 
+  // Evicts oldest non-target entries from `all` until `meta` fits in
+  // localStorage. Before discarding any entry marked hasOCR / hasAnalysis /
+  // hasCitedRefs, shows a confirmation dialog listing what would be lost.
+  // Returns true if eviction succeeded (meta is now persisted); false if the
+  // user declined or eviction still couldn't free enough space.
+  _evictWithConfirmation(all, patentNumber, meta) {
+    const entries = Object.entries(all)
+      .filter(([k]) => k !== patentNumber)
+      .sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
+
+    // Identify valuable entries that would be evicted (oldest first)
+    const valuable = entries.filter(([, v]) =>
+      v && (v.hasOCR || v.hasAnalysis || v.hasCitedRefs));
+
+    if (valuable.length > 0) {
+      const list = valuable.map(([k, v]) => {
+        const tags = [];
+        if (v.hasOCR) tags.push("OCR");
+        if (v.hasAnalysis) tags.push("AI梳理");
+        if (v.hasCitedRefs) tags.push("引用分析");
+        let label = k;
+        try { label = timeAgo(v.timestamp) + " · " + k; } catch (_) {}
+        return "• " + label + "（" + tags.join("+") + "）";
+      }).join("\n");
+
+      const msg =
+        "本地缓存空间已满。继续保存将删除以下含 OCR / AI 梳理 / 引用分析的旧记录：\n\n" +
+        list +
+        "\n\n确认删除并保存当前结果？取消将放弃保存。";
+      if (!confirm(msg)) {
+        showError("已取消保存：缓存已满且含 OCR / AI 报告的旧记录未清理");
+        return false;
+      }
+    } else {
+      // No valuable entries — silently evict oldest as before
+    }
+
+    // Evict oldest entries one by one until the new meta fits
+    while (entries.length > 0) {
+      const [key, val] = entries.shift();
+      const hadHeavy = !!(val && val.heavyInIDB);
+      delete all[key];
+      // Also clean up IDB heavy blob if present
+      if (hadHeavy) {
+        PatentBlobDB.delete(key).catch(() => { /* ignore */ });
+      }
+      try {
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+        all[patentNumber] = meta;
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+        return true;
+      } catch {
+        continue;
+      }
+    }
+
+    console.error("[PatentCache] eviction failed: still no space after clearing all entries");
+    showError("缓存保存失败：清空所有旧记录后空间仍不足");
+    return false;
+  },
+
   remove(patentNumber) {
     const all = this.getAll();
+    const hadHeavy = all[patentNumber] && all[patentNumber].heavyInIDB;
     delete all[patentNumber];
     try {
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
     } catch {}
+    if (hadHeavy) {
+      PatentBlobDB.delete(patentNumber).catch(() => { /* ignore */ });
+    }
   },
 
   clearAll() {
     try {
       localStorage.removeItem(this.STORAGE_KEY);
     } catch {}
+    PatentBlobDB.clearAll().catch(() => { /* ignore */ });
   },
 
   // ── Lightweight history (always recorded, no cache data) ──
@@ -5336,8 +5584,8 @@ function doRestoreFromHistory(patentNumber) {
   doSearch(patentNumber);
 }
 
-function doRestoreFromCache(patentNumber) {
-  const entry = PatentCache.get(patentNumber);
+async function doRestoreFromCache(patentNumber) {
+  const entry = await PatentCache.getFullAsync(patentNumber);
   if (!entry) return;
   searchMode = "dossier";
   document.querySelectorAll(".search-mode-btn").forEach(b => {
@@ -16142,11 +16390,36 @@ function initExtractMode() {
   renderExtractDocList();
 }
 
-function seedGroupsFromCache() {
+// Pre-populates _extractState.groups from cached patent entries so the Extract
+// tab shows patents the user previously opened in dossier mode. Loads heavy
+// fields (kanbanState with docs + extractions) from IndexedDB asynchronously
+// for entries created since the v260729 cache split; legacy entries are read
+// directly from localStorage. Re-renders the doc list after async loading
+// completes.
+async function seedGroupsFromCache() {
   const allCache = PatentCache.getAll();
   const historyAll = PatentCache.getHistoryAll();
-  Object.entries(allCache).forEach(([pn, data]) => {
-    if (!data) return;
+
+  // Load full entries (metadata + heavy) in parallel; this is fast since
+  // IDB reads are local and there are typically only a few patents.
+  const fullEntries = await Promise.all(
+    Object.entries(allCache).map(async ([pn, meta]) => {
+      if (!meta) return [pn, null];
+      if (meta.heavyInIDB) {
+        try {
+          const full = await PatentCache.getFullAsync(pn);
+          return [pn, full || meta];
+        } catch (e) {
+          console.warn("[Extract] seedGroupsFromCache: load heavy failed for", pn, e);
+          return [pn, meta];
+        }
+      }
+      return [pn, meta];
+    })
+  );
+
+  for (const [pn, data] of fullEntries) {
+    if (!data) continue;
     const office = data.office || "";
     const histInfo = historyAll[pn] || {};
     const kanbanDocs = (data.kanbanState && data.kanbanState.documents) || [];
@@ -16201,7 +16474,7 @@ function seedGroupsFromCache() {
     if (!_extractState.groups[pn]) {
       _extractState.groups[pn] = group;
     }
-  });
+  }
   // Also seed history-only entries (patents that were visited but have no kanbanState cached)
   Object.entries(historyAll).forEach(([pn, info]) => {
     if (_extractState.groups[pn]) return;
@@ -16220,6 +16493,9 @@ function seedGroupsFromCache() {
       docsLoadedFromNetwork: false,
     };
   });
+
+  // Heavy fields loaded async — re-render the doc list now that groups are populated
+  try { renderExtractDocList(); } catch (_) { /* ignore */ }
 }
 
 function showExtractStep(step) {
@@ -16665,16 +16941,19 @@ function updateExtractDocCount() {
   if (nextBtn) nextBtn.disabled = ocrReady === 0;
 }
 
-function _syncExtractOcrToCache(pn, docIdx) {
+// Syncs an OCR result back into the patent cache. Loads the full cache entry
+// (metadata + heavy fields) via getFullAsync, mutates kanbanState.extractions
+// and currentData, then saves via PatentCache.save() which routes heavy fields
+// to IndexedDB and light metadata to localStorage.
+async function _syncExtractOcrToCache(pn, docIdx) {
   const g = _extractState.groups[pn];
   if (!g) return;
   const d = g.docs[docIdx];
   if (!d || !d.extraction) return;
-  const allCache = PatentCache.getAll();
-  let entry = allCache[pn];
-  let modified = false;
 
+  let entry = await PatentCache.getFullAsync(pn);
   if (!entry) {
+    // Create a fresh entry if none exists yet
     entry = {
       patentNumber: pn,
       office: g.office || "",
@@ -16702,15 +16981,14 @@ function _syncExtractOcrToCache(pn, docIdx) {
       hasAnalysis: false,
       hasCitedRefs: false,
     };
-    modified = true;
   }
+
   if (!entry.kanbanState) {
     entry.kanbanState = { documents: [], extractions: {}, analysis: "", traceIndex: {}, citedRefsAnalysis: "" };
-    modified = true;
   }
-  if (!Array.isArray(entry.kanbanState.documents)) { entry.kanbanState.documents = []; modified = true; }
+  if (!Array.isArray(entry.kanbanState.documents)) entry.kanbanState.documents = [];
   if (!entry.kanbanState.extractions || typeof entry.kanbanState.extractions !== "object") {
-    entry.kanbanState.extractions = {}; modified = true;
+    entry.kanbanState.extractions = {};
   }
 
   // Find or insert the document record in kanbanState.documents (match by docId)
@@ -16730,7 +17008,6 @@ function _syncExtractOcrToCache(pn, docIdx) {
       type: d.type || status.type,
       stage: d.stage || status.stage,
     });
-    modified = true;
   }
 
   // Write extraction (deep clone to avoid shared references)
@@ -16756,13 +17033,12 @@ function _syncExtractOcrToCache(pn, docIdx) {
     if (g.title) entry.currentData.title = g.title;
     if (g.applicantName) entry.currentData.applicantName = g.applicantName;
   }
-  modified = true;
 
-  if (modified) {
-    allCache[pn] = entry;
-    try { localStorage.setItem(PatentCache.STORAGE_KEY, JSON.stringify(allCache)); } catch (e) { console.warn("[Extract] persist OCR to cache failed:", e); }
-    try { refreshHistoryList(); } catch {}
-  }
+  // PatentCache.save routes heavy fields (currentData, kanbanState) to
+  // IndexedDB and light metadata to localStorage. The eviction safeguard
+  // kicks in if localStorage is full.
+  PatentCache.save(pn, entry);
+  try { refreshHistoryList(); } catch {}
 }
 
 async function runExtractOcr(pn, idx) {
@@ -16804,7 +17080,7 @@ async function runExtractOcr(pn, idx) {
     d.ocrProgress = 100;
     showToast(icon('checkCircle') + " " + pn + " 文档 " + (d.docCode || idx) + " OCR完成");
     // Sync OCR result back to PatentCache so kanban reader reuses it
-    try { _syncExtractOcrToCache(pn, idx); } catch (ce) { console.warn("[Extract] sync to cache failed:", ce); }
+    try { await _syncExtractOcrToCache(pn, idx); } catch (ce) { console.warn("[Extract] sync to cache failed:", ce); }
   } catch (err) {
     console.error("[Extract OCR] error:", err);
     d.ocrStatus = "failed";
@@ -17163,10 +17439,22 @@ async function openExtractDocAndJump(patentNo, docIdx, cell) {
     }, 500);
   };
 
-  const cached = PatentCache.get(patentNo);
-  if (cached && cached.kanbanState) {
-    doRestoreFromCache(patentNo);
-    afterJump();
+  const cachedMeta = PatentCache.get(patentNo);
+  if (cachedMeta) {
+    // Heavy fields (kanbanState incl. OCR/AI) are in IndexedDB now; load
+    // them async before deciding whether to restore from cache.
+    const cachedFull = await PatentCache.getFullAsync(patentNo);
+    if (cachedFull && cachedFull.kanbanState) {
+      await doRestoreFromCache(patentNo);
+      afterJump();
+    } else {
+      // Cache entry exists but lacks kanbanState — fall through to search.
+      const shouldDoSearch = _dossierNewTabFromSearch(patentNo);
+      if (shouldDoSearch) {
+        await doSearch(patentNo);
+      }
+      afterJump();
+    }
   } else {
     const shouldDoSearch = _dossierNewTabFromSearch(patentNo);
     if (shouldDoSearch) {
