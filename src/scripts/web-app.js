@@ -3344,7 +3344,9 @@ function linkFigureReferences(scope) {
 
   // Regex: 图 followed by optional space/punctuation, then Arabic/full-width digits or Chinese numerals
   // Matches: 图1, 图 1, 图.1, 图．1, 图１, 图一, 图十二, etc.
-  var figRegex = /图[\s.．。、·・]*([0-9０-９]+|[一二两三四五六七八九十百零]+)/g;
+  // Also matches letter-suffixed forms common in US patents: 图1A, 图1B, 图12A
+  // (the letter suffix is captured but only the numeric part is used for image lookup)
+  var figRegex = /图[\s.．。、·・]*([0-9０-９]+|[一二两三四五六七八九十百零]+)\s*[A-Za-z]?/g;
 
   // Collect ALL leaf elements that directly contain text (deepest elements).
   // After Google Translate, text is wrapped in <font> tags at various nesting
@@ -3367,7 +3369,10 @@ function linkFigureReferences(scope) {
   while (tn = walker.nextNode()) {
     allTextNodes.push({ node: tn, text: tn.nodeValue });
   }
-  if (allTextNodes.length === 0) return;
+  if (allTextNodes.length === 0) {
+    console.log('[FigLink] linkFigureReferences: no text nodes found');
+    return;
+  }
 
   // Concatenate all text nodes to search across <font>/<span> tag boundaries
   var fullText = allTextNodes.map(function(t) { return t.text; }).join('');
@@ -3375,7 +3380,10 @@ function linkFigureReferences(scope) {
   // Quick pre-scan: are there any matches?
   figRegex.lastIndex = 0;
   var preMatch = figRegex.exec(fullText);
-  if (!preMatch) return;
+  if (!preMatch) {
+    console.log('[FigLink] linkFigureReferences: no 图X matches in text (len=' + fullText.length + ')');
+    return;
+  }
 
   // Build offset map: for each text node, record its start offset in fullText
   var offset = 0;
@@ -3393,12 +3401,14 @@ function linkFigureReferences(scope) {
   figRegex.lastIndex = 0;
   var matches = [];
   var match;
+  var skippedOutOfRange = 0;
+  var skippedInvalidNum = 0;
   while ((match = figRegex.exec(fullText)) !== null) {
     var numStr = match[1];
     var figureNum = _chineseNumToArabic(numStr);
-    if (figureNum < 1) continue;
+    if (figureNum < 1) { skippedInvalidNum++; continue; }
     var imgIdx = isUS ? figureNum : figureNum - 1;
-    if (imgIdx >= totalImgs) continue;
+    if (imgIdx >= totalImgs) { skippedOutOfRange++; continue; }
     matches.push({
       fullMatch: match[0],
       figureNum: figureNum,
@@ -3406,6 +3416,7 @@ function linkFigureReferences(scope) {
       end: match.index + match[0].length
     });
   }
+  console.log('[FigLink] linkFigureReferences: total matches=' + matches.length + ' skipped(outOfRange=' + skippedOutOfRange + ', invalidNum=' + skippedInvalidNum + ') isUS=' + isUS + ' totalImgs=' + totalImgs);
   if (matches.length === 0) return;
 
   // Process matches in reverse order so DOM modifications don't affect earlier indices
@@ -3478,6 +3489,7 @@ function _wrapFigMatch(m, offsetMap, scope) {
       range.setStart(firstNode, startOffsetInNode);
       range.setEnd(lastNode, endOffsetInNode);
     } catch(e) {
+      console.warn('[FigLink] _wrapFigMatch: failed to set range', e);
       return;
     }
     try {
@@ -3485,12 +3497,15 @@ function _wrapFigMatch(m, offsetMap, scope) {
       link.appendChild(contents);
       range.insertNode(link);
     } catch(e) {
+      console.warn('[FigLink] _wrapFigMatch: extractContents failed, trying fallback', e, 'match=', m.fullMatch);
       // Last resort fallback: simple text node insertion
       try {
         range.deleteContents();
         link.textContent = m.fullMatch;
         range.insertNode(link);
-      } catch(e2) {}
+      } catch(e2) {
+        console.warn('[FigLink] _wrapFigMatch: fallback also failed', e2);
+      }
     }
   }
 }

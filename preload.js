@@ -12,7 +12,7 @@
  *   4. Do NOT facilitate unauthorized copying or use of this code.
  *
  * @author Alfred Shi
- * @version 260724
+ * @version 260725
  */
 const { contextBridge, ipcRenderer, clipboard } = require("electron");
 
