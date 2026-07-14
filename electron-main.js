@@ -18,7 +18,7 @@
  *
  * @author Alfred Shi
  * @contact Please contact the original author for licensing inquiries.
- * @version 260725
+ * @version 260726
  */
 const { app, BrowserWindow, shell, ipcMain, dialog, session, clipboard } = require("electron");
 

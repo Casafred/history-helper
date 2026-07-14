@@ -3110,12 +3110,10 @@ function _captureAndApplyTranslation(scope) {
 
   // 3. Turn OFF Google Translate so it stops mutating the DOM.
   //    Reset combo + clear cookie — GT will remove its <font> tags and
-  //    restore the original text.
-  _disableGoogleTranslateQuiet();
-
-  // 4. Wait briefly for GT to restore the DOM, then re-render with the
-  //    translated text and generate figure links on the clean DOM.
-  setTimeout(function() {
+  //    restore the original text. Pass onReady callback to re-render
+  //    ONLY after GT is fully neutralized (prevents re-translation).
+  _disableGoogleTranslateQuiet(function() {
+    // 4. GT is now fully purged — safe to re-render with translated text
     _applyTranslatedDescription(scope, translatedText);
     console.log('[FigLink] re-rendered with translation, generating links...');
     // Now generate figure links on the clean DOM
@@ -3138,7 +3136,7 @@ function _captureAndApplyTranslation(scope) {
         }
       }, 2000);
     }, 200);
-  }, 600);
+  });
 }
 
 // Quietly disable Google Translate (without toggling state confusion).
@@ -3147,52 +3145,86 @@ function _captureAndApplyTranslation(scope) {
 // internal MutationObserver will detect our DOM rewrite and RE-TRANSLATE it,
 // wrapping our <a class="pd-fig-link"> elements in <font> tags and destroying
 // the figure links we just generated.
-function _disableGoogleTranslateQuiet() {
+//
+// Strategy:
+// 1. Set combo to empty + clear googtrans cookie → GT restores original text
+// 2. Wait for GT to finish restoring (it removes its own <font> tags)
+// 3. Then strip GT's script/widget/globals so it can't re-translate
+//
+// `onReady` is called after GT is fully neutralized.
+function _disableGoogleTranslateQuiet(onReady) {
   try {
-    // 1. Remove all GT-injected DOM elements (tooltip, spinner, banner, etc.)
-    var gtEls = document.querySelectorAll(
-      "#goog-gt-tt, .goog-te-spinner-pos, .goog-te-banner-frame, .goog-te-banner, " +
-      ".goog-te-gadget-icon, #goog-gt-tt, .goog-te-balloon, .goog-te-pos, " +
-      "#google_translate_element, .skiptranslate, iframe.goog-te-banner-frame"
-    );
-    gtEls.forEach(function(el) { el.remove(); });
-
-    // 2. Remove the GT script tag itself so it can't re-execute
-    var gtScript = document.getElementById('google-translate-script');
-    if (gtScript) gtScript.remove();
-
-    // 3. Remove the GT widget container
-    var gtContainer = document.getElementById('google_translate_element');
-    if (gtContainer) gtContainer.remove();
-
-    // 4. Reset body styles that GT may have set
-    document.body.style.top = "";
-    document.body.classList.remove('translated');
-
-    // 5. Reset the combo if present (signals GT to restore original text)
+    // Step 1: signal GT to restore original text
     var combo = document.querySelector(".goog-te-combo");
     if (combo) {
       combo.value = "";
       _dispatchComboChange(combo);
     }
-
-    // 6. Clear googtrans cookie — prevents GT from re-translating on next load
     _setGoogTransCookie("");
 
-    // 7. Delete the global google object and init callback — fully neutralize GT
+    // Step 2: wait for GT to restore (it removes <font> tags asynchronously)
+    var restoreAttempts = 0;
+    function waitForRestore() {
+      restoreAttempts++;
+      var stillHasFonts = document.querySelector('font.goog-text-highlight') ||
+                          document.querySelector('.skiptranslate font');
+      if (stillHasFonts && restoreAttempts < 10) {
+        // GT still restoring, wait more
+        setTimeout(waitForRestore, 200);
+        return;
+      }
+
+      // Step 3: GT has restored (or timed out) — fully purge GT
+      _purgeGoogleTranslateCompletely();
+      if (typeof onReady === 'function') onReady();
+    }
+    // Give GT a moment to process the combo change before we start checking
+    setTimeout(waitForRestore, 300);
+  } catch(e) {
+    console.warn('[FigLink] error in _disableGoogleTranslateQuiet:', e);
+    _purgeGoogleTranslateCompletely();
+    if (typeof onReady === 'function') onReady();
+  }
+}
+
+// Fully remove all GT traces from the page
+function _purgeGoogleTranslateCompletely() {
+  try {
+    // 1. Remove all GT-injected DOM elements
+    var gtEls = document.querySelectorAll(
+      "#goog-gt-tt, .goog-te-spinner-pos, .goog-te-banner-frame, .goog-te-banner, " +
+      ".goog-te-gadget-icon, #goog-gt-tt, .goog-te-balloon, .goog-te-pos, " +
+      "#google_translate_element, .skiptranslate, iframe.goog-te-banner-frame, " +
+      "iframe.goog-te-menu-frame, .goog-te-menu2, .goog-te-ftab-float"
+    );
+    gtEls.forEach(function(el) { el.remove(); });
+
+    // 2. Remove the GT script tag
+    var gtScript = document.getElementById('google-translate-script');
+    if (gtScript) gtScript.remove();
+
+    // 3. Reset body styles that GT may have set
+    document.body.style.top = "";
+    document.body.style.position = "";
+    document.body.classList.remove('translated', 'goog-te-popup');
+
+    // 4. Delete the global google object and init callback.
+    //    GT's MutationObserver is a property of `google.translate`, so removing
+    //    the global should disconnect its ability to observe DOM changes.
+    //    We also null out any pending timers GT may have set via setTimeout.
     try { delete window.google; } catch(e) { window.google = undefined; }
     try { delete window.googleTranslateElementInit; } catch(e) { window.googleTranslateElementInit = undefined; }
 
-    // 8. Reset internal state flags
+    // 5. Reset internal state flags
     _googleTranslateActive = false;
     _googleTranslateInjected = false;
 
-    // 9. Stop any pending fig-link poll timer
+    // 6. Stop any pending fig-link poll timer
     if (_figLinkPollTimer) { clearTimeout(_figLinkPollTimer); _figLinkPollTimer = null; }
 
     console.log('[FigLink] Google Translate fully purged from page');
   } catch(e) {
-    console.warn('[FigLink] error disabling GT:', e);
+    console.warn('[FigLink] error in _purgeGoogleTranslateCompletely:', e);
   }
 }
 
