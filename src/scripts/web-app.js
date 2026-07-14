@@ -4611,6 +4611,15 @@ const PatentCache = {
     const hasAnalysis = !!(kanbanState.analysis);
     const hasCitedRefs = !!(kanbanState.citedRefsAnalysis);
 
+    // Capture the currently active inner tab so restoreState can switch to it
+    let activeInnerTab = "overview";
+    try {
+      const activeTabBtn = document.querySelector(".tabs-wrapper .tab-btn.active");
+      if (activeTabBtn && activeTabBtn.dataset.tab) {
+        activeInnerTab = activeTabBtn.dataset.tab;
+      }
+    } catch (e) {}
+
     return {
       patentNumber,
       office: currentData.office || "",
@@ -4628,6 +4637,7 @@ const PatentCache = {
       hasOCR,
       hasAnalysis,
       hasCitedRefs,
+      activeInnerTab,
     };
   },
 
@@ -4762,6 +4772,27 @@ const PatentCache = {
       if (kanbanState.analysis) {
         showAnalysisChatToggle();
         prefetchPatentLinks();
+      }
+
+      // Switch to the saved inner tab (or default based on what was restored)
+      // Priority: saved activeInnerTab > ai-analysis (if analysis exists) > kanban (if OCR exists) > overview
+      let targetTab = cacheEntry.activeInnerTab || "overview";
+      if (!targetTab || targetTab === "overview") {
+        if (kanbanState.analysis) {
+          targetTab = "ai-analysis";
+        } else if (Object.keys(kanbanState.extractions).length > 0) {
+          targetTab = "kanban";
+        }
+      }
+      try {
+        document.querySelectorAll(".tabs-wrapper .tab-btn").forEach(b => {
+          b.classList.toggle("active", b.dataset.tab === targetTab);
+        });
+        document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+        const targetContent = document.getElementById("tab-" + targetTab);
+        if (targetContent) targetContent.classList.add("active");
+      } catch (e) {
+        console.warn("restoreState: failed to switch tab:", e);
       }
 
       if (searchMode === "dossier" && _dossierActiveKey) {
