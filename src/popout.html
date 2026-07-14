@@ -488,6 +488,7 @@
       }
       var _smartBarDismissed = false;
       var _lastSmartResultUrl = "";
+      var _lastSmartBarSig = "";
       if (smartCloseBtn) {
         smartCloseBtn.addEventListener("click", function() {
           _smartBarDismissed = true;
@@ -1162,6 +1163,7 @@
         smartBar.style.display = "none";
         smartActions.innerHTML = "";
         _currentProbeResult = null;
+        _lastSmartBarSig = "";
       }
       function renderSmartBar(result) {
         if (_smartBarDismissed) return;
@@ -1178,13 +1180,27 @@
           actions = actions.concat([{ type: 'info', label: picon('alert') + ' ' + result.__error.substring(0, 80), passive: true }]);
         }
 
-        smartLabel.innerHTML = pi.label || (picon('bot') + ' 智能识别');
+        // Build a signature of the new content to detect no-op updates (prevents flicker)
+        var newLabel = pi.label || (picon('bot') + ' 智能识别');
         var infoParts = [];
         if (result.meta && result.meta.patentNumber) infoParts.push(result.meta.patentNumber);
         else if (result.meta && result.meta.jpNumber) infoParts.push(result.meta.jpNumber);
         if (result.meta && result.meta.title) infoParts.push(result.meta.title);
         if (result.pdfCount > 0) infoParts.push(picon('file') + ' ' + result.pdfCount + "个PDF");
-        smartInfo.innerHTML = infoParts.join(" | ");
+        var newInfo = infoParts.join(" | ");
+        var actionsSig = actions.map(function(a) {
+          return (a.passive ? "p:" : "a:") + (a.type || "") + "|" + (a.label || "") + "|" + (a.href || "");
+        }).join("||");
+        var newSig = newLabel + "~~" + newInfo + "~~" + actionsSig;
+
+        // If the smart bar is already visible and content is identical, skip DOM rebuild (prevents flicker)
+        if (smartBar.style.display === "flex" && _lastSmartBarSig === newSig) {
+          return;
+        }
+        _lastSmartBarSig = newSig;
+
+        smartLabel.innerHTML = newLabel;
+        smartInfo.innerHTML = newInfo;
 
         smartActions.innerHTML = "";
         actions.forEach(function(act, idx) {
@@ -1501,6 +1517,7 @@
             currentUrl = e.url;
             hideLoading();
             _smartBarDismissed = false;
+            _lastSmartBarSig = "";
             hideSmartBar();
             stopPeriodicProbe();
             updateJpBar();
@@ -1523,12 +1540,17 @@
 
         wv.addEventListener("did-navigate-in-page", function (e) {
           if (e && e.url) {
-            currentUrl = e.url;
+            var newUrl = e.url;
+            // Skip probe if only the URL hash changed (scroll anchors on Google Patents)
+            // This prevents smart bar flicker when scrolling the page
+            var oldUrlNoHash = (currentUrl || "").split("#")[0];
+            var newUrlNoHash = (newUrl || "").split("#")[0];
+            currentUrl = newUrl;
             hideLoading();
             updateJpBar();
             updateCnBar();
             scheduleNavButtonsUpdate();
-            if (!_smartBarDismissed) {
+            if (!_smartBarDismissed && oldUrlNoHash !== newUrlNoHash) {
               setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
               setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
             }

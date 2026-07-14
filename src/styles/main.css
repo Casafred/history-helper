@@ -7,7 +7,7 @@
  * or reproduction is strictly prohibited.
  *
  * @author Alfred Shi
- * @version 260710
+ * @version 260714
  */
 :root {
   --bg-primary: #0f1713;
@@ -7752,10 +7752,43 @@ body {
   z-index: 5;
   transform-origin: center center;
 }
+/* Annotation mode: layer stays click-through so normal drag/pan still works.
+   Markers themselves keep pointer-events:auto (see .img-anno-marker).
+   Double-click insertion is handled by the stage dblclick listener. */
 .pd-split-main-image.anno-mode .img-anno-layer {
-  pointer-events: auto;
-  cursor: crosshair;
+  pointer-events: none;
 }
+/* Hint bar shown when annotation mode is active */
+.anno-hint-bar {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--accent, #2563eb);
+  color: #fff;
+  border-radius: 8px;
+  font-size: 13px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+  pointer-events: auto;
+}
+.anno-hint-bar .anno-hint-text { font-weight: 500; }
+.anno-hint-bar .anno-hint-exit {
+  background: rgba(255,255,255,0.2);
+  border: none;
+  color: #fff;
+  padding: 3px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.anno-hint-bar .anno-hint-exit:hover { background: rgba(255,255,255,0.35); }
+body.anno-mode-active .anno-hint-bar { display: flex; }
 body.anno-mode-active .pd-split-img-btn.anno-toggle-btn {
   background: var(--accent);
   color: #fff;

@@ -1,6 +1,6 @@
 {
   "name": "patentlens",
-  "version": "260710.0.1",
+  "version": "260714.0.0",
   "private": true,
   "main": "electron-main.js",
   "scripts": {

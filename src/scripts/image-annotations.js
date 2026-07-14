@@ -189,7 +189,34 @@ var ImageAnnotations = (function () {
     mains.forEach(function (m) {
       m.classList.toggle("anno-mode", annotationMode);
     });
+    _syncAnnoHintBar();
     return annotationMode;
+  }
+
+  // ── Hint bar: reminds user to double-click to insert a marker, with an exit button ──
+  function _syncAnnoHintBar() {
+    var bar = document.getElementById("anno-hint-bar");
+    if (annotationMode) {
+      if (!bar) {
+        bar = document.createElement("div");
+        bar.id = "anno-hint-bar";
+        bar.className = "anno-hint-bar";
+        bar.innerHTML =
+          '<span class="anno-hint-text">' +
+          "标注模式：双击鼠标位置以插入标记" +
+          "</span>" +
+          '<button class="anno-hint-exit" type="button">退出标注</button>';
+        document.body.appendChild(bar);
+        var exitBtn = bar.querySelector(".anno-hint-exit");
+        if (exitBtn) {
+          exitBtn.addEventListener("click", function () {
+            if (annotationMode) toggleAnnotationMode();
+          });
+        }
+      }
+    } else {
+      if (bar) bar.remove();
+    }
   }
 
   // Apply anno-mode class to a newly opened viewer if annotation mode is active
