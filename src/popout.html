@@ -270,6 +270,37 @@
         }
       }
 
+      // ── Full-width / half-width digit conversion for find-in-page ──
+      function toFullWidth(str) {
+        return str.replace(/[A-Za-z0-9]/g, function(ch) {
+          var code = ch.charCodeAt(0);
+          if (code >= 48 && code <= 57) return String.fromCharCode(code + 0xFEE0); // 0-9 → ０-９
+          if (code >= 65 && code <= 90) return String.fromCharCode(code + 0xFEE0); // A-Z → Ａ-Ｚ
+          if (code >= 97 && code <= 122) return String.fromCharCode(code + 0xFEE0); // a-z → ａ-ｚ
+          return ch;
+        });
+      }
+      var _findOriginalTerm = "";
+      var _findTriedFullWidth = false;
+
+      function _doFindInPage(term, opts) {
+        if (isElectron && wv && wv.findInPage) {
+          try {
+            if (wv.stopFindInPage) { try { wv.stopFindInPage("clearSelection"); } catch(e) {} }
+            wv.findInPage(term, opts);
+          } catch(e) { findCountEl.textContent = "受限"; }
+        } else {
+          try {
+            var iframe = container.querySelector("iframe");
+            if (iframe && iframe.contentWindow) {
+              var forward = !opts || opts.forward !== false;
+              var found = iframe.contentWindow.find(term, false, !forward, false, false, true);
+              findCountEl.textContent = found ? "" : "无匹配";
+            }
+          } catch(e) { findCountEl.textContent = "受限"; }
+        }
+      }
+
       // ── Find-in-page ──
       function openFindBar() {
         findBar.style.display = "flex";
@@ -298,20 +329,9 @@
         if (!term || term.length < 1) return;
         findTerm = term;
         findActive = true;
-        if (isElectron && wv && wv.findInPage) {
-          try {
-            var reqId = ++findRequestId;
-            wv.findInPage(term, { forward: true, findNext: true });
-          } catch(e) { findCountEl.textContent = "受限"; }
-        } else {
-          try {
-            var iframe = container.querySelector("iframe");
-            if (iframe && iframe.contentWindow) {
-              var found = iframe.contentWindow.find(term, false, false, false, false, true);
-              findCountEl.textContent = found ? "" : "无匹配";
-            }
-          } catch(e) { findCountEl.textContent = "受限"; }
-        }
+        _findOriginalTerm = term;
+        _findTriedFullWidth = false;
+        _doFindInPage(term, { forward: true, findNext: true });
       }
 
       function doFindPrev() {
@@ -319,18 +339,9 @@
         if (!term || term.length < 1) return;
         findTerm = term;
         findActive = true;
-        if (isElectron && wv && wv.findInPage) {
-          try {
-            wv.findInPage(term, { forward: false, findNext: true });
-          } catch(e) { findCountEl.textContent = "受限"; }
-        } else {
-          try {
-            var iframe = container.querySelector("iframe");
-            if (iframe && iframe.contentWindow) {
-              iframe.contentWindow.find(term, false, true, false, false, true);
-            }
-          } catch(e) {}
-        }
+        _findOriginalTerm = term;
+        _findTriedFullWidth = false;
+        _doFindInPage(term, { forward: false, findNext: true });
       }
 
       function startNewSearchFromBeginning() {
@@ -338,24 +349,9 @@
         if (!term || term.length < 1) { findCountEl.textContent = ""; return; }
         findTerm = term;
         findActive = true;
-        if (isElectron && wv && wv.findInPage) {
-          try {
-            if (wv.stopFindInPage) { try { wv.stopFindInPage("clearSelection"); } catch(e) {} }
-            var reqId = ++findRequestId;
-            wv.findInPage(term, { forward: true, findNext: false });
-          } catch(e) { findCountEl.textContent = "受限"; }
-        } else {
-          try {
-            var iframe = container.querySelector("iframe");
-            if (iframe && iframe.contentWindow) {
-              iframe.contentWindow.find("", false, false, false);
-              setTimeout(function() {
-                var found = iframe.contentWindow.find(term, false, false, false, false, true);
-                findCountEl.textContent = found ? "" : "无匹配";
-              }, 30);
-            }
-          } catch(e) { findCountEl.textContent = "受限"; }
-        }
+        _findOriginalTerm = term;
+        _findTriedFullWidth = false;
+        _doFindInPage(term, { forward: true, findNext: false });
       }
 
       function debouncedFind() {
@@ -490,8 +486,11 @@
           cnBar.style.display = "none";
         });
       }
+      var _smartBarDismissed = false;
+      var _lastSmartResultUrl = "";
       if (smartCloseBtn) {
         smartCloseBtn.addEventListener("click", function() {
+          _smartBarDismissed = true;
           smartBar.style.display = "none";
         });
       }
@@ -1165,6 +1164,7 @@
         _currentProbeResult = null;
       }
       function renderSmartBar(result) {
+        if (_smartBarDismissed) return;
         _currentProbeResult = result;
         if (!result || !result.pageInfo) { hideSmartBar(); return; }
         var pi = result.pageInfo;
@@ -1207,12 +1207,17 @@
         smartBar.style.display = "flex";
       }
       function handleSmartAction(act) {
-        if (!isElectron || !wv) return;
         if (act.type === "pdf" && act.href && act.href.indexOf("http") === 0) {
-          if (window.electronAPI) window.electronAPI.openExternal(act.href);
-          else window.open(act.href, "_blank");
+          if (window.electronAPI && window.electronAPI.downloadFile) {
+            window.electronAPI.downloadFile(act.href, "");
+          } else if (window.electronAPI && window.electronAPI.openExternal) {
+            window.electronAPI.openExternal(act.href);
+          } else {
+            window.open(act.href, "_blank");
+          }
           return;
         }
+        if (!isElectron || !wv) return;
         if (act.type === "click") {
           var clickScript = "(function(){";
           if (act._text === "keika") {
@@ -1226,7 +1231,7 @@
               clickScript += "if(window.__probeClickText) { var r = window.__probeClickText(" + JSON.stringify(cleanLabel) + "); if(r) return true; }";
             }
             if (act.href && act.href.indexOf("http") === 0) {
-              clickScript += "window.location.href = " + JSON.stringify(act.href) + "; return true;";
+              clickScript += "window.open(" + JSON.stringify(act.href) + ", '_blank'); return true;";
             }
           }
           if (typeof act.targetIdx === "number" && act.targetIdx >= 0) {
@@ -1419,6 +1424,14 @@
         wv.addEventListener("found-in-page", function(e) {
           if (e.result && e.result.finalUpdate !== false) {
             if (e.result.matchCount === 0) {
+              if (!_findTriedFullWidth && _findOriginalTerm && /[A-Za-z0-9]/.test(_findOriginalTerm)) {
+                _findTriedFullWidth = true;
+                var fwTerm = toFullWidth(_findOriginalTerm);
+                if (fwTerm !== _findOriginalTerm) {
+                  _doFindInPage(fwTerm, { forward: true, findNext: false });
+                  return;
+                }
+              }
               findCountEl.textContent = "无匹配";
             } else if (e.result.activeMatchOrdinal !== undefined) {
               findCountEl.textContent = e.result.activeMatchOrdinal + "/" + e.result.matchCount;
@@ -1487,6 +1500,7 @@
           if (e && e.url) {
             currentUrl = e.url;
             hideLoading();
+            _smartBarDismissed = false;
             hideSmartBar();
             stopPeriodicProbe();
             updateJpBar();
@@ -1514,8 +1528,10 @@
             updateJpBar();
             updateCnBar();
             scheduleNavButtonsUpdate();
-            setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
-            setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
+            if (!_smartBarDismissed) {
+              setTimeout(function() { runDomProbe({ delay: 800 }); }, 400);
+              setTimeout(function() { runDomProbe({ delay: 0 }); }, 2500);
+            }
           }
         });
 

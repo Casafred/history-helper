@@ -5574,6 +5574,11 @@ function openPatentImageViewerFromScope(item) {
 
 function renderDescriptionHtml(text) {
   if (!text) return '';
+  // Normalize full-width paragraph markers 【００２０】→[0020] (safety for JP patents)
+  let normalizedText = text.replace(/【([０-９0-9]{3,5})】/g, (match, digits) => {
+    const half = digits.replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0));
+    return '[' + half.padStart(4, '0') + ']';
+  });
   // Known section heading patterns for Chinese and English patents
   const headingPatterns = [
     /^技术领域$/,
@@ -5605,7 +5610,7 @@ function renderDescriptionHtml(text) {
     /^ADVANTAGEOUS EFFECTS?$/i,
   ];
   // Normalize: ensure ## section headers are preceded by a newline
-  let normalized = text.replace(/\s*## /g, '\n## ');
+  let normalized = normalizedText.replace(/\s*## /g, '\n## ');
   // Additionally, detect heading patterns in lines that don't have ## markers
   const lines = normalized.split('\n');
   const processedLines = lines.map(line => {

@@ -541,8 +541,27 @@ var ImageAnnotations = (function () {
     if (!number) return [];
     var containers = getDescriptionContainers();
     var occurrences = [];
-    var numEscaped = number.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    var numRegex = new RegExp("(^|[^0-9a-zA-Z])(" + numEscaped + ")(?=[^0-9a-zA-Z]|$)", "g");
+    // Build regex that matches both half-width and full-width characters
+    // e.g., "24a" matches "24a", "２４ａ", "2４a", etc.
+    var numChars = number.split("");
+    var numPattern = numChars.map(function (ch) {
+      var escaped = ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      var code = ch.charCodeAt(0);
+      if (code >= 48 && code <= 57) {
+        // digit 0-9: also match full-width ０-９
+        return "[" + escaped + String.fromCharCode(code + 0xFEE0) + "]";
+      }
+      if (code >= 65 && code <= 90) {
+        // A-Z: also match full-width Ａ-Ｚ
+        return "[" + escaped + String.fromCharCode(code + 0xFEE0) + "]";
+      }
+      if (code >= 97 && code <= 122) {
+        // a-z: also match full-width ａ-ｚ
+        return "[" + escaped + String.fromCharCode(code + 0xFEE0) + "]";
+      }
+      return escaped;
+    }).join("");
+    var numRegex = new RegExp("(^|[^0-9a-zA-Z０-９ａ-ｚＡ-Ｚ])(" + numPattern + ")(?=[^0-9a-zA-Z０-９ａ-ｚＡ-Ｚ]|$)", "g");
 
     containers.forEach(function (container) {
       var paragraphs = container.querySelectorAll("p");

@@ -1112,19 +1112,21 @@ function extractPatentFromHtml(html, patentId) {
       pos = tagEnd + 1;
     }
 
+    // 常见章节标题模式
+    const sectionHeadingPatterns = [
+      /^技术领域$/, /^背景技术$/, /^发明内容$/, /^附图说明$/,
+      /^具体实施方式$/, /^具体实施例$/, /^实施方式$/, /^实施例$/, /^工业应用性$/,
+      /^TECHNICAL FIELD$/i, /^BACKGROUND$/i, /^BACKGROUND OF THE INVENTION$/i,
+      /^SUMMARY$/i, /^SUMMARY OF THE INVENTION$/i,
+      /^DETAILED DESCRIPTION$/i, /^DETAILED DESCRIPTION OF(?: THE)? (?:PREFERRED)?(?: EMBODIMENTS?)?$/i,
+      /^DRAWINGS$/i, /^BRIEF DESCRIPTION OF (?:THE )?DRAWINGS$/i,
+      /^EMBODIMENTS?$/i, /^DESCRIPTION OF EMBODIMENTS?$/i,
+      /^CROSS-REFERENCE TO RELATED APPLICATIONS?$/i,
+      /^BRIEF SUMMARY$/i,
+    ];
+
     if (parts.length > 0) {
       // 后处理：检测常见章节标题模式，未加##的自动加
-      const sectionHeadingPatterns = [
-        /^技术领域$/, /^背景技术$/, /^发明内容$/, /^附图说明$/,
-        /^具体实施方式$/, /^具体实施例$/, /^实施方式$/, /^实施例$/, /^工业应用性$/,
-        /^TECHNICAL FIELD$/i, /^BACKGROUND$/i, /^BACKGROUND OF THE INVENTION$/i,
-        /^SUMMARY$/i, /^SUMMARY OF THE INVENTION$/i,
-        /^DETAILED DESCRIPTION$/i, /^DETAILED DESCRIPTION OF(?: THE)? (?:PREFERRED)?(?: EMBODIMENTS?)?$/i,
-        /^DRAWINGS$/i, /^BRIEF DESCRIPTION OF (?:THE )?DRAWINGS$/i,
-        /^EMBODIMENTS?$/i, /^DESCRIPTION OF EMBODIMENTS?$/i,
-        /^CROSS-REFERENCE TO RELATED APPLICATIONS?$/i,
-        /^BRIEF SUMMARY$/i,
-      ];
       const processed = parts.map(p => {
         if (p.startsWith('## ')) return p;
         if (p.startsWith('•') || p.startsWith('◦')) return p;
@@ -1138,8 +1140,56 @@ function extractPatentFromHtml(html, patentId) {
       const filtered = processed.filter(p => p && p.trim());
       htmlResult.description = filtered.join('\n\n');
     } else {
-      // 最后兜底：直接strip所有标签
-      htmlResult.description = descHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      // 兜底：处理无标准标签的说明书（常见于日本专利GP源码）
+      // 先将<br/>转为换行，再剥离HTML标签
+      let fallbackText = descHtml
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n\n')
+        .replace(/<\/div>/gi, '\n')
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">")
+        .replace(/&quot;/gi, '"')
+        .replace(/&#(\d+);/g, (m, code) => String.fromCharCode(parseInt(code, 10)));
+
+      // 检测日本专利段落标记 【００２０】 或 【0020】（全角/半角数字+lenticular bracket）
+      const jpParaMarkerRe = /【([０-９0-9]{3,5})】/g;
+      const jpMatches = [];
+      let jpM;
+      while ((jpM = jpParaMarkerRe.exec(fallbackText)) !== null) {
+        // 将全角数字转换为半角
+        const numStr = jpM[1].replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0));
+        jpMatches.push({ index: jpM.index, full: jpM[0], num: numStr });
+      }
+
+      if (jpMatches.length > 0) {
+        // 按段落标记分割
+        const jpParts = [];
+        for (let i = 0; i < jpMatches.length; i++) {
+          const start = jpMatches[i].index + jpMatches[i].full.length;
+          const end = i + 1 < jpMatches.length ? jpMatches[i + 1].index : fallbackText.length;
+          const paraText = fallbackText.substring(start, end).replace(/\s+/g, " ").trim();
+          if (paraText) {
+            const num = jpMatches[i].num;
+            jpParts.push("[" + num.padStart(4, '0') + "] " + paraText);
+          }
+        }
+        // 也处理标记之前的文本（可能是章节标题）
+        const beforeText = fallbackText.substring(0, jpMatches[0].index).replace(/\s+/g, " ").trim();
+        if (beforeText) {
+          const headings = beforeText.split(/\n+/).map(s => s.trim()).filter(s => s);
+          headings.forEach(h => {
+            const isHeading = sectionHeadingPatterns.some(p => p.test(h));
+            jpParts.unshift(isHeading ? '## ' + h : h);
+          });
+        }
+        htmlResult.description = jpParts.join('\n\n');
+      } else {
+        // 无段落标记：直接清理为纯文本
+        htmlResult.description = fallbackText.replace(/\s+/g, " ").trim();
+      }
     }
   }
 
