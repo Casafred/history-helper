@@ -108,8 +108,12 @@ var AgentUI = (function () {
     var startX, startY, startLeft, startTop;
 
     function onMouseDown(e) {
-      if (e.target.closest("button") || e.target.closest("input") || e.target.closest("textarea") || e.target.closest("a")) {
-        return;
+      // Skip interactive children for panel dragging, but allow the toggle
+      // button itself to be dragged (it IS a <button> element)
+      if (!isToggleBtn) {
+        if (e.target.closest("button") || e.target.closest("input") || e.target.closest("textarea") || e.target.closest("a")) {
+          return;
+        }
       }
       isDragging = true;
       hasMoved = false;
