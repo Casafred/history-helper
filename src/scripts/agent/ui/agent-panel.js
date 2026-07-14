@@ -50,11 +50,15 @@ var AgentUI = (function () {
     }, 50);
   }
 
-  var SUGGESTIONS = [
-    "查询 US14412875 的审查信息",
-    "帮我查一下这个专利的同族专利",
-    "分析这个专利的审查文档列表",
-    "查完后切换到审查看板",
+  // Quick actions: each has a label and a message template.
+  // {pn} placeholder is replaced with the patent number the user enters.
+  var QUICK_ACTIONS = [
+    { label: "审查文档查询", icon: "search", msg: "查询专利 {pn} 的审查文档信息" },
+    { label: "专利原文查询", icon: "doc", msg: "查询并分析专利 {pn} 的原文详情" },
+    { label: "同族专利分析", icon: "family", msg: "帮我查一下专利 {pn} 的同族专利" },
+    { label: "审查文档列表分析", icon: "list", msg: "分析专利 {pn} 的审查文档列表，给出关键信息摘要" },
+    { label: "法律状态查询", icon: "legal", msg: "查询专利 {pn} 的法律状态和时间线" },
+    { label: "全面分析", icon: "full", msg: "对专利 {pn} 进行全面分析，包括审查文档、同族、法律状态" },
   ];
 
   function loadPosition() {
@@ -407,24 +411,73 @@ var AgentUI = (function () {
     });
   }
 
+  // Build SVG icon for quick action buttons (no emoji)
+  function _quickActionIcon(name) {
+    var icons = {
+      search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+      doc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>',
+      family: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><path d="M2 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2"/><path d="M14 15h4a4 4 0 0 1 4 4v2"/></svg>',
+      list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+      legal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l9-3 9 3"/><path d="M5 6v12c0 1 1 2 2 2h10c1 0 2-1 2-2V6"/><line x1="12" y1="6" x2="12" y2="20"/></svg>',
+      full: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v6h-6"/></svg>',
+    };
+    return icons[name] || icons.search;
+  }
+
   function renderWelcome() {
     messagesEl.innerHTML =
       '<div class="agent-welcome">' +
-        '<h3>👋 你好，我是专利智能助手</h3>' +
-        '<p>输入专利号，我可以帮你自动查询、分析专利信息</p>' +
-        '<div class="agent-suggestions">' +
-          SUGGESTIONS.map(function (s) {
-            return '<button class="agent-suggestion">' + escapeHtml(s) + '</button>';
+        '<h3>PatentLens 智能助手</h3>' +
+        '<p>输入专利号，选择操作类型，我会自动帮你查询和分析</p>' +
+        '<div class="agent-quick-input-wrap">' +
+          '<input type="text" id="agent-pn-input" class="agent-pn-input" placeholder="输入专利号，如 US12030161B2" autocomplete="off">' +
+        '</div>' +
+        '<div class="agent-quick-actions">' +
+          QUICK_ACTIONS.map(function (a) {
+            return '<button class="agent-quick-btn" data-action="' + a.label + '" data-msg="' + escapeHtml(a.msg) + '">' +
+              '<span class="agent-quick-icon">' + _quickActionIcon(a.icon) + '</span>' +
+              '<span class="agent-quick-label">' + escapeHtml(a.label) + '</span>' +
+            '</button>';
           }).join("") +
         '</div>' +
       '</div>';
 
-    messagesEl.querySelectorAll(".agent-suggestion").forEach(function (btn) {
+    // Bind quick action buttons
+    messagesEl.querySelectorAll(".agent-quick-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        inputEl.value = btn.textContent;
+        var pnInput = document.getElementById("agent-pn-input");
+        var pn = pnInput ? pnInput.value.trim() : "";
+        var msgTemplate = btn.getAttribute("data-msg") || "";
+        if (!pn) {
+          // No patent number — focus the input and flash it
+          if (pnInput) {
+            pnInput.focus();
+            pnInput.style.borderColor = "var(--danger, #ef4444)";
+            pnInput.style.boxShadow = "0 0 0 2px rgba(239,68,68,0.2)";
+            setTimeout(function() {
+              pnInput.style.borderColor = "";
+              pnInput.style.boxShadow = "";
+            }, 1500);
+          }
+          return;
+        }
+        var msg = msgTemplate.replace("{pn}", pn);
+        inputEl.value = msg;
         sendMessage();
       });
     });
+
+    // Enter key in patent number input triggers the first quick action
+    var pnInputEl = document.getElementById("agent-pn-input");
+    if (pnInputEl) {
+      pnInputEl.addEventListener("keydown", function(e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          var firstBtn = messagesEl.querySelector(".agent-quick-btn");
+          if (firstBtn) firstBtn.click();
+        }
+      });
+    }
   }
 
   function renderTodos(todos) {
@@ -437,9 +490,9 @@ var AgentUI = (function () {
     todos.forEach(function (t) {
       var cls = "agent-todo-item " + (t.status === "completed" ? "completed" : t.status === "in_progress" ? "in-progress" : "");
       var icon = "";
-      if (t.status === "completed") icon = "✅";
+      if (t.status === "completed") icon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="20 6 9 17 4 12"/></svg>';
       else if (t.status === "in_progress") icon = '<span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent, #22c55e);border-top-color:transparent;border-radius:50%;animation:agent-spin 0.8s linear infinite"></span>';
-      else icon = "⏳";
+      else icon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
       html += '<div class="' + cls + '"><span class="todo-status">' + icon + '</span><span>' + escapeHtml(t.content) + '</span></div>';
     });
     todosEl.innerHTML = html;
@@ -450,7 +503,7 @@ var AgentUI = (function () {
     var msg = document.createElement("div");
     msg.className = "agent-msg user";
     msg.innerHTML =
-      '<div class="agent-msg-avatar">👤</div>' +
+      '<div class="agent-msg-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>' +
       '<div class="agent-msg-body"><div class="agent-msg-bubble">' + escapeHtml(text) + '</div></div>';
     messagesEl.appendChild(msg);
     scrollToBottom();
@@ -465,7 +518,7 @@ var AgentUI = (function () {
     var msg = document.createElement("div");
     msg.className = "agent-msg bot";
     msg.innerHTML =
-      '<div class="agent-msg-avatar">🤖</div>' +
+      '<div class="agent-msg-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg></div>' +
       '<div class="agent-msg-body"><div class="agent-msg-bubble"></div><div class="agent-typing"><span></span><span></span><span></span></div></div>';
     messagesEl.appendChild(msg);
     currentAssistantBubble = msg.querySelector(".agent-msg-bubble");
@@ -603,7 +656,7 @@ var AgentUI = (function () {
     var msg = document.createElement("div");
     msg.className = "agent-msg bot";
     msg.innerHTML =
-      '<div class="agent-msg-avatar">💭</div>' +
+      '<div class="agent-msg-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>' +
       '<div class="agent-msg-body">' +
         '<div class="agent-msg-thinking collapsed">' +
           '<div class="thinking-header"><span>思考中</span><span class="thinking-toggle">展开</span></div>' +
@@ -640,11 +693,11 @@ var AgentUI = (function () {
     var msg = document.createElement("div");
     msg.className = "agent-msg bot";
     msg.innerHTML =
-      '<div class="agent-msg-avatar">🔧</div>' +
+      '<div class="agent-msg-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>' +
       '<div class="agent-msg-body">' +
         '<div class="agent-steps" data-steps>' +
           '<div class="steps-header">' +
-            '<span class="steps-title">⚙️ 执行步骤</span>' +
+            '<span class="steps-title">执行步骤</span>' +
             '<span class="steps-count">0 步</span>' +
             '<span class="steps-toggle">折叠</span>' +
           '</div>' +
@@ -680,9 +733,9 @@ var AgentUI = (function () {
     var titleEl = currentStepsBubble.querySelector(".steps-title");
     if (titleEl && stepsCount > 0) {
       if (completedSteps >= stepsCount) {
-        titleEl.textContent = "✅ 执行完成";
+        titleEl.textContent = "执行完成";
       } else {
-        titleEl.textContent = "⚙️ 执行步骤";
+        titleEl.textContent = "执行步骤";
       }
     }
   }
@@ -709,7 +762,7 @@ var AgentUI = (function () {
       } catch(e) {}
     }
     stepItem.innerHTML =
-      '<span class="step-icon spinner">⚙️</span>' +
+      '<span class="step-icon spinner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>' +
       '<span class="step-text"><span class="step-tool-name">' + escapeHtml(name) + '</span>' +
       (argsPreview ? ' <span class="step-args">' + escapeHtml(argsPreview) + '</span>' : '') +
       ' <span class="step-status">执行中...</span></span>';
@@ -729,14 +782,14 @@ var AgentUI = (function () {
       if (isError) {
         stepItem.classList.add("error");
         stepItem.innerHTML =
-          '<span class="step-icon error">❌</span>' +
+          '<span class="step-icon error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></span>' +
           '<span class="step-text"><span class="step-tool-name">' + escapeHtml(name) + '</span>' +
           ' <span class="step-status error">失败: ' + escapeHtml(result.error) + '</span></span>';
       } else {
         stepItem.classList.add("done");
         var resultSummary = getToolResultSummary(name, result);
         stepItem.innerHTML =
-          '<span class="step-icon done">✅</span>' +
+          '<span class="step-icon done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><polyline points="20 6 9 17 4 12"/></svg></span>' +
           '<span class="step-text"><span class="step-tool-name">' + escapeHtml(name) + '</span>' +
           (resultSummary ? ' <span class="step-result">' + escapeHtml(resultSummary) + '</span>' : '') +
           '</span>';
@@ -791,9 +844,9 @@ var AgentUI = (function () {
       var titleEl = currentStepsBubble.querySelector(".steps-title");
       if (titleEl && stepsCount > 0) {
         if (completedSteps >= stepsCount) {
-          titleEl.textContent = "✅ 执行步骤（全部完成）";
+          titleEl.textContent = "执行步骤（全部完成）";
         } else {
-          titleEl.textContent = "⚠️ 执行步骤（" + completedSteps + "/" + stepsCount + "）";
+          titleEl.textContent = "执行步骤（" + completedSteps + "/" + stepsCount + "）";
         }
       }
       var countEl = currentStepsBubble.querySelector(".steps-count");
@@ -803,7 +856,7 @@ var AgentUI = (function () {
       var spinnerEl = currentStepsBubble.querySelector(".step-icon.spinner");
       if (spinnerEl && completedSteps >= stepsCount) {
         spinnerEl.classList.remove("spinner");
-        spinnerEl.textContent = "✅";
+        spinnerEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><polyline points="20 6 9 17 4 12"/></svg>';
       }
     }
     currentStepsBubble = null;
@@ -816,7 +869,7 @@ var AgentUI = (function () {
     var msg = document.createElement("div");
     msg.className = "agent-msg bot";
     msg.innerHTML =
-      '<div class="agent-msg-avatar">❌</div>' +
+      '<div class="agent-msg-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></div>' +
       '<div class="agent-msg-body"><div class="agent-msg-bubble" style="background:rgba(248,113,113,0.1);color:var(--danger,#f87171);border-left:3px solid var(--danger,#f87171);border-top-left-radius:4px">' + escapeHtml(text) + '</div></div>';
     messagesEl.appendChild(msg);
     scrollToBottom();
@@ -846,7 +899,7 @@ var AgentUI = (function () {
         '</div>';
     }
     msg.innerHTML =
-      '<div class="agent-msg-avatar">🤔</div>' +
+      '<div class="agent-msg-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>' +
       '<div class="agent-msg-body">' +
         '<div class="agent-question">' +
           '<div class="agent-question-text">' + escapeHtml(question) + '</div>' +

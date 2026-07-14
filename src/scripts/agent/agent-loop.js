@@ -58,6 +58,10 @@ var AgentCore = (function () {
     "- 专业但易懂，结构化呈现",
     "- 不要重复工具返回的原始JSON，提炼成用户能看懂的内容",
     "- 回答审查历程时，按时间顺序列出关键审查事件（OA、答复、修改等），让用户一目了然",
+    "",
+    "## 连续对话",
+    "你支持多轮连续对话，可以记住之前的对话上下文。如果用户在后续消息中提到「这个专利」「上面的」等指代词，应结合之前的对话历史理解。",
+    "如果用户切换到新专利，会明确提供新的专利号。",
   ].join("\n");
 
   function setSystemPrompt(prompt) {
@@ -106,8 +110,17 @@ var AgentCore = (function () {
     isRunning = true;
     currentAbortController = new AbortController();
     var signal = currentAbortController.signal;
-    memory = [{ role: "user", content: userMessage }];
-    sessionContext = { startTime: Date.now(), userMessage: userMessage };
+    // Multi-turn conversation: append to existing memory instead of resetting.
+    // Reset only happens via explicit reset() call (user clicks clear button).
+    if (!memory || memory.length === 0) {
+      memory = [{ role: "user", content: userMessage }];
+    } else {
+      memory.push({ role: "user", content: userMessage });
+    }
+    // Preserve sessionContext across turns, only update current message/time
+    if (!sessionContext) sessionContext = {};
+    sessionContext.startTime = Date.now();
+    sessionContext.userMessage = userMessage;
 
     // 不再使用固定todo模板，让AI自己规划
     BUS.emit(EVT.SESSION_STARTED, { message: userMessage });

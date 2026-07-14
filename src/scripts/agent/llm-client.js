@@ -35,7 +35,13 @@ var AgentLLM = (function () {
     if (systemPrompt) {
       msgs.push({ role: "system", content: systemPrompt });
     }
-    for (var i = 0; i < messages.length; i++) {
+    // Sliding window: keep last ~30 messages to avoid token overflow in multi-turn convos
+    var windowSize = 30;
+    var start = 0;
+    if (messages.length > windowSize) {
+      start = messages.length - windowSize;
+    }
+    for (var i = start; i < messages.length; i++) {
       msgs.push(messages[i]);
     }
     return msgs;
