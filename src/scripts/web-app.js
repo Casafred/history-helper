@@ -1250,6 +1250,8 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
       if (extractSection) extractSection.classList.remove("hidden");
       if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
       patentInput.value = "";
+      // Close annotation nav bar when switching to extract mode
+      if (typeof ImageAnnotations !== "undefined" && ImageAnnotations.closeNavBar) ImageAnnotations.closeNavBar();
       _dossierRenderTabs();
       initExtractMode();
     } else if (searchMode === "patent") {
@@ -1280,6 +1282,8 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
       if (batchResultsSection) batchResultsSection.classList.add("hidden");
       if (pdFindBar) pdFindBar.classList.add("hidden");
       _clearFindHighlights();
+      // Close annotation nav bar when leaving patent detail mode
+      if (typeof ImageAnnotations !== "undefined" && ImageAnnotations.closeNavBar) ImageAnnotations.closeNavBar();
       if (_dossierActiveKey) {
         const activeTab = _dossierTabs.find(t => t.key === _dossierActiveKey);
         if (activeTab && activeTab.currentData) {
@@ -3190,18 +3194,22 @@ function _disableGoogleTranslateQuiet(onReady) {
 // Fully remove all GT traces from the page
 function _purgeGoogleTranslateCompletely() {
   try {
-    // 1. Remove all GT-injected DOM elements
+    // 1. Remove all GT-injected DOM elements (comprehensive selector list)
     var gtEls = document.querySelectorAll(
       "#goog-gt-tt, .goog-te-spinner-pos, .goog-te-banner-frame, .goog-te-banner, " +
       ".goog-te-gadget-icon, #goog-gt-tt, .goog-te-balloon, .goog-te-pos, " +
       "#google_translate_element, .skiptranslate, iframe.goog-te-banner-frame, " +
-      "iframe.goog-te-menu-frame, .goog-te-menu2, .goog-te-ftab-float"
+      "iframe.goog-te-menu-frame, .goog-te-menu2, .goog-te-ftab-float, " +
+      ".goog-te-spinner, .gt-spinner, .gt-loading"
     );
     gtEls.forEach(function(el) { el.remove(); });
 
     // 2. Remove the GT script tag
     var gtScript = document.getElementById('google-translate-script');
     if (gtScript) gtScript.remove();
+    // Also remove any other GT-related script tags that may have been injected
+    var gtScripts = document.querySelectorAll('script[src*="translate.google"], script[src*="google.com/translate"]');
+    gtScripts.forEach(function(s) { s.remove(); });
 
     // 3. Reset body styles that GT may have set
     document.body.style.top = "";
@@ -3209,9 +3217,6 @@ function _purgeGoogleTranslateCompletely() {
     document.body.classList.remove('translated', 'goog-te-popup');
 
     // 4. Delete the global google object and init callback.
-    //    GT's MutationObserver is a property of `google.translate`, so removing
-    //    the global should disconnect its ability to observe DOM changes.
-    //    We also null out any pending timers GT may have set via setTimeout.
     try { delete window.google; } catch(e) { window.google = undefined; }
     try { delete window.googleTranslateElementInit; } catch(e) { window.googleTranslateElementInit = undefined; }
 
@@ -3221,6 +3226,42 @@ function _purgeGoogleTranslateCompletely() {
 
     // 6. Stop any pending fig-link poll timer
     if (_figLinkPollTimer) { clearTimeout(_figLinkPollTimer); _figLinkPollTimer = null; }
+
+    // 7. Install a temporary error suppressor for GT residual errors.
+    //    GT's internal promise chains continue running after purge, causing
+    //    "Cannot read properties of undefined (reading 'J')" errors.
+    //    These are harmless but noisy — suppress them for 10 seconds.
+    if (!window._gtErrorSuppressor) {
+      window._gtErrorSuppressor = function(msg, url, line, col, err) {
+        // Suppress errors from GT scripts (m=el_main, m=el_conf, etc.)
+        if (url && (url.indexOf('el_main') >= 0 || url.indexOf('el_conf') >= 0 ||
+            url.indexOf('translate.google') >= 0 || url.indexOf('google.com/translate') >= 0)) {
+          return true; // suppress
+        }
+        return false; // let through
+      };
+      window.addEventListener('error', window._gtErrorSuppressor, true);
+      // Auto-remove suppressor after 10 seconds
+      setTimeout(function() {
+        if (window._gtErrorSuppressor) {
+          window.removeEventListener('error', window._gtErrorSuppressor, true);
+          window._gtErrorSuppressor = null;
+        }
+      }, 10000);
+    }
+
+    // 8. Recurring cleanup: remove any GT elements that get re-created by
+    //    residual GT code. Run every 500ms for 5 seconds.
+    var cleanupCount = 0;
+    var cleanupInterval = setInterval(function() {
+      cleanupCount++;
+      var reappeared = document.querySelectorAll(
+        '.skiptranslate, .goog-te-spinner-pos, .goog-te-banner-frame, ' +
+        '#goog-gt-tt, .goog-te-balloon, .goog-te-pos'
+      );
+      reappeared.forEach(function(el) { el.remove(); });
+      if (cleanupCount >= 10) clearInterval(cleanupInterval);
+    }, 500);
 
     console.log('[FigLink] Google Translate fully purged from page');
   } catch(e) {
@@ -6112,9 +6153,14 @@ function applyImgTransform(vid) {
   var img = document.getElementById(vid + '_img');
   var overlay = document.getElementById(vid + '_anno');
   var zoomLabel = document.getElementById(vid + '_zoom');
-  var tf = 'translate(' + state.tx + 'px, ' + state.ty + 'px) scale(' + state.scale + ') rotate(' + state.rotation + 'deg)';
-  if (img) img.style.transform = tf;
-  if (overlay) overlay.style.transform = tf;
+  // Image gets full transform including rotation
+  var imgTf = 'translate(' + state.tx + 'px, ' + state.ty + 'px) scale(' + state.scale + ') rotate(' + state.rotation + 'deg)';
+  // Annotation overlay gets translate + scale ONLY (no rotation).
+  // This keeps annotations at fixed positions and upright orientation
+  // regardless of how the image is rotated.
+  var overlayTf = 'translate(' + state.tx + 'px, ' + state.ty + 'px) scale(' + state.scale + ')';
+  if (img) img.style.transform = imgTf;
+  if (overlay) overlay.style.transform = overlayTf;
   if (zoomLabel) {
     zoomLabel.textContent = Math.round(state.scale * 100) + '%';
   }

@@ -156,6 +156,9 @@ var ImageAnnotations = (function () {
     var imgRect = getUntransformedImageRect(vid);
     if (!imgRect || !state) return null;
 
+    // Since the annotation overlay does NOT rotate with the image,
+    // click coordinates are already in the unrotated image space.
+    // We only need to reverse the translate and scale.
     var centerX = imgRect.left + imgRect.width / 2 + (state.tx || 0);
     var centerY = imgRect.top + imgRect.height / 2 + (state.ty || 0);
     var dx = e.clientX - centerX;
@@ -164,14 +167,9 @@ var ImageAnnotations = (function () {
     dx /= (state.scale || 1);
     dy /= (state.scale || 1);
 
-    var rot = -((state.rotation || 0) * Math.PI) / 180;
-    var cos = Math.cos(rot);
-    var sin = Math.sin(rot);
-    var rx = dx * cos - dy * sin;
-    var ry = dx * sin + dy * cos;
-
-    var xPct = (rx + imgRect.width / 2) / imgRect.width;
-    var yPct = (ry + imgRect.height / 2) / imgRect.height;
+    // No reverse rotation needed — overlay is not rotated
+    var xPct = (dx + imgRect.width / 2) / imgRect.width;
+    var yPct = (dy + imgRect.height / 2) / imgRect.height;
     xPct = Math.max(0, Math.min(1, xPct));
     yPct = Math.max(0, Math.min(1, yPct));
     return { x: xPct, y: yPct };
@@ -322,17 +320,14 @@ var ImageAnnotations = (function () {
         var imgRect = getUntransformedImageRect(vid);
         if (!imgRect) return;
 
+        // Overlay is not rotated, so drag delta is already in image space.
+        // Only need to reverse translate and scale.
         var dx = (ev.clientX - startX) / (state.scale || 1) / imgRect.width;
         var dy = (ev.clientY - startY) / (state.scale || 1) / imgRect.height;
 
-        var rot = -((state.rotation || 0) * Math.PI) / 180;
-        var cos = Math.cos(rot);
-        var sin = Math.sin(rot);
-        var rx = dx * cos - dy * sin;
-        var ry = dx * sin + dy * cos;
-
-        var newX = Math.max(0, Math.min(1, marker.x + rx));
-        var newY = Math.max(0, Math.min(1, marker.y + ry));
+        // No reverse rotation needed — overlay is not rotated
+        var newX = Math.max(0, Math.min(1, marker.x + dx));
+        var newY = Math.max(0, Math.min(1, marker.y + dy));
 
         el.style.left = (newX * 100) + "%";
         el.style.top = (newY * 100) + "%";
@@ -712,6 +707,12 @@ var ImageAnnotations = (function () {
   // ── Navigation bar ──
   function showNavBar(vid, number, total, current) {
     closeNavBar();
+    // Only show nav bar inside the patent-detail-section.
+    // When patent detail is hidden (dossier/extract mode), the nav bar
+    // will also be hidden because display:none cascades to children.
+    var pdSection = document.getElementById("patent-detail-section");
+    if (!pdSection || pdSection.classList.contains("hidden")) return;
+
     navBarEl = document.createElement("div");
     navBarEl.className = "anno-nav-bar";
     navBarEl.innerHTML =
@@ -724,7 +725,7 @@ var ImageAnnotations = (function () {
       '<button class="anno-nav-btn" id="anno-nav-next" title="下一处">▼</button>' +
       '<button class="anno-nav-btn anno-nav-close" title="关闭">✕</button>' +
       "</div>";
-    document.body.appendChild(navBarEl);
+    pdSection.appendChild(navBarEl);
     navBarEl.addEventListener("mousedown", function (e) { e.stopPropagation(); });
     navBarEl.querySelector("#anno-nav-prev").addEventListener("click", function (e) { e.stopPropagation(); navigateHighlight(-1); });
     navBarEl.querySelector("#anno-nav-next").addEventListener("click", function (e) { e.stopPropagation(); navigateHighlight(1); });
@@ -909,6 +910,7 @@ var ImageAnnotations = (function () {
     onMarkerClick: onMarkerClick,
     toggleMarkerList: toggleMarkerList,
     clearHighlight: clearHighlight,
+    closeNavBar: closeNavBar,
     navigateHighlight: navigateHighlight,
     getCurrentPatentNumber: getCurrentPatentNumber,
     getAllAnnotatedPatents: getAllAnnotatedPatents,
