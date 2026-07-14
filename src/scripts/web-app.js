@@ -2179,6 +2179,13 @@ function autoTriggerGoogleTranslate(scope) {
       return;
     }
   } catch(e) {}
+  // If we already captured a translation for this patent, re-apply it directly
+  // (no need to re-trigger Google Translate — instant render + figure links)
+  if (patentData._translatedDescription) {
+    _applyTranslatedDescription(scope, patentData._translatedDescription);
+    setTimeout(function() { linkFigureReferences(scope); }, 200);
+    return;
+  }
   // Don't toggle off if translation is already active
   if (_googleTranslateActive) {
     // Translation already active for previous patent; for new content, set up
@@ -2978,26 +2985,32 @@ function _selectGoogleTranslateLang(targetLang) {
   _onGoogleTranslateActivated();
 }
 
-// Called when Google Translate becomes active — schedules figure reference linking
+// Called when Google Translate becomes active — schedules translation capture.
+// Strategy: wait for the DOM to stabilize (debounced MutationObserver), then
+// capture the translated text, turn OFF Google Translate (which removes all
+// the nested <font> tags), and re-render the description with the translated
+// text on a clean DOM — where figure links can be reliably generated.
 var _figLinkScope = null;
 var _figLinkTimer = null;
-var _figLinkRetries = 0;
-var _figLinkMaxRetries = 10;
 var _figLinkObserver = null;
+var _figLinkDebounceTimer = null;
+var _figLinkDebounceDelay = 1500; // ms of DOM quietness before we consider translation done
+var _figLinkFallbackDelay = 8000; // ms — fallback if observer never fires
 function _onGoogleTranslateActivated() {
   if (_figLinkScope) {
     if (_figLinkTimer) clearTimeout(_figLinkTimer);
-    _figLinkRetries = 0;
-    // Use MutationObserver to detect when Google Translate has modified the DOM
-    // (it wraps text in <font> tags), in addition to timeout-based retries.
+    if (_figLinkDebounceTimer) clearTimeout(_figLinkDebounceTimer);
     _setupFigLinkObserver(_figLinkScope);
-    // Initial delayed run after a short wait for initial translation to complete
+    // Fallback: if observer never fires (e.g. translation was instant via cookie),
+    // still run capture after a fixed delay.
     _figLinkTimer = setTimeout(function() {
-      _runFigLinkWithRetry(_figLinkScope);
-    }, 3000);
+      _captureAndApplyTranslation(_figLinkScope);
+    }, _figLinkFallbackDelay);
   }
 }
 
+// Observe DOM mutations; when the container has been quiet for
+// _figLinkDebounceDelay, treat translation as complete and capture.
 function _setupFigLinkObserver(scope) {
   if (_figLinkObserver) {
     try { _figLinkObserver.disconnect(); } catch(e) {}
@@ -3006,26 +3019,12 @@ function _setupFigLinkObserver(scope) {
   var container = _getDescriptionContainer(scope);
   if (!container) return;
   try {
-    _figLinkObserver = new MutationObserver(function(mutations) {
-      var hasFontChanges = false;
-      for (var i = 0; i < mutations.length; i++) {
-        var added = mutations[i].addedNodes;
-        for (var j = 0; j < added.length; j++) {
-          var n = added[j];
-          if (n.nodeType === 1 && (n.tagName === 'FONT' || n.querySelector && n.querySelector('font'))) {
-            hasFontChanges = true;
-            break;
-          }
-        }
-        if (hasFontChanges) break;
-      }
-      if (hasFontChanges && _figLinkTimer) {
-        clearTimeout(_figLinkTimer);
-        _figLinkRetries = 0;
-        _figLinkTimer = setTimeout(function() {
-          _runFigLinkWithRetry(scope);
-        }, 2000);
-      }
+    _figLinkObserver = new MutationObserver(function() {
+      // Any DOM change resets the debounce timer
+      if (_figLinkDebounceTimer) clearTimeout(_figLinkDebounceTimer);
+      _figLinkDebounceTimer = setTimeout(function() {
+        _captureAndApplyTranslation(scope);
+      }, _figLinkDebounceDelay);
     });
     _figLinkObserver.observe(container, { childList: true, subtree: true });
   } catch(e) {}
@@ -3036,22 +3035,110 @@ function _stopFigLinkObserver() {
     try { _figLinkObserver.disconnect(); } catch(e) {}
     _figLinkObserver = null;
   }
+  if (_figLinkTimer) { clearTimeout(_figLinkTimer); _figLinkTimer = null; }
+  if (_figLinkDebounceTimer) { clearTimeout(_figLinkDebounceTimer); _figLinkDebounceTimer = null; }
 }
 
-function _runFigLinkWithRetry(scope) {
-  var beforeCount = document.querySelectorAll('#patent-detail-content .pd-fig-link, #ppv-content .pd-fig-link').length;
-  linkFigureReferences(scope);
-  var afterCount = document.querySelectorAll('#patent-detail-content .pd-fig-link, #ppv-content .pd-fig-link').length;
-  _figLinkRetries++;
-  // If no new links were created and we haven't exhausted retries, try again
-  // (translation may still be in progress for long documents)
-  if (afterCount === beforeCount && _figLinkRetries < _figLinkMaxRetries) {
-    _figLinkTimer = setTimeout(function() {
-      _runFigLinkWithRetry(scope);
-    }, 3000);
-  } else {
+// Capture translated text from the current DOM (after GT has wrapped it in
+// <font> tags) and rebuild the description with clean HTML.
+function _captureAndApplyTranslation(scope) {
+  var container = _getDescriptionContainer(scope);
+  if (!container) {
     _stopFigLinkObserver();
+    return;
   }
+  // Only proceed if translation actually happened (i.e. <font> tags present)
+  var hasFonts = container.querySelector('font');
+  if (!hasFonts) {
+    // No translation yet; keep waiting (observer will retry, fallback timer will fire)
+    return;
+  }
+  // Stop observing before we modify the DOM ourselves
+  _stopFigLinkObserver();
+
+  // 1. Capture the translated text, preserving paragraph structure
+  var translatedText = _captureTranslatedDescription(scope);
+  if (!translatedText) return;
+
+  // 2. Cache the translation on the patent data object so subsequent tab
+  // switches can re-render instantly without re-triggering Google Translate.
+  var data = (scope === 'popup') ? window._patentPopupData : window._currentPatentData;
+  if (data) {
+    data._translatedDescription = translatedText;
+  }
+
+  // 3. Turn OFF Google Translate so it stops mutating the DOM.
+  //    Reset combo + clear cookie — GT will remove its <font> tags and
+  //    restore the original text.
+  _disableGoogleTranslateQuiet();
+
+  // 4. Wait briefly for GT to restore the DOM, then re-render with the
+  //    translated text and generate figure links on the clean DOM.
+  setTimeout(function() {
+    _applyTranslatedDescription(scope, translatedText);
+    // Now generate figure links on the clean DOM
+    setTimeout(function() { linkFigureReferences(scope); }, 200);
+  }, 600);
+}
+
+// Quietly disable Google Translate (without toggling state confusion)
+function _disableGoogleTranslateQuiet() {
+  try {
+    var gtEls = document.querySelectorAll("#goog-gt-tt, .goog-te-spinner-pos, .goog-te-banner-frame, .goog-te-banner");
+    gtEls.forEach(function(el) { el.remove(); });
+    document.body.style.top = "";
+    var combo = document.querySelector(".goog-te-combo");
+    if (combo) {
+      combo.value = "";
+      _dispatchComboChange(combo);
+    }
+    _setGoogTransCookie("");
+    _googleTranslateActive = false;
+  } catch(e) {}
+}
+
+// Extract translated text from the DOM, reconstructing the
+// "## 段标题\n[0001] 正文" format that renderDescriptionHtml expects.
+function _captureTranslatedDescription(scope) {
+  var container = _getDescriptionContainer(scope);
+  if (!container) return null;
+  var sections = [];
+  var children = container.children;
+  for (var i = 0; i < children.length; i++) {
+    var child = children[i];
+    if (!child) continue;
+    var cls = child.className || '';
+    if (cls.indexOf('pd-desc-section-title') >= 0) {
+      // Section heading
+      var heading = (child.textContent || '').trim();
+      if (heading) sections.push('## ' + heading);
+    } else if (child.tagName === 'P') {
+      // Paragraph — preserve paragraph number if present
+      var paraNumEl = child.querySelector('.pd-para-num');
+      var text = (child.textContent || '').trim();
+      if (paraNumEl) {
+        // Re-format as "[0001] body"
+        var numMatch = text.match(/^(\[\d+\])\s*([\s\S]*)$/);
+        if (numMatch) {
+          sections.push(numMatch[1] + ' ' + numMatch[2].trim());
+        } else {
+          sections.push(text);
+        }
+      } else {
+        if (text) sections.push(text);
+      }
+    }
+  }
+  if (sections.length === 0) return null;
+  return sections.join('\n\n');
+}
+
+// Re-render the description container using translated text
+function _applyTranslatedDescription(scope, translatedText) {
+  var container = _getDescriptionContainer(scope);
+  if (!container) return;
+  var html = renderDescriptionHtml(translatedText);
+  if (html) container.innerHTML = html;
 }
 
 // ── Figure Reference Auto-Linking ──
