@@ -7067,6 +7067,15 @@ body {
 }
 .extract-doc-row:hover { background: var(--bg-hover); }
 .extract-doc-row input[type="checkbox"] { cursor: pointer; }
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.checkbox-label input[type="checkbox"] { cursor: pointer; margin: 0; }
+.checkbox-label span { flex: 1; }
 .extract-doc-row.ocr-running { background: rgba(59,130,246,0.06); }
 .extract-doc-code {
   font-weight: 600;

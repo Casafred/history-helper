@@ -488,6 +488,8 @@ var ImageAnnotations = (function () {
 
   // ── Switch to description tab (so highlights are visible) ──
   function showDescriptionTab() {
+    // Skip auto-translation when navigating from a marker click (preserve highlight)
+    window._skipAutoTranslate = true;
     // Patent detail tab layout
     var bmTab = document.querySelector('.pd-bookmark-tab[data-tab="description"]');
     if (bmTab && typeof switchPatentTab === "function") {

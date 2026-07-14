@@ -2133,6 +2133,11 @@ function switchPatentTab(tabName) {
   if (!layout) return;
   layout.querySelectorAll('.pd-bookmark-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
   layout.querySelectorAll('.pd-tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === tabName));
+  // Auto-translate non-Chinese patent description when switching to description tab
+  if (tabName === 'description' && !window._skipAutoTranslate) {
+    setTimeout(function() { autoTranslateDescription('main'); }, 300);
+  }
+  window._skipAutoTranslate = false;
 }
 
 // ── 复制到剪贴板 ──
@@ -2188,10 +2193,87 @@ function switchPpvTab(tabName) {
   if (!layout) return;
   layout.querySelectorAll('.pd-bookmark-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
   layout.querySelectorAll('.pd-tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === tabName));
+  // Auto-translate non-Chinese patent description when switching to description tab
+  if (tabName === 'description' && !window._skipAutoTranslate) {
+    setTimeout(function() { autoTranslateDescription('popup'); }, 300);
+  }
+  window._skipAutoTranslate = false;
+}
+
+// Auto-translate description when switching to description tab for non-Chinese patents
+// Prefers AI translation; falls back to immersive translate extension if no API key
+var _autoTranslateInProgress = false;
+async function autoTranslateDescription(scope) {
+  if (_autoTranslateInProgress) return;
+  var config = window.AI.loadAIConfig();
+  var translate = config.translate || {};
+  if (translate.autoDescription === false) return; // disabled by user
+
+  var patentData = (scope === 'popup') ? window._patentPopupData : window._currentPatentData;
+  if (!patentData || !patentData.patent_number) return;
+  // Only auto-translate non-Chinese patents
+  if (isCNPatent(patentData.patent_number)) return;
+  if (!patentData.description || !patentData.description.trim()) return;
+
+  // Already translated? Skip
+  var container = (scope === 'popup')
+    ? document.getElementById('ppv-content')
+    : document.querySelector('.pd-tab-layout');
+  if (!container) return;
+  var descEl = container.querySelector('[data-section-type="description"] .pd-description-text');
+  if (!descEl) return;
+  if (descEl.dataset.translated === 'true') return;
+  if (descEl.dataset.autoTranslateFailed === 'true') return;
+
+  var tp = window.AI.getTranslateProvider(config);
+  if (tp && tp.apiKey) {
+    // Use AI translation
+    _autoTranslateInProgress = true;
+    try {
+      await translatePatentSection('description', { auto: true, scope: scope });
+    } catch(e) {
+      console.warn('[AutoTranslate] AI failed:', e);
+      // Mark as failed so we don't retry repeatedly
+      if (descEl) descEl.dataset.autoTranslateFailed = 'true';
+    } finally {
+      _autoTranslateInProgress = false;
+    }
+  } else {
+    // No API key - fall back to immersive translate Chrome extension
+    descEl.dataset.autoTranslateFailed = 'true'; // avoid retry loop
+    try {
+      triggerImmersiveTranslateForPage();
+    } catch(e) {
+      console.warn('[AutoTranslate] immersive fallback failed:', e);
+    }
+  }
+}
+
+// Trigger immersive translate extension for the current page
+function triggerImmersiveTranslateForPage() {
+  if (window.electronAPI && typeof window.electronAPI.triggerImmersiveTranslate === 'function') {
+    window.electronAPI.triggerImmersiveTranslate();
+    return;
+  }
+  // Fallback: try to call immersive translate API if available
+  try {
+    if (typeof immersiveTranslate !== 'undefined' && immersiveTranslate) {
+      immersiveTranslate({
+        translateLanguageCode: 'zh-CN',
+        matchText: '',
+        enable: true
+      });
+    }
+  } catch(e) {
+    console.warn('[AutoTranslate] immersive API not available:', e);
+    showToast(icon('globe') + ' 未配置翻译API Key，沉浸式翻译插件也未加载。请在AI设置中配置翻译API Key');
+  }
 }
 
 // Translate patent section using AI
-async function translatePatentSection(sectionType) {
+async function translatePatentSection(sectionType, options) {
+  var opts = options || {};
+  var isAuto = !!opts.auto;
   // Find the section container — prefer popup context if active, else main page
   const popupContent = document.getElementById('ppv-content');
   const isPopupActive = popupContent && !popupContent.closest('.hidden');
@@ -2236,7 +2318,7 @@ async function translatePatentSection(sectionType) {
     const config = window.AI.loadAIConfig();
     const translateProvider = window.AI.getTranslateProvider(config);
     if (!translateProvider || !translateProvider.apiKey) {
-      showError("请先在 AI 设置中配置 API Key");
+      if (!isAuto) showError("请先在 AI 设置中配置 API Key");
       return;
     }
 
@@ -2251,7 +2333,7 @@ async function translatePatentSection(sectionType) {
     }
 
     if (!textToTranslate) {
-      showError("没有可翻译的内容");
+      if (!isAuto) showError("没有可翻译的内容");
       return;
     }
 
@@ -2324,9 +2406,10 @@ async function translatePatentSection(sectionType) {
       }
     }
   } catch (e) {
-    showError("翻译失败: " + e.message);
+    if (!isAuto) showError("翻译失败: " + e.message);
     const loadingEl3 = document.getElementById('pd-translation-loading-' + sectionType);
     if (loadingEl3) loadingEl3.remove();
+    throw e; // re-throw so autoTranslateDescription can catch and mark failed
   }
 }
 
@@ -2360,7 +2443,9 @@ function showPatentDetailContextMenu(clientX, clientY, targetSection) {
     translateSectionItem.textContent = targetSection === "claims" ? "翻译全部权利要求" : "翻译全部说明书";
     translateSectionItem.addEventListener("click", () => {
       hidePatentDetailContextMenu();
-      translatePatentSection(targetSection);
+      translatePatentSection(targetSection).catch(function(e) {
+        console.warn("[Translate] manual translate failed:", e);
+      });
     });
     menu.appendChild(translateSectionItem);
   }
@@ -6629,6 +6714,8 @@ if (translateSaveBtn) {
     config.translate.apiKey = translateApiKeyInput ? translateApiKeyInput.value.trim() : "";
     config.translate.model = translateModelSelect ? translateModelSelect.value : "";
     config.translate.defaultLang = translateDefaultLang ? translateDefaultLang.value : "en";
+    const autoDescCheckbox = document.getElementById("translate-auto-description-checkbox");
+    config.translate.autoDescription = autoDescCheckbox ? !!autoDescCheckbox.checked : true;
     window.AI.saveAIConfig(config);
     aiSettingsModal.classList.add("hidden");
   });
@@ -6774,6 +6861,8 @@ function loadAISettingsToForm() {
   }
   if (translateApiKeyInput) translateApiKeyInput.value = translate.apiKey || "";
   if (translateDefaultLang) translateDefaultLang.value = translate.defaultLang || "en";
+  const autoDescCheckbox = document.getElementById("translate-auto-description-checkbox");
+  if (autoDescCheckbox) autoDescCheckbox.checked = translate.autoDescription !== false;
 
   // Load custom prompts
   const promptKeys = [

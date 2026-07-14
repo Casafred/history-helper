@@ -28,5 +28,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getImmersiveTranslateScript: () => ipcRenderer.invoke("get-immersive-translate-script"),
   getImmersiveTranslateStatus: () => ipcRenderer.invoke("get-immersive-translate-status"),
   openExtensionsFolder: () => ipcRenderer.invoke("open-extensions-folder"),
+  triggerImmersiveTranslate: () => ipcRenderer.invoke("trigger-immersive-translate"),
   onForceClose: (callback) => ipcRenderer.on("force-close-app", () => callback()),
 });
