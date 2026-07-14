@@ -3124,26 +3124,73 @@ function _captureAndApplyTranslation(scope) {
       linkFigureReferences(scope);
       var afterCount = document.querySelectorAll('#patent-detail-content .pd-fig-link, #ppv-content .pd-fig-link').length;
       console.log('[FigLink] links created: before=' + beforeCount + ' after=' + afterCount);
+
+      // Safety net: 2 seconds later, verify links still exist. If they were
+      // destroyed (e.g. by residual GT activity), regenerate them once more.
+      setTimeout(function() {
+        var lateCount = document.querySelectorAll('#patent-detail-content .pd-fig-link, #ppv-content .pd-fig-link').length;
+        console.log('[FigLink] 2s later, link count=' + lateCount + ' (was ' + afterCount + ')');
+        if (lateCount < afterCount) {
+          console.warn('[FigLink] links disappeared! regenerating...');
+          linkFigureReferences(scope);
+          var finalCount = document.querySelectorAll('#patent-detail-content .pd-fig-link, #ppv-content .pd-fig-link').length;
+          console.log('[FigLink] regenerated: ' + finalCount + ' links');
+        }
+      }, 2000);
     }, 200);
   }, 600);
 }
 
-// Quietly disable Google Translate (without toggling state confusion)
+// Quietly disable Google Translate (without toggling state confusion).
+// IMPORTANT: We must FULLY purge GT from the page — remove the script tag,
+// widget container, global google object, and init callback. Otherwise GT's
+// internal MutationObserver will detect our DOM rewrite and RE-TRANSLATE it,
+// wrapping our <a class="pd-fig-link"> elements in <font> tags and destroying
+// the figure links we just generated.
 function _disableGoogleTranslateQuiet() {
   try {
-    var gtEls = document.querySelectorAll("#goog-gt-tt, .goog-te-spinner-pos, .goog-te-banner-frame, .goog-te-banner, .goog-te-gadget-icon, #goog-gt-tt");
+    // 1. Remove all GT-injected DOM elements (tooltip, spinner, banner, etc.)
+    var gtEls = document.querySelectorAll(
+      "#goog-gt-tt, .goog-te-spinner-pos, .goog-te-banner-frame, .goog-te-banner, " +
+      ".goog-te-gadget-icon, #goog-gt-tt, .goog-te-balloon, .goog-te-pos, " +
+      "#google_translate_element, .skiptranslate, iframe.goog-te-banner-frame"
+    );
     gtEls.forEach(function(el) { el.remove(); });
+
+    // 2. Remove the GT script tag itself so it can't re-execute
+    var gtScript = document.getElementById('google-translate-script');
+    if (gtScript) gtScript.remove();
+
+    // 3. Remove the GT widget container
+    var gtContainer = document.getElementById('google_translate_element');
+    if (gtContainer) gtContainer.remove();
+
+    // 4. Reset body styles that GT may have set
     document.body.style.top = "";
+    document.body.classList.remove('translated');
+
+    // 5. Reset the combo if present (signals GT to restore original text)
     var combo = document.querySelector(".goog-te-combo");
     if (combo) {
       combo.value = "";
       _dispatchComboChange(combo);
     }
+
+    // 6. Clear googtrans cookie — prevents GT from re-translating on next load
     _setGoogTransCookie("");
+
+    // 7. Delete the global google object and init callback — fully neutralize GT
+    try { delete window.google; } catch(e) { window.google = undefined; }
+    try { delete window.googleTranslateElementInit; } catch(e) { window.googleTranslateElementInit = undefined; }
+
+    // 8. Reset internal state flags
     _googleTranslateActive = false;
-    // Stop any pending poll timer
+    _googleTranslateInjected = false;
+
+    // 9. Stop any pending fig-link poll timer
     if (_figLinkPollTimer) { clearTimeout(_figLinkPollTimer); _figLinkPollTimer = null; }
-    console.log('[FigLink] Google Translate disabled quietly');
+
+    console.log('[FigLink] Google Translate fully purged from page');
   } catch(e) {
     console.warn('[FigLink] error disabling GT:', e);
   }
