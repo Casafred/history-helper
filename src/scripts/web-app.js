@@ -240,14 +240,15 @@ function _dossierApplyTab(tab) {
   // Restore a tab snapshot into the global state and re-render the UI.
   if (!tab) return;
 
-  // First, save current tab state BEFORE aborting anything (captures partial AI output)
-  if (_dossierActiveKey && currentData) {
-    _dossierSaveActiveTab();
-  }
+  // NOTE: _dossierSaveActiveTab() is NOT called here because all callers
+  // (_dossierSwitchTo, _dossierPrepareTab) already save the active tab BEFORE
+  // changing _dossierActiveKey. Calling it here would save old currentData
+  // into the NEW tab (since _dossierActiveKey has already been switched),
+  // overwriting the target tab's saved state.
 
   // Abort any running AI process before switching (prevents writes to dead DOM)
-  if (activeAnalysisProcess) {
-    abortActiveProcess();
+  if (typeof activeAnalysisProcess !== 'undefined' && activeAnalysisProcess) {
+    if (typeof abortActiveProcess === 'function') abortActiveProcess();
   }
 
   // Close reader modal first, since it references old kanban state
