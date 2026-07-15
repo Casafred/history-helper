@@ -240,6 +240,11 @@ function _dossierApplyTab(tab) {
   // Restore a tab snapshot into the global state and re-render the UI.
   if (!tab) return;
 
+  // First, save current tab state BEFORE aborting anything (captures partial AI output)
+  if (_dossierActiveKey && currentData) {
+    _dossierSaveActiveTab();
+  }
+
   // Abort any running AI process before switching (prevents writes to dead DOM)
   if (activeAnalysisProcess) {
     abortActiveProcess();
@@ -267,7 +272,32 @@ function _dossierApplyTab(tab) {
   pdfViewState.active = false;
   pdfViewState.currentDocIdx = null;
   pdfViewState.currentDocKey = null;
+  pdfViewState.pdfDoc = null;
+  pdfViewState.currentPage = 1;
+  pdfViewState.totalPages = 0;
+  pdfViewState.scale = 1.0;
+  pdfViewState.baseScale = 1.0;
   pdfViewState.renderedPages = {};
+  pdfViewState.pendingHighlight = null;
+  pdfViewState.pendingHighlightRange = null;
+  pdfViewState.searchMatches = [];
+  pdfViewState.searchCurrentIdx = -1;
+  pdfViewState.selectedBlockIds = [];
+  pdfViewState.selectedAnnotIds = [];
+  pdfViewState.selecting = false;
+  pdfViewState.selectStart = null;
+  pdfViewState.selectEnd = null;
+  pdfViewState.traceJumpPending = false;
+  pdfViewState.renderVersion = 0;
+  pdfViewState.annotTool = null;
+  pdfViewState.annotDragging = false;
+  pdfViewState.annotDragStart = null;
+  pdfViewState.annotDragEnd = null;
+  pdfViewState.annotDragPage = null;
+  pdfViewState.annotDragViewport = null;
+  pdfViewState.annotMoving = null;
+  pdfViewState.annotResizing = null;
+  pdfViewState.ocrHidden = false;
   pdfViewState._pdfDocCache = {};
   if (typeof _pdfDocCache !== "undefined") _pdfDocCache = {};
 
@@ -308,6 +338,10 @@ function _dossierApplyTab(tab) {
 
   try { renderKanban(currentData); } catch (e) { console.error("renderKanban:", e); }
 
+  const savedDocuments = savedKs.documents || [];
+  if (savedDocuments.length > 0) {
+    kanbanState.documents = JSON.parse(JSON.stringify(savedDocuments));
+  }
   kanbanState.extractions = JSON.parse(JSON.stringify(savedExtractionState));
   kanbanState.analysis = savedAnalysis;
   kanbanState.analysisSystemPrompt = savedAnalysisSystemPrompt;
@@ -316,7 +350,6 @@ function _dossierApplyTab(tab) {
   kanbanState.traceIndex = JSON.parse(JSON.stringify(savedTraceIndex));
   kanbanState.hasUnsavedWork = savedHasUnsaved;
   kanbanState.activeAnalysisView = savedActiveView;
-  // Ensure documents have idx
   kanbanState.documents.forEach((d, i) => { if (d.idx == null) d.idx = i; });
 
   // Restore extraction previews in kanban cards
@@ -326,12 +359,17 @@ function _dossierApplyTab(tab) {
       const displayText = ext.markdown || ext.text;
       const blocksInfo = ext.blocks && ext.blocks.length > 0 ? ` · ${ext.blocks.length} blocks` : "";
       container.classList.remove("hidden");
+      container._extractedText = ext.text || "";
+      container._extractedMarkdown = ext.markdown || "";
+      const doc = kanbanState.documents.find(d => String(d.idx) === String(idx));
+      const docTypeForBtn = doc ? (doc.docCode || doc.name || "") : "";
       container.innerHTML = `
         <div class="extracted-header">
           <span class="extracted-engine">引擎: ${escapeHtml(ext.engine || "")}</span>
           <span class="extracted-chars">字符数: ${displayText.length}${blocksInfo}</span>
+          <button class="btn-small btn-ai-analyze" data-action="ai-analyze-doc" data-idx="${idx}" data-doctype="${escapeHtml(docTypeForBtn)}">AI 分析</button>
         </div>
-        <pre class="extracted-text">${escapeHtml(displayText.length > 6000 ? displayText.substring(0, 6000) + "\n\n[...已截断...]" : displayText)}</pre>
+        <pre class="extracted-text">${escapeHtml(displayText.length > 8000 ? displayText.substring(0, 8000) + "\n\n[...已截断...]" : displayText)}</pre>
       `;
     }
   }
@@ -360,6 +398,17 @@ function _dossierApplyTab(tab) {
     showAnalysisChatToggle();
     prefetchPatentLinks();
   }
+
+  // Restore analysis view toggle buttons (review vs cited refs)
+  try {
+    const reviewBtn = document.getElementById("kanban-analysis-result-btn");
+    const citedBtn = document.getElementById("kanban-analysis-cited-btn");
+    if (reviewBtn && citedBtn) {
+      const isCitedView = savedActiveView === "citedRefs";
+      reviewBtn.classList.toggle("active", !isCitedView);
+      citedBtn.classList.toggle("active", isCitedView);
+    }
+  } catch (_) {}
 
   try { renderOverview(currentData); } catch (e) { console.error("renderOverview:", e); }
   try { renderFamily(currentData); } catch (e) { console.error("renderFamily:", e); }
@@ -589,7 +638,7 @@ function _dossierCreateEmptyTab(key, label) {
     label: label || key,
     title: "",
     currentData: null,
-    kanbanState: { documents: [], extractions: {}, analysis: "", analysisSystemPrompt: "", analysisUserMessage: "", citedRefsAnalysis: "", traceIndex: {}, hasUnsavedWork: false },
+    kanbanState: { documents: [], extractions: {}, analysis: "", analysisSystemPrompt: "", analysisUserMessage: "", citedRefsAnalysis: "", traceIndex: {}, hasUnsavedWork: false, activeAnalysisView: "review" },
     activeInnerTab: "overview",
   };
   _dossierTabs.push(newTab);
@@ -607,7 +656,32 @@ function _dossierCreateEmptyTab(key, label) {
   pdfViewState.active = false;
   pdfViewState.currentDocIdx = null;
   pdfViewState.currentDocKey = null;
+  pdfViewState.pdfDoc = null;
+  pdfViewState.currentPage = 1;
+  pdfViewState.totalPages = 0;
+  pdfViewState.scale = 1.0;
+  pdfViewState.baseScale = 1.0;
   pdfViewState.renderedPages = {};
+  pdfViewState.pendingHighlight = null;
+  pdfViewState.pendingHighlightRange = null;
+  pdfViewState.searchMatches = [];
+  pdfViewState.searchCurrentIdx = -1;
+  pdfViewState.selectedBlockIds = [];
+  pdfViewState.selectedAnnotIds = [];
+  pdfViewState.selecting = false;
+  pdfViewState.selectStart = null;
+  pdfViewState.selectEnd = null;
+  pdfViewState.traceJumpPending = false;
+  pdfViewState.renderVersion = 0;
+  pdfViewState.annotTool = null;
+  pdfViewState.annotDragging = false;
+  pdfViewState.annotDragStart = null;
+  pdfViewState.annotDragEnd = null;
+  pdfViewState.annotDragPage = null;
+  pdfViewState.annotDragViewport = null;
+  pdfViewState.annotMoving = null;
+  pdfViewState.annotResizing = null;
+  pdfViewState.ocrHidden = false;
   if (typeof _pdfDocCache !== "undefined") _pdfDocCache = {};
   if (typeof closeReader === "function") closeReader();
   const analysisPanel = document.getElementById("analysis-chat-panel");
@@ -4956,10 +5030,19 @@ const PatentCache = {
       }
     } catch (e) {}
 
+    const applicantName = currentData.applicantName ||
+      (currentData.family && currentData.family.list && currentData.family.list[0] && currentData.family.list[0].applicantName) ||
+      "";
+    const title = (currentData.family && currentData.family.list && currentData.family.list[0] && currentData.family.list[0].title) ||
+      (currentData.documents && currentData.documents.title) ||
+      "";
+
     return {
       patentNumber,
       office: currentData.office || "",
       timestamp: Date.now(),
+      applicantName,
+      title,
       currentData: JSON.parse(JSON.stringify(currentData)),
       kanbanState: {
         documents: JSON.parse(JSON.stringify(kanbanState.documents)),
@@ -4970,6 +5053,7 @@ const PatentCache = {
         traceIndex: traceIndexClone,
         citedRefsAnalysis: kanbanState.citedRefsAnalysis || "",
         activeAnalysisView: kanbanState.activeAnalysisView || "review",
+        hasUnsavedWork: !!kanbanState.hasUnsavedWork,
       },
       hasOCR,
       hasAnalysis,
@@ -5097,12 +5181,17 @@ const PatentCache = {
           const displayText = ext.markdown || ext.text;
           const blocksInfo = ext.blocks && ext.blocks.length > 0 ? ` · ${ext.blocks.length} blocks` : "";
           container.classList.remove("hidden");
+          container._extractedText = ext.text || "";
+          container._extractedMarkdown = ext.markdown || "";
+          const doc = kanbanState.documents.find(d => String(d.idx) === String(idx));
+          const docTypeForBtn = doc ? (doc.docCode || doc.name || "") : "";
           container.innerHTML = `
             <div class="extracted-header">
               <span class="extracted-engine">引擎: ${escapeHtml(ext.engine || "")}</span>
               <span class="extracted-chars">字符数: ${displayText.length}${blocksInfo}</span>
+              <button class="btn-small btn-ai-analyze" data-action="ai-analyze-doc" data-idx="${idx}" data-doctype="${escapeHtml(docTypeForBtn)}">AI 分析</button>
             </div>
-            <pre class="extracted-text">${escapeHtml(displayText.length > 6000 ? displayText.substring(0, 6000) + "\n\n[...已截断...]" : displayText)}</pre>
+            <pre class="extracted-text">${escapeHtml(displayText.length > 8000 ? displayText.substring(0, 8000) + "\n\n[...已截断...]" : displayText)}</pre>
           `;
         }
       }
@@ -5123,6 +5212,17 @@ const PatentCache = {
         showAnalysisChatToggle();
         prefetchPatentLinks();
       }
+
+      // Restore analysis view toggle buttons (review vs cited refs)
+      try {
+        const reviewBtn = document.getElementById("kanban-analysis-result-btn");
+        const citedBtn = document.getElementById("kanban-analysis-cited-btn");
+        if (reviewBtn && citedBtn) {
+          const isCitedView = kanbanState.activeAnalysisView === "citedRefs";
+          reviewBtn.classList.toggle("active", !isCitedView);
+          citedBtn.classList.toggle("active", isCitedView);
+        }
+      } catch (_) {}
 
       // Switch to the saved inner tab (or default based on what was restored)
       // Priority: saved activeInnerTab > ai-analysis (if analysis exists) > kanban (if OCR exists) > overview
@@ -5275,6 +5375,9 @@ function autoSaveCache() {
   if (entry) {
     PatentCache.save(entry.patentNumber, entry);
     kanbanState.hasUnsavedWork = false;
+    if (searchMode === "dossier" && _dossierActiveKey) {
+      _dossierSaveActiveTab();
+    }
     refreshHistoryList();
   }
 }
@@ -5381,6 +5484,20 @@ function refreshHistoryList() {
   });
   // Overlay cached entries (they have richer data)
   Object.entries(cachedAll).forEach(([pn, c]) => {
+    const metaApplicant = c.applicantName || "";
+    const metaTitle = c.title || "";
+    const legacyApplicant = (c.currentData && c.currentData.applicantName) || "";
+    let legacyTitle = "";
+    if (c.currentData) {
+      if (c.currentData.documents && c.currentData.documents.title) {
+        legacyTitle = c.currentData.documents.title;
+      } else if (c.currentData.family && c.currentData.family.list && c.currentData.family.list.length > 0) {
+        legacyTitle = c.currentData.family.list[0].title || "";
+      }
+    }
+    const finalApplicant = metaApplicant || legacyApplicant;
+    const finalTitle = metaTitle || legacyTitle;
+
     if (mergedMap[pn]) {
       mergedMap[pn].isCached = true;
       mergedMap[pn].hasOCR = !!c.hasOCR;
@@ -5391,19 +5508,8 @@ function refreshHistoryList() {
         mergedMap[pn].timestamp = c.timestamp;
         mergedMap[pn].office = c.office || mergedMap[pn].office;
       }
-      // Also get applicantName/title from cached currentData if available
-      if (c.currentData) {
-        if (!mergedMap[pn].applicantName && c.currentData.applicantName) {
-          mergedMap[pn].applicantName = c.currentData.applicantName;
-        }
-        if (!mergedMap[pn].title) {
-          if (c.currentData.documents && c.currentData.documents.title) {
-            mergedMap[pn].title = c.currentData.documents.title;
-          } else if (c.currentData.family && c.currentData.family.list && c.currentData.family.list.length > 0) {
-            mergedMap[pn].title = c.currentData.family.list[0].title || "";
-          }
-        }
-      }
+      if (finalApplicant) mergedMap[pn].applicantName = finalApplicant;
+      if (finalTitle) mergedMap[pn].title = finalTitle;
     } else {
       mergedMap[pn] = {
         patentNumber: pn,
@@ -5413,8 +5519,8 @@ function refreshHistoryList() {
         hasOCR: !!c.hasOCR,
         hasAnalysis: !!c.hasAnalysis,
         hasCitedRefs: !!c.hasCitedRefs,
-        applicantName: (c.currentData && c.currentData.applicantName) || "",
-        title: (c.currentData && c.currentData.documents && c.currentData.documents.title) || (c.currentData && c.currentData.family && c.currentData.family.list && c.currentData.family.list[0] && c.currentData.family.list[0].title) || "",
+        applicantName: finalApplicant,
+        title: finalTitle,
       };
     }
   });
@@ -8383,6 +8489,8 @@ async function runCitedRefsAnalysis(selectedIdxs) {
     let fullText = "";
     let _streamRafPending = false;
     let _lastRenderLen = 0;
+    kanbanState.citedRefsAnalysis = "";
+    kanbanState.hasUnsavedWork = true;
     for await (const chunk of window.AI.streamChat(
       provider.type, provider.apiKey, provider.baseUrl,
       {
@@ -8411,6 +8519,8 @@ async function runCitedRefsAnalysis(selectedIdxs) {
             if (answerContainer) {
               answerContainer.innerHTML = marked.parse(fullText);
             }
+            kanbanState.citedRefsAnalysis = fullText;
+            kanbanState.hasUnsavedWork = true;
             _lastRenderLen = fullText.length;
             _streamRafPending = false;
           });
@@ -9090,6 +9200,10 @@ function buildReviewManualSelectPanel() {
 
     try {
       let fullText = "";
+      kanbanState.analysis = "";
+      kanbanState.analysisSystemPrompt = systemPrompt;
+      kanbanState.analysisUserMessage = userMessage;
+      kanbanState.hasUnsavedWork = true;
       // Clear previous content (including any previous progress UI)
       analysisContent.innerHTML = "";
       // Create a stable container once to avoid full DOM replacement on each chunk
@@ -9140,6 +9254,8 @@ function buildReviewManualSelectPanel() {
               if (answerContainer) {
                 answerContainer.innerHTML = renderMarkdownWithTrace(fullText);
               }
+              kanbanState.analysis = fullText;
+              kanbanState.hasUnsavedWork = true;
               _lastRenderLen = fullText.length;
               _streamRafPending = false;
             });
