@@ -4510,8 +4510,33 @@ async function doSearch(input) {
 
   searchBtn.disabled = true;
   loadingText.textContent = "正在查询专利信息...";
-  loading.classList.remove("hidden");
-  resultSection.classList.add("hidden");
+  
+  // Check if result section is already visible (tabs exist)
+  const isResultVisible = !resultSection.classList.contains("hidden");
+  
+  if (isResultVisible) {
+    // When tabs already exist: show inline loading in content area, keep tabs bar visible
+    loading.classList.add("hidden");
+    resultSection.classList.remove("hidden");
+    const tabsBar = document.getElementById("dossier-tabs-bar");
+    if (tabsBar) tabsBar.classList.remove("hidden");
+    // Show loading state in the content area
+    const overviewContent = document.getElementById("overview-content");
+    const kanbanBoard = document.getElementById("kanban-board");
+    const familyContent = document.getElementById("family-content");
+    const timelineBoard = document.getElementById("timeline-board");
+    const aiContent = document.getElementById("ai-analysis-content");
+    const inlineLoadingHtml = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:12px;"><div class="spinner"></div><p id="inline-loading-text" style="color:var(--text-muted);font-size:13px;margin:0;">正在查询专利信息...</p></div>';
+    if (overviewContent) overviewContent.innerHTML = inlineLoadingHtml;
+    if (kanbanBoard) kanbanBoard.innerHTML = inlineLoadingHtml;
+    if (familyContent) familyContent.innerHTML = inlineLoadingHtml;
+    if (timelineBoard) timelineBoard.innerHTML = inlineLoadingHtml;
+    if (aiContent) aiContent.innerHTML = inlineLoadingHtml;
+  } else {
+    // First search or from home: use full-screen loading
+    loading.classList.remove("hidden");
+    resultSection.classList.add("hidden");
+  }
   hideError();
 
   kanbanState.documents = [];
@@ -4534,84 +4559,102 @@ async function doSearch(input) {
   const warnings = [];
 
   try {
-    const familyData = await gdFetch(`/patent-family/svc/family/${queryType}/${office}/${docNum}`);
-    result.family = familyData;
-    // 当通过 publication/patent 类型查询时，family 返回 corrAppNum 是真正的申请号
-    // 后续的文档列表查询必须使用申请号
-    if (familyData && familyData.corrAppNum) {
-      result.applicationNumber = familyData.corrAppNum;
-    } else if (familyData && familyData.list && Array.isArray(familyData.list)) {
-      // corrAppNum 为 null 时，从 family.list 中查找当前局的申请号
-      // EP 专利通过公开号/专利号查询时，corrAppNum 经常为 null
-      const ownEntry = familyData.list.find(item => item.countryCode === office);
-      if (ownEntry && ownEntry.appNum) {
-        result.applicationNumber = ownEntry.appNum;
-      } else if (ownEntry && ownEntry.docNum && ownEntry.docNum.docNumber) {
-        result.applicationNumber = ownEntry.docNum.docNumber;
+    try {
+      const familyData = await gdFetch(`/patent-family/svc/family/${queryType}/${office}/${docNum}`);
+      result.family = familyData;
+      // 当通过 publication/patent 类型查询时，family 返回 corrAppNum 是真正的申请号
+      // 后续的文档列表查询必须使用申请号
+      if (familyData && familyData.corrAppNum) {
+        result.applicationNumber = familyData.corrAppNum;
+      } else if (familyData && familyData.list && Array.isArray(familyData.list)) {
+        // corrAppNum 为 null 时，从 family.list 中查找当前局的申请号
+        // EP 专利通过公开号/专利号查询时，corrAppNum 经常为 null
+        const ownEntry = familyData.list.find(item => item.countryCode === office);
+        if (ownEntry && ownEntry.appNum) {
+          result.applicationNumber = ownEntry.appNum;
+        } else if (ownEntry && ownEntry.docNum && ownEntry.docNum.docNumber) {
+          result.applicationNumber = ownEntry.docNum.docNumber;
+        }
+      }
+    } catch (e) {
+      warnings.push("同族查询失败: " + e.message);
+    }
+
+    // 使用修正后的申请号查询文档列表
+    const appNumForDocs = result.applicationNumber;
+
+    loadingText.textContent = "正在查询审查文档...";
+    const inlineLoadingTextEl = document.getElementById("inline-loading-text");
+    if (inlineLoadingTextEl) inlineLoadingTextEl.textContent = "正在查询审查文档...";
+    await new Promise(r => setTimeout(r, 1500));
+
+    try {
+      const docData = await gdFetch(`/doc-list/svc/doclist/${office}/${appNumForDocs}/A`);
+      result.documents = docData;
+      if (docData && docData.docNumber) {
+        result.docNumber = docData.docNumber;
+      }
+    } catch (e) {
+      warnings.push("文档列表查询失败: " + e.message);
+    }
+
+    if (warnings.length > 0) result.warnings = warnings;
+
+    currentData = result;
+
+    try { renderKanban(result); } catch (e) { console.error("renderKanban:", e); }
+    try { renderOverview(result); } catch (e) { console.error("renderOverview:", e); }
+    try { renderFamily(result); } catch (e) { console.error("renderFamily:", e); }
+    try { renderTimeline(result); } catch (e) { console.error("renderTimeline:", e); }
+
+    if (warnings.length > 0) {
+      warnings.forEach(w => showError("警告: " + w));
+    }
+
+    if (aiSummarizeBtn) aiSummarizeBtn.disabled = false;
+    const citedRefsManualBtn = document.getElementById("cited-refs-manual-btn");
+    if (citedRefsManualBtn) citedRefsManualBtn.disabled = false;
+    const manualSelectBtn = document.getElementById("kanban-manual-select-btn");
+    if (manualSelectBtn) manualSelectBtn.disabled = false;
+    // Auto-expand review manual selection panel when documents are loaded
+    if (typeof buildReviewManualSelectPanel === "function") {
+      try { buildReviewManualSelectPanel(); } catch (e) { console.error("auto-expand review panel:", e); }
+    }
+    resultSection.classList.remove("hidden");
+    searchBtn.disabled = false;
+    loading.classList.add("hidden");
+
+    // Register this search as a dossier tab (if in dossier mode)
+    try { _dossierRegisterCurrentTab(); } catch (_) {}
+
+    // Auto-record lightweight history entry (even without OCR/AI)
+    let patentTitle = "";
+    if (result.documents && result.documents.title) {
+      patentTitle = result.documents.title;
+    } else if (result.family && result.family.list && result.family.list.length > 0) {
+      patentTitle = result.family.list[0].title || "";
+    }
+    PatentCache.addHistory(result.raw || (result.office + result.applicationNumber), result.office, {
+      applicantName: result.applicantName || "",
+      title: patentTitle,
+    });
+    // Refresh history list after new search
+    refreshHistoryList();
+  } catch (e) {
+    console.error("doSearch error:", e);
+    showError("查询失败: " + (e.message || e));
+    searchBtn.disabled = false;
+    loading.classList.add("hidden");
+    if (isResultVisible) {
+      // Restore view - re-render if we have previous currentData
+      if (currentData) {
+        try { renderKanban(currentData); } catch (_) {}
+        try { renderOverview(currentData); } catch (_) {}
+        try { renderFamily(currentData); } catch (_) {}
+        try { renderTimeline(currentData); } catch (_) {}
       }
     }
-  } catch (e) {
-    warnings.push("同族查询失败: " + e.message);
   }
-
-  // 使用修正后的申请号查询文档列表
-  const appNumForDocs = result.applicationNumber;
-
-  loadingText.textContent = "正在查询审查文档...";
-  await new Promise(r => setTimeout(r, 1500));
-
-  try {
-    const docData = await gdFetch(`/doc-list/svc/doclist/${office}/${appNumForDocs}/A`);
-    result.documents = docData;
-    if (docData && docData.docNumber) {
-      result.docNumber = docData.docNumber;
-    }
-  } catch (e) {
-    warnings.push("文档列表查询失败: " + e.message);
-  }
-
-  if (warnings.length > 0) result.warnings = warnings;
-
-  currentData = result;
-
-  try { renderKanban(result); } catch (e) { console.error("renderKanban:", e); }
-  try { renderOverview(result); } catch (e) { console.error("renderOverview:", e); }
-  try { renderFamily(result); } catch (e) { console.error("renderFamily:", e); }
-  try { renderTimeline(result); } catch (e) { console.error("renderTimeline:", e); }
-
-  if (warnings.length > 0) {
-    warnings.forEach(w => showError("警告: " + w));
-  }
-
-  if (aiSummarizeBtn) aiSummarizeBtn.disabled = false;
-  const citedRefsManualBtn = document.getElementById("cited-refs-manual-btn");
-  if (citedRefsManualBtn) citedRefsManualBtn.disabled = false;
-  const manualSelectBtn = document.getElementById("kanban-manual-select-btn");
-  if (manualSelectBtn) manualSelectBtn.disabled = false;
-  // Auto-expand review manual selection panel when documents are loaded
-  if (typeof buildReviewManualSelectPanel === "function") {
-    try { buildReviewManualSelectPanel(); } catch (e) { console.error("auto-expand review panel:", e); }
-  }
-  resultSection.classList.remove("hidden");
-  searchBtn.disabled = false;
-  loading.classList.add("hidden");
-
-  // Register this search as a dossier tab (if in dossier mode)
-  try { _dossierRegisterCurrentTab(); } catch (_) {}
-
-  // Auto-record lightweight history entry (even without OCR/AI)
-  let patentTitle = "";
-  if (result.documents && result.documents.title) {
-    patentTitle = result.documents.title;
-  } else if (result.family && result.family.list && result.family.list.length > 0) {
-    patentTitle = result.family.list[0].title || "";
-  }
-  PatentCache.addHistory(result.raw || (result.office + result.applicationNumber), result.office, {
-    applicantName: result.applicantName || "",
-    title: patentTitle,
-  });
-  // Refresh history list after new search
-  refreshHistoryList();
 }
 
 let kanbanState = {
@@ -4715,6 +4758,48 @@ const PatentBlobDB = {
       tx.oncomplete = () => resolve(true);
       tx.onerror = () => reject(tx.error || new Error("IndexedDB clearAll error"));
     });
+  },
+
+  async getEstimatedSize() {
+    if (this._available === false) return 0;
+    try {
+      const db = await this.open();
+      return new Promise((resolve) => {
+        let totalSize = 0;
+        const tx = db.transaction(this.STORE_NAME, "readonly");
+        const store = tx.objectStore(this.STORE_NAME);
+        const req = store.openCursor();
+        req.onsuccess = (e) => {
+          const cursor = e.target.result;
+          if (cursor) {
+            try {
+              totalSize += new Blob([JSON.stringify(cursor.value)]).size;
+            } catch (_) {}
+            cursor.continue();
+          } else {
+            resolve(totalSize);
+          }
+        };
+        req.onerror = () => resolve(0);
+      });
+    } catch (_) {
+      return 0;
+    }
+  },
+
+  async count() {
+    if (this._available === false) return 0;
+    try {
+      const db = await this.open();
+      return new Promise((resolve) => {
+        const tx = db.transaction(this.STORE_NAME, "readonly");
+        const req = tx.objectStore(this.STORE_NAME).count();
+        req.onsuccess = () => resolve(req.result || 0);
+        req.onerror = () => resolve(0);
+      });
+    } catch (_) {
+      return 0;
+    }
   },
 };
 
@@ -4826,11 +4911,9 @@ const PatentCache = {
     // Write heavy fields to IndexedDB (async, fire-and-forget with fallback)
     if (hasHeavy) {
       PatentBlobDB.put(patentNumber, heavy).then(() => {
-        // Heavy blob persisted successfully
+        setTimeout(() => this.checkCacheSizeAndWarn(), 500);
       }).catch((e) => {
         console.error("[PatentCache] IDB put failed, attempting localStorage fallback:", e);
-        // Best-effort: write full entry (heavy + meta) back to localStorage
-        // and clear the heavyInIDB flag so future reads don't expect IDB.
         try {
           const all2 = this.getAll();
           if (all2[patentNumber]) {
@@ -4844,8 +4927,8 @@ const PatentCache = {
         }
       });
     } else {
-      // No heavy fields — clean up any stale IDB entry from a previous version
       PatentBlobDB.delete(patentNumber).catch(() => { /* ignore */ });
+      setTimeout(() => this.checkCacheSizeAndWarn(), 500);
     }
     return true;
   },
@@ -4860,31 +4943,43 @@ const PatentCache = {
       .filter(([k]) => k !== patentNumber)
       .sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
 
-    // Identify valuable entries that would be evicted (oldest first)
     const valuable = entries.filter(([, v]) =>
       v && (v.hasOCR || v.hasAnalysis || v.hasCitedRefs));
+    const nonValuableCount = entries.length - valuable.length;
 
-    if (valuable.length > 0) {
-      const list = valuable.map(([k, v]) => {
-        const tags = [];
-        if (v.hasOCR) tags.push("OCR");
-        if (v.hasAnalysis) tags.push("AI梳理");
-        if (v.hasCitedRefs) tags.push("引用分析");
-        let label = k;
-        try { label = timeAgo(v.timestamp) + " · " + k; } catch (_) {}
-        return "• " + label + "（" + tags.join("+") + "）";
-      }).join("\n");
+    if (valuable.length > 0 || nonValuableCount > 0) {
+      let list = "";
+      if (valuable.length > 0) {
+        list = valuable.slice(0, 10).map(([k, v]) => {
+          const tags = [];
+          if (v.hasOCR) tags.push("OCR");
+          if (v.hasAnalysis) tags.push("AI梳理");
+          if (v.hasCitedRefs) tags.push("引用分析");
+          let label = k;
+          try { label = timeAgo(v.timestamp) + " · " + k; } catch (_) {}
+          return "• " + label + "（" + tags.join("+") + "）";
+        }).join("\n");
+        if (valuable.length > 10) {
+          list += "\n• ... 以及其他 " + (valuable.length - 10) + " 条含重要数据的记录";
+        }
+      }
+      if (nonValuableCount > 0) {
+        if (list) list += "\n";
+        list += "• " + nonValuableCount + " 条无重要数据的旧记录（无OCR/AI）";
+      }
 
       const msg =
-        "本地缓存空间已满。继续保存将删除以下含 OCR / AI 梳理 / 引用分析的旧记录：\n\n" +
+        "💾 本地缓存元数据空间已满（浏览器localStorage约5-10MB限制）。\n\n" +
+        "继续保存当前结果将自动删除最旧的记录，包括：\n\n" +
         list +
-        "\n\n确认删除并保存当前结果？取消将放弃保存。";
+        "\n\n" +
+        (valuable.length > 0 ? "⚠️ 以上含OCR/AI梳理的记录删除后，重新打开时需要重新提取/分析。\n\n" : "") +
+        "点击「确定」自动清理旧记录并保存；\n" +
+        "点击「取消」放弃保存，您可以稍后到「设置→缓存」手动管理。";
       if (!confirm(msg)) {
-        showError("已取消保存：缓存已满且含 OCR / AI 报告的旧记录未清理");
+        showError("已取消保存：缓存空间不足，可到设置中手动清理缓存");
         return false;
       }
-    } else {
-      // No valuable entries — silently evict oldest as before
     }
 
     // Evict oldest entries one by one until the new meta fits
@@ -4892,7 +4987,6 @@ const PatentCache = {
       const [key, val] = entries.shift();
       const hadHeavy = !!(val && val.heavyInIDB);
       delete all[key];
-      // Also clean up IDB heavy blob if present
       if (hadHeavy) {
         PatentBlobDB.delete(key).catch(() => { /* ignore */ });
       }
@@ -4907,7 +5001,7 @@ const PatentCache = {
     }
 
     console.error("[PatentCache] eviction failed: still no space after clearing all entries");
-    showError("缓存保存失败：清空所有旧记录后空间仍不足");
+    showError("缓存保存失败：清空所有旧记录后空间仍不足。IndexedDB大文件存储受浏览器配额限制，请在设置中清除部分缓存后重试。");
     return false;
   },
 
@@ -5004,10 +5098,46 @@ const PatentCache = {
     } catch { return 0; }
   },
 
+  async getTotalSizeAsync() {
+    const lsSize = this.getSize();
+    const idbSize = await PatentBlobDB.getEstimatedSize();
+    return lsSize + idbSize;
+  },
+
+  getCachedEntryCount() {
+    const all = this.getAll();
+    return Object.keys(all).length;
+  },
+
+  WARN_THRESHOLD_BYTES: 200 * 1024 * 1024,
+  CRITICAL_THRESHOLD_BYTES: 500 * 1024 * 1024,
+  WARN_INTERVAL_MS: 24 * 60 * 60 * 1000,
+  _lastCacheWarnTime: 0,
+
+  checkCacheSizeAndWarn(force) {
+    const now = Date.now();
+    if (!force && this._lastCacheWarnTime && (now - this._lastCacheWarnTime) < this.WARN_INTERVAL_MS) {
+      return;
+    }
+    this.getTotalSizeAsync().then(totalSize => {
+      if (totalSize > this.CRITICAL_THRESHOLD_BYTES) {
+        this._lastCacheWarnTime = now;
+        const sizeStr = this.formatSize(totalSize);
+        if (confirm("⚠️ 本地缓存已达 " + sizeStr + "，占用空间较大。建议清理不需要的缓存以释放空间。\n\n是否立即前往设置管理缓存？")) {
+          const settingsBtn = document.getElementById("settings-btn");
+          if (settingsBtn) settingsBtn.click();
+          const cacheTabBtn = document.querySelector('[data-settings-tab="cache"]');
+          if (cacheTabBtn) setTimeout(() => cacheTabBtn.click(), 100);
+        }
+      }
+    }).catch(() => {});
+  },
+
   formatSize(bytes) {
     if (bytes < 1024) return bytes + " B";
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
   },
 
   hasUnsavedWork() {
@@ -5805,7 +5935,7 @@ function refreshHistoryList() {
   const cacheOverview = document.getElementById("cache-overview");
   const cachePatentList = document.getElementById("cache-patent-list");
   if (cacheOverview) {
-    const size = PatentCache.getSize();
+    const lsSize = PatentCache.getSize();
     let annoCount = 0;
     try {
       if (typeof ImageAnnotations !== "undefined") {
@@ -5814,11 +5944,48 @@ function refreshHistoryList() {
         });
       }
     } catch (e) { /* ignore */ }
-    let overviewText = `${cachedEntries.length} 条缓存，共 ${PatentCache.formatSize(size)}`;
+    let ocrCount = 0, analysisCount = 0, citedCount = 0;
+    cachedEntries.forEach(e => {
+      if (e.hasOCR) ocrCount++;
+      if (e.hasAnalysis) analysisCount++;
+      if (e.hasCitedRefs) citedCount++;
+    });
+    let overviewText = `${cachedEntries.length} 条缓存记录 · 元数据 ${PatentCache.formatSize(lsSize)}`;
+    if (ocrCount > 0 || analysisCount > 0 || citedCount > 0) {
+      const stats = [];
+      if (ocrCount > 0) stats.push("含OCR: " + ocrCount);
+      if (analysisCount > 0) stats.push("含AI梳理: " + analysisCount);
+      if (citedCount > 0) stats.push("含引用分析: " + citedCount);
+      overviewText += " · " + stats.join(" · ");
+    }
     if (annoCount > 0) {
       overviewText += ` · 附图标注 ${annoCount} 条`;
     }
-    cacheOverview.textContent = overviewText;
+    cacheOverview.innerHTML = overviewText + '<br><span style="color:var(--text-muted);font-size:11px;margin-top:4px;display:block;">正在计算总占用空间（含OCR/AI大文件）...</span>';
+
+    PatentCache.getTotalSizeAsync().then(totalSize => {
+      const sizeStr = PatentCache.formatSize(totalSize);
+      let finalText = `${cachedEntries.length} 条缓存记录 · 总占用 ${sizeStr}（元数据 ${PatentCache.formatSize(lsSize)}）`;
+      if (ocrCount > 0 || analysisCount > 0 || citedCount > 0) {
+        const stats = [];
+        if (ocrCount > 0) stats.push("含OCR: " + ocrCount);
+        if (analysisCount > 0) stats.push("含AI梳理: " + analysisCount);
+        if (citedCount > 0) stats.push("含引用分析: " + citedCount);
+        finalText += " · " + stats.join(" · ");
+      }
+      if (annoCount > 0) {
+        finalText += ` · 附图标注 ${annoCount} 条`;
+      }
+      let warningHtml = "";
+      if (totalSize > PatentCache.CRITICAL_THRESHOLD_BYTES) {
+        warningHtml = '<br><span style="color:#ef4444;font-size:11px;margin-top:4px;display:block;">⚠️ 缓存占用较大，建议清理不需要的记录释放空间</span>';
+      } else if (totalSize > PatentCache.WARN_THRESHOLD_BYTES) {
+        warningHtml = '<br><span style="color:#f59e0b;font-size:11px;margin-top:4px;display:block;">💡 缓存占用已超过 200MB</span>';
+      }
+      cacheOverview.innerHTML = finalText + warningHtml;
+    }).catch(() => {
+      cacheOverview.textContent = overviewText;
+    });
   }
   if (cachePatentList) {
     if (cachedEntries.length === 0) {
@@ -13878,6 +14045,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   loadAISettingsToForm();
+
+  setTimeout(() => {
+    try { PatentCache.checkCacheSizeAndWarn(); } catch (e) { console.warn("[Cache] startup check failed:", e); }
+  }, 3000);
 
   // Initialize image annotation module (double-click markers + description highlighting)
   if (typeof ImageAnnotations !== "undefined") {

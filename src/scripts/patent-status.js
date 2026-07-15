@@ -118,6 +118,7 @@ var PATENT_STATUS = {
       "MFEE.ADDR": { name: "年费地址变更 (Maintenance Fee Address Change)", type: "response", stage: "授权" },
       "IDS.FEE.ASSN": { name: "关于信息披露声明(IDS)超页费声明(SB/08C) (Assertion regarding IDS Size Fee)", type: "response", stage: "审查中" },
       "PET.OP.REV": { name: "请愿处审查请愿 (Petition for review by the Office of Petitions)", type: "response", stage: "审查中" },
+      "RFP": { name: "继续审查请求 (Request for Further Processing)", type: "response", stage: "审查中" },
     },
     typeNames: {
       "office_action": "审查意见",
@@ -162,6 +163,9 @@ var PATENT_STATUS = {
       "maintenance fee address change": "年费地址变更 (Maintenance Fee Address Change)",
       "assertion regarding information disclosure statement": "关于信息披露声明(IDS)超页费声明 (Assertion regarding IDS Size Fee)",
       "petition for review by the office of petitions": "请愿处审查请愿 (Petition for review by the Office of Petitions)",
+      "decision to allow further processing": "准予继续审查决定 (Decision to Allow Further Processing)",
+      "english translation of the claims": "权利要求英文翻译 (English Translation of the Claims)",
+      "request for further processing": "继续审查请求 (Request for Further Processing)",
     },
     stageNames: {
       "审查前": "审查前",
