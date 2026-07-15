@@ -325,7 +325,8 @@ function _dossierApplyTab(tab) {
   analysisChatProviderOverride = null;
   analysisChatModelOverride = null;
 
-  currentData = tab.currentData;
+  // Deep copy currentData to avoid shared references
+  currentData = tab.currentData ? JSON.parse(JSON.stringify(tab.currentData)) : null;
   const savedKs = tab.kanbanState || {};
   const savedExtractionState = savedKs.extractions || {};
   const savedAnalysis = savedKs.analysis || "";
@@ -1501,12 +1502,24 @@ async function searchPatentDetail(input) {
             return;
           }
         }
+        // Properly prepare tab (create new or switch to existing) before restoring state
+        const key = _dossierMakeKey(raw);
+        const prep = _dossierPrepareTab(key, raw);
+        if (prep.action === "abort") return;
+        if (prep.action === "existing") {
+          if (patentInput) patentInput.value = "";
+          refreshHistoryList();
+          updateFloatingBallsVisibility();
+          return;
+        }
         const success = PatentCache.restoreState(cachedEntry);
         if (success) {
+          _dossierRegisterCurrentTab();
           if (patentInput) patentInput.value = raw;
-          patentDetailSection.classList.remove("hidden");
+          resultSection.classList.remove("hidden");
           refreshHistoryList();
           showDataSourceBadge("本地缓存", "从缓存恢复，无需重新查询");
+          updateFloatingBallsVisibility();
           return;
         }
       }
@@ -5065,7 +5078,92 @@ const PatentCache = {
   restoreState(cacheEntry) {
     if (!cacheEntry) return false;
     try {
-      currentData = cacheEntry.currentData;
+      // Abort any running AI process before restoring (prevents writes to dead DOM)
+      if (typeof activeAnalysisProcess !== 'undefined' && activeAnalysisProcess) {
+        if (typeof abortActiveProcess === 'function') abortActiveProcess();
+      }
+
+      // Close reader modal first
+      try {
+        const rm = document.getElementById("reader-modal");
+        if (rm && !rm.classList.contains("hidden")) {
+          if (typeof closeReader === "function") closeReader();
+          else rm.classList.add("hidden");
+        }
+      } catch (_) {}
+      // Close PDF view if currently showing
+      try {
+        if (typeof pdfViewState !== 'undefined' && pdfViewState.active && typeof togglePdfView === "function") {
+          togglePdfView(true);
+        }
+      } catch (_) {}
+      // Close analysis chat panel
+      try {
+        const acp = document.getElementById("analysis-chat-panel");
+        if (acp) acp.classList.remove("open");
+      } catch (_) {}
+
+      // Reset pdfViewState completely (same as _dossierApplyTab)
+      if (typeof pdfViewState !== 'undefined') {
+        pdfViewState.active = false;
+        pdfViewState.currentDocIdx = null;
+        pdfViewState.currentDocKey = null;
+        pdfViewState.pdfDoc = null;
+        pdfViewState.currentPage = 1;
+        pdfViewState.totalPages = 0;
+        pdfViewState.scale = 1.0;
+        pdfViewState.baseScale = 1.0;
+        pdfViewState.renderedPages = {};
+        pdfViewState.pendingHighlight = null;
+        pdfViewState.pendingHighlightRange = null;
+        pdfViewState.searchMatches = [];
+        pdfViewState.searchCurrentIdx = -1;
+        pdfViewState.selectedBlockIds = [];
+        pdfViewState.selectedAnnotIds = [];
+        pdfViewState.selecting = false;
+        pdfViewState.selectStart = null;
+        pdfViewState.selectEnd = null;
+        pdfViewState.traceJumpPending = false;
+        pdfViewState.renderVersion = 0;
+        pdfViewState.annotTool = null;
+        pdfViewState.annotDragging = false;
+        pdfViewState.annotDragStart = null;
+        pdfViewState.annotDragEnd = null;
+        pdfViewState.annotDragPage = null;
+        pdfViewState.annotDragViewport = null;
+        pdfViewState.annotMoving = null;
+        pdfViewState.annotResizing = null;
+        pdfViewState.ocrHidden = false;
+        pdfViewState._pdfDocCache = {};
+      }
+      if (typeof _pdfDocCache !== "undefined") _pdfDocCache = {};
+
+      // Reset AI manual-select panel and analysis section
+      const _msPanel = document.getElementById("ai-manual-select");
+      if (_msPanel) { _msPanel.innerHTML = ""; _msPanel.classList.add("hidden"); }
+      const _kaPanel = document.getElementById("kanban-analysis");
+      if (_kaPanel) _kaPanel.classList.add("hidden");
+      const _kaContent = document.getElementById("kanban-analysis-content");
+      if (_kaContent) _kaContent.innerHTML = "";
+
+      // Reset action buttons to default state
+      ["kanban-manual-select-btn", "cited-refs-manual-btn"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.disabled = false; el.classList.remove("hidden"); }
+      });
+      const _abortBtn = document.getElementById("cited-refs-abort-btn");
+      if (_abortBtn) _abortBtn.classList.add("hidden");
+      const _statusEl = document.getElementById("ai-analysis-status");
+      if (_statusEl) _statusEl.innerHTML = "";
+
+      // Reset global chat state
+      if (typeof analysisChatHistory !== 'undefined') analysisChatHistory = [];
+      if (typeof analysisChatAbortController !== 'undefined') analysisChatAbortController = null;
+      if (typeof analysisChatProviderOverride !== 'undefined') analysisChatProviderOverride = null;
+      if (typeof analysisChatModelOverride !== 'undefined') analysisChatModelOverride = null;
+
+      // Deep copy currentData to avoid shared references
+      currentData = JSON.parse(JSON.stringify(cacheEntry.currentData));
 
       // Re-render everything first (renderKanban will reset kanbanState)
       try { renderKanban(currentData); } catch (e) { console.error("renderKanban:", e); }
@@ -5074,25 +5172,32 @@ const PatentCache = {
       try { renderTimeline(currentData); } catch (e) { console.error("renderTimeline:", e); }
 
       // Now restore kanbanState AFTER renderKanban (which resets it)
-      kanbanState.documents = cacheEntry.kanbanState.documents || [];
+      // Deep copy documents to avoid shared references
+      kanbanState.documents = cacheEntry.kanbanState.documents
+        ? JSON.parse(JSON.stringify(cacheEntry.kanbanState.documents))
+        : [];
       kanbanState.analysis = cacheEntry.kanbanState.analysis || "";
       kanbanState.analysisSystemPrompt = cacheEntry.kanbanState.analysisSystemPrompt || "";
       kanbanState.analysisUserMessage = cacheEntry.kanbanState.analysisUserMessage || "";
       kanbanState.citedRefsAnalysis = cacheEntry.kanbanState.citedRefsAnalysis || "";
       kanbanState.hasUnsavedWork = false;
       kanbanState.activeAnalysisView = cacheEntry.kanbanState.activeAnalysisView || "review";
+      kanbanState.documents.forEach((d, i) => { if (d.idx == null) d.idx = i; });
 
       // Restore extractions - use saved pageDimensions directly for correct OCR bbox mapping
-      kanbanState.extractions = {};
+      // Build extractions first with migration logic
+      const restoredExtractions = {};
       if (cacheEntry.kanbanState.extractions) {
         for (const [idx, ext] of Object.entries(cacheEntry.kanbanState.extractions)) {
+          // Deep copy ext first to avoid shared references
+          const extCopy = JSON.parse(JSON.stringify(ext));
           // Use saved pageDimensions if available; fall back to reconstructing from blocks for old caches
-          let pageDims = ext.pageDimensions || {};
+          let pageDims = extCopy.pageDimensions || {};
           const hasValidPageDims = Object.keys(pageDims).length > 0;
-          if (!hasValidPageDims && ext.blocks && Array.isArray(ext.blocks)) {
+          if (!hasValidPageDims && extCopy.blocks && Array.isArray(extCopy.blocks)) {
             // Legacy cache: reconstruct pageDimensions from max bbox extents (approximation)
             const pageMax = {};
-            for (const b of ext.blocks) {
+            for (const b of extCopy.blocks) {
               if (b.page != null && b.bbox) {
                 const [x1, y1, x2, y2] = b.bbox;
                 if (!pageMax[b.page]) pageMax[b.page] = { maxX2: 0, maxY2: 0 };
@@ -5105,29 +5210,35 @@ const PatentCache = {
               pageDims[p] = { width: m.maxX2 + 10, height: m.maxY2 + 10 };
             }
           }
-          kanbanState.extractions[idx] = { ...ext, pageDimensions: pageDims };
+          restoredExtractions[idx] = { ...extCopy, pageDimensions: pageDims };
         }
       }
+      // Deep copy the final extractions to ensure no shared references
+      kanbanState.extractions = JSON.parse(JSON.stringify(restoredExtractions));
 
       // Restore traceIndex - re-populate pageDimensions from extractions
       // Also migrate old format keys (B_p1_0) to new format (D0_B_p1_0)
-      kanbanState.traceIndex = {};
+      const restoredTraceIndex = {};
       if (cacheEntry.kanbanState.traceIndex) {
         for (const [key, val] of Object.entries(cacheEntry.kanbanState.traceIndex)) {
-          const ext = kanbanState.extractions[val.docIdx];
-          const pd = ext && ext.pageDimensions ? (ext.pageDimensions[val.page] || null) : null;
+          // Deep copy val first
+          const valCopy = JSON.parse(JSON.stringify(val));
+          const ext = kanbanState.extractions[valCopy.docIdx];
+          const pd = ext && ext.pageDimensions ? (ext.pageDimensions[valCopy.page] || null) : null;
           // Migrate old format key: if key doesn't start with D, prefix with D{docIdx}_
-          const newKey = /^D\d+_B_/.test(key) ? key : ("D" + val.docIdx + "_" + key);
+          const newKey = /^D\d+_B_/.test(key) ? key : ("D" + valCopy.docIdx + "_" + key);
           // Ensure originalBlockId exists
-          const entryVal = { ...val, pageDimensions: pd };
+          const entryVal = { ...valCopy, pageDimensions: pd };
           if (!entryVal.originalBlockId) {
             // Extract original block_id from old format key or from the key itself
             const blockMatch = key.match(/B_p\d+_\d+/);
             entryVal.originalBlockId = blockMatch ? blockMatch[0] : key;
           }
-          kanbanState.traceIndex[newKey] = entryVal;
+          restoredTraceIndex[newKey] = entryVal;
         }
       }
+      // Deep copy the final traceIndex
+      kanbanState.traceIndex = JSON.parse(JSON.stringify(restoredTraceIndex));
 
       // Migrate old format references in analysis text (【来源: B_p1_0】 → 【来源: D0_B_p1_0】)
       if (kanbanState.analysis && /【来源:\s*B_p/.test(kanbanState.analysis)) {
