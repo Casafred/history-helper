@@ -4514,24 +4514,29 @@ async function doSearch(input) {
   // Check if result section is already visible (tabs exist)
   const isResultVisible = !resultSection.classList.contains("hidden");
   
+  let tabLoadingOverlay = null;
   if (isResultVisible) {
-    // When tabs already exist: show inline loading in content area, keep tabs bar visible
+    // When tabs already exist: show overlay on content area, keep tabs bar visible
     loading.classList.add("hidden");
     resultSection.classList.remove("hidden");
     const tabsBar = document.getElementById("dossier-tabs-bar");
     if (tabsBar) tabsBar.classList.remove("hidden");
-    // Show loading state in the content area
-    const overviewContent = document.getElementById("overview-content");
-    const kanbanBoard = document.getElementById("kanban-board");
-    const familyContent = document.getElementById("family-content");
-    const timelineBoard = document.getElementById("timeline-board");
-    const aiContent = document.getElementById("ai-analysis-content");
-    const inlineLoadingHtml = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:12px;"><div class="spinner"></div><p id="inline-loading-text" style="color:var(--text-muted);font-size:13px;margin:0;">正在查询专利信息...</p></div>';
-    if (overviewContent) overviewContent.innerHTML = inlineLoadingHtml;
-    if (kanbanBoard) kanbanBoard.innerHTML = inlineLoadingHtml;
-    if (familyContent) familyContent.innerHTML = inlineLoadingHtml;
-    if (timelineBoard) timelineBoard.innerHTML = inlineLoadingHtml;
-    if (aiContent) aiContent.innerHTML = inlineLoadingHtml;
+    // Switch to overview tab so user sees new results immediately
+    const tabBtns = document.querySelectorAll(".tabs-wrapper .tab-btn");
+    tabBtns.forEach(b => b.classList.toggle("active", b.dataset.tab === "overview"));
+    document.querySelectorAll(".tab-content").forEach(c => {
+      c.classList.toggle("active", c.id === "tab-overview");
+    });
+    // Create a semi-transparent overlay over the result content area
+    const resultLayout = document.querySelector(".result-layout");
+    if (resultLayout) {
+      tabLoadingOverlay = document.createElement("div");
+      tabLoadingOverlay.id = "tab-loading-overlay";
+      tabLoadingOverlay.style.cssText = "position:absolute;inset:0;background:var(--bg-primary,var(--bg));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:50;opacity:0.9;";
+      tabLoadingOverlay.innerHTML = '<div class="spinner"></div><p id="tab-loading-text" style="color:var(--text-muted);font-size:13px;margin:0;">正在查询专利信息...</p>';
+      resultLayout.style.position = "relative";
+      resultLayout.appendChild(tabLoadingOverlay);
+    }
   } else {
     // First search or from home: use full-screen loading
     loading.classList.remove("hidden");
@@ -4584,8 +4589,8 @@ async function doSearch(input) {
     const appNumForDocs = result.applicationNumber;
 
     loadingText.textContent = "正在查询审查文档...";
-    const inlineLoadingTextEl = document.getElementById("inline-loading-text");
-    if (inlineLoadingTextEl) inlineLoadingTextEl.textContent = "正在查询审查文档...";
+    const tabLoadingTextEl = document.getElementById("tab-loading-text");
+    if (tabLoadingTextEl) tabLoadingTextEl.textContent = "正在查询审查文档...";
     await new Promise(r => setTimeout(r, 1500));
 
     try {
@@ -4623,6 +4628,10 @@ async function doSearch(input) {
     resultSection.classList.remove("hidden");
     searchBtn.disabled = false;
     loading.classList.add("hidden");
+    if (tabLoadingOverlay && tabLoadingOverlay.parentNode) {
+      tabLoadingOverlay.parentNode.removeChild(tabLoadingOverlay);
+      tabLoadingOverlay = null;
+    }
 
     // Register this search as a dossier tab (if in dossier mode)
     try { _dossierRegisterCurrentTab(); } catch (_) {}
@@ -4645,6 +4654,10 @@ async function doSearch(input) {
     showError("查询失败: " + (e.message || e));
     searchBtn.disabled = false;
     loading.classList.add("hidden");
+    if (tabLoadingOverlay && tabLoadingOverlay.parentNode) {
+      tabLoadingOverlay.parentNode.removeChild(tabLoadingOverlay);
+      tabLoadingOverlay = null;
+    }
     if (isResultVisible) {
       // Restore view - re-render if we have previous currentData
       if (currentData) {
@@ -6356,6 +6369,7 @@ function renderKanban(data) {
 function renderOverview(data) {
   const appInfo = document.getElementById("app-info");
   const appStatus = document.getElementById("app-status");
+  if (!appInfo || !appStatus) return;
   const office = OFFICE_NAMES[data.office] || data.office;
 
   let title = "";
