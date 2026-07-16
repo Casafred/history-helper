@@ -36,6 +36,307 @@
   color: var(--accent);
 }
 
+.comparison-mode-badge {
+  font-size: 11px;
+  padding: 2px 10px;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, #8b5cf6));
+  color: #fff;
+  border-radius: 10px;
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.comparison-usage-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.comparison-usage-hint strong {
+  color: var(--accent);
+}
+
+.comparison-anchor-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 3px 10px;
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  color: #92400e;
+  border-radius: 12px;
+  font-weight: 500;
+  margin-left: 10px;
+}
+
+.comparison-anchor-indicator svg {
+  color: #f59e0b;
+}
+
+/* ===== 锚点项样式 ===== */
+.comparison-item.is-anchor {
+  border-color: #f59e0b;
+  background: linear-gradient(135deg, #fffbeb, #fef3c7);
+  box-shadow: 0 0 0 1px #f59e0b, 0 2px 8px rgba(245, 158, 11, 0.15);
+}
+
+.comparison-item-badge.anchor-badge {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+}
+
+.comparison-item-btn.anchor-btn {
+  color: #f59e0b;
+}
+
+.comparison-item-btn.anchor-btn:hover {
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #d97706;
+}
+
+/* ===== 相似度矩阵 ===== */
+.comparison-sim-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.comparison-sim-header {
+  margin-bottom: 16px;
+}
+
+.comparison-sim-title {
+  font-weight: 600;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comparison-sim-scroll {
+  overflow-x: auto;
+  margin-bottom: 12px;
+}
+
+.comparison-sim-matrix {
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 100%;
+}
+
+.comparison-sim-matrix th {
+  padding: 8px 10px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  min-width: 80px;
+}
+
+.comparison-sim-matrix th.sim-anchor-col,
+.comparison-sim-matrix th.sim-anchor-row {
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  color: #92400e;
+  font-weight: 700;
+}
+
+.comparison-sim-matrix td.sim-cell {
+  padding: 10px 8px;
+  text-align: center;
+  border: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 12px;
+  transition: transform 0.15s;
+  cursor: default;
+}
+
+.comparison-sim-matrix td.sim-cell:hover {
+  transform: scale(1.08);
+  z-index: 2;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.comparison-sim-matrix td.sim-diag {
+  background: var(--bg-secondary) !important;
+  color: var(--text-secondary) !important;
+  font-weight: 400;
+}
+
+.comparison-sim-matrix td.sim-anchor-cell {
+  border-color: #f59e0b;
+  border-width: 2px;
+}
+
+.comparison-sim-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.sim-legend-item {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+/* ===== 并排对照 ===== */
+.comparison-sxs-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.comparison-sxs-header {
+  margin-bottom: 16px;
+}
+
+.comparison-sxs-title {
+  font-weight: 600;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comparison-sxs-pair {
+  margin-bottom: 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.comparison-sxs-pair:last-child {
+  margin-bottom: 0;
+}
+
+.comparison-sxs-pair-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.comparison-sxs-vs {
+  font-weight: 600;
+}
+
+.comparison-sxs-sim {
+  font-size: 11px;
+  padding: 3px 12px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.comparison-sxs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+
+@media (max-width: 768px) {
+  .comparison-sxs-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.comparison-sxs-col {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: 400px;
+}
+
+.comparison-sxs-col.anchor-col {
+  background: linear-gradient(135deg, #fffbeb, #fefce8);
+  border-right: 2px solid #f59e0b;
+}
+
+.comparison-sxs-col.compare-col {
+  background: var(--bg);
+}
+
+@media (max-width: 768px) {
+  .comparison-sxs-col.anchor-col {
+    border-right: none;
+    border-bottom: 2px solid #f59e0b;
+  }
+}
+
+.comparison-sxs-col-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+}
+
+.comparison-sxs-text {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ===== 结果区原文附录 ===== */
+.comparison-result-originals {
+  padding: 20px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.comparison-result-anchor,
+.comparison-result-other {
+  margin-bottom: 16px;
+}
+
+.comparison-result-other:last-child {
+  margin-bottom: 0;
+}
+
+.comparison-original-block {
+  padding: 12px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
 /* ===== 输入方式切换 ===== */
 .comparison-input-tabs {
   display: flex;

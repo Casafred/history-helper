@@ -26,6 +26,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC
 .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; margin-left: 8px; }
 .badge.ind { background: #dcfce7; color: #16a34a; }
 .badge.dep { background: #f1f5f9; color: #64748b; }
+.badge.anchor { background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; }
+.badge.manual { background: #fef3c7; color: #92400e; }
 .analysis h1 { font-size: 22px; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid #10b981; }
 .analysis h2 { font-size: 18px; margin: 28px 0 16px; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; color: #10b981; }
 .analysis h3 { font-size: 15px; margin: 20px 0 12px; color: #334155; }
@@ -89,14 +91,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC
 
     html += '    <h2 style="margin-top:0;">一、比对项概览</h2>\n';
     html += '    <div class="items-summary">\n';
+    var anchorId = result.anchor ? result.anchor.id : null;
     items.forEach(function(item, idx) {
-      var badge = item.source === 'patent'
-        ? (item.metadata && item.metadata.claimType === 'independent'
-          ? '<span class="badge ind">独权</span>'
-          : '<span class="badge dep">从权</span>')
-        : '<span class="badge dep">手动输入</span>';
-      html += '      <div class="item-card">\n';
-      html += '        <h4>文本' + (idx + 1) + ': ' + ComparisonUtils.escapeHtml(item.label) + badge + '</h4>\n';
+      var isAnchor = item.id === anchorId;
+      var badge = isAnchor
+        ? '<span class="badge anchor">⭐ 锚点</span>'
+        : (item.source === 'patent'
+          ? (item.metadata && item.metadata.claimType === 'independent'
+            ? '<span class="badge ind">独权</span>'
+            : '<span class="badge dep">从权</span>')
+          : '<span class="badge manual">手动输入</span>');
+      html += '      <div class="item-card' + (isAnchor ? ' style="border-color:#f59e0b;box-shadow:0 0 0 1px #f59e0b;"' : '') + '">\n';
+      html += '        <h4>' + (isAnchor ? '⭐ ' : '') + ComparisonUtils.escapeHtml(item.label) + badge + '</h4>\n';
       if (item.patentNumber) {
         html += '        <div class="patent-num">专利号: ' + ComparisonUtils.escapeHtml(item.patentNumber) + '</div>\n';
       }
@@ -112,8 +118,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC
     html += '    <div class="original-text" id="originals-section" style="display:none;">\n';
     html += '      <h2>附录：原文对照</h2>\n';
     items.forEach(function(item, idx) {
-      html += '      <div class="original-item">\n';
-      html += '        <h4>文本' + (idx + 1) + ': ' + ComparisonUtils.escapeHtml(item.label) + '</h4>\n';
+      var isAnchor = item.id === anchorId;
+      html += '      <div class="original-item' + (isAnchor ? '" style="border-left-color:#f59e0b;background:#fffbeb;"' : '') + '>\n';
+      html += '        <h4>' + (isAnchor ? '⭐ 锚点：' : '比对：') + ComparisonUtils.escapeHtml(item.label) + '</h4>\n';
       html += '        <pre>' + ComparisonUtils.escapeHtml(item.originalText) + '</pre>\n';
       html += '      </div>\n';
     });

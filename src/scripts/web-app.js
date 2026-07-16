@@ -1527,6 +1527,7 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
       patentInput.placeholder = "输入专利号添加到抽取列表（如 US17204063、EP4252965A3、CN115398523A）...";
       searchBtn.textContent = "添加";
       searchBtn.style.display = "";
+      patentInput.style.display = "";
       resultSection.classList.add("hidden");
       patentDetailSection.classList.add("hidden");
       const comparisonSection = document.getElementById("comparison-section");
@@ -1544,6 +1545,7 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
       patentInput.placeholder = "输入专利号查询原文信息（如 US12030161B2, EP4252965A3）";
       searchBtn.textContent = "查询";
       searchBtn.style.display = "";
+      patentInput.style.display = "";
       resultSection.classList.add("hidden");
       if (extractSection) extractSection.classList.add("hidden");
       const comparisonSection = document.getElementById("comparison-section");
@@ -1565,6 +1567,7 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
       patentInput.placeholder = "智能比对模式可直接在下方面板中操作";
       searchBtn.textContent = "比对";
       searchBtn.style.display = "none";
+      patentInput.style.display = "none";
       resultSection.classList.add("hidden");
       patentDetailSection.classList.add("hidden");
       if (extractSection) extractSection.classList.add("hidden");
@@ -1597,6 +1600,7 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
       patentInput.placeholder = "输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型";
       searchBtn.textContent = "查询";
       searchBtn.style.display = "";
+      patentInput.style.display = "";
       patentDetailSection.classList.add("hidden");
       if (extractSection) extractSection.classList.add("hidden");
       const comparisonSection = document.getElementById("comparison-section");
@@ -6075,17 +6079,30 @@ function refreshHistoryList() {
               document.querySelectorAll(".search-mode-btn").forEach(b => {
                 b.classList.toggle("active", b.dataset.mode === "patent");
               });
+              searchBtn.style.display = "";
+              if (patentInput) { patentInput.style.display = ""; patentInput.value = patentNumber; }
               if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "";
+              resultSection.classList.add("hidden");
+              const _cmpSec = document.getElementById("comparison-section");
+              if (_cmpSec) _cmpSec.classList.add("hidden");
+              const _extSec2 = document.getElementById("extract-mode-section");
+              if (_extSec2) _extSec2.classList.add("hidden");
+              const appEl = document.getElementById("app");
+              if (appEl) appEl.classList.remove("home-mode");
               _openPdPatent(patentNumber);
             } else {
               searchMode = "dossier";
               document.querySelectorAll(".search-mode-btn").forEach(b => {
                 b.classList.toggle("active", b.dataset.mode === "dossier");
               });
+              searchBtn.style.display = "";
+              if (patentInput) patentInput.style.display = "";
               if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
               if (patentDetailSection) patentDetailSection.classList.add("hidden");
               const _extSec = document.getElementById("extract-mode-section");
               if (_extSec) _extSec.classList.add("hidden");
+              const _cmpSec = document.getElementById("comparison-section");
+              if (_cmpSec) _cmpSec.classList.add("hidden");
               const isCached = item.dataset.cached === "1";
               if (isCached) {
                 doRestoreFromCache(patentNumber);
