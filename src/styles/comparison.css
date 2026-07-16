@@ -1,0 +1,688 @@
+/*
+ * PatentLens - 智能比对模块样式
+ * Copyright (c) 2026 Alfred Shi. All rights reserved.
+ * @author Alfred Shi
+ * @version 260716
+ */
+
+/* ===== 主面板容器 ===== */
+.comparison-section {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.comparison-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.comparison-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comparison-title svg {
+  width: 24px;
+  height: 24px;
+  color: var(--accent);
+}
+
+/* ===== 输入方式切换 ===== */
+.comparison-input-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  background: var(--bg-secondary);
+  padding: 4px;
+  border-radius: 8px;
+  width: fit-content;
+}
+
+.comparison-input-tab {
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.comparison-input-tab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.comparison-input-tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ===== 输入面板 ===== */
+.comparison-input-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.comparison-input-panel.hidden {
+  display: none;
+}
+
+/* 手动输入 */
+.comparison-manual-add {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.comparison-label-input {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.comparison-label-input:focus {
+  border-color: var(--accent);
+}
+
+.comparison-textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+
+.comparison-textarea:focus {
+  border-color: var(--accent);
+}
+
+.comparison-add-btn {
+  align-self: flex-start;
+}
+
+/* 专利号查询 */
+.comparison-patent-input {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.comparison-patent-textarea {
+  width: 100%;
+  min-height: 100px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.8;
+  resize: vertical;
+  outline: none;
+  font-family: monospace;
+  box-sizing: border-box;
+}
+
+.comparison-patent-textarea:focus {
+  border-color: var(--accent);
+}
+
+.comparison-patent-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 查询进度 */
+.comparison-progress {
+  margin: 12px 0;
+  padding: 12px;
+  background: var(--bg);
+  border-radius: 6px;
+}
+
+.comparison-progress-bar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.comparison-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s;
+  border-radius: 2px;
+}
+
+.comparison-progress-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ===== 比对项列表 ===== */
+.comparison-items-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.comparison-items-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.comparison-items-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.comparison-items-count {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-left: 8px;
+}
+
+.comparison-items-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.comparison-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.comparison-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: border-color 0.2s;
+}
+
+.comparison-item:hover {
+  border-color: var(--accent);
+}
+
+.comparison-item.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg));
+}
+
+.comparison-item-checkbox {
+  margin-top: 4px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.comparison-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.comparison-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.comparison-item-label-input {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.comparison-item-label-input:hover {
+  border-color: var(--border);
+}
+
+.comparison-item-label-input:focus {
+  border-color: var(--accent);
+  background: var(--bg-card);
+}
+
+.comparison-item-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.comparison-item-badge.independent {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+
+.comparison-item-badge.dependent {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.comparison-item-badge.manual {
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #f59e0b;
+}
+
+.comparison-item-preview {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.comparison-item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.comparison-item-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.comparison-item-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.comparison-item-btn.danger:hover {
+  background: color-mix(in srgb, #ef4444 15%, transparent);
+  color: #ef4444;
+}
+
+.comparison-item-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.comparison-empty-list {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* ===== 操作按钮区 ===== */
+.comparison-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.comparison-run-btn {
+  padding: 10px 28px;
+  font-size: 14px;
+}
+
+.comparison-run-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.comparison-abort-btn {
+  padding: 10px 20px;
+}
+
+.comparison-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ===== 权利要求选择器 ===== */
+.claims-selector {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.claims-selector.hidden {
+  display: none;
+}
+
+.patent-claims-group {
+  border-bottom: 1px solid var(--border);
+}
+
+.patent-claims-group:last-child {
+  border-bottom: none;
+}
+
+.patent-claims-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.patent-claims-header:hover {
+  background: var(--bg-hover);
+}
+
+.patent-claims-toggle {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.2s;
+}
+
+.patent-claims-header.collapsed .patent-claims-toggle {
+  transform: rotate(-90deg);
+}
+
+.patent-claims-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.patent-claims-list {
+  padding: 8px 0;
+}
+
+.patent-claims-list.collapsed {
+  display: none;
+}
+
+.claim-select-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.claim-select-item:hover {
+  background: var(--bg-hover);
+}
+
+.claim-select-checkbox {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.claim-select-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.claim-select-num {
+  font-weight: 500;
+  font-size: 12px;
+  margin-right: 8px;
+  color: var(--accent);
+}
+
+.claim-select-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ===== 结果展示区 ===== */
+.comparison-result-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.comparison-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.comparison-result-title {
+  font-weight: 600;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comparison-result-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.comparison-result-content {
+  padding: 24px;
+}
+
+.comparison-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  gap: 16px;
+}
+
+.comparison-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.comparison-loading-text {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.comparison-stream-preview {
+  width: 100%;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 16px;
+  background: var(--bg);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 16px;
+}
+
+/* Markdown 样式增强 */
+.comparison-result-content.markdown-body h1 {
+  font-size: 22px;
+  margin-top: 0;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--accent);
+}
+
+.comparison-result-content.markdown-body h2 {
+  font-size: 18px;
+  margin-top: 28px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--accent);
+}
+
+.comparison-result-content.markdown-body h3 {
+  font-size: 15px;
+  margin-top: 20px;
+}
+
+.comparison-result-content.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 13px;
+}
+
+.comparison-result-content.markdown-body th,
+.comparison-result-content.markdown-body td {
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.comparison-result-content.markdown-body th {
+  background: var(--bg-secondary);
+  font-weight: 600;
+}
+
+.comparison-result-content.markdown-body blockquote {
+  margin: 12px 0;
+  padding: 10px 16px;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg));
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.comparison-result-content.markdown-body ul,
+.comparison-result-content.markdown-body ol {
+  padding-left: 24px;
+  line-height: 1.8;
+}
+
+/* ===== 同族跳转按钮 ===== */
+.family-compare-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  margin-left: 12px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.family-compare-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.family-compare-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ===== 响应式 ===== */
+@media (max-width: 768px) {
+  .comparison-section {
+    padding: 12px;
+  }
+
+  .comparison-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .comparison-items-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .comparison-item {
+    flex-wrap: wrap;
+  }
+
+  .comparison-actions-bar {
+    flex-wrap: wrap;
+  }
+
+  .comparison-result-content.markdown-body table {
+    display: block;
+    overflow-x: auto;
+  }
+}
