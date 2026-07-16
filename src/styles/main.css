@@ -1113,6 +1113,133 @@ body {
   flex: 1;
 }
 
+.kanban-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ── Kanban multi-select mode (for AI analysis / merge export) ── */
+.kanban-select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, rgba(34,197,94,0.08), rgba(34,197,94,0.03));
+  border: 1px solid rgba(34,197,94,0.25);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+.kanban-select-bar.hidden { display: none; }
+.kanban-select-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+#kanban-select-mode-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent, #22c55e);
+  white-space: nowrap;
+}
+.kanban-select-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* When in select mode, show checkbox on each card */
+.kanban-board.select-mode .kanban-card {
+  position: relative;
+  cursor: pointer;
+  padding-left: 36px;
+}
+.kanban-board.select-mode .kanban-card::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border, #2a2d3a);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  transition: all 0.15s ease;
+}
+.kanban-board.select-mode .kanban-card:hover::before {
+  border-color: var(--accent, #22c55e);
+}
+.kanban-board.select-mode .kanban-card.selected::before {
+  background: var(--accent, #22c55e);
+  border-color: var(--accent, #22c55e);
+}
+.kanban-board.select-mode .kanban-card.selected::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+  width: 5px;
+  height: 10px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+}
+.kanban-board.select-mode .kanban-card.selected {
+  border-color: var(--accent, #22c55e);
+  background: rgba(34,197,94,0.06);
+}
+.kanban-card-cb {
+  display: none;
+}
+
+/* ── AI Analysis empty state ── */
+.ai-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px;
+  text-align: center;
+  gap: 12px;
+}
+.ai-empty-state.hidden { display: none; }
+.ai-empty-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(34,197,94,0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent, #22c55e);
+  margin-bottom: 8px;
+}
+.ai-empty-icon svg {
+  width: 32px;
+  height: 32px;
+}
+.ai-empty-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+.ai-empty-hint {
+  font-size: 13px;
+  color: var(--text-secondary, #888);
+  margin: 0;
+  max-width: 400px;
+  line-height: 1.6;
+}
+
 .kanban-board {
   padding: 0;
   overflow-x: auto;

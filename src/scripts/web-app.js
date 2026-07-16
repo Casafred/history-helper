@@ -108,6 +108,134 @@ function abortActiveProcess() {
   activeAnalysisProcess = null;
 }
 
+// ── Kanban card multi-select mode (for AI analysis entry from kanban) ──
+let _kanbanSelectMode = null; // null | "review" | "citedRefs"
+const _kanbanSelected = new Set();
+
+function exitKanbanSelectMode() {
+  _kanbanSelectMode = null;
+  _kanbanSelected.clear();
+  const board = document.getElementById("kanban-board");
+  if (board) board.classList.remove("select-mode");
+  const selectBar = document.getElementById("kanban-select-bar");
+  if (selectBar) selectBar.classList.add("hidden");
+  document.querySelectorAll(".kanban-card.selected").forEach(c => c.classList.remove("selected"));
+}
+
+function enterKanbanSelectMode(mode) {
+  if (!kanbanState.documents || kanbanState.documents.length === 0) {
+    showError("请先查询专利并加载审查文档");
+    return;
+  }
+  const office = currentData && currentData.office;
+  const canAnalyze = office === "US" || office === "EP" || office === "CN" || office === "WO" || office === "KR";
+  if (!canAnalyze) {
+    showError("当前国家/地区暂不支持AI梳理");
+    return;
+  }
+  exitKanbanSelectMode();
+  _kanbanSelectMode = mode;
+  const board = document.getElementById("kanban-board");
+  if (board) board.classList.add("select-mode");
+  const selectBar = document.getElementById("kanban-select-bar");
+  if (selectBar) selectBar.classList.remove("hidden");
+  const modeLabel = document.getElementById("kanban-select-mode-label");
+  if (modeLabel) modeLabel.textContent = mode === "citedRefs" ? "选择引用文献文件" : "选择审查意见文件";
+  const confirmBtn = document.getElementById("kanban-select-confirm-btn");
+  if (confirmBtn) confirmBtn.textContent = mode === "citedRefs" ? "确认并梳理引用文献" : "确认并梳理审查意见";
+
+  // Pre-select default documents
+  _kanbanSelected.clear();
+  kanbanState.documents.forEach(it => {
+    let shouldSelect = false;
+    if (mode === "review") {
+      shouldSelect = shouldIncludeInAIAnalysis(office, it.type);
+    } else {
+      const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
+      shouldSelect = CITED_DOC_CODES.includes(it.docCode);
+    }
+    if (shouldSelect) _kanbanSelected.add(it.idx);
+  });
+  _applyKanbanSelection();
+  _updateKanbanSelectSummary();
+}
+
+function _applyKanbanSelection() {
+  document.querySelectorAll(".kanban-card").forEach(card => {
+    const idx = parseInt(card.dataset.idx);
+    if (_kanbanSelected.has(idx)) {
+      card.classList.add("selected");
+    } else {
+      card.classList.remove("selected");
+    }
+  });
+}
+
+function _updateKanbanSelectSummary() {
+  const summaryEl = document.getElementById("kanban-selected-summary");
+  const confirmBtn = document.getElementById("kanban-select-confirm-btn");
+  if (!summaryEl) return;
+  const count = _kanbanSelected.size;
+  if (count === 0) {
+    summaryEl.innerHTML = '<span class="summary-empty">未选择任何文档</span>';
+  } else {
+    const names = [..._kanbanSelected].map(idx => {
+      const it = (kanbanState.documents || []).find(d => d.idx === idx);
+      return it ? escapeHtml(it.docCode + ' - ' + (it.name || '')) : '';
+    }).filter(Boolean);
+    summaryEl.innerHTML = '<span class="summary-label">已选 ' + count + ' 份：</span>' + names.join('<span class="summary-sep">、</span>');
+  }
+  if (confirmBtn) confirmBtn.disabled = count === 0;
+}
+
+function _toggleKanbanCard(idx) {
+  if (!_kanbanSelectMode) return;
+  if (_kanbanSelected.has(idx)) {
+    _kanbanSelected.delete(idx);
+  } else {
+    _kanbanSelected.add(idx);
+  }
+  _applyKanbanSelection();
+  _updateKanbanSelectSummary();
+}
+
+function _switchToTab(tabName) {
+  document.querySelectorAll(".tabs-wrapper .tab-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.tab === tabName);
+  });
+  document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+  const target = document.getElementById("tab-" + tabName);
+  if (target) target.classList.add("active");
+  const app = document.getElementById("app");
+  if (app) {
+    app.classList.toggle("wide-layout", ["kanban", "ai-analysis"].includes(tabName));
+  }
+  if (tabName === "ai-analysis") {
+    _updateAIAnalysisView();
+  }
+}
+
+function _updateAIAnalysisView() {
+  const emptyState = document.getElementById("ai-empty-state");
+  const analysisSection = document.getElementById("kanban-analysis");
+  const hasAnalysis = !!(kanbanState.analysis || kanbanState.citedRefsAnalysis) || activeAnalysisProcess;
+  if (emptyState) emptyState.classList.toggle("hidden", !!hasAnalysis);
+  if (analysisSection) analysisSection.classList.toggle("hidden", !hasAnalysis);
+  // Update title text
+  const titleEl = document.getElementById("kanban-analysis-title-text");
+  if (titleEl) {
+    titleEl.textContent = kanbanState.activeAnalysisView === "citedRefs" ? "引用文献分析" : "审查历史综合分析";
+  }
+  // Update toggle buttons
+  const reviewBtn = document.getElementById("kanban-analysis-result-btn");
+  const citedBtn = document.getElementById("kanban-analysis-cited-btn");
+  if (reviewBtn && citedBtn) {
+    const isCited = kanbanState.activeAnalysisView === "citedRefs";
+    reviewBtn.classList.toggle("active", !isCited);
+    citedBtn.classList.toggle("active", isCited);
+  }
+}
+
 // Save/load manual selection state
 function getManualSelectKey(prefix) {
   if (!currentData) return null;
@@ -303,12 +431,12 @@ function _dossierApplyTab(tab) {
   if (typeof _pdfDocCache !== "undefined") _pdfDocCache = {};
 
   // Reset AI panels first; we'll restore the correct visibility below based on saved state
-  const _msPanel = document.getElementById("ai-manual-select");
-  if (_msPanel) { _msPanel.innerHTML = ""; _msPanel.classList.add("hidden"); }
   const _kaPanel = document.getElementById("kanban-analysis");
   if (_kaPanel) _kaPanel.classList.add("hidden");
   const _kaContent = document.getElementById("kanban-analysis-content");
   if (_kaContent) _kaContent.innerHTML = "";
+  const _emptyState = document.getElementById("ai-empty-state");
+  if (_emptyState) _emptyState.classList.remove("hidden");
 
   // Reset action buttons to default state
   ["kanban-manual-select-btn", "cited-refs-manual-btn"].forEach(id => {
@@ -434,14 +562,6 @@ function _dossierApplyTab(tab) {
   if (_msBtn) _msBtn.disabled = false;
   const _crBtn = document.getElementById("cited-refs-manual-btn");
   if (_crBtn) _crBtn.disabled = false;
-
-  // If documents exist but no AI analysis report, show the manual selection panel
-  const hasAnalysis = !!(kanbanState.analysis || kanbanState.citedRefsAnalysis);
-  if (!hasAnalysis && kanbanState.documents && kanbanState.documents.length > 0) {
-    if (typeof buildReviewManualSelectPanel === "function") {
-      try { buildReviewManualSelectPanel(); } catch (e) { console.warn("buildReviewManualSelectPanel:", e); }
-    }
-  }
 
   resultSection.classList.remove("hidden");
   _dossierRenderTabs();
@@ -4603,10 +4723,10 @@ async function doSearch(input) {
     kanbanState.traceIndex = {};
     kanbanState.hasUnsavedWork = false;
     kanbanState.activeAnalysisView = "review";
-    const _msPanel = document.getElementById("ai-manual-select");
-    if (_msPanel) { _msPanel.innerHTML = ""; _msPanel.classList.add("hidden"); }
     const _kaPanel = document.getElementById("kanban-analysis");
     if (_kaPanel) _kaPanel.classList.add("hidden");
+    const _emptyState = document.getElementById("ai-empty-state");
+    if (_emptyState) _emptyState.classList.remove("hidden");
 
     // Switch to overview tab and exit wide-layout before rendering
     document.querySelectorAll(".tabs-wrapper .tab-btn").forEach(b => {
@@ -4633,10 +4753,6 @@ async function doSearch(input) {
     if (citedRefsManualBtn) citedRefsManualBtn.disabled = false;
     const manualSelectBtn = document.getElementById("kanban-manual-select-btn");
     if (manualSelectBtn) manualSelectBtn.disabled = false;
-    // Build manual selection panel (always visible after docs load when no AI report exists)
-    if (typeof buildReviewManualSelectPanel === "function") {
-      try { buildReviewManualSelectPanel(); } catch (e) { console.error("auto-expand review panel:", e); }
-    }
 
     searchBtn.disabled = false;
     loading.classList.add("hidden");
@@ -5286,13 +5402,13 @@ const PatentCache = {
       }
       if (typeof _pdfDocCache !== "undefined") _pdfDocCache = {};
 
-      // Reset AI manual-select panel and analysis section
-      const _msPanel = document.getElementById("ai-manual-select");
-      if (_msPanel) { _msPanel.innerHTML = ""; _msPanel.classList.add("hidden"); }
+      // Reset AI analysis section
       const _kaPanel = document.getElementById("kanban-analysis");
       if (_kaPanel) _kaPanel.classList.add("hidden");
       const _kaContent = document.getElementById("kanban-analysis-content");
       if (_kaContent) _kaContent.innerHTML = "";
+      const _emptyState = document.getElementById("ai-empty-state");
+      if (_emptyState) _emptyState.classList.remove("hidden");
 
       // Reset action buttons to default state
       ["kanban-manual-select-btn", "cited-refs-manual-btn"].forEach(id => {
@@ -5427,10 +5543,8 @@ const PatentCache = {
             analysisContentEl.innerHTML = renderAnalysisModules(contentToRestore);
           }
         }
-        if (analysisSection) analysisSection.classList.remove("hidden");
       } else {
         if (analysisContentEl) analysisContentEl.innerHTML = "";
-        if (analysisSection) analysisSection.classList.add("hidden");
       }
 
       // Restore extraction display in kanban cards
@@ -5494,12 +5608,7 @@ const PatentCache = {
         }
       }
       try {
-        document.querySelectorAll(".tabs-wrapper .tab-btn").forEach(b => {
-          b.classList.toggle("active", b.dataset.tab === targetTab);
-        });
-        document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
-        const targetContent = document.getElementById("tab-" + targetTab);
-        if (targetContent) targetContent.classList.add("active");
+        _switchToTab(targetTab);
       } catch (e) {
         console.warn("restoreState: failed to switch tab:", e);
       }
@@ -5507,14 +5616,6 @@ const PatentCache = {
       if (searchMode === "dossier" && _dossierActiveKey) {
         _dossierSaveActiveTab();
         _dossierRenderTabs();
-      }
-
-      // If documents exist but no AI analysis report, show the manual selection panel
-      const restoredHasAnalysis = !!(kanbanState.analysis || kanbanState.citedRefsAnalysis);
-      if (!restoredHasAnalysis && kanbanState.documents && kanbanState.documents.length > 0) {
-        if (typeof buildReviewManualSelectPanel === "function") {
-          try { buildReviewManualSelectPanel(); } catch (e) { console.warn("buildReviewManualSelectPanel (restore):", e); }
-        }
       }
 
       return true;
@@ -6217,12 +6318,18 @@ function renderKanban(data) {
   const analysisContentEl = document.getElementById("kanban-analysis-content");
   if (analysisContentEl) analysisContentEl.innerHTML = "";
 
-  // Show merge export button if there are documents with download URLs
+  // Show action buttons (merge export, AI analysis) when documents are available
   const mergeExportBtn = document.getElementById("merge-export-btn");
-  if (mergeExportBtn) {
-    const hasDownloadable = items.some(it => it.docId && data.office !== "DE");
-    mergeExportBtn.style.display = hasDownloadable ? "" : "none";
-  }
+  const kanbanAiBtn = document.getElementById("kanban-manual-select-btn");
+  const citedAiBtn = document.getElementById("cited-refs-manual-btn");
+  const hasDownloadable = items.some(it => it.docId && data.office !== "DE");
+  const canAnalyze = data.office === "US" || data.office === "EP" || data.office === "CN" || data.office === "WO" || data.office === "KR";
+  if (mergeExportBtn) mergeExportBtn.style.display = hasDownloadable ? "" : "none";
+  if (kanbanAiBtn) kanbanAiBtn.style.display = canAnalyze ? "" : "none";
+  if (citedAiBtn) citedAiBtn.style.display = canAnalyze ? "" : "none";
+
+  // Exit any pending select mode from previous state
+  exitKanbanSelectMode();
   analysisChatHistory = [];
   const analysisChatPanel = document.getElementById("analysis-chat-panel");
   if (analysisChatPanel) analysisChatPanel.classList.add("hidden");
@@ -6367,6 +6474,18 @@ function renderKanban(data) {
   html += '</div>';
 
   board.innerHTML = html;
+
+  // Bind card clicks for multi-select mode
+  board.querySelectorAll(".kanban-card").forEach(card => {
+    card.addEventListener("click", (e) => {
+      if (!_kanbanSelectMode) return;
+      // Don't toggle if clicking on a button inside the card
+      if (e.target.closest("button")) return;
+      const idx = parseInt(card.dataset.idx);
+      if (!isNaN(idx)) _toggleKanbanCard(idx);
+    });
+  });
+
   if (statusEl) {
     const oaCount = items.filter(it => it.type === "office_action").length;
     const respCount = items.filter(it => it.type === "response").length;
@@ -8184,19 +8303,113 @@ function extractDocuments(docs) {
 
 document.querySelectorAll(".tab-btn").forEach(btn => {
   btn.addEventListener("click", () => {
+    const tabName = btn.dataset.tab;
     document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
     document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
     btn.classList.add("active");
-    document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+    document.getElementById("tab-" + tabName).classList.add("active");
     const app = document.getElementById("app");
     const wideTabs = ["kanban", "ai-analysis"];
-    if (wideTabs.includes(btn.dataset.tab)) {
+    if (wideTabs.includes(tabName)) {
       app.classList.add("wide-layout");
     } else {
       app.classList.remove("wide-layout");
     }
+    // Exit kanban select mode when leaving kanban tab
+    if (tabName !== "kanban") {
+      exitKanbanSelectMode();
+    }
+    // Update AI analysis view when entering that tab
+    if (tabName === "ai-analysis") {
+      _updateAIAnalysisView();
+    }
   });
 });
+
+// ── Kanban select bar buttons ──
+const _sbAll = document.getElementById("kanban-select-all-btn");
+if (_sbAll) _sbAll.addEventListener("click", () => {
+  if (!_kanbanSelectMode) return;
+  _kanbanSelected.clear();
+  (kanbanState.documents || []).forEach(it => _kanbanSelected.add(it.idx));
+  _applyKanbanSelection();
+  _updateKanbanSelectSummary();
+});
+const _sbNone = document.getElementById("kanban-select-none-btn");
+if (_sbNone) _sbNone.addEventListener("click", () => {
+  _kanbanSelected.clear();
+  _applyKanbanSelection();
+  _updateKanbanSelectSummary();
+});
+const _sbDefault = document.getElementById("kanban-select-default-btn");
+if (_sbDefault) _sbDefault.addEventListener("click", () => {
+  if (!_kanbanSelectMode) return;
+  const office = currentData && currentData.office;
+  _kanbanSelected.clear();
+  (kanbanState.documents || []).forEach(it => {
+    let shouldSelect = false;
+    if (_kanbanSelectMode === "review") {
+      shouldSelect = shouldIncludeInAIAnalysis(office, it.type);
+    } else {
+      const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
+      shouldSelect = CITED_DOC_CODES.includes(it.docCode);
+    }
+    if (shouldSelect) _kanbanSelected.add(it.idx);
+  });
+  _applyKanbanSelection();
+  _updateKanbanSelectSummary();
+});
+const _sbCancel = document.getElementById("kanban-select-cancel-btn");
+if (_sbCancel) _sbCancel.addEventListener("click", () => exitKanbanSelectMode());
+const _sbConfirm = document.getElementById("kanban-select-confirm-btn");
+if (_sbConfirm) _sbConfirm.addEventListener("click", async () => {
+  if (!_kanbanSelectMode || _kanbanSelected.size === 0) return;
+  const selectedIdxs = [..._kanbanSelected];
+  const mode = _kanbanSelectMode;
+  exitKanbanSelectMode();
+  _switchToTab("ai-analysis");
+  if (mode === "citedRefs") {
+    await runCitedRefsAnalysis(selectedIdxs);
+  } else {
+    await startReviewAnalysis(selectedIdxs);
+  }
+});
+
+// ── AI analysis tab buttons ──
+const _gotoKanbanBtn = document.getElementById("ai-goto-kanban-btn");
+if (_gotoKanbanBtn) _gotoKanbanBtn.addEventListener("click", () => _switchToTab("kanban"));
+const _newAnalysisBtn = document.getElementById("new-analysis-btn");
+if (_newAnalysisBtn) _newAnalysisBtn.addEventListener("click", () => {
+  kanbanState.analysis = "";
+  kanbanState.citedRefsAnalysis = "";
+  const ac = document.getElementById("kanban-analysis-content");
+  if (ac) ac.innerHTML = "";
+  _switchToTab("kanban");
+});
+const _reviewViewBtn = document.getElementById("kanban-analysis-result-btn");
+const _citedViewBtn = document.getElementById("kanban-analysis-cited-btn");
+if (_reviewViewBtn && _citedViewBtn) {
+  _reviewViewBtn.addEventListener("click", () => {
+    if (kanbanState.analysis) {
+      kanbanState.activeAnalysisView = "review";
+      const ac = document.getElementById("kanban-analysis-content");
+      if (ac) ac.innerHTML = renderAnalysisModules(kanbanState.analysis);
+      _updateAIAnalysisView();
+      showAnalysisChatToggle();
+    }
+  });
+  _citedViewBtn.addEventListener("click", () => {
+    if (kanbanState.citedRefsAnalysis) {
+      kanbanState.activeAnalysisView = "citedRefs";
+      const ac = document.getElementById("kanban-analysis-content");
+      if (ac) ac.innerHTML = '<div class="kanban-analysis-content markdown-body"><div class="kanban-analysis-answer">' + renderMarkdown(kanbanState.citedRefsAnalysis) + '</div></div>';
+      _updateAIAnalysisView();
+      showAnalysisChatToggle();
+    } else {
+      showError("暂无引用文献分析结果，请先在看板中选择文件梳理");
+    }
+  });
+}
 
 aiSettingsBtn.addEventListener("click", () => {
   loadAISettingsToForm();
@@ -8858,168 +9071,35 @@ async function runCitedRefsAnalysis(selectedIdxs) {
     const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
     if (citedRefsAbortBtn) citedRefsAbortBtn.classList.add("hidden");
     citedRefsAbortController = null;
+    _updateAIAnalysisView();
   }
 }
 
-// Cited refs abort button handler
+// Generic abort button handler (used for both review and cited-refs analysis)
 const citedRefsAbortBtn = document.getElementById("cited-refs-abort-btn");
 if (citedRefsAbortBtn) {
   citedRefsAbortBtn.addEventListener("click", () => {
+    const wasCited = activeAnalysisProcess === "citedRefs";
     abortActiveProcess();
     const statusEl = document.getElementById("ai-analysis-status");
-    if (statusEl) statusEl.textContent = "引用文献梳理已中止";
+    if (statusEl) statusEl.textContent = wasCited ? "引用文献梳理已中止" : "审查意见梳理已中止";
   });
 }
 
-// Manual select button - now in HTML
+// AI analysis buttons (now in kanban header) - enter card multi-select mode
 const manualSelectBtn = document.getElementById("kanban-manual-select-btn");
 if (manualSelectBtn) {
   manualSelectBtn.addEventListener("click", () => {
-    buildReviewManualSelectPanel();
+    _switchToTab("kanban");
+    enterKanbanSelectMode("review");
   });
 }
 
-// Cited refs manual select button - now in HTML
 const citedRefsManualBtn = document.getElementById("cited-refs-manual-btn");
-
 if (citedRefsManualBtn) {
   citedRefsManualBtn.addEventListener("click", () => {
-    const manualSelectPanel = document.getElementById("ai-manual-select");
-    if (!manualSelectPanel) return;
-
-    // Interrupt any existing process
-    if (activeAnalysisProcess) {
-      abortActiveProcess();
-    }
-
-    const items = kanbanState.documents;
-    const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
-
-    let html = '<div class="ai-manual-header"><span class="ai-manual-title">选择引用文献文件范围</span></div>';
-    html += '<div class="ai-manual-toolbar">';
-    html += '<input type="text" id="cited-manual-search-input" class="merge-search-input" placeholder="搜索文档名称、代码、日期...">';
-    html += '<div class="ai-manual-select-all"><button id="cited-manual-select-all" class="btn-small btn-extract">全选</button><button id="cited-manual-select-none" class="btn-small btn-extract">全不选</button><button id="cited-manual-select-default" class="btn-small btn-extract">默认选择</button></div>';
-    html += '</div>';
-    html += '<div class="ai-manual-docs">';
-    items.forEach(it => {
-      const searchText = ((it.name || '') + ' ' + (it.docCode || '') + ' ' + (it.date || '')).toLowerCase();
-      html += `
-        <label class="ai-manual-doc-item" data-search-text="${escapeHtml(searchText)}">
-          <input type="checkbox" class="cited-manual-select-checkbox" data-idx="${it.idx}" ${CITED_DOC_CODES.includes(it.docCode) ? 'checked' : ''}>
-          <div class="ai-manual-doc-info">
-            <span class="ai-manual-doc-code">${escapeHtml(it.docCode)}</span>
-            <span class="ai-manual-doc-name">${escapeHtml(it.name)}</span>
-            <span class="ai-manual-doc-date">${escapeHtml(it.date)}</span>
-          </div>
-        </label>
-      `;
-    });
-    html += '</div>';
-    html += '<div id="cited-manual-selected-summary" class="manual-selected-summary"></div>';
-    html += '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">';
-    html += '<button id="cited-manual-select-cancel" class="btn-secondary">取消</button>';
-    html += '<button id="cited-manual-select-merge-btn" class="btn-secondary">合并导出选中文档</button>';
-    html += '<button id="cited-manual-select-confirm" class="btn-primary">确认并开始AI梳理</button>';
-    html += '</div>';
-
-    manualSelectPanel.innerHTML = html;
-    manualSelectPanel.classList.remove("hidden");
-
-    // Try to load saved selections, fall back to defaults
-    if (!loadManualSelection("cited", items, ".cited-manual-select-checkbox", manualSelectPanel, null)) {
-      // Apply default checks (already set in HTML via CITED_DOC_CODES)
-    }
-
-    // Update selected summary
-    function updateCitedSummary() {
-      const summaryEl = document.getElementById("cited-manual-selected-summary");
-      if (!summaryEl) return;
-      const checkedIdxs = [];
-      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox:checked").forEach(cb => {
-        checkedIdxs.push(parseInt(cb.dataset.idx));
-      });
-      if (checkedIdxs.length === 0) {
-        summaryEl.innerHTML = '<span class="summary-empty">未选择任何文档</span>';
-      } else {
-        const names = checkedIdxs.map(idx => {
-          const it = items.find(d => d.idx === idx);
-          return it ? escapeHtml(it.docCode + ' - ' + (it.name || '')) : '';
-        }).filter(Boolean);
-        summaryEl.innerHTML = '<span class="summary-label">已选 ' + checkedIdxs.length + ' 份：</span>' + names.join('<span class="summary-sep">、</span>');
-      }
-    }
-    updateCitedSummary();
-
-    // Auto-save on every checkbox change
-    function onCitedCheckboxChange() {
-      saveManualSelection("cited", items, ".cited-manual-select-checkbox", manualSelectPanel);
-      updateCitedSummary();
-    }
-    manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => {
-      cb.addEventListener("change", onCitedCheckboxChange);
-    });
-
-    // Search filter
-    const searchInput = document.getElementById("cited-manual-search-input");
-    if (searchInput) {
-      searchInput.oninput = () => {
-        const keyword = searchInput.value.trim().toLowerCase();
-        manualSelectPanel.querySelectorAll(".ai-manual-doc-item").forEach(item => {
-          if (!keyword) { item.style.display = ""; return; }
-          const st = item.dataset.searchText || "";
-          item.style.display = st.includes(keyword) ? "" : "none";
-        });
-      };
-    }
-
-    document.getElementById("cited-manual-select-all").addEventListener("click", () => {
-      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => cb.checked = true);
-      onCitedCheckboxChange();
-    });
-    document.getElementById("cited-manual-select-none").addEventListener("click", () => {
-      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => cb.checked = false);
-      onCitedCheckboxChange();
-    });
-    document.getElementById("cited-manual-select-default").addEventListener("click", () => {
-      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox").forEach(cb => {
-        const idx = parseInt(cb.dataset.idx);
-        const it = items.find(d => d.idx === idx);
-        cb.checked = it && CITED_DOC_CODES.includes(it.docCode);
-      });
-      onCitedCheckboxChange();
-    });
-    document.getElementById("cited-manual-select-cancel").addEventListener("click", () => {
-      manualSelectPanel.classList.add("hidden");
-    });
-    document.getElementById("cited-manual-select-merge-btn").addEventListener("click", async () => {
-      const selectedIdxs = [];
-      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox:checked").forEach(cb => {
-        selectedIdxs.push(parseInt(cb.dataset.idx));
-      });
-      if (selectedIdxs.length === 0) {
-        showError("请至少选择一个文档");
-        return;
-      }
-      const mergeBtn = document.getElementById("cited-manual-select-merge-btn");
-      if (mergeBtn) { mergeBtn.disabled = true; mergeBtn.textContent = "导出中..."; }
-      await doMergeExportWithItems(selectedIdxs);
-      if (mergeBtn) { mergeBtn.disabled = false; mergeBtn.textContent = "合并导出选中文档"; }
-    });
-    document.getElementById("cited-manual-select-confirm").addEventListener("click", async () => {
-      const selectedIdxs = [];
-      manualSelectPanel.querySelectorAll(".cited-manual-select-checkbox:checked").forEach(cb => {
-        selectedIdxs.push(parseInt(cb.dataset.idx));
-      });
-      if (selectedIdxs.length === 0) {
-        showError("请至少选择一个文档");
-        return;
-      }
-      saveManualSelection("cited", items, ".cited-manual-select-checkbox", manualSelectPanel);
-      manualSelectPanel.classList.add("hidden");
-
-      // Run cited refs analysis with selected documents
-      await runCitedRefsAnalysis(selectedIdxs);
-    });
+    _switchToTab("kanban");
+    enterKanbanSelectMode("citedRefs");
   });
 }
 
@@ -9129,493 +9209,350 @@ function renderAiProgressUI(step, detail, progress) {
   return html;
 }
 
-// ── Build review manual selection panel ──
-function buildReviewManualSelectPanel() {
+async function startReviewAnalysis(selectedIdxs) {
   const items = kanbanState.documents;
-  const manualSelectPanel = document.getElementById("ai-manual-select");
-  if (!manualSelectPanel) return;
-
-  if (!items || items.length === 0) {
-    manualSelectPanel.innerHTML = "";
-    manualSelectPanel.classList.add("hidden");
+  // Trigger AI analysis with selected documents only
+  const config = window.AI.loadAIConfig();
+  const provider = window.AI.getCurrentProvider(config);
+  if (!provider) {
+    showError("请先在 AI 设置中配置并选择一个 AI 服务商");
+    aiSettingsBtn.click();
     return;
   }
 
-  const canDownload = currentData && (currentData.office === "US" || currentData.office === "EP" || currentData.office === "CN" || currentData.office === "WO" || currentData.office === "KR");
-  if (!canDownload) {
-    manualSelectPanel.innerHTML = "";
-    manualSelectPanel.classList.add("hidden");
-    return;
+  const manualSelectBtnEl = document.getElementById("kanban-manual-select-btn");
+  if (manualSelectBtnEl) manualSelectBtnEl.disabled = true;
+  // Interrupt any existing process
+  if (activeAnalysisProcess) {
+    abortActiveProcess();
   }
-
-  const sortedItems = [...items].sort((a, b) => parseDocDateToTimestamp(b.date) - parseDocDateToTimestamp(a.date));
-
-  // Build checkbox list
-  const typeLabels = { office_action: "审查意见", response: "答复", request: "请求", allowance: "授权", notification: "通知", misc: "其他" };
-  let html = '<div class="ai-manual-header"><span class="ai-manual-title">选择分析文件范围</span></div>';
-  html += '<div class="ai-manual-toolbar">';
-  html += '<input type="text" id="manual-search-input" class="merge-search-input" placeholder="搜索文档名称、代码、日期...">';
-  html += '<div class="ai-manual-select-all"><button id="manual-select-all" class="btn-small btn-extract">全选</button><button id="manual-select-none" class="btn-small btn-extract">全不选</button><button id="manual-select-default" class="btn-small btn-extract">默认选择</button></div>';
-  html += '</div>';
-  html += '<div class="ai-manual-docs">';
-  sortedItems.forEach(it => {
-    const typeLabel = typeLabels[it.type] || it.type;
-    const searchText = ((it.name || '') + ' ' + (it.docCode || '') + ' ' + (it.date || '') + ' ' + typeLabel).toLowerCase();
-    html += `
-      <label class="ai-manual-doc-item" data-search-text="${escapeHtml(searchText)}">
-        <input type="checkbox" class="manual-select-checkbox" data-idx="${it.idx}" ${shouldIncludeInAIAnalysis(currentData.office, it.type) ? 'checked' : ''}>
-        <div class="ai-manual-doc-info">
-          <span class="ai-manual-doc-code">${escapeHtml(it.docCode)}</span>
-          <span class="ai-manual-doc-name">${escapeHtml(it.name)}</span>
-          <span class="ai-manual-doc-date">${escapeHtml(it.date)}</span>
-        </div>
-        <span class="ai-manual-doc-type">${typeLabel}</span>
-      </label>
-    `;
+  activeAnalysisProcess = "review";
+  kanbanState.activeAnalysisView = "review";
+  kanbanAutoAbortController = new AbortController();
+  // Hide kanban action buttons (they live in kanban header which is not visible during analysis)
+  ["kanban-manual-select-btn", "cited-refs-manual-btn"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hidden");
   });
-  html += '</div>';
-  html += '<div id="manual-selected-summary" class="manual-selected-summary"></div>';
-  html += '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">';
-  html += '<button id="manual-select-cancel" class="btn-secondary">取消</button>';
-  html += '<button id="manual-select-merge-btn" class="btn-secondary">合并导出选中文档</button>';
-  html += '<button id="manual-select-confirm" class="btn-primary">确认并开始AI梳理</button>';
-  html += '</div>';
+  // Show the abort button in AI analysis header (reuses the same abort button as cited refs)
+  const abortBtn = document.getElementById("cited-refs-abort-btn");
+  if (abortBtn) abortBtn.classList.remove("hidden");
 
-  manualSelectPanel.innerHTML = html;
-  manualSelectPanel.classList.remove("hidden");
+  const analysisSection = document.getElementById("kanban-analysis");
+  const analysisContent = document.getElementById("kanban-analysis-content");
+  analysisSection.classList.remove("hidden");
+  analysisContent.innerHTML = renderAiProgressUI("extract", "正在准备文档提取...", -1);
 
-  // Try to load saved selections, fall back to defaults
-  if (!loadManualSelection("review", items, ".manual-select-checkbox", manualSelectPanel, null)) {
-    // Apply default checks (already set in HTML via shouldIncludeInAIAnalysis)
-  }
+  const selectedItems = items.filter(it => selectedIdxs.includes(it.idx));
+  const CLAIMS_CODES_MANUAL = ["CLM", "FWCLM"];
+  const oaItems = selectedItems;
 
-  // Update selected summary
-  function updateReviewSummary() {
-    const summaryEl = document.getElementById("manual-selected-summary");
-    if (!summaryEl) return;
-    const checkedIdxs = [];
-    manualSelectPanel.querySelectorAll(".manual-select-checkbox:checked").forEach(cb => {
-      checkedIdxs.push(parseInt(cb.dataset.idx));
-    });
-    if (checkedIdxs.length === 0) {
-      summaryEl.innerHTML = '<span class="summary-empty">未选择任何文档</span>';
-    } else {
-      const names = checkedIdxs.map(idx => {
-        const it = items.find(d => d.idx === idx);
-        return it ? escapeHtml(it.docCode + ' - ' + (it.name || '')) : '';
-      }).filter(Boolean);
-      summaryEl.innerHTML = '<span class="summary-label">已选 ' + checkedIdxs.length + ' 份：</span>' + names.join('<span class="summary-sep">、</span>');
+  const ocrConfig = window.AI.getOCRConfig(config);
+  const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
+  const glmApiKey = window.AI.getGlmOcrApiKey(config);
+  const statusEl = document.getElementById("ai-analysis-status");
+  const isUS = currentData.office === "US";
+  const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
+
+  const MAX_RETRIES = 5;
+  const RETRY_BASE_DELAY = 8000; // 8s base, exponential backoff
+  const extractReport = { success: [], empty: [], failed: [], retrying: [] };
+
+  async function extractWithRetry(it, engine, retriesLeft) {
+    const container = document.getElementById("kanban-extracted-" + it.idx);
+    const attemptNum = MAX_RETRIES - retriesLeft + 1;
+    if (container) {
+      container.classList.remove("hidden");
+      container.innerHTML = '<p class="extracting">正在提取（' + escapeHtml(engine) + '）' + (attemptNum > 1 ? '第' + attemptNum + '次尝试' : '') + '...</p>';
     }
-  }
-  updateReviewSummary();
-
-  // Auto-save on every checkbox change
-  function onCheckboxChange() {
-    saveManualSelection("review", items, ".manual-select-checkbox", manualSelectPanel);
-    updateReviewSummary();
-  }
-  manualSelectPanel.querySelectorAll(".manual-select-checkbox").forEach(cb => {
-    cb.addEventListener("change", onCheckboxChange);
-  });
-
-  // Search filter
-  const searchInput = document.getElementById("manual-search-input");
-  if (searchInput) {
-    searchInput.oninput = () => {
-      const keyword = searchInput.value.trim().toLowerCase();
-      manualSelectPanel.querySelectorAll(".ai-manual-doc-item").forEach(item => {
-        if (!keyword) { item.style.display = ""; return; }
-        const st = item.dataset.searchText || "";
-        item.style.display = st.includes(keyword) ? "" : "none";
-      });
-    };
-  }
-
-  document.getElementById("manual-select-all").addEventListener("click", () => {
-    manualSelectPanel.querySelectorAll(".manual-select-checkbox").forEach(cb => cb.checked = true);
-    onCheckboxChange();
-  });
-  document.getElementById("manual-select-none").addEventListener("click", () => {
-    manualSelectPanel.querySelectorAll(".manual-select-checkbox").forEach(cb => cb.checked = false);
-    onCheckboxChange();
-  });
-  document.getElementById("manual-select-default").addEventListener("click", () => {
-    manualSelectPanel.querySelectorAll(".manual-select-checkbox").forEach(cb => {
-      const idx = parseInt(cb.dataset.idx);
-      const it = items.find(d => d.idx === idx);
-      cb.checked = it && shouldIncludeInAIAnalysis(currentData.office, it.type);
-    });
-    onCheckboxChange();
-  });
-
-  document.getElementById("manual-select-cancel").addEventListener("click", () => {
-    manualSelectPanel.classList.add("hidden");
-  });
-
-  document.getElementById("manual-select-merge-btn").addEventListener("click", async () => {
-    const selectedIdxs = [];
-    manualSelectPanel.querySelectorAll(".manual-select-checkbox:checked").forEach(cb => {
-      selectedIdxs.push(parseInt(cb.dataset.idx));
-    });
-    if (selectedIdxs.length === 0) {
-      showError("请至少选择一个文档");
-      return;
-    }
-    const mergeBtn = document.getElementById("manual-select-merge-btn");
-    if (mergeBtn) { mergeBtn.disabled = true; mergeBtn.textContent = "导出中..."; }
-    await doMergeExportWithItems(selectedIdxs);
-    if (mergeBtn) { mergeBtn.disabled = false; mergeBtn.textContent = "合并导出选中文档"; }
-  });
-
-  document.getElementById("manual-select-confirm").addEventListener("click", async () => {
-    const selectedIdxs = [];
-    manualSelectPanel.querySelectorAll(".manual-select-checkbox:checked").forEach(cb => {
-      selectedIdxs.push(parseInt(cb.dataset.idx));
-    });
-    if (selectedIdxs.length === 0) {
-      showError("请至少选择一个文档");
-      return;
-    }
-    saveManualSelection("review", items, ".manual-select-checkbox", manualSelectPanel);
-    manualSelectPanel.classList.add("hidden");
-
-    // Trigger AI analysis with selected documents only
-    const config = window.AI.loadAIConfig();
-    const provider = window.AI.getCurrentProvider(config);
-    if (!provider) {
-      showError("请先在 AI 设置中配置并选择一个 AI 服务商");
-      aiSettingsBtn.click();
-      return;
-    }
-
-    const manualSelectBtnEl = document.getElementById("kanban-manual-select-btn");
-    if (manualSelectBtnEl) manualSelectBtnEl.disabled = true;
-    // Interrupt any existing process
-    if (activeAnalysisProcess) {
-      abortActiveProcess();
-    }
-    activeAnalysisProcess = "review";
-    kanbanState.activeAnalysisView = "review";
-    kanbanAutoAbortController = new AbortController();
-    // Hide all action buttons, show abort
-    ["kanban-manual-select-btn", "cited-refs-manual-btn"].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.classList.add("hidden");
-    });
-
-    const analysisSection = document.getElementById("kanban-analysis");
-    const analysisContent = document.getElementById("kanban-analysis-content");
-    analysisSection.classList.remove("hidden");
-    analysisContent.innerHTML = renderAiProgressUI("extract", "正在准备文档提取...", -1);
-
-    const selectedItems = items.filter(it => selectedIdxs.includes(it.idx));
-    const CLAIMS_CODES_MANUAL = ["CLM", "FWCLM"];
-    const oaItems = selectedItems;
-
-    const ocrConfig = window.AI.getOCRConfig(config);
-    const primaryEngine = ocrConfig.engine || "paddle_ocr_vl";
-    const glmApiKey = window.AI.getGlmOcrApiKey(config);
-    const statusEl = document.getElementById("ai-analysis-status");
-    const isUS = currentData.office === "US";
-    const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
-
-    const MAX_RETRIES = 5;
-    const RETRY_BASE_DELAY = 8000; // 8s base, exponential backoff
-    const extractReport = { success: [], empty: [], failed: [], retrying: [] };
-
-    async function extractWithRetry(it, engine, retriesLeft) {
-      const container = document.getElementById("kanban-extracted-" + it.idx);
-      const attemptNum = MAX_RETRIES - retriesLeft + 1;
-      if (container) {
-        container.classList.remove("hidden");
-        container.innerHTML = '<p class="extracting">正在提取（' + escapeHtml(engine) + '）' + (attemptNum > 1 ? '第' + attemptNum + '次尝试' : '') + '...</p>';
-      }
-      try {
-        const useApiKey = engine === "glm_ocr" ? glmApiKey : "";
-        const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, useApiKey);
-        if (result.error) {
-          const isRateLimit = result.error.includes("429") || result.error.includes("rate") || result.error.includes("limit") || result.error.includes("Too Many");
-          if (retriesLeft > 0) {
-            const delay = isRateLimit
-              ? RETRY_BASE_DELAY * Math.pow(2, attemptNum - 1) + Math.random() * 3000  // longer for rate-limit
-              : RETRY_BASE_DELAY * Math.pow(1.5, attemptNum - 1);
-            if (statusEl) statusEl.textContent = `${it.name} 遇到${isRateLimit ? '限速' : '提取错误'}，${Math.round(delay/1000)}秒后重试 (${attemptNum}/${MAX_RETRIES})...`;
-            if (container) container.innerHTML = `<p class="extracting" style="color:var(--warning)">${isRateLimit ? '因限速正在等待重试' : '提取出错，正在重试'} (${attemptNum}/${MAX_RETRIES})，约${Math.round(delay/1000)}秒后重试...</p>`;
-            extractReport.retrying.push({ name: it.name, docCode: it.docCode, attempt: attemptNum, reason: result.error });
-            await new Promise(r => setTimeout(r, delay));
-            // On rate-limit, try same engine first; on other errors, try fallback
-            if (isRateLimit) {
-              return await extractWithRetry(it, engine, retriesLeft - 1);
-            }
-            const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
-            if (fallbackEngine === "glm_ocr" && !glmApiKey) {
-              return await extractWithRetry(it, engine, retriesLeft - 1);
-            }
-            return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
-          }
-          extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: result.error });
-          if (container) container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>';
-          return false;
-        }
-        const text = result.text || "";
-        const markdown = result.markdown || "";
-        if (!text && !markdown) {
-          if (retriesLeft > 0) {
-            const delay = RETRY_BASE_DELAY * Math.pow(1.5, attemptNum - 1);
-            if (statusEl) statusEl.textContent = `${it.name} 提取结果为空，${Math.round(delay/1000)}秒后重试...`;
-            if (container) container.innerHTML = `<p class="extracting" style="color:var(--warning)">提取结果为空，正在重试 (${attemptNum}/${MAX_RETRIES})...</p>`;
-            const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
-            if (fallbackEngine === "glm_ocr" && !glmApiKey) {
-              return await extractWithRetry(it, engine, retriesLeft - 1);
-            }
-            return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
-          }
-          extractReport.empty.push({ name: it.name, docCode: it.docCode });
-          if (container) container.innerHTML = '<p class="extract-empty">未能提取到文本（已尝试 ' + MAX_RETRIES + ' 次）</p>';
-          return false;
-        }
-        const blocks = result.blocks || [];
-        const pageDimensions = result.page_dimensions || {};
-        kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
-        kanbanState.hasUnsavedWork = true;
-        if (blocks.length > 0) {
-          blocks.forEach(b => {
-            const traceKey = "D" + it.idx + "_" + b.block_id;
-            kanbanState.traceIndex[traceKey] = {
-              docIdx: it.idx, page: b.page, bbox: b.bbox,
-              content: b.content, label: b.label, originalBlockId: b.block_id,
-              pageDimensions: pageDimensions[b.page] || null,
-            };
-          });
-        }
-        extractReport.success.push({ name: it.name, docCode: it.docCode, chars: (markdown || text).length, engine: result.engine });
-        if (container) {
-          const displayText = markdown || text;
-          const blocksInfo = blocks.length > 0 ? ` · ${blocks.length} blocks` : "";
-          container.innerHTML = `
-            <div class="extracted-header">
-              <span class="extracted-engine">引擎: ${escapeHtml(result.engine)}</span>
-              <span class="extracted-chars">字符数: ${displayText.length}${blocksInfo}</span>
-            </div>
-            <pre class="extracted-text">${escapeHtml(displayText.length > 6000 ? displayText.substring(0, 6000) + "\n\n[...已截断...]" : displayText)}</pre>
-          `;
-        }
-        return true;
-      } catch (e) {
-        const isRateLimit = e.message && (e.message.includes("429") || e.message.includes("rate") || e.message.includes("limit"));
+    try {
+      const useApiKey = engine === "glm_ocr" ? glmApiKey : "";
+      const result = await doExtractText(currentData.office, urlDocNum, it.docId, it.numberOfPages, it.docFormat, engine, useApiKey);
+      if (result.error) {
+        const isRateLimit = result.error.includes("429") || result.error.includes("rate") || result.error.includes("limit") || result.error.includes("Too Many");
         if (retriesLeft > 0) {
           const delay = isRateLimit
-            ? RETRY_BASE_DELAY * Math.pow(2, attemptNum - 1) + Math.random() * 3000
-            : 2000 * attemptNum;
-          if (statusEl) statusEl.textContent = `${it.name} ${isRateLimit ? '限速等待重试' : '提取异常重试中'} (${attemptNum}/${MAX_RETRIES})...`;
-          if (container) container.innerHTML = `<p class="extracting" style="color:var(--warning)">${isRateLimit ? '因限速正在等待重试' : '提取异常，正在重试'} (${attemptNum}/${MAX_RETRIES})...</p>`;
+            ? RETRY_BASE_DELAY * Math.pow(2, attemptNum - 1) + Math.random() * 3000  // longer for rate-limit
+            : RETRY_BASE_DELAY * Math.pow(1.5, attemptNum - 1);
+          if (statusEl) statusEl.textContent = `${it.name} 遇到${isRateLimit ? '限速' : '提取错误'}，${Math.round(delay/1000)}秒后重试 (${attemptNum}/${MAX_RETRIES})...`;
+          if (container) container.innerHTML = `<p class="extracting" style="color:var(--warning)">${isRateLimit ? '因限速正在等待重试' : '提取出错，正在重试'} (${attemptNum}/${MAX_RETRIES})，约${Math.round(delay/1000)}秒后重试...</p>`;
+          extractReport.retrying.push({ name: it.name, docCode: it.docCode, attempt: attemptNum, reason: result.error });
           await new Promise(r => setTimeout(r, delay));
-          return await extractWithRetry(it, engine, retriesLeft - 1);
+          // On rate-limit, try same engine first; on other errors, try fallback
+          if (isRateLimit) {
+            return await extractWithRetry(it, engine, retriesLeft - 1);
+          }
+          const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
+          if (fallbackEngine === "glm_ocr" && !glmApiKey) {
+            return await extractWithRetry(it, engine, retriesLeft - 1);
+          }
+          return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
         }
-        extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: e.message });
-        const container2 = document.getElementById("kanban-extracted-" + it.idx);
-        if (container2) container2.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
+        extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: result.error });
+        if (container) container.innerHTML = '<p class="extract-error">' + escapeHtml(result.error) + '</p>';
         return false;
       }
-    }
-
-    // 断点续OCR：已有缓存（kanbanState.extractions）的跳过，只提取缺失的
-    const missing = oaItems.filter(it => !kanbanState.extractions[it.idx] || (!kanbanState.extractions[it.idx].text && !kanbanState.extractions[it.idx].markdown));
-    if (missing.length > 0) {
-      for (let i = 0; i < missing.length; i++) {
-        const it = missing[i];
-        // Double-check: another parallel flow may have filled it
-        if (kanbanState.extractions[it.idx] && (kanbanState.extractions[it.idx].text || kanbanState.extractions[it.idx].markdown)) continue;
-        if (statusEl) statusEl.textContent = "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
-        // Update progress bar
-        const extractProgress = Math.round(((i + 1) / missing.length) * 60);
-        analysisContent.innerHTML = renderAiProgressUI("extract", "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name, extractProgress);
-        await extractWithRetry(it, primaryEngine, MAX_RETRIES);
-        if (kanbanAutoAbortController && kanbanAutoAbortController.signal.aborted) break;
+      const text = result.text || "";
+      const markdown = result.markdown || "";
+      if (!text && !markdown) {
+        if (retriesLeft > 0) {
+          const delay = RETRY_BASE_DELAY * Math.pow(1.5, attemptNum - 1);
+          if (statusEl) statusEl.textContent = `${it.name} 提取结果为空，${Math.round(delay/1000)}秒后重试...`;
+          if (container) container.innerHTML = `<p class="extracting" style="color:var(--warning)">提取结果为空，正在重试 (${attemptNum}/${MAX_RETRIES})...</p>`;
+          const fallbackEngine = engine === "paddle_ocr_vl" ? "glm_ocr" : "paddle_ocr_vl";
+          if (fallbackEngine === "glm_ocr" && !glmApiKey) {
+            return await extractWithRetry(it, engine, retriesLeft - 1);
+          }
+          return await extractWithRetry(it, fallbackEngine, retriesLeft - 1);
+        }
+        extractReport.empty.push({ name: it.name, docCode: it.docCode });
+        if (container) container.innerHTML = '<p class="extract-empty">未能提取到文本（已尝试 ' + MAX_RETRIES + ' 次）</p>';
+        return false;
       }
-    }
-    autoSaveCache();
-
-    // 务必等所有文档提取完毕再进入AI梳理
-    const successCount = extractReport.success.length;
-    const failedCount = extractReport.failed.length + extractReport.empty.length;
-
-    if (successCount === 0) {
-      analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有文档提取均失败，无法进行 AI 分析。</p>';
-      const manualSelectBtnEl2 = document.getElementById("kanban-manual-select-btn");
-      if (manualSelectBtnEl2) { manualSelectBtnEl2.disabled = false; manualSelectBtnEl2.classList.remove("hidden"); }
-      kanbanAutoAbortController = null;
-      return;
-    }
-
-    // 如果有部分失败，提示用户但仍继续AI分析
-    if (failedCount > 0) {
-      const failedNames = [...extractReport.failed, ...extractReport.empty].map(f => f.docCode || f.name).join(", ");
-      if (statusEl) statusEl.textContent = `${successCount} 个文档提取成功，${failedCount} 个失败（${failedNames}），正在用 AI 整理...`;
-      analysisContent.innerHTML = renderAiProgressUI("analyzing", successCount + " 个文档提取成功，" + failedCount + " 个失败，AI 梳理中...", -1);
-    } else {
-      if (statusEl) statusEl.textContent = "全部文档提取完成，正在用 AI 整理审查历史...";
-      analysisContent.innerHTML = renderAiProgressUI("analyzing", "全部文档提取完成，AI 梳理中...", -1);
-    }
-    analysisContent.innerHTML = renderAiProgressUI("analyzing", "AI 正在梳理审查历史...", -1);
-
-    const hasBlocks = oaItems.some(it => {
-      const ext = kanbanState.extractions[it.idx];
-      return ext && ext.blocks && ext.blocks.length > 0;
-    });
-
-    const annotatedLines = [];
-    const timelineSummary = buildTimelineSummary(currentData.office, kanbanState.documents);
-
-    // Sort oaItems by date for consistent timeline in AI context
-    const sortedOaItems = [...oaItems].sort((a, b) => {
-      const da = parseDate(a.date);
-      const db = parseDate(b.date);
-      return da - db;
-    });
-
-    sortedOaItems.forEach((it) => {
-      const ext = kanbanState.extractions[it.idx];
-      if (!ext) {
-        const isClaimsDoc = CLAIMS_CODES_MANUAL.includes(it.docCode);
-        const missingHeader = isClaimsDoc
-          ? `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）[权利要求参考]`
-          : `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）`;
-        annotatedLines.push(missingHeader + "\n[未能提取内容]");
-        return;
+      const blocks = result.blocks || [];
+      const pageDimensions = result.page_dimensions || {};
+      kanbanState.extractions[it.idx] = { text, markdown, engine: result.engine, blocks, pageDimensions };
+      kanbanState.hasUnsavedWork = true;
+      if (blocks.length > 0) {
+        blocks.forEach(b => {
+          const traceKey = "D" + it.idx + "_" + b.block_id;
+          kanbanState.traceIndex[traceKey] = {
+            docIdx: it.idx, page: b.page, bbox: b.bbox,
+            content: b.content, label: b.label, originalBlockId: b.block_id,
+            pageDimensions: pageDimensions[b.page] || null,
+          };
+        });
       }
+      extractReport.success.push({ name: it.name, docCode: it.docCode, chars: (markdown || text).length, engine: result.engine });
+      if (container) {
+        const displayText = markdown || text;
+        const blocksInfo = blocks.length > 0 ? ` · ${blocks.length} blocks` : "";
+        container.innerHTML = `
+          <div class="extracted-header">
+            <span class="extracted-engine">引擎: ${escapeHtml(result.engine)}</span>
+            <span class="extracted-chars">字符数: ${displayText.length}${blocksInfo}</span>
+          </div>
+          <pre class="extracted-text">${escapeHtml(displayText.length > 6000 ? displayText.substring(0, 6000) + "\n\n[...已截断...]" : displayText)}</pre>
+        `;
+      }
+      return true;
+    } catch (e) {
+      const isRateLimit = e.message && (e.message.includes("429") || e.message.includes("rate") || e.message.includes("limit"));
+      if (retriesLeft > 0) {
+        const delay = isRateLimit
+          ? RETRY_BASE_DELAY * Math.pow(2, attemptNum - 1) + Math.random() * 3000
+          : 2000 * attemptNum;
+        if (statusEl) statusEl.textContent = `${it.name} ${isRateLimit ? '限速等待重试' : '提取异常重试中'} (${attemptNum}/${MAX_RETRIES})...`;
+        if (container) container.innerHTML = `<p class="extracting" style="color:var(--warning)">${isRateLimit ? '因限速正在等待重试' : '提取异常，正在重试'} (${attemptNum}/${MAX_RETRIES})...</p>`;
+        await new Promise(r => setTimeout(r, delay));
+        return await extractWithRetry(it, engine, retriesLeft - 1);
+      }
+      extractReport.failed.push({ name: it.name, docCode: it.docCode, reason: e.message });
+      const container2 = document.getElementById("kanban-extracted-" + it.idx);
+      if (container2) container2.innerHTML = '<p class="extract-error">' + escapeHtml(e.message) + '</p>';
+      return false;
+    }
+  }
+
+  // 断点续OCR：已有缓存（kanbanState.extractions）的跳过，只提取缺失的
+  const missing = oaItems.filter(it => !kanbanState.extractions[it.idx] || (!kanbanState.extractions[it.idx].text && !kanbanState.extractions[it.idx].markdown));
+  if (missing.length > 0) {
+    for (let i = 0; i < missing.length; i++) {
+      const it = missing[i];
+      // Double-check: another parallel flow may have filled it
+      if (kanbanState.extractions[it.idx] && (kanbanState.extractions[it.idx].text || kanbanState.extractions[it.idx].markdown)) continue;
+      if (statusEl) statusEl.textContent = "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name;
+      // Update progress bar
+      const extractProgress = Math.round(((i + 1) / missing.length) * 60);
+      analysisContent.innerHTML = renderAiProgressUI("extract", "提取中 (" + (i + 1) + "/" + missing.length + "): " + it.name, extractProgress);
+      await extractWithRetry(it, primaryEngine, MAX_RETRIES);
+      if (kanbanAutoAbortController && kanbanAutoAbortController.signal.aborted) break;
+    }
+  }
+  autoSaveCache();
+
+  // 务必等所有文档提取完毕再进入AI梳理
+  const successCount = extractReport.success.length;
+  const failedCount = extractReport.failed.length + extractReport.empty.length;
+
+  if (successCount === 0) {
+    analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">所有文档提取均失败，无法进行 AI 分析。</p>';
+    const manualSelectBtnEl2 = document.getElementById("kanban-manual-select-btn");
+    if (manualSelectBtnEl2) { manualSelectBtnEl2.disabled = false; manualSelectBtnEl2.classList.remove("hidden"); }
+    kanbanAutoAbortController = null;
+    return;
+  }
+
+  // 如果有部分失败，提示用户但仍继续AI分析
+  if (failedCount > 0) {
+    const failedNames = [...extractReport.failed, ...extractReport.empty].map(f => f.docCode || f.name).join(", ");
+    if (statusEl) statusEl.textContent = `${successCount} 个文档提取成功，${failedCount} 个失败（${failedNames}），正在用 AI 整理...`;
+    analysisContent.innerHTML = renderAiProgressUI("analyzing", successCount + " 个文档提取成功，" + failedCount + " 个失败，AI 梳理中...", -1);
+  } else {
+    if (statusEl) statusEl.textContent = "全部文档提取完成，正在用 AI 整理审查历史...";
+    analysisContent.innerHTML = renderAiProgressUI("analyzing", "全部文档提取完成，AI 梳理中...", -1);
+  }
+  analysisContent.innerHTML = renderAiProgressUI("analyzing", "AI 正在梳理审查历史...", -1);
+
+  const hasBlocks = oaItems.some(it => {
+    const ext = kanbanState.extractions[it.idx];
+    return ext && ext.blocks && ext.blocks.length > 0;
+  });
+
+  const annotatedLines = [];
+  const timelineSummary = buildTimelineSummary(currentData.office, kanbanState.documents);
+
+  // Sort oaItems by date for consistent timeline in AI context
+  const sortedOaItems = [...oaItems].sort((a, b) => {
+    const da = parseDate(a.date);
+    const db = parseDate(b.date);
+    return da - db;
+  });
+
+  sortedOaItems.forEach((it) => {
+    const ext = kanbanState.extractions[it.idx];
+    if (!ext) {
       const isClaimsDoc = CLAIMS_CODES_MANUAL.includes(it.docCode);
-      const header = isClaimsDoc
+      const missingHeader = isClaimsDoc
         ? `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）[权利要求参考]`
         : `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）`;
-      if (hasBlocks && ext.blocks && ext.blocks.length > 0) {
-        const blockParts = ext.blocks
-          .filter(b => b.content && b.content.trim())
-          .map(b => `[ref:D${it.idx}_${b.block_id}]${b.content}[/ref:D${it.idx}_${b.block_id}]`)
-          .join("\n\n");
-        annotatedLines.push(header + "\n" + blockParts);
-      } else {
-        const fullContent = ext.markdown || ext.text || "";
-        const content = fullContent.length > 50000 ? fullContent.substring(0, 50000) + "\n\n[...内容过长，已截断...]" : fullContent;
-        annotatedLines.push(header + "\n" + content);
-      }
-    });
-
-    const promptConfig = window.AI.loadAIConfig();
-    const systemPrompt = hasBlocks
-      ? window.AI.getCustomPrompt(promptConfig, "kanbanAnalysis")
-      : window.AI.getCustomPrompt(promptConfig, "kanbanAnalysisSimple");
-
-    const userMessage = timelineSummary + annotatedLines.join("\n\n---\n\n");
-
-    try {
-      let fullText = "";
-      kanbanState.analysis = "";
-      kanbanState.analysisSystemPrompt = systemPrompt;
-      kanbanState.analysisUserMessage = userMessage;
-      kanbanState.hasUnsavedWork = true;
-      // Clear previous content (including any previous progress UI)
-      analysisContent.innerHTML = "";
-      // Create a stable container once to avoid full DOM replacement on each chunk
-      // Keep the progress bar visible initially; it will be replaced when first content arrives
-      const progressPlaceholder = document.createElement("div");
-      progressPlaceholder.innerHTML = renderAiProgressUI("analyzing", "AI 正在梳理审查历史，等待响应...", -1);
-      analysisContent.appendChild(progressPlaceholder);
-      const streamContainer = document.createElement("div");
-      streamContainer.className = "kanban-analysis-content markdown-body";
-      analysisContent.appendChild(streamContainer);
-      // 思考区挂在 streamContainer 内（renderMarkdownWithTrace 只会改 innerHTML，需保留思考区）
-      // 为避免被覆盖，把回答放到内层 .kanban-analysis-answer
-      const answerContainer = document.createElement("div");
-      answerContainer.className = "kanban-analysis-answer";
-      streamContainer.appendChild(answerContainer);
-      const thinkingHost = _createThinkingHost(streamContainer);
-      let _streamContentStarted = false;
-      let _streamRafPending = false;
-      let _lastRenderLen = 0;
-      for await (const chunk of window.AI.streamChat(
-        provider.type, provider.apiKey, provider.baseUrl,
-        {
-          model: provider.model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userMessage },
-          ],
-          temperature: 0.3,
-          maxTokens: 32768,
-        },
-        kanbanAutoAbortController ? kanbanAutoAbortController.signal : undefined
-      )) {
-        if (chunk.reasoningContent && thinkingHost) {
-          if (progressPlaceholder.parentNode) progressPlaceholder.remove();
-          thinkingHost.appendReasoning(chunk.reasoningContent);
-        }
-        if (chunk.content) {
-          if (!_streamContentStarted) {
-            _streamContentStarted = true;
-            if (progressPlaceholder.parentNode) progressPlaceholder.remove();
-            if (thinkingHost) thinkingHost.startContent();
-          }
-          fullText += chunk.content;
-          // Throttle rendering: only render if enough new content or enough time passed
-          if (!_streamRafPending && (fullText.length - _lastRenderLen > 20 || fullText.length < 200)) {
-            _streamRafPending = true;
-            requestAnimationFrame(() => {
-              if (answerContainer) {
-                answerContainer.innerHTML = renderMarkdownWithTrace(fullText);
-              }
-              kanbanState.analysis = fullText;
-              kanbanState.hasUnsavedWork = true;
-              _lastRenderLen = fullText.length;
-              _streamRafPending = false;
-            });
-          }
-        }
-      }
-      if (thinkingHost) thinkingHost.finish();
-      // Final render to ensure all content is displayed (with module sections)
-      if (answerContainer) answerContainer.innerHTML = renderAnalysisModules(fullText);
-      kanbanState.analysis = fullText;
-      kanbanState.hasUnsavedWork = true;
-      // Save context for continued chat
-      kanbanState.analysisSystemPrompt = systemPrompt;
-      kanbanState.analysisUserMessage = userMessage;
-      analysisChatHistory = [];
-      showAnalysisChatToggle();
-      autoSaveCache();
-      prefetchPatentLinks();
-      if (statusEl) statusEl.innerHTML = icon('check') + " AI 整理完成 共 " + oaItems.length + " 份文档" + (hasBlocks ? "（含溯源标记）" : "");
-
-      let reportHtml = "";
-      if (extractReport.empty.length > 0 || extractReport.failed.length > 0) {
-        reportHtml = '<div class="extract-report"><h4>提取完整性报告</h4>';
-        if (extractReport.success.length > 0) {
-          reportHtml += '<div class="report-success" style="display:flex;align-items:center;gap:6px;">' + icon('check') + ' 成功: ' + extractReport.success.map(s => escapeHtml(s.name) + ' (' + s.chars + '字/' + s.engine + ')').join('、') + '</div>';
-        }
-        if (extractReport.empty.length > 0) {
-          reportHtml += '<div class="report-warning">内容为空: ' + extractReport.empty.map(s => escapeHtml(s.name)).join('、') + '</div>';
-        }
-        if (extractReport.failed.length > 0) {
-          reportHtml += '<div class="report-error" style="display:flex;align-items:center;gap:6px;">' + icon('x') + ' 提取失败: ' + extractReport.failed.map(s => escapeHtml(s.name) + ' (' + escapeHtml(s.reason) + ')').join('、') + '</div>';
-        }
-        reportHtml += '</div>';
-        // Prepend report before the stable stream container
-        const reportDiv = document.createElement("div");
-        reportDiv.innerHTML = reportHtml;
-        analysisContent.insertBefore(reportDiv.firstChild, streamContainer);
-      }
-    } catch (e) {
-      analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
-      if (statusEl) statusEl.innerHTML = icon('x') + " AI 整理失败";
-    } finally {
-      activeAnalysisProcess = null;
-      ["kanban-manual-select-btn", "cited-refs-manual-btn"].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) { el.disabled = false; el.classList.remove("hidden"); }
-      });
-      kanbanAutoAbortController = null;
+      annotatedLines.push(missingHeader + "\n[未能提取内容]");
+      return;
+    }
+    const isClaimsDoc = CLAIMS_CODES_MANUAL.includes(it.docCode);
+    const header = isClaimsDoc
+      ? `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）[权利要求参考]`
+      : `【${it.idx}】${it.docCode} - ${it.name}（${it.date}）`;
+    if (hasBlocks && ext.blocks && ext.blocks.length > 0) {
+      const blockParts = ext.blocks
+        .filter(b => b.content && b.content.trim())
+        .map(b => `[ref:D${it.idx}_${b.block_id}]${b.content}[/ref:D${it.idx}_${b.block_id}]`)
+        .join("\n\n");
+      annotatedLines.push(header + "\n" + blockParts);
+    } else {
+      const fullContent = ext.markdown || ext.text || "";
+      const content = fullContent.length > 50000 ? fullContent.substring(0, 50000) + "\n\n[...内容过长，已截断...]" : fullContent;
+      annotatedLines.push(header + "\n" + content);
     }
   });
+
+  const promptConfig = window.AI.loadAIConfig();
+  const systemPrompt = hasBlocks
+    ? window.AI.getCustomPrompt(promptConfig, "kanbanAnalysis")
+    : window.AI.getCustomPrompt(promptConfig, "kanbanAnalysisSimple");
+
+  const userMessage = timelineSummary + annotatedLines.join("\n\n---\n\n");
+
+  try {
+    let fullText = "";
+    kanbanState.analysis = "";
+    kanbanState.analysisSystemPrompt = systemPrompt;
+    kanbanState.analysisUserMessage = userMessage;
+    kanbanState.hasUnsavedWork = true;
+    // Clear previous content (including any previous progress UI)
+    analysisContent.innerHTML = "";
+    // Create a stable container once to avoid full DOM replacement on each chunk
+    // Keep the progress bar visible initially; it will be replaced when first content arrives
+    const progressPlaceholder = document.createElement("div");
+    progressPlaceholder.innerHTML = renderAiProgressUI("analyzing", "AI 正在梳理审查历史，等待响应...", -1);
+    analysisContent.appendChild(progressPlaceholder);
+    const streamContainer = document.createElement("div");
+    streamContainer.className = "kanban-analysis-content markdown-body";
+    analysisContent.appendChild(streamContainer);
+    // 思考区挂在 streamContainer 内（renderMarkdownWithTrace 只会改 innerHTML，需保留思考区）
+    // 为避免被覆盖，把回答放到内层 .kanban-analysis-answer
+    const answerContainer = document.createElement("div");
+    answerContainer.className = "kanban-analysis-answer";
+    streamContainer.appendChild(answerContainer);
+    const thinkingHost = _createThinkingHost(streamContainer);
+    let _streamContentStarted = false;
+    let _streamRafPending = false;
+    let _lastRenderLen = 0;
+    for await (const chunk of window.AI.streamChat(
+      provider.type, provider.apiKey, provider.baseUrl,
+      {
+        model: provider.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        temperature: 0.3,
+        maxTokens: 32768,
+      },
+      kanbanAutoAbortController ? kanbanAutoAbortController.signal : undefined
+    )) {
+      if (chunk.reasoningContent && thinkingHost) {
+        if (progressPlaceholder.parentNode) progressPlaceholder.remove();
+        thinkingHost.appendReasoning(chunk.reasoningContent);
+      }
+      if (chunk.content) {
+        if (!_streamContentStarted) {
+          _streamContentStarted = true;
+          if (progressPlaceholder.parentNode) progressPlaceholder.remove();
+          if (thinkingHost) thinkingHost.startContent();
+        }
+        fullText += chunk.content;
+        // Throttle rendering: only render if enough new content or enough time passed
+        if (!_streamRafPending && (fullText.length - _lastRenderLen > 20 || fullText.length < 200)) {
+          _streamRafPending = true;
+          requestAnimationFrame(() => {
+            if (answerContainer) {
+              answerContainer.innerHTML = renderMarkdownWithTrace(fullText);
+            }
+            kanbanState.analysis = fullText;
+            kanbanState.hasUnsavedWork = true;
+            _lastRenderLen = fullText.length;
+            _streamRafPending = false;
+          });
+        }
+      }
+    }
+    if (thinkingHost) thinkingHost.finish();
+    // Final render to ensure all content is displayed (with module sections)
+    if (answerContainer) answerContainer.innerHTML = renderAnalysisModules(fullText);
+    kanbanState.analysis = fullText;
+    kanbanState.hasUnsavedWork = true;
+    // Save context for continued chat
+    kanbanState.analysisSystemPrompt = systemPrompt;
+    kanbanState.analysisUserMessage = userMessage;
+    analysisChatHistory = [];
+    showAnalysisChatToggle();
+    autoSaveCache();
+    prefetchPatentLinks();
+    if (statusEl) statusEl.innerHTML = icon('check') + " AI 整理完成 共 " + oaItems.length + " 份文档" + (hasBlocks ? "（含溯源标记）" : "");
+
+    let reportHtml = "";
+    if (extractReport.empty.length > 0 || extractReport.failed.length > 0) {
+      reportHtml = '<div class="extract-report"><h4>提取完整性报告</h4>';
+      if (extractReport.success.length > 0) {
+        reportHtml += '<div class="report-success" style="display:flex;align-items:center;gap:6px;">' + icon('check') + ' 成功: ' + extractReport.success.map(s => escapeHtml(s.name) + ' (' + s.chars + '字/' + s.engine + ')').join('、') + '</div>';
+      }
+      if (extractReport.empty.length > 0) {
+        reportHtml += '<div class="report-warning">内容为空: ' + extractReport.empty.map(s => escapeHtml(s.name)).join('、') + '</div>';
+      }
+      if (extractReport.failed.length > 0) {
+        reportHtml += '<div class="report-error" style="display:flex;align-items:center;gap:6px;">' + icon('x') + ' 提取失败: ' + extractReport.failed.map(s => escapeHtml(s.name) + ' (' + escapeHtml(s.reason) + ')').join('、') + '</div>';
+      }
+      reportHtml += '</div>';
+      // Prepend report before the stable stream container
+      const reportDiv = document.createElement("div");
+      reportDiv.innerHTML = reportHtml;
+      analysisContent.insertBefore(reportDiv.firstChild, streamContainer);
+    }
+  } catch (e) {
+    analysisContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">' + escapeHtml(e.toString()) + "</p>";
+    if (statusEl) statusEl.innerHTML = icon('x') + " AI 整理失败";
+  } finally {
+    activeAnalysisProcess = null;
+    ["kanban-manual-select-btn", "cited-refs-manual-btn"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.disabled = false; el.classList.remove("hidden"); }
+    });
+    const abortBtn = document.getElementById("cited-refs-abort-btn");
+    if (abortBtn) abortBtn.classList.add("hidden");
+    kanbanAutoAbortController = null;
+    _updateAIAnalysisView();
+  }
 }
 
 function renderMarkdown(text) {
