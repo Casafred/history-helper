@@ -302,7 +302,7 @@ function _dossierApplyTab(tab) {
   pdfViewState._pdfDocCache = {};
   if (typeof _pdfDocCache !== "undefined") _pdfDocCache = {};
 
-  // Reset AI manual-select panel and analysis section
+  // Reset AI panels first; we'll restore the correct visibility below based on saved state
   const _msPanel = document.getElementById("ai-manual-select");
   if (_msPanel) { _msPanel.innerHTML = ""; _msPanel.classList.add("hidden"); }
   const _kaPanel = document.getElementById("kanban-analysis");
@@ -434,6 +434,14 @@ function _dossierApplyTab(tab) {
   if (_msBtn) _msBtn.disabled = false;
   const _crBtn = document.getElementById("cited-refs-manual-btn");
   if (_crBtn) _crBtn.disabled = false;
+
+  // If documents exist but no AI analysis report, show the manual selection panel
+  const hasAnalysis = !!(kanbanState.analysis || kanbanState.citedRefsAnalysis);
+  if (!hasAnalysis && kanbanState.documents && kanbanState.documents.length > 0) {
+    if (typeof buildReviewManualSelectPanel === "function") {
+      try { buildReviewManualSelectPanel(); } catch (e) { console.warn("buildReviewManualSelectPanel:", e); }
+    }
+  }
 
   resultSection.classList.remove("hidden");
   _dossierRenderTabs();
@@ -4503,58 +4511,38 @@ async function doSearch(input) {
   }
 
   if (isCNPatent(rawPn)) {
+    searchBtn.disabled = false;
+    loading.classList.add("hidden");
+    if (patentInput) patentInput.value = rawPn;
     openCNQuery(rawPn, "中国专利查询: " + rawPn);
     PatentCache.addPatentHistory(rawPn, { title: "CNIPA: " + rawPn, source: "cnipa" });
     refreshHistoryList();
+    return;
   }
 
   searchBtn.disabled = true;
   loadingText.textContent = "正在查询专利信息...";
   
-  // Check if result section is already visible (tabs exist)
-  const isResultVisible = !resultSection.classList.contains("hidden");
-  
-  let tabLoadingOverlay = null;
-  if (isResultVisible) {
-    // When tabs already exist: show overlay on content area, keep tabs bar visible
-    loading.classList.add("hidden");
-    resultSection.classList.remove("hidden");
-    const tabsBar = document.getElementById("dossier-tabs-bar");
-    if (tabsBar) tabsBar.classList.remove("hidden");
-    // Switch to overview tab so user sees new results immediately
-    const tabBtns = document.querySelectorAll(".tabs-wrapper .tab-btn");
-    tabBtns.forEach(b => b.classList.toggle("active", b.dataset.tab === "overview"));
-    document.querySelectorAll(".tab-content").forEach(c => {
-      c.classList.toggle("active", c.id === "tab-overview");
-    });
-    // Create a semi-transparent overlay over the result content area
-    const resultLayout = document.querySelector(".result-layout");
-    if (resultLayout) {
-      tabLoadingOverlay = document.createElement("div");
-      tabLoadingOverlay.id = "tab-loading-overlay";
-      tabLoadingOverlay.style.cssText = "position:absolute;inset:0;background:var(--bg-primary,var(--bg));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:50;opacity:0.9;";
-      tabLoadingOverlay.innerHTML = '<div class="spinner"></div><p id="tab-loading-text" style="color:var(--text-muted);font-size:13px;margin:0;">正在查询专利信息...</p>';
-      resultLayout.style.position = "relative";
-      resultLayout.appendChild(tabLoadingOverlay);
-    }
-  } else {
-    // First search or from home: use full-screen loading
-    loading.classList.remove("hidden");
-    resultSection.classList.add("hidden");
+  const app = document.getElementById("app");
+
+  // Show result section immediately with overlay covering content area; tab bars stay visible
+  resultSection.classList.remove("hidden");
+  loading.classList.add("hidden");
+  const tabsBar = document.getElementById("dossier-tabs-bar");
+  if (tabsBar && searchMode === "dossier") tabsBar.classList.remove("hidden");
+
+  let contentOverlay = null;
+  const resultLayout = document.querySelector(".result-layout");
+  if (resultLayout) {
+    const old = document.getElementById("content-loading-overlay");
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    contentOverlay = document.createElement("div");
+    contentOverlay.id = "content-loading-overlay";
+    contentOverlay.className = "content-loading-overlay";
+    contentOverlay.innerHTML = '<div class="spinner"></div><p id="content-loading-text">正在查询专利信息...</p>';
+    resultLayout.appendChild(contentOverlay);
   }
   hideError();
-
-  kanbanState.documents = [];
-  kanbanState.extractions = {};
-  kanbanState.analysis = "";
-  kanbanState.analysisSystemPrompt = "";
-  kanbanState.analysisUserMessage = "";
-  kanbanState.citedRefsAnalysis = "";
-  kanbanState.traceIndex = {};
-  kanbanState.hasUnsavedWork = false;
-  kanbanState.activeAnalysisView = "review";
-  const _msPanel = document.getElementById("ai-manual-select");
-  if (_msPanel) { _msPanel.innerHTML = ""; _msPanel.classList.add("hidden"); }
 
   const office = pn.office;
   const docNum = pn.applicationNumber;
@@ -4589,8 +4577,8 @@ async function doSearch(input) {
     const appNumForDocs = result.applicationNumber;
 
     loadingText.textContent = "正在查询审查文档...";
-    const tabLoadingTextEl = document.getElementById("tab-loading-text");
-    if (tabLoadingTextEl) tabLoadingTextEl.textContent = "正在查询审查文档...";
+    const contentLoadingTextEl = document.getElementById("content-loading-text");
+    if (contentLoadingTextEl) contentLoadingTextEl.textContent = "正在查询审查文档...";
     await new Promise(r => setTimeout(r, 1500));
 
     try {
@@ -4604,6 +4592,30 @@ async function doSearch(input) {
     }
 
     if (warnings.length > 0) result.warnings = warnings;
+
+    // Reset state for new data
+    kanbanState.documents = [];
+    kanbanState.extractions = {};
+    kanbanState.analysis = "";
+    kanbanState.analysisSystemPrompt = "";
+    kanbanState.analysisUserMessage = "";
+    kanbanState.citedRefsAnalysis = "";
+    kanbanState.traceIndex = {};
+    kanbanState.hasUnsavedWork = false;
+    kanbanState.activeAnalysisView = "review";
+    const _msPanel = document.getElementById("ai-manual-select");
+    if (_msPanel) { _msPanel.innerHTML = ""; _msPanel.classList.add("hidden"); }
+    const _kaPanel = document.getElementById("kanban-analysis");
+    if (_kaPanel) _kaPanel.classList.add("hidden");
+
+    // Switch to overview tab and exit wide-layout before rendering
+    document.querySelectorAll(".tabs-wrapper .tab-btn").forEach(b => {
+      b.classList.toggle("active", b.dataset.tab === "overview");
+    });
+    document.querySelectorAll(".tab-content").forEach(c => {
+      c.classList.toggle("active", c.id === "tab-overview");
+    });
+    if (app) app.classList.remove("wide-layout");
 
     currentData = result;
 
@@ -4621,16 +4633,17 @@ async function doSearch(input) {
     if (citedRefsManualBtn) citedRefsManualBtn.disabled = false;
     const manualSelectBtn = document.getElementById("kanban-manual-select-btn");
     if (manualSelectBtn) manualSelectBtn.disabled = false;
-    // Auto-expand review manual selection panel when documents are loaded
+    // Build manual selection panel (always visible after docs load when no AI report exists)
     if (typeof buildReviewManualSelectPanel === "function") {
       try { buildReviewManualSelectPanel(); } catch (e) { console.error("auto-expand review panel:", e); }
     }
-    resultSection.classList.remove("hidden");
+
     searchBtn.disabled = false;
     loading.classList.add("hidden");
-    if (tabLoadingOverlay && tabLoadingOverlay.parentNode) {
-      tabLoadingOverlay.parentNode.removeChild(tabLoadingOverlay);
-      tabLoadingOverlay = null;
+    // Remove content loading overlay
+    if (contentOverlay && contentOverlay.parentNode) {
+      contentOverlay.parentNode.removeChild(contentOverlay);
+      contentOverlay = null;
     }
 
     // Register this search as a dossier tab (if in dossier mode)
@@ -4654,18 +4667,9 @@ async function doSearch(input) {
     showError("查询失败: " + (e.message || e));
     searchBtn.disabled = false;
     loading.classList.add("hidden");
-    if (tabLoadingOverlay && tabLoadingOverlay.parentNode) {
-      tabLoadingOverlay.parentNode.removeChild(tabLoadingOverlay);
-      tabLoadingOverlay = null;
-    }
-    if (isResultVisible) {
-      // Restore view - re-render if we have previous currentData
-      if (currentData) {
-        try { renderKanban(currentData); } catch (_) {}
-        try { renderOverview(currentData); } catch (_) {}
-        try { renderFamily(currentData); } catch (_) {}
-        try { renderTimeline(currentData); } catch (_) {}
-      }
+    if (contentOverlay && contentOverlay.parentNode) {
+      contentOverlay.parentNode.removeChild(contentOverlay);
+      contentOverlay = null;
     }
   }
 }
@@ -5503,6 +5507,14 @@ const PatentCache = {
       if (searchMode === "dossier" && _dossierActiveKey) {
         _dossierSaveActiveTab();
         _dossierRenderTabs();
+      }
+
+      // If documents exist but no AI analysis report, show the manual selection panel
+      const restoredHasAnalysis = !!(kanbanState.analysis || kanbanState.citedRefsAnalysis);
+      if (!restoredHasAnalysis && kanbanState.documents && kanbanState.documents.length > 0) {
+        if (typeof buildReviewManualSelectPanel === "function") {
+          try { buildReviewManualSelectPanel(); } catch (e) { console.warn("buildReviewManualSelectPanel (restore):", e); }
+        }
       }
 
       return true;
