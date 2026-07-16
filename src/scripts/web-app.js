@@ -314,7 +314,7 @@ const loadingGpLink = document.getElementById("loading-gp-link");
 const loadingEspacenetLink = document.getElementById("loading-espacenet-link");
 const errorToast = document.getElementById("error-toast");
 
-let searchMode = "dossier"; // "dossier" | "patent" | "extract"
+let searchMode = "dossier"; // "dossier" | "patent" | "extract" | "comparison"
 
 // ── Dossier (审查文档) multi-tab state ──
 // Each tab stores an independent snapshot of currentData+kanbanState.
@@ -1526,8 +1526,11 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
     if (searchMode === "extract") {
       patentInput.placeholder = "输入专利号添加到抽取列表（如 US17204063、EP4252965A3、CN115398523A）...";
       searchBtn.textContent = "添加";
+      searchBtn.style.display = "";
       resultSection.classList.add("hidden");
       patentDetailSection.classList.add("hidden");
+      const comparisonSection = document.getElementById("comparison-section");
+      if (comparisonSection) comparisonSection.classList.add("hidden");
       if (batchSearchPanel) batchSearchPanel.classList.add("hidden");
       if (batchResultsSection) batchResultsSection.classList.add("hidden");
       if (extractSection) extractSection.classList.remove("hidden");
@@ -1540,8 +1543,11 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
     } else if (searchMode === "patent") {
       patentInput.placeholder = "输入专利号查询原文信息（如 US12030161B2, EP4252965A3）";
       searchBtn.textContent = "查询";
+      searchBtn.style.display = "";
       resultSection.classList.add("hidden");
       if (extractSection) extractSection.classList.add("hidden");
+      const comparisonSection = document.getElementById("comparison-section");
+      if (comparisonSection) comparisonSection.classList.add("hidden");
       if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "";
       _dossierRenderTabs();
       if (_pdOpenPatents.length > 0 && _pdActivePatent && _pdPatentCache[_pdActivePatent]) {
@@ -1555,11 +1561,46 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
       } else {
         patentDetailSection.classList.add("hidden");
       }
+    } else if (searchMode === "comparison") {
+      patentInput.placeholder = "智能比对模式可直接在下方面板中操作";
+      searchBtn.textContent = "比对";
+      searchBtn.style.display = "none";
+      resultSection.classList.add("hidden");
+      patentDetailSection.classList.add("hidden");
+      if (extractSection) extractSection.classList.add("hidden");
+      if (batchSearchPanel) batchSearchPanel.classList.add("hidden");
+      if (batchResultsSection) batchResultsSection.classList.add("hidden");
+      if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
+      if (pdFindBar) pdFindBar.classList.add("hidden");
+      _clearFindHighlights();
+      if (typeof ImageAnnotations !== "undefined" && ImageAnnotations.closeNavBar) ImageAnnotations.closeNavBar();
+      _dossierRenderTabs();
+      const comparisonSection = document.getElementById("comparison-section");
+      if (comparisonSection) {
+        comparisonSection.classList.remove("hidden");
+        const appEl = document.getElementById("app");
+        if (appEl) appEl.classList.remove("home-mode");
+        if (typeof ComparisonUI !== "undefined" && typeof ComparisonCore !== "undefined") {
+          ComparisonUI.init();
+          var pending = ComparisonCore.getPendingFamilyPatents();
+          if (pending && pending.length > 0) {
+            ComparisonInput.loadFromFamilyPatents(pending);
+          } else {
+            if (ComparisonCore.getItems().length === 0) {
+              ComparisonCore.init();
+            }
+            ComparisonUI.render();
+          }
+        }
+      }
     } else {
       patentInput.placeholder = "输入专利号（如 US12030161B2, US17204063, EP4252965A3）系统自动识别类型";
       searchBtn.textContent = "查询";
+      searchBtn.style.display = "";
       patentDetailSection.classList.add("hidden");
       if (extractSection) extractSection.classList.add("hidden");
+      const comparisonSection = document.getElementById("comparison-section");
+      if (comparisonSection) comparisonSection.classList.add("hidden");
       if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
       if (batchSearchPanel) batchSearchPanel.classList.add("hidden");
       if (batchResultsSection) batchResultsSection.classList.add("hidden");
@@ -2240,7 +2281,11 @@ function renderPatentDetail(data) {
   // Family information
   if (data.family_id || (data.family_applications && data.family_applications.length > 0) || (data.country_status && data.country_status.length > 0)) {
     html += '<div class="pd-section">';
-    html += '<div class="pd-section-title">同族信息' + (data.family_id ? ' <span class="pd-family-id">ID: ' + escapeHtml(data.family_id) + '</span>' : '') + '</div>';
+    html += '<div class="pd-section-title"><span>同族信息' + (data.family_id ? ' <span class="pd-family-id">ID: ' + escapeHtml(data.family_id) + '</span>' : '') + '</span>' +
+      (data.family_applications && data.family_applications.length > 0 ?
+      '<button class="family-compare-btn" onclick="goToPatentDetailFamilyComparison(this)" data-patents=\'' +
+      escapeHtml(JSON.stringify(data.family_applications.map(function(fa) { return { patentNumber: fa.publication_number, title: fa.title || '' }; }))) +
+      '\'><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px;"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/><path d="M9 9l6 6"/><path d="M15 9l-6 6"/></svg>转到智能比对分析同族</button>' : '') + '</div>';
     if (data.family_applications && data.family_applications.length > 0) {
       html += '<table class="pd-legal-table"><thead><tr><th>公开号</th><th>标题</th><th>状态</th></tr></thead><tbody>';
       data.family_applications.forEach(fa => {
@@ -4227,7 +4272,11 @@ function renderPatentPopupContent(data) {
   // Family information (同族信息)
   if (data.family_id || (data.family_applications && data.family_applications.length > 0) || (data.country_status && data.country_status.length > 0)) {
     html += '<div class="pd-section">';
-    html += '<div class="pd-section-title">同族信息' + (data.family_id ? ' <span class="pd-family-id">ID: ' + escapeHtml(data.family_id) + '</span>' : '') + '</div>';
+    html += '<div class="pd-section-title"><span>同族信息' + (data.family_id ? ' <span class="pd-family-id">ID: ' + escapeHtml(data.family_id) + '</span>' : '') + '</span>' +
+      (data.family_applications && data.family_applications.length > 0 ?
+      '<button class="family-compare-btn" onclick="goToPatentDetailFamilyComparison(this)" data-patents=\'' +
+      escapeHtml(JSON.stringify(data.family_applications.map(function(fa) { return { patentNumber: fa.publication_number, title: fa.title || '' }; }))) +
+      '\'><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px;"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/><path d="M9 9l6 6"/><path d="M15 9l-6 6"/></svg>转到智能比对分析同族</button>' : '') + '</div>';
     if (data.family_applications && data.family_applications.length > 0) {
       html += '<table class="pd-legal-table"><thead><tr><th>公开号</th><th>标题</th><th>状态</th></tr></thead><tbody>';
       data.family_applications.forEach(fa => {
@@ -6675,7 +6724,11 @@ function renderFamily(data) {
     return;
   }
 
-  let html = '<div class="family-list">';
+  let html = '<div style="margin-bottom:12px;"><button class="family-compare-btn" onclick="goToFamilyComparison()">' +
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/><path d="M9 9l6 6"/><path d="M15 9l-6 6"/></svg>' +
+    '转到智能比对中分析同族保护范围' +
+    '</button></div>';
+  html += '<div class="family-list">';
   members.forEach(m => {
     const officeCode = m.countryCode || m.office || "";
     const officeName = OFFICE_NAMES[officeCode] || officeCode;
@@ -6717,6 +6770,66 @@ function extractFamilyMembers(family) {
   }
   if (family.patentFamily) return extractFamilyMembers(family.patentFamily);
   return [family];
+}
+
+function goToFamilyComparison() {
+  const members = extractFamilyMembers(currentData && currentData.family);
+  const patents = [];
+  members.forEach(function(m) {
+    let pubNum = m.publicationNumber || "";
+    if (!pubNum && m.pubList && Array.isArray(m.pubList) && m.pubList.length > 0) {
+      const pub = m.pubList[0];
+      pubNum = (pub.pubCountry || "") + (pub.pubNum || "");
+    }
+    if (!pubNum) pubNum = m.appNum || m.applicationNumber || m.docNumber || "";
+    if (pubNum) {
+      patents.push({
+        patentNumber: pubNum,
+        title: m.inventionTitle || m.title || ""
+      });
+    }
+  });
+  if (patents.length < 2) {
+    alert("同族专利数量不足，至少需要2个才能比对");
+    return;
+  }
+  if (typeof ComparisonCore !== "undefined") {
+    ComparisonCore.setPendingFamilyPatents(patents);
+  }
+  document.querySelectorAll(".search-mode-btn").forEach(b => b.classList.remove("active"));
+  const cmpBtn = document.querySelector('.search-mode-btn[data-mode="comparison"]');
+  if (cmpBtn) cmpBtn.classList.add("active");
+  cmpBtn && cmpBtn.click();
+}
+
+function goToPatentDetailFamilyComparison(btnEl) {
+  let patents = [];
+  try {
+    patents = JSON.parse(btnEl.dataset.patents || "[]");
+  } catch(e) {
+    console.error("Parse patents error:", e);
+  }
+  const currentPatent = window._currentPatentData || window._patentPopupData;
+  if (currentPatent && currentPatent.publication_number) {
+    const hasCurrent = patents.some(function(p) { return p.patentNumber === currentPatent.publication_number; });
+    if (!hasCurrent) {
+      patents.unshift({
+        patentNumber: currentPatent.publication_number,
+        title: currentPatent.title || ""
+      });
+    }
+  }
+  if (patents.length < 2) {
+    alert("同族专利数量不足，至少需要2个才能比对");
+    return;
+  }
+  if (typeof ComparisonCore !== "undefined") {
+    ComparisonCore.setPendingFamilyPatents(patents);
+  }
+  document.querySelectorAll(".search-mode-btn").forEach(b => b.classList.remove("active"));
+  const cmpBtn = document.querySelector('.search-mode-btn[data-mode="comparison"]');
+  if (cmpBtn) cmpBtn.classList.add("active");
+  cmpBtn && cmpBtn.click();
 }
 
 function escapeHtml(str) {
