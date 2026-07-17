@@ -8649,6 +8649,7 @@ if (promptsSaveBtn) {
       { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
       { id: "prompt-doc-analysis", key: "docAnalysis" },
       { id: "prompt-cited-refs-analysis", key: "citedRefsAnalysis" },
+      { id: "prompt-comparison-anchor", key: "comparisonAnchor" },
     ];
     promptKeys.forEach(p => {
       const el = document.getElementById(p.id);
@@ -8788,6 +8789,7 @@ function loadAISettingsToForm() {
     { id: "prompt-kanban-simple", key: "kanbanAnalysisSimple" },
     { id: "prompt-doc-analysis", key: "docAnalysis" },
     { id: "prompt-cited-refs-analysis", key: "citedRefsAnalysis" },
+    { id: "prompt-comparison-anchor", key: "comparisonAnchor" },
   ];
   promptKeys.forEach(p => {
     const el = document.getElementById(p.id);
@@ -8812,6 +8814,7 @@ document.querySelectorAll("[id^='reset-prompt-']").forEach(btn => {
       "kanban-simple": "kanbanAnalysisSimple",
       "doc-analysis": "docAnalysis",
       "cited-refs-analysis": "citedRefsAnalysis",
+      "comparison-anchor": "comparisonAnchor",
     };
     const key = keyMap[promptId];
     if (!key) return;

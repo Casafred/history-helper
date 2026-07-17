@@ -6,7 +6,7 @@
  */
 
 var ComparisonPrompts = (function () {
-  var SYSTEM_PROMPT = '你是一位资深专利比对分析专家，擅长以锚定方式做多语言专利权利要求的差异化分析。请严格遵守以下规则：\n\n' +
+  var DEFAULT_SYSTEM_PROMPT = '你是一位资深专利比对分析专家，擅长以锚定方式做多语言专利权利要求的差异化分析。请严格遵守以下规则：\n\n' +
     '## 核心职责\n' +
     '用户指定一段文本作为【锚点文本】（基准/参考文本），其他文本作为【比对文本】。你需要将每段比对文本逐一与锚点文本进行深度对比分析。\n\n' +
     '## 关键规则\n' +
@@ -78,6 +78,17 @@ var ComparisonPrompts = (function () {
     '- **最大差异点**：影响保护范围的最关键差异（1-3个）\n' +
     '- **分析结论**：一句话总结比对结果';
 
+  function getSystemPrompt() {
+    if (typeof window !== 'undefined' && window.AI && typeof window.AI.getCustomPrompt === 'function') {
+      try {
+        var config = window.AI.loadAIConfig();
+        var custom = window.AI.getCustomPrompt(config, 'comparisonAnchor');
+        if (custom && custom.trim()) return custom;
+      } catch (e) { /* fall through to default */ }
+    }
+    return DEFAULT_SYSTEM_PROMPT;
+  }
+
   function buildAnchorPrompt(anchor, others) {
     var prompt = '请以锚定方式进行专利权利要求比对分析。\n\n';
     prompt += '## 锚点文本（基准）\n\n';
@@ -138,7 +149,9 @@ var ComparisonPrompts = (function () {
   }
 
   return {
-    SYSTEM_PROMPT: SYSTEM_PROMPT,
+    get SYSTEM_PROMPT() { return getSystemPrompt(); },
+    getSystemPrompt: getSystemPrompt,
+    DEFAULT_SYSTEM_PROMPT: DEFAULT_SYSTEM_PROMPT,
     buildAnchorPrompt: buildAnchorPrompt,
     buildUserPrompt: buildUserPrompt
   };
