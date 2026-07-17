@@ -443,6 +443,10 @@ var ComparisonCore = (function () {
           aiSimilarityMatrix: aiSimMatrix
         };
         setProgress(100, 100, '比对完成');
+        // Save to history cache
+        try {
+          _history.save(_state.result, _state.patentNumbersText, _state.fetchedPatents);
+        } catch(e) { console.warn('History save failed:', e); }
         emit('resultReady', _state.result);
       }
     } catch (err) {
@@ -463,6 +467,14 @@ var ComparisonCore = (function () {
 
   function getResult() {
     return _state.result;
+  }
+
+  function setResult(result) {
+    _state.result = result;
+    if (result && result.anchor) {
+      _state.anchorId = result.anchor.id;
+    }
+    emit('resultReady', result);
   }
 
   function isLoading() {
@@ -596,6 +608,95 @@ var ComparisonCore = (function () {
       (_state.manualContentText && _state.manualContentText.trim().length > 0);
   }
 
+  // ── 智能比对历史记录缓存 ──
+  var _history = {
+    STORAGE_KEY: 'patentlens-comparison-history',
+    MAX_ENTRIES: 20,
+
+    _getAll: function() {
+      try {
+        var raw = localStorage.getItem(this.STORAGE_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch(e) { return []; }
+    },
+
+    _save: function(list) {
+      try {
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(list));
+      } catch(e) {
+        console.warn('ComparisonHistory save failed:', e);
+      }
+    },
+
+    getAll: function() {
+      var list = this._getAll();
+      list.sort(function(a, b) { return (b.timestamp || 0) - (a.timestamp || 0); });
+      return list;
+    },
+
+    save: function(result, patentNumbersText, fetchedPatents) {
+      if (!result) return null;
+      var patentNums = [];
+      if (patentNumbersText && patentNumbersText.trim()) {
+        patentNums = patentNumbersText.trim().split(/\n/).map(function(s) {
+          return s.trim();
+        }).filter(Boolean);
+      }
+      var claimsSnapshot = {};
+      if (fetchedPatents) {
+        Object.keys(fetchedPatents).forEach(function(key) {
+          var p = fetchedPatents[key];
+          claimsSnapshot[key] = {
+            patentNumber: p.patentNumber,
+            title: p.title || '',
+            applicant: p.applicant || '',
+            claims: (p.claims || []).map(function(c) {
+              return { num: c.num, text: c.text, isIndependent: c.isIndependent };
+            })
+          };
+        });
+      }
+      var anchor = result.anchor || {};
+      var entry = {
+        id: result.sessionId || ('cmp_' + Date.now()),
+        timestamp: result.timestamp || Date.now(),
+        patentNumbers: patentNums,
+        anchorLabel: anchor.label || '',
+        itemCount: (result.items || []).length,
+        markdownContent: result.markdownContent || '',
+        htmlContent: result.htmlContent || '',
+        claimsSnapshot: claimsSnapshot,
+        itemsSummary: (result.items || []).map(function(i) {
+          return { label: i.label, patentNumber: i.patentNumber || '', source: i.source || '' };
+        })
+      };
+      var list = this._getAll();
+      list = list.filter(function(e) { return e.id !== entry.id; });
+      list.push(entry);
+      list.sort(function(a, b) { return (b.timestamp || 0) - (a.timestamp || 0); });
+      if (list.length > this.MAX_ENTRIES) {
+        list = list.slice(0, this.MAX_ENTRIES);
+      }
+      this._save(list);
+      return entry;
+    },
+
+    remove: function(id) {
+      var list = this._getAll();
+      list = list.filter(function(e) { return e.id !== id; });
+      this._save(list);
+    },
+
+    clear: function() {
+      this._save([]);
+    },
+
+    get: function(id) {
+      var list = this._getAll();
+      return list.find(function(e) { return e.id === id; }) || null;
+    }
+  };
+
   return {
     on: on,
     off: off,
@@ -621,6 +722,7 @@ var ComparisonCore = (function () {
     runComparison: runComparison,
     abort: abort,
     getResult: getResult,
+    setResult: setResult,
     isLoading: isLoading,
     addPatentClaims: addPatentClaims,
     getLoadedPatents: getLoadedPatents,
@@ -640,6 +742,7 @@ var ComparisonCore = (function () {
     getManualLabelText: getManualLabelText,
     getManualContentText: getManualContentText,
     hasState: hasState,
+    history: _history,
     init: init,
     isIndependentClaim: isIndependentClaim
   };

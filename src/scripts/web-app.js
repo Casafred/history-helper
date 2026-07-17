@@ -2180,13 +2180,15 @@ function renderPatentDetail(data) {
   html += '<div class="pd-patent-number">' + escapeHtml(data.patent_number) + '</div>';
   html += '<div class="pd-title">' + escapeHtml(data.title || "无标题") + '</div>';
   html += '<div class="pd-links">';
+  var gtBtnClass = 'pd-header-link' + (_googleTranslateActive ? ' gt-active' : '');
+  var gtBtnText = _googleTranslateActive ? '恢复原文' : '网页翻译';
   html += '<button class="pd-ai-ask-btn" onclick="openPatentAsk(\'detail\')" title="针对本篇专利向 AI 提问">AI 问一问</button>';
-  html += '<button class="pd-gp-link" onclick="toggleGoogleTranslate()" title="使用 Google 翻译翻译整个页面">网页翻译</button>';
-  html += '<button class="pd-gp-link" onclick="openInAppWebview(\'' + escapeHtml(data.url) + '\', \'Google Patents: ' + escapeHtml(data.patent_number) + '\')" title="在应用内打开 Google Patents 页面">Google Patents</button>';
+  html += '<button class="' + gtBtnClass + '" onclick="toggleGoogleTranslate()" title="使用 Google 翻译翻译整个页面">' + gtBtnText + '</button>';
+  html += '<button class="pd-header-link" onclick="openInAppWebview(\'' + escapeHtml(data.url) + '\', \'Google Patents: ' + escapeHtml(data.patent_number) + '\')" title="在应用内打开 Google Patents 页面">Google Patents</button>';
   if (isJPPatent(data.patent_number)) {
-    html += '<button class="pd-gp-link" onclick="openJPlatPat(\'' + escapeHtml(data.patent_number) + '\', \'J-PlatPat: ' + escapeHtml(data.patent_number) + '\')" title="在 J-PlatPat（日本专利局）查看" style="background:#e74c3c;color:#fff;border-color:#c0392b;">J-PlatPat</button>';
+    html += '<button class="pd-header-link pd-header-jp" onclick="openJPlatPat(\'' + escapeHtml(data.patent_number) + '\', \'J-PlatPat: ' + escapeHtml(data.patent_number) + '\')" title="在 J-PlatPat（日本专利局）查看">J-PlatPat</button>';
   }
-  html += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(data.patent_number) + '\', \'Espacenet: ' + escapeHtml(data.patent_number) + '\')" title="在应用内打开 Espacenet 页面">Espacenet</button>';
+  html += '<button class="pd-header-link pd-header-ep" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(data.patent_number) + '\', \'Espacenet: ' + escapeHtml(data.patent_number) + '\')" title="在应用内打开 Espacenet 页面">Espacenet</button>';
   if (data.pdf_link) {
     html += '<a href="' + escapeHtml(data.pdf_link) + '" target="_blank" rel="noopener" class="pd-pdf-link">PDF原文</a>';
   }
@@ -3214,6 +3216,28 @@ function copyPatentSectionText(sectionType) {
 let _googleTranslateInjected = false;
 let _googleTranslateActive = false;
 
+// Permanent GT error suppressor — GT's internal code (el_main, el_conf) throws
+// errors after we reset/purge it. These are harmless but noisy. Install once.
+if (!window._gtErrorSuppressor) {
+  window._gtErrorSuppressor = function(msg, url, line, col, err) {
+    if (url && (url.indexOf('el_main') >= 0 || url.indexOf('el_conf') >= 0 ||
+        url.indexOf('translate.google') >= 0 || url.indexOf('google.com/translate') >= 0)) {
+      return true; // suppress
+    }
+    return false;
+  };
+  window.addEventListener('error', window._gtErrorSuppressor, true);
+  // Also suppress unhandled promise rejections from GT
+  window.addEventListener('unhandledrejection', function(e) {
+    if (e.reason && e.reason.stack && (
+        e.reason.stack.indexOf('el_main') >= 0 ||
+        e.reason.stack.indexOf('el_conf') >= 0 ||
+        e.reason.stack.indexOf('translate.google') >= 0)) {
+      e.preventDefault();
+    }
+  });
+}
+
 function toggleGoogleTranslate() {
   // If translation is already active, toggle off
   if (_googleTranslateActive) {
@@ -3232,6 +3256,12 @@ function toggleGoogleTranslate() {
     // re-detects the scope from scratch.
     if (_figLinkPollTimer) { clearTimeout(_figLinkPollTimer); _figLinkPollTimer = null; }
     _figLinkScope = null;
+    // Remove notranslate from description containers so GT can translate them next time
+    document.querySelectorAll('.pd-description-text.notranslate, .pd-desc-container.notranslate').forEach(function(el) {
+      el.classList.remove('notranslate');
+      el.removeAttribute('translate');
+    });
+    _updateGtButtonState();
     return;
   }
 
@@ -3239,6 +3269,7 @@ function toggleGoogleTranslate() {
   const combo = document.querySelector(".goog-te-combo");
   if (combo) {
     _selectGoogleTranslateLang("zh-CN");
+    _updateGtButtonState();
     return;
   }
 
@@ -3249,6 +3280,8 @@ function toggleGoogleTranslate() {
 
   // Inject Google Translate widget
   _googleTranslateInjected = true;
+  _googleTranslateActive = true;
+  _updateGtButtonState();
   const container = document.createElement("div");
   container.id = "google_translate_element";
   container.style.cssText = "position:fixed;top:-100px;left:0;z-index:999999;visibility:hidden;";
@@ -3393,6 +3426,8 @@ function _onGoogleTranslateActivated() {
     _figLinkScope = _detectFigLinkScope();
   }
   console.log('[FigLink] GT activated, starting translation polling for scope:', _figLinkScope);
+  // Update button state to show "恢复原文"
+  _updateGtButtonState();
   // Reset poll state
   _figLinkPollCount = 0;
   _figLinkLastTextSnapshot = '';
@@ -3466,13 +3501,18 @@ function _captureAndApplyTranslation(scope) {
     console.log('[FigLink] cached translation on patentData');
   }
 
-  // 3. Turn OFF Google Translate so it stops mutating the DOM.
-  //    Reset combo + clear cookie — GT will remove its <font> tags and
-  //    restore the original text. Pass onReady callback to re-render
-  //    ONLY after GT is fully neutralized (prevents re-translation).
-  _disableGoogleTranslateQuiet(function() {
-    // 4. GT is now fully purged — safe to re-render with translated text
+  // 3. Reset GT to original language so the REST of the page reverts,
+  //    but DON'T purge GT — keep it alive so the user can toggle it on/off.
+  //    Mark the description container as notranslate so GT won't re-translate it.
+  _disableGoogleTranslateKeepAlive(function() {
+    // 4. GT has reverted the page — safe to re-render with translated text
     _applyTranslatedDescription(scope, translatedText);
+    // Mark the description container as notranslate to prevent GT re-translation
+    var descContainer = _getDescriptionContainer(scope);
+    if (descContainer) {
+      descContainer.classList.add('notranslate');
+      descContainer.setAttribute('translate', 'no');
+    }
     console.log('[FigLink] re-rendered with translation, generating links...');
     // Now generate figure links on the clean DOM
     setTimeout(function() {
@@ -3495,6 +3535,53 @@ function _captureAndApplyTranslation(scope) {
       }, 2000);
     }, 200);
   });
+}
+
+// Update the GT toggle button text/state in the patent detail header
+function _updateGtButtonState() {
+  var btns = document.querySelectorAll('.pd-header-link[onclick*="toggleGoogleTranslate"]');
+  btns.forEach(function(btn) {
+    if (_googleTranslateActive) {
+      btn.textContent = '恢复原文';
+      btn.classList.add('gt-active');
+    } else {
+      btn.textContent = '网页翻译';
+      btn.classList.remove('gt-active');
+    }
+  });
+}
+
+// Keep GT alive but reset translation to original language.
+// This allows the user to toggle GT on/off after fig-link captures the description.
+// `onReady` is called after GT has reverted the page.
+function _disableGoogleTranslateKeepAlive(onReady) {
+  try {
+    // Step 1: signal GT to restore original text
+    var combo = document.querySelector(".goog-te-combo");
+    if (combo) {
+      combo.value = "";
+      _dispatchComboChange(combo);
+    }
+    _setGoogTransCookie("");
+
+    // Step 2: wait for GT to restore (it removes <font> tags asynchronously)
+    var restoreAttempts = 0;
+    function waitForRestore() {
+      restoreAttempts++;
+      var stillHasFonts = document.querySelector('font.goog-text-highlight') ||
+                          document.querySelector('.skiptranslate font');
+      if (stillHasFonts && restoreAttempts < 10) {
+        setTimeout(waitForRestore, 200);
+        return;
+      }
+      // GT has restored — call onReady but DON'T purge GT
+      if (typeof onReady === 'function') onReady();
+    }
+    setTimeout(waitForRestore, 300);
+  } catch(e) {
+    console.warn('[FigLink] error in _disableGoogleTranslateKeepAlive:', e);
+    if (typeof onReady === 'function') onReady();
+  }
 }
 
 // Quietly disable Google Translate (without toggling state confusion).
@@ -3581,28 +3668,8 @@ function _purgeGoogleTranslateCompletely() {
     // 6. Stop any pending fig-link poll timer
     if (_figLinkPollTimer) { clearTimeout(_figLinkPollTimer); _figLinkPollTimer = null; }
 
-    // 7. Install a temporary error suppressor for GT residual errors.
-    //    GT's internal promise chains continue running after purge, causing
-    //    "Cannot read properties of undefined (reading 'J')" errors.
-    //    These are harmless but noisy — suppress them for 10 seconds.
-    if (!window._gtErrorSuppressor) {
-      window._gtErrorSuppressor = function(msg, url, line, col, err) {
-        // Suppress errors from GT scripts (m=el_main, m=el_conf, etc.)
-        if (url && (url.indexOf('el_main') >= 0 || url.indexOf('el_conf') >= 0 ||
-            url.indexOf('translate.google') >= 0 || url.indexOf('google.com/translate') >= 0)) {
-          return true; // suppress
-        }
-        return false; // let through
-      };
-      window.addEventListener('error', window._gtErrorSuppressor, true);
-      // Auto-remove suppressor after 10 seconds
-      setTimeout(function() {
-        if (window._gtErrorSuppressor) {
-          window.removeEventListener('error', window._gtErrorSuppressor, true);
-          window._gtErrorSuppressor = null;
-        }
-      }, 10000);
-    }
+    // 7. Error suppressor is now installed permanently at module init — no
+    //    need for a temporary one here.
 
     // 8. Recurring cleanup: remove any GT elements that get re-created by
     //    residual GT code. Run every 500ms for 5 seconds.
