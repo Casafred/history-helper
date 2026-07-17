@@ -2,7 +2,7 @@
  * PatentLens - 智能比对模块 - 报告生成与导出
  * Copyright (c) 2026 Alfred Shi. All rights reserved.
  * @author Alfred Shi
- * @version 260716
+ * @version 260729
  */
 
 var ComparisonReport = (function () {
@@ -28,6 +28,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC
 .badge.dep { background: #f1f5f9; color: #64748b; }
 .badge.anchor { background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; }
 .badge.manual { background: #fef3c7; color: #92400e; }
+.sim-badge { display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:500;margin-left:8px; }
+.sim-high { background:#dcfce7;color:#166534; }
+.sim-good { background:#fef9c3;color:#854d0e; }
+.sim-mid { background:#ffedd5;color:#9a3412; }
+.sim-low { background:#fee2e2;color:#991b1b; }
+.sim-none { background:#f3f4f6;color:#6b7280; }
+.ai-sim-matrix { margin:20px 0;overflow-x:auto; }
+.ai-sim-matrix table { border-collapse:collapse;font-size:12px;width:auto; }
+.ai-sim-matrix th,.ai-sim-matrix td { border:1px solid #e2e8f0;padding:6px 10px;text-align:center;min-width:60px; }
+.ai-sim-matrix th { background:#f1f5f9;font-weight:600; }
+.ai-sim-matrix th.anchor-h { background:#fef3c7; }
+.ai-sim-matrix td.diag { background:#dcfce7;color:#166534;font-weight:600; }
+.ai-sim-matrix td.na { background:#f9fafb;color:#9ca3af; }
 .analysis h1 { font-size: 22px; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid #10b981; }
 .analysis h2 { font-size: 18px; margin: 28px 0 16px; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; color: #10b981; }
 .analysis h3 { font-size: 15px; margin: 20px 0 12px; color: #334155; }
@@ -53,6 +66,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC
 @media print { body { background: white; padding: 0; } .container { box-shadow: none; } .toolbar { display: none; } }
 @media (max-width: 768px) { body { padding: 10px; } .header { padding: 20px; } .content { padding: 20px; } .items-summary { grid-template-columns: 1fr; } }
 `;
+
+  function simBadgeClass(score) {
+    if (score === null || score === undefined) return 'sim-none';
+    if (score >= 0.8) return 'sim-high';
+    if (score >= 0.6) return 'sim-good';
+    if (score >= 0.4) return 'sim-mid';
+    if (score >= 0.2) return 'sim-low';
+    return 'sim-none';
+  }
 
   function generateFullHtml() {
     var result = ComparisonCore.getResult();
@@ -92,6 +114,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC
     html += '    <h2 style="margin-top:0;">一、比对项概览</h2>\n';
     html += '    <div class="items-summary">\n';
     var anchorId = result.anchor ? result.anchor.id : null;
+    var aiScores = result.aiSimilarityScores || {};
+
+    function simBadgeHtml(label, isAnchor) {
+      if (isAnchor) return '<span class="sim-badge sim-high">基准</span>';
+      var s = aiScores[label];
+      if (s === null || s === undefined) return '';
+      return '<span class="sim-badge ' + simBadgeClass(s) + '">AI ' + Math.round(s * 100) + '%</span>';
+    }
+
     items.forEach(function(item, idx) {
       var isAnchor = item.id === anchorId;
       var badge = isAnchor
@@ -102,7 +133,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC
             : '<span class="badge dep">从权</span>')
           : '<span class="badge manual">手动输入</span>');
       html += '      <div class="item-card' + (isAnchor ? ' style="border-color:#f59e0b;box-shadow:0 0 0 1px #f59e0b;"' : '') + '">\n';
-      html += '        <h4>' + (isAnchor ? '⭐ ' : '') + ComparisonUtils.escapeHtml(item.label) + badge + '</h4>\n';
+      html += '        <h4>' + (isAnchor ? '⭐ ' : '') + ComparisonUtils.escapeHtml(item.label) + badge + simBadgeHtml(item.label, isAnchor) + '</h4>\n';
       if (item.patentNumber) {
         html += '        <div class="patent-num">专利号: ' + ComparisonUtils.escapeHtml(item.patentNumber) + '</div>\n';
       }
@@ -110,6 +141,40 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC
       html += '      </div>\n';
     });
     html += '    </div>\n';
+
+    if (result.aiSimilarityMatrix) {
+      var aiMat = result.aiSimilarityMatrix;
+      html += '    <h2>二、AI语义相似度矩阵</h2>\n';
+      html += '    <p style="font-size:13px;color:#64748b;margin-bottom:12px;">基于技术方案实质内容（保护范围、技术特征、技术效果）的AI评估，支持跨语言比对。</p>\n';
+      html += '    <div class="ai-sim-matrix"><table><thead><tr><th></th>';
+      items.forEach(function(it) {
+        var isAnc = it.id === anchorId;
+        html += '<th class="' + (isAnc ? 'anchor-h' : '') + '">' + ComparisonUtils.escapeHtml(ComparisonUtils.truncateText(it.label, 10)) + (isAnc ? ' ⭐' : '') + '</th>';
+      });
+      html += '</tr></thead><tbody>';
+      items.forEach(function(rowItem, i) {
+        var isAncRow = rowItem.id === anchorId;
+        html += '<tr><th class="' + (isAncRow ? 'anchor-h' : '') + '">' + ComparisonUtils.escapeHtml(ComparisonUtils.truncateText(rowItem.label, 10)) + (isAncRow ? ' ⭐' : '') + '</th>';
+        items.forEach(function(colItem, j) {
+          if (i === j) {
+            html += '<td class="diag">100%</td>';
+          } else {
+            var sc = (aiMat.matrix[i] && aiMat.matrix[i][j] !== null && aiMat.matrix[i][j] !== undefined) ? aiMat.matrix[i][j] : null;
+            if (sc !== null) {
+              var pct = Math.round(sc * 100);
+              html += '<td class="' + simBadgeClass(sc) + '">' + pct + '%</td>';
+            } else {
+              html += '<td class="na">—</td>';
+            }
+          }
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>\n';
+      html += '    <h2>三、详细比对分析</h2>\n';
+    } else {
+      html += '    <h2>二、详细比对分析</h2>\n';
+    }
 
     html += '    <div class="analysis">\n';
     html += result.htmlContent;
@@ -119,8 +184,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC
     html += '      <h2>附录：原文对照</h2>\n';
     items.forEach(function(item, idx) {
       var isAnchor = item.id === anchorId;
-      html += '      <div class="original-item' + (isAnchor ? '" style="border-left-color:#f59e0b;background:#fffbeb;"' : '') + '>\n';
-      html += '        <h4>' + (isAnchor ? '⭐ 锚点：' : '比对：') + ComparisonUtils.escapeHtml(item.label) + '</h4>\n';
+      var sBadge = simBadgeHtml(item.label, isAnchor);
+      html += '      <div class="original-item' + (isAnchor ? '" style="border-left-color:#f59e0b;background:#fffbeb;"' : '') + '">\n';
+      html += '        <h4>' + (isAnchor ? '⭐ 锚点：' : '比对：') + ComparisonUtils.escapeHtml(item.label) + sBadge + '</h4>\n';
       html += '        <pre>' + ComparisonUtils.escapeHtml(item.originalText) + '</pre>\n';
       html += '      </div>\n';
     });

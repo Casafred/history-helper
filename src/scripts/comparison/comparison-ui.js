@@ -172,49 +172,16 @@ var ComparisonUI = (function () {
   }
 
   function renderSimilarityMatrix(selected, anchor) {
-    var simMatrix = ComparisonCore.computeSimilarityMatrix();
-    if (!simMatrix) return '';
-
-    var anchorIdx = selected.findIndex(function(i) { return i.id === anchor.id; });
-    if (anchorIdx === -1) return '';
-
     var html = '<div class="comparison-sim-panel">';
     html += '  <div class="comparison-sim-header">';
     html += '    <div class="comparison-sim-title">';
     html += '      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;color:var(--accent)"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>';
-    html += '      文本相似度矩阵（基于字符/词元Jaccard相似度，仅供参考）';
+    html += '      语义相似度矩阵';
     html += '    </div>';
     html += '  </div>';
-    html += '  <div class="comparison-sim-scroll">';
-    html += '  <table class="comparison-sim-matrix">';
-    html += '    <thead><tr><th></th>';
-    selected.forEach(function(item, j) {
-      var isAnc = item.id === anchor.id;
-      html += '<th class="' + (isAnc ? 'sim-anchor-col' : '') + '">' + ComparisonUtils.escapeHtml(ComparisonUtils.truncateText(item.label, 12)) + (isAnc ? ' ⭐' : '') + '</th>';
-    });
-    html += '    </tr></thead><tbody>';
-
-    selected.forEach(function(item, i) {
-      var isAncRow = item.id === anchor.id;
-      html += '<tr><th class="' + (isAncRow ? 'sim-anchor-row' : '') + '">' + ComparisonUtils.escapeHtml(ComparisonUtils.truncateText(item.label, 12)) + (isAncRow ? ' ⭐' : '') + '</th>';
-      selected.forEach(function(_, j) {
-        var score = simMatrix.matrix[i][j];
-        var color = getSimilarityColor(score);
-        var isDiag = i === j;
-        var isAnchorCell = isAncRow || selected[j].id === anchor.id;
-        html += '<td class="sim-cell' + (isDiag ? ' sim-diag' : '') + (isAnchorCell ? ' sim-anchor-cell' : '') + '" style="background:' + color.bg + ';color:' + color.fg + ';" title="' + ComparisonUtils.escapeHtml(selected[i].label) + ' vs ' + ComparisonUtils.escapeHtml(selected[j].label) + ': ' + color.pct + '%">' + color.pct + '%</td>';
-      });
-      html += '</tr>';
-    });
-
-    html += '    </tbody></table>';
-    html += '  </div>';
-    html += '  <div class="comparison-sim-legend">';
-    html += '    <span class="sim-legend-item" style="background:#dcfce7;color:#166534;">高度相似 ≥80%</span>';
-    html += '    <span class="sim-legend-item" style="background:#fef9c3;color:#854d0e;">较为相似 60-79%</span>';
-    html += '    <span class="sim-legend-item" style="background:#ffedd5;color:#9a3412;">部分相似 40-59%</span>';
-    html += '    <span class="sim-legend-item" style="background:#fee2e2;color:#991b1b;">低度相似 20-39%</span>';
-    html += '    <span class="sim-legend-item" style="background:#f3f4f6;color:#6b7280;">差异较大 &lt;20%</span>';
+    html += '  <div style="padding:16px;text-align:center;color:var(--text-secondary);font-size:13px;">';
+    html += '    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:24px;height:24px;margin:0 auto 8px;display:block;opacity:0.5;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+    html += '    点击"开始锚定比对"后，AI将基于技术方案实质内容（保护范围、技术特征、技术效果）评估跨语言相似度，结果将显示在此处';
     html += '  </div>';
     html += '</div>';
     return html;
@@ -233,14 +200,10 @@ var ComparisonUI = (function () {
     html += '  </div>';
 
     others.forEach(function(other) {
-      var sim = ComparisonCore.computeTextSimilarity(anchor.originalText, other.originalText);
-      var simColor = getSimilarityColor(sim);
-      var simLabel = getSimilarityLabel(sim);
-
       html += '<div class="comparison-sxs-pair">';
       html += '  <div class="comparison-sxs-pair-header">';
       html += '    <span class="comparison-sxs-vs">' + ComparisonUtils.escapeHtml(anchor.label) + ' ⭐</span>';
-      html += '    <span class="comparison-sxs-sim" style="background:' + simColor.bg + ';color:' + simColor.fg + ';">' + simColor.pct + '% ' + simLabel + '</span>';
+      html += '    <span class="comparison-sxs-sim" style="background:#f3f4f6;color:#6b7280;">AI待评估</span>';
       html += '    <span class="comparison-sxs-vs">vs ' + ComparisonUtils.escapeHtml(other.label) + '</span>';
       html += '  </div>';
       html += '  <div class="comparison-sxs-grid">';
@@ -279,6 +242,69 @@ var ComparisonUI = (function () {
     });
   }
 
+  function renderAiSimMatrix(result) {
+    var items = result.items || [];
+    var anchor = result.anchor;
+    var aiMatrix = result.aiSimilarityMatrix;
+    var aiScores = result.aiSimilarityScores || {};
+    if (!anchor || items.length < 2) return '';
+
+    var html = '<div class="comparison-sim-panel" style="margin-top:0;">';
+    html += '  <div class="comparison-sim-header">';
+    html += '    <div class="comparison-sim-title">';
+    html += '      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;color:var(--accent)"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>';
+    html += '      AI语义相似度矩阵';
+    html += '      <span style="font-size:11px;font-weight:normal;color:var(--text-secondary);margin-left:8px;">（基于技术方案实质内容评估，支持跨语言）</span>';
+    html += '    </div>';
+    html += '  </div>';
+    html += '  <div class="comparison-sim-scroll">';
+    html += '  <table class="comparison-sim-matrix">';
+    html += '    <thead><tr><th></th>';
+    items.forEach(function(item) {
+      var isAnc = item.id === anchor.id;
+      html += '<th class="' + (isAnc ? 'sim-anchor-col' : '') + '">' + ComparisonUtils.escapeHtml(ComparisonUtils.truncateText(item.label, 12)) + (isAnc ? ' ⭐' : '') + '</th>';
+    });
+    html += '    </tr></thead><tbody>';
+
+    var anchorIdx = items.findIndex(function(i) { return i.id === anchor.id; });
+    items.forEach(function(item, i) {
+      var isAncRow = item.id === anchor.id;
+      html += '<tr><th class="' + (isAncRow ? 'sim-anchor-row' : '') + '">' + ComparisonUtils.escapeHtml(ComparisonUtils.truncateText(item.label, 12)) + (isAncRow ? ' ⭐' : '') + '</th>';
+      items.forEach(function(_, j) {
+        if (i === j) {
+          html += '<td class="sim-cell sim-diag" style="background:#dcfce7;color:#166534;">100%</td>';
+        } else {
+          var score = null;
+          if (aiMatrix && aiMatrix.matrix && aiMatrix.matrix[i] && aiMatrix.matrix[i][j] !== null && aiMatrix.matrix[i][j] !== undefined) {
+            score = aiMatrix.matrix[i][j];
+          }
+          if (score !== null) {
+            var pct = Math.round(score * 100);
+            var color = getSimilarityColor(score);
+            var isAnchorCell = isAncRow || items[j].id === anchor.id;
+            html += '<td class="sim-cell' + (isAnchorCell ? ' sim-anchor-cell' : '') + '" style="background:' + color.bg + ';color:' + color.fg + ';font-weight:' + (isAnchorCell ? '600' : '400') + ';" title="' + ComparisonUtils.escapeHtml(items[i].label) + ' vs ' + ComparisonUtils.escapeHtml(items[j].label) + ': ' + pct + '%">' + pct + '%</td>';
+          } else {
+            html += '<td class="sim-cell" style="background:#f9fafb;color:#9ca3af;" title="AI未评估此对比对">—</td>';
+          }
+        }
+      });
+      html += '</tr>';
+    });
+
+    html += '    </tbody></table>';
+    html += '  </div>';
+    html += '  <div class="comparison-sim-legend">';
+    html += '    <span class="sim-legend-item" style="background:#dcfce7;color:#166534;">高度相似 ≥80%</span>';
+    html += '    <span class="sim-legend-item" style="background:#fef9c3;color:#854d0e;">较为相似 60-79%</span>';
+    html += '    <span class="sim-legend-item" style="background:#ffedd5;color:#9a3412;">部分相似 40-59%</span>';
+    html += '    <span class="sim-legend-item" style="background:#fee2e2;color:#991b1b;">低度相似 20-39%</span>';
+    html += '    <span class="sim-legend-item" style="background:#f3f4f6;color:#6b7280;">差异较大 &lt;20%</span>';
+    html += '    <span class="sim-legend-item" style="background:#f9fafb;color:#9ca3af;border:1px dashed #d1d5db;">— AI未评估</span>';
+    html += '  </div>';
+    html += '</div>';
+    return html;
+  }
+
   function renderResultArea(container) {
     if (!container) return;
     var isLoading = ComparisonCore.isLoading();
@@ -296,7 +322,6 @@ var ComparisonUI = (function () {
     } else if (result) {
       var anchor = result.anchor;
       var others = result.others || [];
-      var simMatrix = result.similarityMatrix;
 
       html += '<div class="comparison-result-panel">';
       html += '  <div class="comparison-result-header">';
@@ -308,6 +333,8 @@ var ComparisonUI = (function () {
       html += '      <button class="btn-secondary btn-small" onclick="ComparisonReport.exportHtml()" id="comparison-export-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:4px;vertical-align:-2px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出HTML报告</button>';
       html += '    </div>';
       html += '  </div>';
+
+      html += renderAiSimMatrix(result);
 
       html += '  <div class="comparison-result-content markdown-body">';
       html += result.htmlContent;
@@ -321,11 +348,19 @@ var ComparisonUI = (function () {
       html += '      <div class="comparison-original-block">' + formatTextForDisplay(anchor.originalText) + '</div>';
       html += '    </div>';
 
+      var aiScores = result.aiSimilarityScores || {};
       others.forEach(function(other) {
-        var sim = ComparisonCore.computeTextSimilarity(anchor.originalText, other.originalText);
-        var simColor = getSimilarityColor(sim);
+        var sim = aiScores[other.label];
+        var simBadge;
+        if (sim !== null && sim !== undefined) {
+          var simColor = getSimilarityColor(sim);
+          var simLabel = getSimilarityLabel(sim);
+          simBadge = '<span class="comparison-sxs-sim" style="background:' + simColor.bg + ';color:' + simColor.fg + ';margin-left:8px;font-size:11px;padding:1px 8px;border-radius:10px;" title="AI语义相似度">' + Math.round(sim * 100) + '% ' + simLabel + '</span>';
+        } else {
+          simBadge = '<span class="comparison-sxs-sim" style="background:#f3f4f6;color:#6b7280;margin-left:8px;font-size:11px;padding:1px 8px;border-radius:10px;">—</span>';
+        }
         html += '    <div class="comparison-result-other">';
-        html += '      <div class="comparison-sxs-col-header" style="margin-bottom:8px;">比对：' + ComparisonUtils.escapeHtml(other.label) + ' <span class="comparison-sxs-sim" style="background:' + simColor.bg + ';color:' + simColor.fg + ';margin-left:8px;font-size:11px;padding:1px 8px;border-radius:10px;">' + Math.round(sim * 100) + '%</span></div>';
+        html += '      <div class="comparison-sxs-col-header" style="margin-bottom:8px;">比对：' + ComparisonUtils.escapeHtml(other.label) + simBadge + '</div>';
         html += '      <div class="comparison-original-block">' + formatTextForDisplay(other.originalText) + '</div>';
         html += '    </div>';
       });

@@ -6789,6 +6789,96 @@ function extractFamilyMembers(family) {
   return [family];
 }
 
+function showFamilyPatentSelector(patents, onConfirm) {
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+
+  var box = document.createElement('div');
+  box.style.cssText = 'background:var(--bg-card);border-radius:12px;max-width:600px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+
+  var listHtml = '';
+  patents.forEach(function(p, idx) {
+    var id = 'fampat_' + idx;
+    listHtml += '<label style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer;" for="' + id + '">' +
+      '<input type="checkbox" id="' + id + '" class="fam-pat-cb" data-idx="' + idx + '" checked style="margin-top:3px;flex-shrink:0;">' +
+      '<div style="flex:1;min-width:0;">' +
+      '<div style="font-weight:600;font-size:13px;color:var(--text-primary);word-break:break-all;">' + escapeHtml(p.patentNumber || '') + '</div>' +
+      (p.title ? '<div style="font-size:12px;color:var(--text-secondary);margin-top:2px;word-break:break-word;">' + escapeHtml(p.title) + '</div>' : '') +
+      '</div></label>';
+  });
+
+  box.innerHTML = '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">' +
+    '<h3 style="margin:0;font-size:16px;">选择要发送到智能比对的同族专利</h3>' +
+    '<button class="fam-close-btn" style="width:32px;height:32px;border:none;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:20px;display:flex;align-items:center;justify-content:center;border-radius:6px;">&times;</button>' +
+    '</div>' +
+    '<div style="padding:8px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;">' +
+    '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="fam-select-all" checked>全选</label>' +
+    '<span style="font-size:12px;color:var(--text-secondary);">已选 <span id="fam-selected-count">' + patents.length + '</span> / ' + patents.length + ' 个（至少选2个）</span>' +
+    '</div>' +
+    '<div style="padding:8px 20px;overflow-y:auto;flex:1;" id="fam-patent-list">' + listHtml + '</div>' +
+    '<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;">' +
+    '<button class="fam-cancel-btn btn-secondary" style="padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);cursor:pointer;">取消</button>' +
+    '<button class="fam-confirm-btn btn-primary" style="padding:8px 16px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;">发送到智能比对</button>' +
+    '</div>';
+
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+
+  function updateCount() {
+    var cbs = box.querySelectorAll('.fam-pat-cb');
+    var checked = 0;
+    cbs.forEach(function(cb) { if (cb.checked) checked++; });
+    var countEl = box.querySelector('#fam-selected-count');
+    if (countEl) countEl.textContent = checked;
+    var confirmBtn = box.querySelector('.fam-confirm-btn');
+    if (confirmBtn) confirmBtn.disabled = checked < 2;
+    if (confirmBtn) confirmBtn.style.opacity = checked < 2 ? '0.5' : '1';
+  }
+
+  function close() { modal.remove(); }
+
+  box.querySelector('.fam-close-btn').onclick = close;
+  box.querySelector('.fam-cancel-btn').onclick = close;
+
+  var selectAllCb = box.querySelector('#fam-select-all');
+  selectAllCb.onchange = function() {
+    var cbs = box.querySelectorAll('.fam-pat-cb');
+    cbs.forEach(function(cb) { cb.checked = selectAllCb.checked; });
+    updateCount();
+  };
+
+  var cbs = box.querySelectorAll('.fam-pat-cb');
+  cbs.forEach(function(cb) {
+    cb.onchange = function() {
+      var allCbs = box.querySelectorAll('.fam-pat-cb');
+      var allC = true;
+      allCbs.forEach(function(c) { if (!c.checked) allC = false; });
+      selectAllCb.checked = allC;
+      updateCount();
+    };
+  });
+
+  box.querySelector('.fam-confirm-btn').onclick = function() {
+    var cbs = box.querySelectorAll('.fam-pat-cb');
+    var selected = [];
+    cbs.forEach(function(cb) {
+      if (cb.checked) {
+        var idx = parseInt(cb.dataset.idx, 10);
+        if (patents[idx]) selected.push(patents[idx]);
+      }
+    });
+    if (selected.length < 2) {
+      alert('请至少选择2个专利进行比对');
+      return;
+    }
+    close();
+    onConfirm(selected);
+  };
+
+  updateCount();
+}
+
 function goToFamilyComparison() {
   const members = extractFamilyMembers(currentData && currentData.family);
   const patents = [];
@@ -6810,13 +6900,15 @@ function goToFamilyComparison() {
     alert("同族专利数量不足，至少需要2个才能比对");
     return;
   }
-  if (typeof ComparisonCore !== "undefined") {
-    ComparisonCore.setPendingFamilyPatents(patents);
-  }
-  document.querySelectorAll(".search-mode-btn").forEach(b => b.classList.remove("active"));
-  const cmpBtn = document.querySelector('.search-mode-btn[data-mode="comparison"]');
-  if (cmpBtn) cmpBtn.classList.add("active");
-  cmpBtn && cmpBtn.click();
+  showFamilyPatentSelector(patents, function(selected) {
+    if (typeof ComparisonCore !== "undefined") {
+      ComparisonCore.setPendingFamilyPatents(selected);
+    }
+    document.querySelectorAll(".search-mode-btn").forEach(b => b.classList.remove("active"));
+    const cmpBtn = document.querySelector('.search-mode-btn[data-mode="comparison"]');
+    if (cmpBtn) cmpBtn.classList.add("active");
+    cmpBtn && cmpBtn.click();
+  });
 }
 
 function goToPatentDetailFamilyComparison(btnEl) {
@@ -6840,13 +6932,15 @@ function goToPatentDetailFamilyComparison(btnEl) {
     alert("同族专利数量不足，至少需要2个才能比对");
     return;
   }
-  if (typeof ComparisonCore !== "undefined") {
-    ComparisonCore.setPendingFamilyPatents(patents);
-  }
-  document.querySelectorAll(".search-mode-btn").forEach(b => b.classList.remove("active"));
-  const cmpBtn = document.querySelector('.search-mode-btn[data-mode="comparison"]');
-  if (cmpBtn) cmpBtn.classList.add("active");
-  cmpBtn && cmpBtn.click();
+  showFamilyPatentSelector(patents, function(selected) {
+    if (typeof ComparisonCore !== "undefined") {
+      ComparisonCore.setPendingFamilyPatents(selected);
+    }
+    document.querySelectorAll(".search-mode-btn").forEach(b => b.classList.remove("active"));
+    const cmpBtn = document.querySelector('.search-mode-btn[data-mode="comparison"]');
+    if (cmpBtn) cmpBtn.classList.add("active");
+    cmpBtn && cmpBtn.click();
+  });
 }
 
 function escapeHtml(str) {

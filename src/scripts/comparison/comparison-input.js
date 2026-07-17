@@ -147,7 +147,7 @@ var ComparisonInput = (function () {
         errors.push(num + ': ' + err.message);
       }
 
-      await new Promise(function(r) { setTimeout(r, 800); });
+      await new Promise(function(r) { setTimeout(r, 150); });
     }
 
     if (progressContainer) {

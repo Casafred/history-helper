@@ -18,6 +18,7 @@ var ComparisonCore = (function () {
     pendingPatentClaims: null,
     loadedPatents: {},
     similarityMatrix: null,
+    aiSimilarityScores: null,
     progress: {
       current: 0,
       total: 0,
@@ -161,6 +162,79 @@ var ComparisonCore = (function () {
     return _state.similarityMatrix;
   }
 
+  function parseAiSimilarityScores(markdownContent) {
+    if (!markdownContent) return {};
+    var scores = {};
+    try {
+      var jsonMatch = markdownContent.match(/```(?:json)?\s*\n?(\{[\s\S]*?"similarityScores"[\s\S]*?\})\s*\n?```/);
+      if (!jsonMatch) {
+        jsonMatch = markdownContent.match(/```(?:json)?\s*\n?(\{[\s\S]*?\})\s*\n?```/g);
+        if (jsonMatch) {
+          for (var k = 0; k < jsonMatch.length; k++) {
+            var block = jsonMatch[k];
+            var inner = block.match(/```(?:json)?\s*\n?([\s\S]*?)\s*\n?```/);
+            if (inner) {
+              try {
+                var parsed = JSON.parse(inner[1].trim());
+                if (parsed && parsed.similarityScores) {
+                  jsonMatch = [null, inner[1].trim()];
+                  break;
+                }
+              } catch (e2) { /* continue */ }
+            }
+          }
+        }
+      }
+      if (jsonMatch && jsonMatch[1]) {
+        var data = JSON.parse(jsonMatch[1].trim());
+        if (data && Array.isArray(data.similarityScores)) {
+          data.similarityScores.forEach(function(item) {
+            if (item.label && typeof item.score === 'number') {
+              scores[item.label] = Math.max(0, Math.min(100, item.score)) / 100;
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse AI similarity scores:', e);
+    }
+    return scores;
+  }
+
+  function buildAiSimilarityMatrix(selected, anchor, aiScores) {
+    if (!selected || selected.length < 2 || !anchor) return null;
+    var matrix = [];
+    var anchorIdx = selected.findIndex(function(i) { return i.id === anchor.id; });
+    for (var i = 0; i < selected.length; i++) {
+      var row = [];
+      for (var j = 0; j < selected.length; j++) {
+        if (i === j) {
+          row.push(1);
+        } else if (i === anchorIdx) {
+          var label = selected[j].label;
+          row.push(aiScores && aiScores[label] !== undefined ? aiScores[label] : null);
+        } else if (j === anchorIdx) {
+          var label2 = selected[i].label;
+          row.push(aiScores && aiScores[label2] !== undefined ? aiScores[label2] : null);
+        } else {
+          row.push(null);
+        }
+      }
+      matrix.push(row);
+    }
+    return {
+      items: selected.map(function(it) { return it.id; }),
+      labels: selected.map(function(it) { return it.label; }),
+      matrix: matrix,
+      source: 'ai'
+    };
+  }
+
+  function getAiSimilarityScore(label) {
+    if (!_state.aiSimilarityScores) return null;
+    return _state.aiSimilarityScores[label] !== undefined ? _state.aiSimilarityScores[label] : null;
+  }
+
   function addItem(options) {
     var item = {
       id: ComparisonUtils.generateId(),
@@ -240,6 +314,7 @@ var ComparisonCore = (function () {
     _state.result = null;
     _state.loadedPatents = {};
     _state.similarityMatrix = null;
+    _state.aiSimilarityScores = null;
     emit('itemsChanged', getItems());
     emit('anchorChanged', null);
     emit('resultCleared', null);
@@ -341,6 +416,9 @@ var ComparisonCore = (function () {
       }
 
       if (!_state.isAborted) {
+        _state.aiSimilarityScores = parseAiSimilarityScores(resultContent);
+        var aiSimMatrix = buildAiSimilarityMatrix(selected, anchor, _state.aiSimilarityScores);
+        var cleanMarkdown = resultContent.replace(/```json\s*\n?\{"similarityScores":[\s\S]*?\}\s*\n?```/g, '').trim();
         _state.result = {
           sessionId: 'sess_' + Date.now(),
           timestamp: Date.now(),
@@ -348,8 +426,10 @@ var ComparisonCore = (function () {
           items: selected,
           others: others,
           markdownContent: resultContent,
-          htmlContent: marked.parse(resultContent),
-          similarityMatrix: _state.similarityMatrix
+          htmlContent: marked.parse(cleanMarkdown),
+          similarityMatrix: _state.similarityMatrix,
+          aiSimilarityScores: _state.aiSimilarityScores,
+          aiSimilarityMatrix: aiSimMatrix
         };
         setProgress(100, 100, '比对完成');
         emit('resultReady', _state.result);
@@ -443,6 +523,7 @@ var ComparisonCore = (function () {
     _state.isLoading = false;
     _state.loadedPatents = {};
     _state.similarityMatrix = null;
+    _state.aiSimilarityScores = null;
     emit('itemsChanged', getItems());
     emit('anchorChanged', null);
     emit('resultCleared', null);
@@ -478,6 +559,9 @@ var ComparisonCore = (function () {
     getLoadedPatents: getLoadedPatents,
     setPendingFamilyPatents: setPendingFamilyPatents,
     getPendingFamilyPatents: getPendingFamilyPatents,
+    parseAiSimilarityScores: parseAiSimilarityScores,
+    buildAiSimilarityMatrix: buildAiSimilarityMatrix,
+    getAiSimilarityScore: getAiSimilarityScore,
     init: init,
     isIndependentClaim: isIndependentClaim
   };
