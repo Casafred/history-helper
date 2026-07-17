@@ -19,6 +19,11 @@ var ComparisonCore = (function () {
     loadedPatents: {},
     similarityMatrix: null,
     aiSimilarityScores: null,
+    fetchedPatents: null,
+    fetchErrors: [],
+    patentNumbersText: '',
+    manualLabelText: '',
+    manualContentText: '',
     progress: {
       current: 0,
       total: 0,
@@ -315,6 +320,10 @@ var ComparisonCore = (function () {
     _state.loadedPatents = {};
     _state.similarityMatrix = null;
     _state.aiSimilarityScores = null;
+    _state.fetchedPatents = null;
+    _state.fetchErrors = [];
+    _state.manualLabelText = '';
+    _state.manualContentText = '';
     emit('itemsChanged', getItems());
     emit('anchorChanged', null);
     emit('resultCleared', null);
@@ -524,9 +533,48 @@ var ComparisonCore = (function () {
     _state.loadedPatents = {};
     _state.similarityMatrix = null;
     _state.aiSimilarityScores = null;
+    _state.fetchedPatents = null;
+    _state.fetchErrors = [];
+    _state.patentNumbersText = '';
+    _state.manualLabelText = '';
+    _state.manualContentText = '';
     emit('itemsChanged', getItems());
     emit('anchorChanged', null);
     emit('resultCleared', null);
+  }
+
+  function setFetchedPatents(patents, errors) {
+    _state.fetchedPatents = patents || null;
+    _state.fetchErrors = errors || [];
+  }
+
+  function getFetchedPatents() {
+    return _state.fetchedPatents;
+  }
+
+  function getFetchErrors() {
+    return (_state.fetchErrors || []).slice();
+  }
+
+  function setPatentNumbersText(text) {
+    _state.patentNumbersText = text || '';
+  }
+
+  function getPatentNumbersText() {
+    return _state.patentNumbersText || '';
+  }
+
+  function setManualInput(label, content) {
+    _state.manualLabelText = label || '';
+    _state.manualContentText = content || '';
+  }
+
+  function getManualLabelText() {
+    return _state.manualLabelText || '';
+  }
+
+  function getManualContentText() {
+    return _state.manualContentText || '';
   }
 
   return {
@@ -562,6 +610,14 @@ var ComparisonCore = (function () {
     parseAiSimilarityScores: parseAiSimilarityScores,
     buildAiSimilarityMatrix: buildAiSimilarityMatrix,
     getAiSimilarityScore: getAiSimilarityScore,
+    setFetchedPatents: setFetchedPatents,
+    getFetchedPatents: getFetchedPatents,
+    getFetchErrors: getFetchErrors,
+    setPatentNumbersText: setPatentNumbersText,
+    getPatentNumbersText: getPatentNumbersText,
+    setManualInput: setManualInput,
+    getManualLabelText: getManualLabelText,
+    getManualContentText: getManualContentText,
     init: init,
     isIndependentClaim: isIndependentClaim
   };

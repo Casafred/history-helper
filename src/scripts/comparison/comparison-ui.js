@@ -9,6 +9,7 @@ var ComparisonUI = (function () {
   var _container = null;
   var _streamContent = '';
   var _onStreamUpdate = null;
+  var _initialized = false;
 
   function getContainer() {
     if (!_container) {
@@ -431,6 +432,8 @@ var ComparisonUI = (function () {
   }
 
   function init() {
+    if (_initialized) return;
+    _initialized = true;
     ComparisonCore.on('itemsChanged', function() {
       render();
     });

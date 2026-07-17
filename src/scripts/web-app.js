@@ -3299,22 +3299,27 @@ function _setGoogTransCookie(value) {
 }
 
 // Dispatch a change event on the Google Translate combo (tries HTMLEvents + Event)
+var _gtDispatching = false;
 function _dispatchComboChange(combo) {
+  if (_gtDispatching) return;
+  _gtDispatching = true;
   try {
-    var evt = document.createEvent("HTMLEvents");
-    evt.initEvent("change", true, true);
-    combo.dispatchEvent(evt);
-  } catch(e) {
-    combo.dispatchEvent(new Event("change", { bubbles: true }));
+    try {
+      var evt = document.createEvent("HTMLEvents");
+      evt.initEvent("change", true, true);
+      combo.dispatchEvent(evt);
+    } catch(e) {
+      combo.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  } finally {
+    setTimeout(function() { _gtDispatching = false; }, 500);
   }
 }
 
 // Poll for the combo and auto-select the target language (fallback for cookie approach)
 function _pollSelectGoogleTranslateLang(targetLang, attempts) {
-  if (attempts > 20) {
-    console.warn('[FigLink] _pollSelectGoogleTranslateLang exhausted, but checking DOM for translation anyway');
-    // Even if combo wasn't set, check if GT translated the DOM via cookie.
-    // If <font> tags appeared, treat as activated.
+  if (_googleTranslateActive) return;
+  if (attempts > 10) {
     if (document.querySelector('font')) {
       _googleTranslateActive = true;
       _onGoogleTranslateActivated();
@@ -3323,7 +3328,7 @@ function _pollSelectGoogleTranslateLang(targetLang, attempts) {
   }
   var combo = document.querySelector(".goog-te-combo");
   if (!combo) {
-    setTimeout(function() { _pollSelectGoogleTranslateLang(targetLang, attempts + 1); }, 1000);
+    setTimeout(function() { _pollSelectGoogleTranslateLang(targetLang, attempts + 1); }, 1500);
     return;
   }
   if (combo.value === targetLang) {
@@ -3333,21 +3338,18 @@ function _pollSelectGoogleTranslateLang(targetLang, attempts) {
   }
   combo.value = targetLang;
   _dispatchComboChange(combo);
-  // Verify after a short delay; retry if not set
   setTimeout(function() {
+    if (_googleTranslateActive) return;
     if (combo.value === targetLang || document.querySelector(".goog-te-banner-frame")) {
       _googleTranslateActive = true;
       _onGoogleTranslateActivated();
     } else if (document.querySelector('font')) {
-      // Combo value didn't match, but <font> tags appeared — translation is
-      // happening via cookie. Treat as activated.
-      console.log('[FigLink] combo value mismatch, but <font> tags detected — activating');
       _googleTranslateActive = true;
       _onGoogleTranslateActivated();
     } else {
       _pollSelectGoogleTranslateLang(targetLang, attempts + 1);
     }
-  }, 800);
+  }, 1200);
 }
 
 // Select a language when the widget is already injected

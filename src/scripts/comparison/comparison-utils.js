@@ -49,7 +49,7 @@ var ComparisonUtils = (function () {
 
   function normalizePatentNumber(input) {
     if (!input) return '';
-    return input.trim().toUpperCase().replace(/[\s\-_.]/g, '');
+    return input.trim().toUpperCase().replace(/[\s\/]/g, '');
   }
 
   function parsePatentNumbersInput(text) {
