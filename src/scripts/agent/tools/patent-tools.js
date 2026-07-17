@@ -110,6 +110,14 @@ var AgentPatentTools = (function () {
   }
 
   function switchToTab(tabName) {
+    if (tabName === "comparison") {
+      var cmpBtn = document.querySelector('.search-mode-btn[data-mode="comparison"]');
+      if (cmpBtn) {
+        cmpBtn.click();
+        return { ok: true, switchedTo: "comparison" };
+      }
+      return { ok: false, error: "未找到智能比对入口" };
+    }
     var tabMap = {
       "overview": "overview",
       "family": "family",
@@ -206,23 +214,34 @@ var AgentPatentTools = (function () {
 
         var pn = normalizedPn || "";
         var office = pn.replace(/[0-9].*/, "").toUpperCase();
+        var espacenetUrl = "https://worldwide.espacenet.com/patent/search?q=" + encodeURIComponent(pn);
+        var gpUrl = "https://patents.google.com/patent/" + encodeURIComponent(pn);
         var hint = "请确认专利号格式正确，如 US14412875, EP1234567B1, WO2023123456";
         if (office === "JP" || office === "CN" || office === "KR") {
-          hint = "该专利局可能不在Global Dossier覆盖范围内。请改用fetch_patent_fulltext工具查询专利原文（包含权利要求书、说明书等）";
+          hint = "该专利局可能不在Global Dossier覆盖范围内。请改用fetch_patent_fulltext工具查询专利原文（包含权利要求书、说明书等），或通过open_url工具在Espacenet中查看。";
         }
-        return { ok: false, error: "审查档案查询未获取到数据。" + hint };
+        return {
+          ok: false,
+          error: "审查档案查询未获取到数据。" + hint,
+          patentNumber: pn,
+          links: {
+            espacenet: espacenetUrl,
+            googlePatents: gpUrl,
+          },
+          tip: "如果用户需要同族专利信息、权利要求、技术方案分析等，应该直接使用fetch_patent_fulltext工具，而不是审查档案查询。审查档案只用于审查历程、OA答复等审查流程相关内容。",
+        };
       },
     });
 
     AgentTools.register({
       name: "switch_to_tab",
-      description: "切换应用界面的标签页。可选值：overview（概览）、family（同族）、kanban（审查看板/文档列表）、ai-analysis（AI分析）。",
+      description: "切换应用界面的标签页/功能模块。可选值：overview（概览）、family（同族）、kanban（审查看板/文档列表）、ai-analysis（AI分析）、comparison（智能比对）。",
       parameters: {
         type: "object",
         properties: {
           tab: {
             type: "string",
-            enum: ["overview", "family", "kanban", "ai-analysis"],
+            enum: ["overview", "family", "kanban", "ai-analysis", "comparison"],
             description: "要切换到的标签页名称",
           },
         },
@@ -316,7 +335,7 @@ var AgentPatentTools = (function () {
 
     AgentTools.register({
       name: "fetch_patent_fulltext",
-      description: "查询专利原文（Google Patents），获取完整的专利信息包括：标题、摘要、权利要求书、说明书、申请人、发明人、引证/被引信息等。当用户需要总结权利要求保护范围、分析专利技术方案、查看专利全文内容时，应使用此工具而非fetch_patent。",
+      description: "查询专利原文（Google Patents），获取完整的专利信息包括：标题、摘要、权利要求书、说明书、申请人、发明人、申请日/公开日/优先权日、同族专利列表、引证/被引信息、法律事件等。**这是获取专利基本信息的首选工具**——除非用户明确询问审查历程、审查意见答复、审查文档列表等审查流程相关内容，否则都应使用此工具。同族专利信息也从这里获取，不需要调用审查档案的get_family_summary。",
       parameters: {
         type: "object",
         properties: {
@@ -346,22 +365,68 @@ var AgentPatentTools = (function () {
 
         patentInput.value = normalizedPn;
 
+        var queryError = null;
         if (typeof searchPatentDetail === "function") {
           try {
             await searchPatentDetail(normalizedPn);
           } catch (e) {
-            return { error: "查询失败: " + e.message };
+            queryError = e;
           }
         } else {
           return { error: "专利原文查询功能不可用" };
         }
 
-        await new Promise(function (r) { return setTimeout(r, 1000); });
+        await new Promise(function (r) { return setTimeout(r, 1200); });
 
         var data = getCurrentFulltextData();
         if (data) {
           currentFulltextData = data;
           AgentCore.updateContext({ patentFulltextData: data, patentNumber: args.patent_number });
+
+          var familyMembers = [];
+          if (data.family_applications && Array.isArray(data.family_applications)) {
+            data.family_applications.forEach(function (fa) {
+              familyMembers.push({
+                publicationNumber: fa.publication_number || "",
+                title: fa.title || "",
+                status: fa.status || "",
+                countryCode: fa.country_code || (fa.publication_number ? fa.publication_number.replace(/[0-9A-Z].*/, "").substring(0, 2) : ""),
+              });
+            });
+          }
+
+          var citations = [];
+          if (data.patent_citations && Array.isArray(data.patent_citations)) {
+            data.patent_citations.slice(0, 30).forEach(function (c) {
+              citations.push({
+                patentNumber: c.patent_number || "",
+                title: c.title || "",
+                assignee: c.assignee || "",
+                priorityDate: c.priority_date || "",
+                publicationDate: c.publication_date || "",
+              });
+            });
+          }
+
+          var citedBy = [];
+          if (data.cited_by && Array.isArray(data.cited_by)) {
+            data.cited_by.slice(0, 30).forEach(function (c) {
+              citedBy.push({
+                patentNumber: c.patent_number || "",
+                title: c.title || "",
+                assignee: c.assignee || "",
+                priorityDate: c.priority_date || "",
+                publicationDate: c.publication_date || "",
+              });
+            });
+          }
+
+          var legalEvents = [];
+          if (data.legal_events && Array.isArray(data.legal_events)) {
+            data.legal_events.forEach(function (le) {
+              legalEvents.push({ date: le.date || "", code: le.code || "", description: le.description || "" });
+            });
+          }
 
           var result = {
             ok: true,
@@ -373,16 +438,43 @@ var AgentPatentTools = (function () {
             publicationDate: data.publication_date || "",
             filingDate: data.filing_date || "",
             priorityDate: data.priority_date || "",
+            familyId: data.family_id || "",
+            familyMembers: familyMembers,
+            familyMemberCount: familyMembers.length,
             claimsCount: (data.claims || []).length,
             hasDescription: !!(data.description && data.description.length > 0),
+            descriptionLength: (data.description || "").length,
+            citations: citations,
             citationCount: (data.patent_citations || []).length,
+            citedBy: citedBy,
             citedByCount: (data.cited_by || []).length,
+            legalEvents: legalEvents,
+            legalEventCount: legalEvents.length,
+            dataSource: data.data_source || "Google Patents",
+            links: {
+              googlePatents: "https://patents.google.com/patent/" + encodeURIComponent(normalizedPn),
+              espacenet: "https://worldwide.espacenet.com/patent/search?q=" + encodeURIComponent(normalizedPn),
+            },
           };
 
           return result;
         }
 
-        return { ok: false, error: "查询完成但未获取到专利原文数据，请检查专利号是否正确" };
+        var espacenetUrl = "https://worldwide.espacenet.com/patent/search?q=" + encodeURIComponent(normalizedPn);
+        var gpUrl = "https://patents.google.com/patent/" + encodeURIComponent(normalizedPn);
+        return {
+          ok: false,
+          error: "在Google Patents中未查询到专利「" + normalizedPn + "」的数据。",
+          patentNumber: normalizedPn,
+          suggestion: "您可以尝试以下方式：\n1. 确认专利号格式是否正确（如 US12030161B2, EP4252965A3）\n2. 尝试在Espacenet中手动查找：在应用内打开Espacenet链接\n3. 如果您能确认该专利存在，请提供正确的专利号后继续",
+          links: {
+            googlePatents: gpUrl,
+            espacenet: espacenetUrl,
+            openInApp_espacenet: "应用内查看Espacenet（使用浏览器打开工具open_external_url）",
+            openInApp_googlePatents: "应用内查看Google Patents",
+          },
+          tip: "向用户展示这些链接时，请说明：「您可以先在Espacenet中确认专利号是否正确，确认后再告诉我继续分析。Espacenet查询链接已提供。」不要因为查询失败就停止任务，请询问用户是否能提供正确专利号或愿意手动查找。",
+        };
       },
     });
 
@@ -430,6 +522,43 @@ var AgentPatentTools = (function () {
           patentNumber: data.patent_number || "",
           title: data.title || "",
           abstract: data.abstract || "",
+        });
+      },
+    });
+
+    AgentTools.register({
+      name: "get_patent_description",
+      description: "获取已查询专利原文的说明书（具体实施方式、发明内容等）全文或片段。必须先调用fetch_patent_fulltext。说明书内容可能很长，可通过max_length参数限制返回长度。",
+      parameters: {
+        type: "object",
+        properties: {
+          max_length: {
+            type: "number",
+            description: "返回的最大字符数，默认8000。说明书可能非常长（数万字），建议根据需要截取",
+          },
+        },
+      },
+      execute: function (args) {
+        var data = getCurrentFulltextData();
+        if (!data) {
+          return Promise.resolve({ error: "请先调用fetch_patent_fulltext查询专利原文" });
+        }
+        var desc = data.description || "";
+        var maxLen = (args && args.max_length) || 8000;
+        var truncated = false;
+        if (desc.length > maxLen) {
+          desc = desc.substring(0, maxLen);
+          truncated = true;
+        }
+        return Promise.resolve({
+          ok: true,
+          patentNumber: data.patent_number || "",
+          title: data.title || "",
+          descriptionLength: (data.description || "").length,
+          returnedLength: desc.length,
+          truncated: truncated,
+          description: desc,
+          tip: truncated ? "说明书已被截断，如需更多内容可增大max_length参数" : "",
         });
       },
     });
@@ -659,6 +788,71 @@ var AgentPatentTools = (function () {
           waitForUser: true,
           openInApp: { patentNumber: data.patentNumber, mode: "dossier" },
         };
+      },
+    });
+
+    AgentTools.register({
+      name: "get_patent_family",
+      description: "获取已查询专利原文的同族专利列表。必须先调用fetch_patent_fulltext获取专利原文。返回同族专利的公开号、标题、状态等信息。注意：同族信息从Google Patents数据中获取，不需要调用审查档案的get_family_summary。",
+      parameters: { type: "object", properties: {} },
+      execute: function () {
+        var data = getCurrentFulltextData();
+        if (!data) {
+          return Promise.resolve({
+            ok: false,
+            error: "请先调用fetch_patent_fulltext查询专利原文",
+            tip: "同族专利信息来自Google Patents，需要先查询专利原文才能获取。如果审查档案的get_family_summary失败（如500错误），这是正常的备用方案。",
+          });
+        }
+        var members = [];
+        if (data.family_applications && Array.isArray(data.family_applications)) {
+          data.family_applications.forEach(function (fa) {
+            members.push({
+              publicationNumber: fa.publication_number || "",
+              title: fa.title || "",
+              status: fa.status || "",
+            });
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          patentNumber: data.patent_number || "",
+          title: data.title || "",
+          familyId: data.family_id || "",
+          memberCount: members.length,
+          familyMembers: members,
+        });
+      },
+    });
+
+    AgentTools.register({
+      name: "open_url",
+      description: "在应用内打开外部网页链接（如Espacenet、Google Patents等）。当专利查询失败需要用户手动确认时，可调用此工具打开Espacenet链接让用户查看。",
+      parameters: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string",
+            description: "要打开的完整URL地址，如 https://worldwide.espacenet.com/patent/search?q=US11407039B2",
+          },
+          title: {
+            type: "string",
+            description: "（可选）窗口标题",
+          },
+        },
+        required: ["url"],
+      },
+      execute: function (args) {
+        try {
+          if (typeof openInAppWebview === "function") {
+            openInAppWebview(args.url, args.title || "外部链接");
+            return Promise.resolve({ ok: true, action: "已在应用内打开链接: " + args.url });
+          }
+          window.open(args.url, "_blank");
+          return Promise.resolve({ ok: true, action: "已在新窗口打开链接: " + args.url });
+        } catch (e) {
+          return Promise.resolve({ ok: false, error: "打开链接失败: " + e.message });
+        }
       },
     });
   }

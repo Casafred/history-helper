@@ -1703,6 +1703,8 @@ async function searchPatentDetail(input) {
 
   searchBtn.disabled = true;
   loadingText.textContent = "正在从 Google Patents 获取专利信息...";
+  const _spinner = loading.querySelector(".spinner");
+  if (_spinner) _spinner.style.display = "";
   // Show Google Patents + Espacenet links immediately so user can jump if loading takes too long
   if (loadingGpLink) {
     const gpUrl = "https://patents.google.com/patent/" + encodeURIComponent(raw);
@@ -1805,14 +1807,22 @@ async function searchPatentDetail(input) {
       title: json.data.title || "",
     });
     refreshHistoryList();
+    if (loadingGpLink) loadingGpLink.classList.add("hidden");
+    if (loadingEspacenetLink) loadingEspacenetLink.classList.add("hidden");
+    loading.classList.add("hidden");
   } catch (e) {
-    showError("查询失败: " + e.message);
+    loadingText.textContent = "查询失败: " + e.message;
+    const spinner = loading.querySelector(".spinner");
+    if (spinner) spinner.style.display = "none";
+    if (loadingGpLink) loadingGpLink.classList.add("hidden");
+    if (loadingEspacenetLink) {
+      loadingEspacenetLink.textContent = "在 Espacenet 中手动查找 " + raw + " →";
+      loadingEspacenetLink.classList.remove("hidden");
+    }
+    showError("查询失败: " + e.message + "。您可通过Espacenet链接手动查找。");
   }
 
   searchBtn.disabled = false;
-  if (loadingGpLink) loadingGpLink.classList.add("hidden");
-  if (loadingEspacenetLink) loadingEspacenetLink.classList.add("hidden");
-  loading.classList.add("hidden");
 }
 
 // ── 应用内 Webview 弹窗（Google Patents / Espacenet 等） ──
