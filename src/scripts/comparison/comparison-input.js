@@ -7,6 +7,8 @@
 
 var ComparisonInput = (function () {
   var _selectedClaims = {};
+  var _failedPatents = {};
+  var _manualTexts = {};
 
   function renderInputArea(container, inputMode) {
     if (!container) return;
@@ -114,8 +116,14 @@ var ComparisonInput = (function () {
 
     var savedPatents = ComparisonCore.getFetchedPatents();
     var savedErrors = ComparisonCore.getFetchErrors();
+    var savedFailed = ComparisonCore.getFailedPatents();
     var claimsContainer = document.getElementById('cmp-claims-selector');
     var progressContainer = document.getElementById('cmp-patent-progress');
+
+    var hasFailed = savedFailed && Object.keys(savedFailed).length > 0;
+    if (hasFailed) {
+      _failedPatents = Object.assign({}, savedFailed);
+    }
 
     if (savedPatents && Object.keys(savedPatents).length > 0) {
       renderClaimsSelector(claimsContainer, savedPatents);
@@ -132,6 +140,9 @@ var ComparisonInput = (function () {
           '</div>';
       }
     }
+    if (hasFailed) {
+      _renderFailedPatents(claimsContainer);
+    }
   }
 
   function clearPatentInput() {
@@ -140,6 +151,8 @@ var ComparisonInput = (function () {
     ComparisonCore.setPatentNumbersText('');
     ComparisonCore.setFetchedPatents(null, []);
     _selectedClaims = {};
+    _failedPatents = {};
+    _manualTexts = {};
     var progressContainer = document.getElementById('cmp-patent-progress');
     var claimsContainer = document.getElementById('cmp-claims-selector');
     if (progressContainer) progressContainer.innerHTML = '';
@@ -149,6 +162,239 @@ var ComparisonInput = (function () {
   function _normalizeNum(input) {
     if (!input) return '';
     return input.trim().toUpperCase().replace(/[\s\/]/g, '');
+  }
+
+  async function _fetchSinglePatent(normalized, isRetry) {
+    var cached = null;
+    if (typeof GPCache !== 'undefined') {
+      cached = GPCache.get(normalized);
+    }
+    if (window._pdPatentCache && window._pdPatentCache[normalized]) {
+      cached = window._pdPatentCache[normalized];
+    }
+    if (cached && cached.claims && cached.claims.length > 0) {
+      return cached;
+    }
+
+    var maxRetries = isRetry ? 4 : 3;
+    var json = await fetchPatentWithRetry(normalized, maxRetries);
+    if (json && json.success && json.data) {
+      var data = json.data;
+      if (data.claims && data.claims.length > 0 && data.data_source !== 'Espacenet') {
+        if (typeof GPCache !== 'undefined') GPCache.set(normalized, data);
+        if (window._pdPatentCache) window._pdPatentCache[normalized] = data;
+      }
+      return data;
+    }
+    throw new Error(json && json.error ? json.error : '查询失败');
+  }
+
+  function _renderFailedPatents(container) {
+    if (!container) return;
+    var existing = document.getElementById('cmp-failed-patents');
+    if (existing) existing.remove();
+    var failedNums = Object.keys(_failedPatents);
+    if (failedNums.length === 0) return;
+    var html = '<div id="cmp-failed-patents" style="margin-top:16px;padding:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;">';
+    html += '<div style="font-size:13px;font-weight:600;color:#991b1b;margin-bottom:10px;">以下专利查询失败，可重试或手动粘贴文本：</div>';
+    failedNums.forEach(function(pn) {
+      var err = _failedPatents[pn];
+      html += '<div style="margin-bottom:10px;padding:10px;background:#fff;border-radius:6px;border:1px solid #fecaca;">';
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px;">';
+      html += '<span style="font-weight:600;color:#991b1b;font-size:13px;">' + ComparisonUtils.escapeHtml(pn) + '</span>';
+      html += '<span style="display:flex;gap:6px;">';
+      html += '<button class="btn-secondary btn-small" onclick="ComparisonInput.retrySinglePatent(\'' + ComparisonUtils.escapeHtml(pn).replace(/'/g, "\\'") + '\')" style="font-size:11px;padding:2px 8px;">重试</button>';
+      html += '<button class="btn-secondary btn-small" onclick="ComparisonInput.showManualInput(\'' + ComparisonUtils.escapeHtml(pn).replace(/'/g, "\\'") + '\')" style="font-size:11px;padding:2px 8px;">手动输入文本</button>';
+      html += '</span>';
+      html += '</div>';
+      html += '<div style="font-size:11px;color:#b91c1c;margin-bottom:4px;">' + ComparisonUtils.escapeHtml(err) + '</div>';
+      if (_manualTexts[pn]) {
+        html += '<div style="margin-top:6px;">';
+        html += '<textarea id="cmp-manual-' + ComparisonUtils.escapeHtml(pn) + '" class="comparison-textarea" placeholder="在此粘贴该专利的权利要求文本..." style="min-height:60px;font-size:12px;" oninput="ComparisonInput.updateManualText(\'' + ComparisonUtils.escapeHtml(pn).replace(/'/g, "\\'") + '\', this.value)">' + ComparisonUtils.escapeHtml(_manualTexts[pn].text || '') + '</textarea>';
+        html += '<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;">';
+        html += '<input type="text" id="cmp-manual-label-' + ComparisonUtils.escapeHtml(pn) + '" class="comparison-label-input" placeholder="标签（如：US权1）" value="' + ComparisonUtils.escapeHtml(_manualTexts[pn].label || (pn + ' 权1')) + '" style="max-width:160px;font-size:12px;" oninput="ComparisonInput.updateManualText(\'' + ComparisonUtils.escapeHtml(pn).replace(/'/g, "\\'") + '\', null, this.value)">';
+        html += '<button class="btn-primary btn-small" onclick="ComparisonInput.addManualTextForPatent(\'' + ComparisonUtils.escapeHtml(pn).replace(/'/g, "\\'") + '\')" style="font-size:11px;padding:2px 10px;">添加到比对列表</button>';
+        html += '</div></div>';
+      }
+      html += '</div>';
+    });
+    html += '<button class="btn-secondary btn-small" onclick="ComparisonInput.retryAllFailed()" style="font-size:12px;margin-top:4px;">全部重试</button>';
+    html += '</div>';
+    container.insertAdjacentHTML('beforeend', html);
+  }
+
+  async function retrySinglePatent(pn) {
+    var normalized = _normalizeNum(pn);
+    var btn = document.getElementById('cmp-fetch-patents-btn');
+    var progressContainer = document.getElementById('cmp-patent-progress');
+
+    if (btn) btn.disabled = true;
+    if (progressContainer) {
+      progressContainer.innerHTML = '<div class="comparison-progress">' +
+        '<div class="comparison-progress-text">正在重试 ' + ComparisonUtils.escapeHtml(pn) + ' ...</div>' +
+        '<div class="comparison-progress-bar"><div class="comparison-progress-fill" style="width:50%"></div></div>' +
+        '</div>';
+    }
+
+    try {
+      var data = await _fetchSinglePatent(normalized, true);
+      var claims = data.claims || [];
+      if (claims.length > 0) {
+        delete _failedPatents[normalized];
+        var existingFetched = ComparisonCore.getFetchedPatents() || {};
+        existingFetched[normalized] = {
+          patentNumber: normalized,
+          title: data.title || '',
+          applicant: data.assignee || data.applicant || '',
+          claims: claims
+        };
+        var errors = [];
+        Object.keys(_failedPatents).forEach(function(k) {
+          errors.push(k + ': ' + _failedPatents[k]);
+        });
+        ComparisonCore.setFetchedPatents(existingFetched, errors, Object.assign({}, _failedPatents));
+
+        var claimsContainer = document.getElementById('cmp-claims-selector');
+        renderClaimsSelector(claimsContainer, existingFetched);
+
+        var errHtml = '';
+        if (errors.length > 0) {
+          errHtml = '<div style="margin-top:8px;font-size:12px;color:#ef4444;">失败: ' + errors.map(ComparisonUtils.escapeHtml).join('; ') + '</div>';
+        }
+        var succCount = Object.keys(existingFetched).length;
+        if (progressContainer) {
+          progressContainer.innerHTML = '<div class="comparison-progress">' +
+            '<div class="comparison-progress-text">查询完成: 成功 ' + succCount + ' 个' + (errors.length > 0 ? '，失败 ' + errors.length + ' 个' : '') + '</div>' +
+            '<div class="comparison-progress-bar"><div class="comparison-progress-fill" style="width:100%"></div></div>' +
+            errHtml +
+            '</div>';
+        }
+        _renderFailedPatents(claimsContainer);
+      } else {
+        throw new Error('未找到权利要求数据');
+      }
+    } catch (err) {
+      _failedPatents[normalized] = err.message;
+      var existingForRetry = ComparisonCore.getFetchedPatents() || {};
+      var errsForRetry = Object.keys(_failedPatents).map(function(k) { return k + ': ' + _failedPatents[k]; });
+      ComparisonCore.setFetchedPatents(existingForRetry, errsForRetry, Object.assign({}, _failedPatents));
+      if (progressContainer) {
+        progressContainer.innerHTML = '<div class="comparison-progress">' +
+          '<div class="comparison-progress-text">重试 ' + ComparisonUtils.escapeHtml(pn) + ' 仍然失败: ' + ComparisonUtils.escapeHtml(err.message) + '</div>' +
+          '<div class="comparison-progress-bar"><div class="comparison-progress-fill" style="width:100%"></div></div>' +
+          '</div>';
+      }
+      var claimsContainer2 = document.getElementById('cmp-claims-selector');
+      _renderFailedPatents(claimsContainer2);
+    }
+
+    if (btn) btn.disabled = false;
+  }
+
+  async function retryAllFailed() {
+    var failedNums = Object.keys(_failedPatents);
+    if (failedNums.length === 0) return;
+
+    var btn = document.getElementById('cmp-fetch-patents-btn');
+    var progressContainer = document.getElementById('cmp-patent-progress');
+    var claimsContainer = document.getElementById('cmp-claims-selector');
+    if (btn) btn.disabled = true;
+
+    var existingFetched = ComparisonCore.getFetchedPatents() || {};
+    var newErrors = {};
+
+    for (var i = 0; i < failedNums.length; i++) {
+      var pn = failedNums[i];
+      if (progressContainer) {
+        progressContainer.innerHTML = '<div class="comparison-progress">' +
+          '<div class="comparison-progress-text">正在重试 ' + (i + 1) + '/' + failedNums.length + ': ' + ComparisonUtils.escapeHtml(pn) + '</div>' +
+          '<div class="comparison-progress-bar"><div class="comparison-progress-fill" style="width:' + Math.round((i / failedNums.length) * 100) + '%"></div></div>' +
+          '</div>';
+      }
+      try {
+        var data = await _fetchSinglePatent(pn, true);
+        var claims = data.claims || [];
+        if (claims.length > 0) {
+          existingFetched[pn] = {
+            patentNumber: pn,
+            title: data.title || '',
+            applicant: data.assignee || data.applicant || '',
+            claims: claims
+          };
+        } else {
+          newErrors[pn] = '未找到权利要求数据';
+        }
+      } catch (err) {
+        newErrors[pn] = err.message;
+      }
+      if (i < failedNums.length - 1) {
+        await new Promise(function(r) { setTimeout(r, 300); });
+      }
+    }
+
+    _failedPatents = newErrors;
+    var errs = Object.keys(newErrors).map(function(k) { return k + ': ' + newErrors[k]; });
+    ComparisonCore.setFetchedPatents(existingFetched, errs, Object.assign({}, newErrors));
+    renderClaimsSelector(claimsContainer, existingFetched);
+
+    var errHtml = '';
+    if (errs.length > 0) errHtml = '<div style="margin-top:8px;font-size:12px;color:#ef4444;">失败: ' + errs.map(ComparisonUtils.escapeHtml).join('; ') + '</div>';
+    if (progressContainer) {
+      progressContainer.innerHTML = '<div class="comparison-progress">' +
+        '<div class="comparison-progress-text">重试完成: 成功 ' + Object.keys(existingFetched).length + ' 个' + (errs.length > 0 ? '，失败 ' + errs.length + ' 个' : '') + '</div>' +
+        '<div class="comparison-progress-bar"><div class="comparison-progress-fill" style="width:100%"></div></div>' +
+        errHtml +
+        '</div>';
+    }
+    _renderFailedPatents(claimsContainer);
+    if (btn) btn.disabled = false;
+  }
+
+  function showManualInput(pn) {
+    if (!_manualTexts[pn]) {
+      _manualTexts[pn] = { label: pn + ' 权1', text: '' };
+    } else {
+      _manualTexts[pn]._show = true;
+    }
+    var claimsContainer = document.getElementById('cmp-claims-selector');
+    _renderFailedPatents(claimsContainer);
+  }
+
+  function updateManualText(pn, text, label) {
+    if (!_manualTexts[pn]) _manualTexts[pn] = { label: pn + ' 权1', text: '' };
+    if (text !== null && text !== undefined) _manualTexts[pn].text = text;
+    if (label !== null && label !== undefined) _manualTexts[pn].label = label;
+  }
+
+  function addManualTextForPatent(pn) {
+    var textarea = document.getElementById('cmp-manual-' + pn);
+    var labelInput = document.getElementById('cmp-manual-label-' + pn);
+    var text = textarea ? ComparisonUtils.cleanText(textarea.value) : '';
+    var label = (labelInput ? labelInput.value.trim() : '') || (pn + ' 权1');
+    if (!text) {
+      alert('请输入权利要求文本');
+      return;
+    }
+    var existing = ComparisonCore.getItems().find(function(i) {
+      return i.patentNumber === pn && i.source === 'manual-fallback';
+    });
+    if (existing) {
+      alert('该专利的手动文本已添加到比对列表');
+      return;
+    }
+    ComparisonCore.addItem({
+      label: label,
+      source: 'manual-fallback',
+      patentNumber: pn,
+      originalText: text,
+      isSelected: true,
+      metadata: { manualFallback: true }
+    });
+    delete _failedPatents[pn];
+    delete _manualTexts[pn];
+    var claimsContainer = document.getElementById('cmp-claims-selector');
+    _renderFailedPatents(claimsContainer);
+    ComparisonUI.render();
   }
 
   async function fetchPatents() {
@@ -174,6 +420,7 @@ var ComparisonInput = (function () {
 
     if (btn) btn.disabled = true;
     _selectedClaims = {};
+    _failedPatents = {};
 
     var fetchedPatents = {};
     var errors = [];
@@ -190,35 +437,10 @@ var ComparisonInput = (function () {
       }
 
       try {
-        var cached = null;
-        if (typeof GPCache !== 'undefined') {
-          cached = GPCache.get(normalized);
+        if (i === 0) {
+          await new Promise(function(r) { setTimeout(r, 300); });
         }
-        if (window._pdPatentCache && window._pdPatentCache[normalized]) {
-          cached = window._pdPatentCache[normalized];
-        }
-
-        var data;
-        if (cached && cached.claims && cached.claims.length > 0) {
-          data = cached;
-        } else {
-          if (i === 0) {
-            await new Promise(function(r) { setTimeout(r, 200); });
-          }
-          var json = await fetchPatentWithRetry(normalized, 3);
-          if (json && json.success && json.data) {
-            data = json.data;
-            if (typeof GPCache !== 'undefined' && data.claims && data.claims.length > 0 && data.data_source !== 'Espacenet') {
-              GPCache.set(normalized, data);
-            }
-            if (window._pdPatentCache) {
-              window._pdPatentCache[normalized] = data;
-            }
-          } else {
-            throw new Error(json && json.error ? json.error : '查询失败');
-          }
-        }
-
+        var data = await _fetchSinglePatent(normalized, false);
         var claims = data.claims || [];
         if (claims.length > 0) {
           fetchedPatents[normalized] = {
@@ -228,18 +450,20 @@ var ComparisonInput = (function () {
             claims: claims
           };
         } else {
+          _failedPatents[normalized] = '未找到权利要求数据';
           errors.push(num + ': 未找到权利要求数据');
         }
       } catch (err) {
+        _failedPatents[normalized] = err.message;
         errors.push(num + ': ' + err.message);
       }
 
       if (i < numbers.length - 1) {
-        await new Promise(function(r) { setTimeout(r, 150); });
+        await new Promise(function(r) { setTimeout(r, 200); });
       }
     }
 
-    ComparisonCore.setFetchedPatents(fetchedPatents, errors);
+    ComparisonCore.setFetchedPatents(fetchedPatents, errors, Object.assign({}, _failedPatents));
 
     if (progressContainer) {
       var errMsg = '';
@@ -255,7 +479,11 @@ var ComparisonInput = (function () {
 
     if (Object.keys(fetchedPatents).length > 0) {
       renderClaimsSelector(claimsContainer, fetchedPatents);
+    } else {
+      if (claimsContainer) claimsContainer.innerHTML = '';
     }
+
+    _renderFailedPatents(claimsContainer);
 
     if (btn) btn.disabled = false;
   }
@@ -451,6 +679,11 @@ var ComparisonInput = (function () {
     toggleClaimSelect: toggleClaimSelect,
     selectAllClaims: selectAllClaims,
     addSelectedClaims: addSelectedClaims,
-    loadFromFamilyPatents: loadFromFamilyPatents
+    loadFromFamilyPatents: loadFromFamilyPatents,
+    retrySinglePatent: retrySinglePatent,
+    retryAllFailed: retryAllFailed,
+    showManualInput: showManualInput,
+    updateManualText: updateManualText,
+    addManualTextForPatent: addManualTextForPatent
   };
 })();

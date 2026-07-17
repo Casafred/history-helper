@@ -1000,16 +1000,17 @@ function openCNQuery(patentNo, title) {
 }
 
 function patentLinkButtons(patentNo) {
-  // Clean patent number: remove language suffixes like /en, /de, /fr etc.
   const cleanNo = String(patentNo).replace(/\/[a-z]{2}$/i, "").trim();
-  let btns = '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(cleanNo) + '\', \'Google Patents: ' + escapeHtml(cleanNo) + '\')" title="在应用内打开 Google Patents">GP</button>';
-  btns += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(cleanNo) + '\', \'Espacenet: ' + escapeHtml(cleanNo) + '\')" title="在应用内打开 Espacenet (EPO)" style="background:#1565c0;color:#fff;border-color:#0d47a1;">EP</button>';
+  let btns = '<span class="pd-link-buttons">';
+  btns += '<button class="pd-gp-link" onclick="openInAppWebview(\'https://patents.google.com/patent/' + encodeURIComponent(cleanNo) + '\', \'Google Patents: ' + escapeHtml(cleanNo) + '\')" title="在应用内打开 Google Patents">GP</button>';
+  btns += '<button class="pd-gp-link pd-ep-link" onclick="openInAppWebview(\'https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(cleanNo) + '\', \'Espacenet: ' + escapeHtml(cleanNo) + '\')" title="在应用内打开 Espacenet (EPO)">EP</button>';
   if (isJPPatent(cleanNo)) {
-    btns += '<button class="pd-gp-link" onclick="openJPlatPat(\'' + escapeHtml(cleanNo) + '\', \'J-PlatPat: ' + escapeHtml(cleanNo) + '\')" title="在 J-PlatPat（日本专利局）查看" style="background:#e74c3c;color:#fff;border-color:#c0392b;font-size:10px;padding:1px 5px;">JP</button>';
+    btns += '<button class="pd-gp-link pd-jp-link" onclick="openJPlatPat(\'' + escapeHtml(cleanNo) + '\', \'J-PlatPat: ' + escapeHtml(cleanNo) + '\')" title="在 J-PlatPat（日本专利局）查看">JP</button>';
   }
   if (isCNPatent(cleanNo)) {
-    btns += '<button class="pd-gp-link" onclick="openCNQuery(\'' + escapeHtml(cleanNo) + '\', \'中国专利查询: ' + escapeHtml(cleanNo) + '\')" title="在中国专利查询系统（CNIPA）查看" style="background:#dc2626;color:#fff;border-color:#b91c1c;font-size:10px;padding:1px 5px;">CN</button>';
+    btns += '<button class="pd-gp-link pd-cn-link" onclick="openCNQuery(\'' + escapeHtml(cleanNo) + '\', \'中国专利查询: ' + escapeHtml(cleanNo) + '\')" title="在中国专利查询系统（CNIPA）查看">CN</button>';
   }
+  btns += '</span>';
   return btns;
 }
 
@@ -1589,7 +1590,7 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
           if (pending && pending.length > 0) {
             ComparisonInput.loadFromFamilyPatents(pending);
           } else {
-            if (ComparisonCore.getItems().length === 0) {
+            if (!ComparisonCore.hasState()) {
               ComparisonCore.init();
             }
             ComparisonUI.render();
@@ -16680,10 +16681,21 @@ function _openPdPatent(pn) {
 
   _pdOpenPatents.push(raw);
   _pdActivePatent = raw;
-  patentDetailContent.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary)"><div style="display:inline-block;width:32px;height:32px;border:3px solid var(--border-color);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:12px"></div><div>正在加载 ' + escapeHtml(raw) + ' ...</div></div>';
+  patentDetailContent.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary)">' +
+    '<div style="display:inline-block;width:32px;height:32px;border:3px solid var(--border-color);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:12px"></div>' +
+    '<div>正在加载 ' + escapeHtml(raw) + ' ...</div>' +
+    '<div style="margin-top:16px;font-size:12px;color:var(--text-secondary);">加载较慢？可直接跳转查看：</div>' +
+    '<div style="margin-top:8px;display:inline-flex;gap:8px;">' +
+    '<button class="pd-gp-link" data-loading-gp="' + escapeHtml(raw) + '">Google Patents</button>' +
+    '<button class="pd-gp-link pd-ep-link" data-loading-ep="' + escapeHtml(raw) + '">Espacenet</button>' +
+    '</div></div>';
+  var gpLBtn = patentDetailContent.querySelector('[data-loading-gp]');
+  if (gpLBtn) gpLBtn.addEventListener('click', function() { openInAppWebview('https://patents.google.com/patent/' + encodeURIComponent(raw), 'Google Patents: ' + raw); });
+  var epLBtn = patentDetailContent.querySelector('[data-loading-ep]');
+  if (epLBtn) epLBtn.addEventListener('click', function() { openInAppWebview('https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(raw), 'Espacenet: ' + raw); });
   _renderPdTabs();
 
-  fetchPatentWithRetry(raw, 2).then(json => {
+  fetchPatentWithRetry(raw, 3).then(json => {
     if (_pdActivePatent !== raw) return;
 
     if (json.data_source === "Espacenet" || (json.data && json.data.data_source === "Espacenet")) {
@@ -16739,7 +16751,19 @@ function _openPdPatent(pn) {
     } else {
       _pdActivePatent = null;
       window._currentPatentData = null;
-      patentDetailContent.innerHTML = '<p class="placeholder" style="color:var(--danger)">查询失败: ' + escapeHtml(err.message) + '</p>';
+      patentDetailContent.innerHTML = '<div style="padding:40px;text-align:center;">' +
+        '<div style="color:var(--danger);margin-bottom:12px;">查询失败: ' + escapeHtml(err.message) + '</div>' +
+        '<div style="display:inline-flex;gap:8px;flex-wrap:wrap;justify-content:center;">' +
+        '<button class="btn-primary btn-small" data-pd-retry="' + escapeHtml(raw) + '">重试查询</button>' +
+        '<button class="pd-gp-link" data-pd-gp="' + escapeHtml(raw) + '">Google Patents</button>' +
+        '<button class="pd-gp-link pd-ep-link" data-pd-ep="' + escapeHtml(raw) + '">Espacenet</button>' +
+        '</div></div>';
+      var retryBtn = patentDetailContent.querySelector('[data-pd-retry]');
+      if (retryBtn) retryBtn.addEventListener('click', function() { _openPdPatent(raw); });
+      var gpBtn = patentDetailContent.querySelector('[data-pd-gp]');
+      if (gpBtn) gpBtn.addEventListener('click', function() { openInAppWebview('https://patents.google.com/patent/' + encodeURIComponent(raw), 'Google Patents: ' + raw); });
+      var epBtn = patentDetailContent.querySelector('[data-pd-ep]');
+      if (epBtn) epBtn.addEventListener('click', function() { openInAppWebview('https://worldwide.espacenet.com/patent/search?q=' + encodeURIComponent(raw), 'Espacenet: ' + raw); });
     }
     _renderPdTabs();
     showError("查询 " + raw + " 失败: " + err.message);

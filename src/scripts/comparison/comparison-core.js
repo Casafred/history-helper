@@ -21,6 +21,7 @@ var ComparisonCore = (function () {
     aiSimilarityScores: null,
     fetchedPatents: null,
     fetchErrors: [],
+    failedPatents: {},
     patentNumbersText: '',
     manualLabelText: '',
     manualContentText: '',
@@ -322,6 +323,7 @@ var ComparisonCore = (function () {
     _state.aiSimilarityScores = null;
     _state.fetchedPatents = null;
     _state.fetchErrors = [];
+    _state.failedPatents = {};
     _state.manualLabelText = '';
     _state.manualContentText = '';
     emit('itemsChanged', getItems());
@@ -543,9 +545,10 @@ var ComparisonCore = (function () {
     emit('resultCleared', null);
   }
 
-  function setFetchedPatents(patents, errors) {
+  function setFetchedPatents(patents, errors, failedMap) {
     _state.fetchedPatents = patents || null;
     _state.fetchErrors = errors || [];
+    _state.failedPatents = failedMap || {};
   }
 
   function getFetchedPatents() {
@@ -554,6 +557,14 @@ var ComparisonCore = (function () {
 
   function getFetchErrors() {
     return (_state.fetchErrors || []).slice();
+  }
+
+  function getFailedPatents() {
+    return _state.failedPatents || {};
+  }
+
+  function setFailedPatents(failed) {
+    _state.failedPatents = failed || {};
   }
 
   function setPatentNumbersText(text) {
@@ -575,6 +586,14 @@ var ComparisonCore = (function () {
 
   function getManualContentText() {
     return _state.manualContentText || '';
+  }
+
+  function hasState() {
+    return _state.items.length > 0 ||
+      !!_state.result ||
+      !!_state.fetchedPatents ||
+      (_state.patentNumbersText && _state.patentNumbersText.trim().length > 0) ||
+      (_state.manualContentText && _state.manualContentText.trim().length > 0);
   }
 
   return {
@@ -613,11 +632,14 @@ var ComparisonCore = (function () {
     setFetchedPatents: setFetchedPatents,
     getFetchedPatents: getFetchedPatents,
     getFetchErrors: getFetchErrors,
+    getFailedPatents: getFailedPatents,
+    setFailedPatents: setFailedPatents,
     setPatentNumbersText: setPatentNumbersText,
     getPatentNumbersText: getPatentNumbersText,
     setManualInput: setManualInput,
     getManualLabelText: getManualLabelText,
     getManualContentText: getManualContentText,
+    hasState: hasState,
     init: init,
     isIndependentClaim: isIndependentClaim
   };

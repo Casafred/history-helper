@@ -6174,21 +6174,52 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 10px;
+  font-weight: 600;
   color: var(--accent);
   text-decoration: none;
-  padding: 4px 12px;
+  padding: 1px 6px;
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
-  transition: all 0.2s;
+  transition: all 0.15s;
   cursor: pointer;
   line-height: 1.4;
-  height: 28px;
+  height: 20px;
   white-space: nowrap;
 }
 .pd-gp-link:hover {
   background: var(--accent);
+  color: #fff;
+}
+.pd-link-buttons {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.pd-gp-link.pd-ep-link {
+  color: #1565c0;
+  border-color: #1565c0;
+}
+.pd-gp-link.pd-ep-link:hover {
+  background: #1565c0;
+  color: #fff;
+}
+.pd-gp-link.pd-jp-link {
+  color: #e74c3c;
+  border-color: #e74c3c;
+}
+.pd-gp-link.pd-jp-link:hover {
+  background: #e74c3c;
+  color: #fff;
+}
+.pd-gp-link.pd-cn-link {
+  color: #dc2626;
+  border-color: #dc2626;
+}
+.pd-gp-link.pd-cn-link:hover {
+  background: #dc2626;
   color: #fff;
 }
 
