@@ -67,6 +67,8 @@ var ComparisonUI = (function () {
 
     html += '<div id="comparison-input-area"></div>';
 
+    html += renderHistoryPanel();
+
     html += '<div class="comparison-items-panel">';
     html += '  <div class="comparison-items-header">';
     html += '    <div>';
@@ -125,9 +127,6 @@ var ComparisonUI = (function () {
 
     html += '<div id="comparison-result-container"></div>';
 
-    // History panel
-    html += renderHistoryPanel();
-
     container.innerHTML = html;
     bindEvents(container);
 
@@ -135,24 +134,35 @@ var ComparisonUI = (function () {
     renderResultArea(document.getElementById('comparison-result-container'));
   }
 
+  var _latestHistoryId = null;
+
   function renderHistoryPanel() {
     var history = ComparisonCore.history.getAll();
+    var hasRecords = history.length > 0;
+    var isExpanded = hasRecords;
     var html = '<div class="comparison-history-panel">';
     html += '<div class="comparison-history-header" onclick="ComparisonUI.toggleHistoryList();">';
     html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
     html += '<span>比对历史记录 (' + history.length + ')</span>';
-    html += '<span class="comparison-history-toggle" id="cmp-history-toggle-text">展开</span>';
+    if (hasRecords) {
+      html += '<span style="font-size:11px;color:var(--accent);background:var(--accent-light, rgba(16,185,129,0.1));padding:1px 6px;border-radius:4px;margin-left:6px;">点击恢复查看</span>';
+    }
+    html += '<span class="comparison-history-toggle" id="cmp-history-toggle-text">' + (isExpanded ? '收起' : '展开') + '</span>';
     html += '</div>';
-    html += '<div id="cmp-history-list" style="display:none;">';
-    if (history.length === 0) {
+    html += '<div id="cmp-history-list" style="display:' + (isExpanded ? 'block' : 'none') + ';">';
+    if (!hasRecords) {
       html += '<div style="padding:12px;text-align:center;color:var(--text-secondary);font-size:12px;">暂无比对历史记录，完成一次比对后将自动保存</div>';
     } else {
-      history.forEach(function(entry) {
+      history.forEach(function(entry, idx) {
         var date = new Date(entry.timestamp || 0);
         var dateStr = (date.getMonth() + 1) + '/' + date.getDate() + ' ' + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
         var patentStr = (entry.patentNumbers || []).join(', ');
         if (patentStr.length > 40) patentStr = patentStr.substring(0, 40) + '...';
-        html += '<div class="comparison-history-item" data-history-id="' + entry.id + '">';
+        var isLatest = idx === 0;
+        html += '<div class="comparison-history-item' + (isLatest ? ' comparison-history-item-latest' : '') + '" data-history-id="' + entry.id + '">';
+        if (isLatest) {
+          html += '<span style="position:absolute;top:6px;right:6px;font-size:10px;color:#fff;background:var(--accent);padding:0px 6px;border-radius:3px;">最新</span>';
+        }
         html += '<div class="comparison-history-item-info">';
         html += '<span class="comparison-history-date">' + dateStr + '</span>';
         html += '<span class="comparison-history-patents">' + ComparisonUtils.escapeHtml(patentStr || '手动输入') + '</span>';
@@ -160,12 +170,12 @@ var ComparisonUI = (function () {
         html += '</div>';
         html += '<div class="comparison-history-item-actions">';
         html += '<button class="btn-secondary btn-small" data-action="view" data-id="' + entry.id + '">查看</button>';
-        html += '<button class="btn-secondary btn-small" data-action="restore" data-id="' + entry.id + '">恢复</button>';
-        html += '<button class="btn-secondary btn-small" data-action="delete" data-id="' + entry.id + '">删除</button>';
+        html += '<button class="btn-primary btn-small" data-action="restore" data-id="' + entry.id + '" style="font-size:11px;padding:2px 8px;">恢复</button>';
+        html += '<button class="btn-secondary btn-small" data-action="delete" data-id="' + entry.id + '" style="color:#ef4444;border-color:#fca5a5;">删除</button>';
         html += '</div>';
         html += '</div>';
       });
-      html += '<button class="btn-secondary btn-small" data-action="clear-all" style="margin-top:8px;">清空全部历史</button>';
+      html += '<button class="btn-secondary btn-small" data-action="clear-all" style="margin-top:8px;width:100%;justify-content:center;color:#ef4444;border-color:#fca5a5;">清空全部历史</button>';
     }
     html += '</div>';
     html += '</div>';
