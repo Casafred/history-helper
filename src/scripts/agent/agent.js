@@ -24,6 +24,9 @@ var PatentLensAgent = (function () {
 
     AgentBaseTools.registerAll();
     AgentPatentTools.registerAll();
+    if (typeof AgentComparisonTools !== "undefined") {
+      AgentComparisonTools.registerAll();
+    }
 
     if (opts.extraTools && Array.isArray(opts.extraTools)) {
       for (var i = 0; i < opts.extraTools.length; i++) {

@@ -1,0 +1,482 @@
+/* PatentLens Agent - Claim Comparison Tools */
+var AgentComparisonTools = (function () {
+  var BUS = AgentEventBus;
+  var EVT = BUS.EVENTS;
+
+  var _prepState = null;
+
+  function log(msg, isError) {
+    console.log("[AgentComparison] " + msg);
+  }
+
+  function normalizePatentNumber(input) {
+    if (!input) return "";
+    return String(input).trim().toUpperCase().replace(/[\s\/]/g, "");
+  }
+
+  function parsePatentNumbers(text) {
+    if (!text) return [];
+    return String(text)
+      .split(/[\n,;，；\s]+/)
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean)
+      .map(normalizePatentNumber)
+      .filter(Boolean);
+  }
+
+  function switchToComparisonMode() {
+    var cmpBtn = document.querySelector('.search-mode-btn[data-mode="comparison"]');
+    if (cmpBtn) {
+      cmpBtn.classList.add("active");
+      cmpBtn.click();
+    }
+    document.querySelectorAll(".search-mode-btn").forEach(function (b) {
+      if (b.dataset.mode !== "comparison") b.classList.remove("active");
+    });
+    return { ok: true };
+  }
+
+  function waitFor(conditionFn, timeoutMs, intervalMs) {
+    timeoutMs = timeoutMs || 60000;
+    intervalMs = intervalMs || 300;
+    return new Promise(function (resolve) {
+      var start = Date.now();
+      var timer = setInterval(function () {
+        try {
+          if (conditionFn()) {
+            clearInterval(timer);
+            resolve({ ok: true, elapsed: Date.now() - start });
+            return;
+          }
+        } catch (e) {}
+        if (Date.now() - start > timeoutMs) {
+          clearInterval(timer);
+          resolve({ ok: false, timedOut: true, elapsed: Date.now() - start });
+        }
+      }, intervalMs);
+    });
+  }
+
+  function waitMs(ms) {
+    return new Promise(function (r) { return setTimeout(r, ms); });
+  }
+
+  async function fetchPatentData(patentNum) {
+    if (typeof GPCache !== "undefined") {
+      var cached = GPCache.get(patentNum);
+      if (cached && cached.claims && cached.claims.length > 0) {
+        return { ok: true, fromCache: true, data: cached };
+      }
+    }
+    if (window._pdPatentCache && window._pdPatentCache[patentNum]) {
+      var sessionCached = window._pdPatentCache[patentNum];
+      if (sessionCached.claims && sessionCached.claims.length > 0) {
+        return { ok: true, fromCache: true, data: sessionCached };
+      }
+    }
+    if (typeof fetchPatentWithRetry === "function") {
+      try {
+        var data = await fetchPatentWithRetry(patentNum, 3);
+        if (data && data.claims && data.claims.length > 0) {
+          if (typeof GPCache !== "undefined") {
+            GPCache.set(patentNum, data);
+          }
+          return { ok: true, fromCache: false, data: data };
+        }
+        return { ok: false, error: "未找到权利要求数据" };
+      } catch (e) {
+        return { ok: false, error: e.message || String(e) };
+      }
+    }
+    return { ok: false, error: "专利查询功能不可用" };
+  }
+
+  function extractIndependentClaims(patentData, patentNum) {
+    var claims = patentData.claims || [];
+    var indeps = [];
+    claims.forEach(function (c, i) {
+      var isInd = false;
+      if (c.type === "independent") {
+        isInd = true;
+      } else if (c.type === "dependent") {
+        isInd = false;
+      } else if (c.dependent_on !== undefined && c.dependent_on !== null && c.dependent_on !== "" && c.dependent_on !== false) {
+        isInd = false;
+      } else if (typeof ComparisonCore !== "undefined" && ComparisonCore.isIndependentClaim) {
+        isInd = ComparisonCore.isIndependentClaim(c, i);
+      } else {
+        var text = (c.text || "").trim();
+        var head = text.substring(0, 300);
+        if (/^(根据|如|按照|依据).*(权利要求|权项)/i.test(head)) isInd = false;
+        else if (/前記|所述的/.test(text.substring(0, 80))) isInd = false;
+        else if (/\bclaim\s+\d+/i.test(head)) isInd = false;
+        else isInd = i === 0;
+      }
+      if (isInd) {
+        indeps.push({
+          num: c.num || (i + 1),
+          text: c.text || "",
+          textPreview: (c.text || "").substring(0, 200),
+          isIndependent: true,
+          idx: i
+        });
+      }
+    });
+    return indeps;
+  }
+
+  function registerAll() {
+
+    AgentTools.register({
+      name: "prepare_claim_comparison",
+      description: "准备权利要求比对：输入多个专利号（用逗号/换行/空格分隔，如 US14412875, CN101172339B, EP1234567B1），自动查询各专利并提取独立权利要求。查询完成后会返回各专利的独权列表供确认。仅用于权利要求比对场景，普通专利查询请用fetch_patent或fetch_patent_fulltext。",
+      parameters: {
+        type: "object",
+        properties: {
+          patent_numbers: {
+            type: "string",
+            description: "专利号列表，支持多个，用逗号、换行或空格分隔。例如：US14412875, CN101172339B, EP1234567B1",
+          },
+          anchor_patent: {
+            type: "string",
+            description: "（可选）指定作为锚点（比对基准）的专利号。如不指定，默认使用第一个专利的第一项独权作为锚点。",
+          },
+        },
+        required: ["patent_numbers"],
+      },
+      execute: async function (args) {
+        var numbers = parsePatentNumbers(args.patent_numbers);
+        if (numbers.length < 2) {
+          return { ok: false, error: "至少需要2个专利号进行比对，您输入了 " + numbers.length + " 个" };
+        }
+        if (numbers.length > 10) {
+          return { ok: false, error: "最多支持同时比对10个专利" };
+        }
+
+        switchToComparisonMode();
+        await waitMs(500);
+
+        if (typeof ComparisonCore !== "undefined") {
+          ComparisonCore.clearItems();
+          ComparisonCore.setInputMode("patent");
+        }
+        await waitMs(200);
+
+        var textarea = document.getElementById("cmp-patent-numbers");
+        if (textarea) {
+          textarea.value = numbers.join("\n");
+          if (typeof ComparisonCore !== "undefined") {
+            ComparisonCore.setPatentNumbersText(numbers.join("\n"));
+          }
+        }
+
+        var results = {};
+        var errors = [];
+        var allIndeps = {};
+
+        for (var i = 0; i < numbers.length; i++) {
+          var pn = numbers[i];
+          log("正在查询专利 " + (i + 1) + "/" + numbers.length + ": " + pn);
+          await waitMs(i === 0 ? 300 : 200);
+          var result = await fetchPatentData(pn);
+          if (result.ok) {
+            var indeps = extractIndependentClaims(result.data, pn);
+            results[pn] = {
+              patentNumber: result.data.patent_number || result.data.patentNumber || pn,
+              title: result.data.title || "",
+              applicant: result.data.assignee || result.data.applicant || "",
+              totalClaims: (result.data.claims || []).length,
+              independentClaims: indeps,
+              fromCache: result.fromCache
+            };
+            allIndeps[pn] = indeps;
+            log(pn + " 查询成功（" + (result.data.claims || []).length + "项权利要求，" + indeps.length + "项独权）");
+          } else {
+            errors.push(pn + ": " + result.error);
+            log(pn + " 查询失败: " + result.error, true);
+          }
+        }
+
+        var successCount = Object.keys(results).length;
+        if (successCount < 2) {
+          return {
+            ok: false,
+            error: "专利查询失败，成功获取到 " + successCount + " 个专利（至少需要2个）。错误: " + errors.join("; "),
+            successfulPatents: Object.keys(results),
+            errors: errors
+          };
+        }
+
+        var anchorPatent = normalizePatentNumber(args.anchor_patent) || numbers[0];
+        if (!results[anchorPatent]) {
+          anchorPatent = Object.keys(results)[0];
+        }
+
+        _prepState = {
+          patentNumbers: numbers,
+          results: results,
+          errors: errors,
+          anchorPatent: anchorPatent,
+          allIndeps: allIndeps
+        };
+
+        if (typeof ComparisonCore !== "undefined") {
+          var fetchedPatents = {};
+          Object.keys(results).forEach(function (key) {
+            var r = results[key];
+            var fullData = null;
+            if (typeof GPCache !== "undefined") fullData = GPCache.get(key);
+            if (!fullData && window._pdPatentCache) fullData = window._pdPatentCache[key];
+            if (fullData) {
+              fetchedPatents[key] = {
+                patentNumber: fullData.patent_number || fullData.patentNumber || key,
+                title: fullData.title || r.title,
+                applicant: fullData.assignee || fullData.applicant || r.applicant,
+                claims: fullData.claims || []
+              };
+            }
+          });
+          ComparisonCore.setFetchedPatents(fetchedPatents, errors, {});
+          ComparisonCore.setPatentNumbersText(numbers.join("\n"));
+        }
+
+        if (typeof ComparisonUI !== "undefined" && ComparisonUI.render) {
+          ComparisonUI.render();
+        }
+
+        var summary = {
+          ok: true,
+          action: "专利查询完成",
+          totalQueried: numbers.length,
+          successCount: successCount,
+          errorCount: errors.length,
+          errors: errors,
+          anchorPatent: anchorPatent,
+          patents: {}
+        };
+
+        Object.keys(results).forEach(function (pn) {
+          var r = results[pn];
+          summary.patents[pn] = {
+            title: r.title,
+            applicant: r.applicant,
+            totalClaims: r.totalClaims,
+            independentClaimCount: r.independentClaims.length,
+            independentClaims: r.independentClaims.map(function (c) {
+              return {
+                num: c.num,
+                preview: c.textPreview
+              };
+            })
+          };
+        });
+
+        summary.tip = "已完成 " + successCount + " 个专利的查询。默认将选择各专利的**所有独立权利要求**进行比对，以「" + anchorPatent + "」的权1作为锚点基准。如果需要调整选择（如只选权1、选择不同的锚点等），请告知；如确认使用默认设置，请回复「确认」或「开始比对」，我将自动执行比对并生成HTML报告供下载。";
+        summary.waitForConfirmation = true;
+        return summary;
+      },
+    });
+
+    AgentTools.register({
+      name: "execute_claim_comparison",
+      description: "确认选择后执行权利要求比对：在prepare_claim_comparison查询完成、用户确认独权选择后调用此工具。工具会自动将选中的独权加入比对列表、设置锚点、运行AI比对，并在完成后生成HTML报告供用户下载。",
+      parameters: {
+        type: "object",
+        properties: {
+          selected_claims: {
+            type: "string",
+            description: "（可选）指定要比对的权利要求，格式为「专利号:权项号」，多个用逗号分隔。例如：US14412875:1, CN101172339B:1, EP1234567B:1。留空或不填则默认选择所有专利的全部独立权利要求。",
+          },
+          anchor_claim: {
+            type: "string",
+            description: "（可选）指定锚点权利要求，格式为「专利号:权项号」。如不指定则使用第一个专利的权1。",
+          },
+          auto_export: {
+            type: "boolean",
+            description: "（可选）是否在比对完成后自动导出HTML报告，默认true。",
+          },
+        },
+      },
+      execute: async function (args) {
+        if (!_prepState) {
+          return { ok: false, error: "请先调用prepare_claim_comparison准备比对数据" };
+        }
+        var state = _prepState;
+        var results = state.results;
+        var anchorClaim = args.anchor_claim || "";
+        var autoExport = args.auto_export !== false;
+
+        var claimSelections = {};
+        var selectedClaimsInput = (args.selected_claims || "").trim();
+
+        Object.keys(results).forEach(function (pn) {
+          claimSelections[pn] = state.allIndeps[pn].map(function (c) { return c.num; });
+        });
+
+        if (selectedClaimsInput) {
+          claimSelections = {};
+          var pairs = selectedClaimsInput.split(/[,，;；\s]+/).filter(Boolean);
+          pairs.forEach(function (pair) {
+            var parts = pair.split(/[:：]+/);
+            var pn = normalizePatentNumber(parts[0]);
+            var cn = parts[1] ? parseInt(parts[1], 10) : 1;
+            if (!claimSelections[pn]) claimSelections[pn] = [];
+            if (claimSelections[pn].indexOf(cn) === -1) claimSelections[pn].push(cn);
+          });
+        }
+
+        var anchorPatent = state.anchorPatent;
+        var anchorNum = 1;
+        if (anchorClaim) {
+          var aParts = anchorClaim.split(/[:：]+/);
+          anchorPatent = normalizePatentNumber(aParts[0]) || state.anchorPatent;
+          anchorNum = aParts[1] ? parseInt(aParts[1], 10) : 1;
+        }
+
+        if (typeof ComparisonCore === "undefined") {
+          return { ok: false, error: "智能比对模块未加载" };
+        }
+
+        ComparisonCore.clearItems();
+
+        var itemsToAdd = [];
+        var anchorId = null;
+
+        Object.keys(claimSelections).forEach(function (pn) {
+          var patentData = null;
+          if (typeof GPCache !== "undefined") patentData = GPCache.get(pn);
+          if (!patentData && window._pdPatentCache) patentData = window._pdPatentCache[pn];
+          if (!patentData || !patentData.claims) return;
+
+          var selectedNums = claimSelections[pn];
+          selectedNums.forEach(function (cnum) {
+            var claim = null;
+            var claimIdx = -1;
+            for (var ci = 0; ci < patentData.claims.length; ci++) {
+              var c = patentData.claims[ci];
+              var cn = c.num || (ci + 1);
+              if (cn == cnum) {
+                claim = c;
+                claimIdx = ci;
+                break;
+              }
+            }
+            if (!claim) return;
+            var label = pn + " 权" + cnum;
+            var itemId = "cmp_" + pn + "_" + cnum;
+            var item = {
+              id: itemId,
+              label: label,
+              source: "patent",
+              patentNumber: pn,
+              claimNum: cnum,
+              originalText: claim.text || "",
+              isSelected: true
+            };
+            itemsToAdd.push(item);
+            if (pn === anchorPatent && cnum == anchorNum && !anchorId) {
+              anchorId = itemId;
+            }
+          });
+        });
+
+        if (itemsToAdd.length < 2) {
+          return { ok: false, error: "可用于比对的权利要求不足2项，请检查选择" };
+        }
+        if (!anchorId) anchorId = itemsToAdd[0].id;
+
+        log("已选择 " + itemsToAdd.length + " 项权利要求，锚点: " + (itemsToAdd.find(function(i){return i.id===anchorId;})||{}).label);
+
+        itemsToAdd.forEach(function (item) {
+          ComparisonCore.addItem(item);
+        });
+        ComparisonCore.setAnchor(anchorId);
+        ComparisonCore.selectAll();
+
+        await waitMs(300);
+        if (typeof ComparisonUI !== "undefined" && ComparisonUI.render) {
+          ComparisonUI.render();
+        }
+        await waitMs(500);
+
+        log("开始AI比对分析，请稍候...");
+
+        var result = null;
+        try {
+          result = await ComparisonCore.runComparison();
+        } catch (e) {
+          return { ok: false, error: "比对失败: " + (e.message || String(e)) };
+        }
+
+        if (!result) {
+          return { ok: false, error: "比对未完成（可能被用户中止）" };
+        }
+
+        if (autoExport && typeof ComparisonReport !== "undefined" && ComparisonReport.exportHtml) {
+          await waitMs(500);
+          try {
+            ComparisonReport.exportHtml();
+            log("HTML报告已触发下载");
+          } catch (e) {
+            log("报告导出失败: " + e.message, true);
+          }
+        }
+
+        if (typeof ComparisonUI !== "undefined" && ComparisonUI.render) {
+          ComparisonUI.render();
+        }
+
+        _prepState = null;
+
+        return {
+          ok: true,
+          action: "权利要求比对完成",
+          itemCount: itemsToAdd.length,
+          anchor: (itemsToAdd.find(function(i){return i.id===anchorId;})||{}).label,
+          markdownLength: (result.markdownContent || "").length,
+          htmlReportExported: autoExport,
+          tip: "比对分析已完成，结果已显示在智能比对页面中。HTML报告已开始下载，您也可以在页面上点击「导出HTML报告」按钮重新导出。报告包含AI语义相似度分析、异同点梳理和原文对照附录。",
+          resultReady: true
+        };
+      },
+    });
+
+    AgentTools.register({
+      name: "quick_compare_claims",
+      description: "快捷权利要求比对：一站式完成多专利独权比对。输入专利号后自动查询→自动选择所有独权→以第一个专利为锚点→直接运行AI比对→生成并下载HTML报告。无需中间确认步骤，适用于用户明确说「直接比对」「帮我对比这几个专利」等快速场景。如果用户说要先看独权列表再确认，请使用prepare_claim_comparison。",
+      parameters: {
+        type: "object",
+        properties: {
+          patent_numbers: {
+            type: "string",
+            description: "专利号列表，多个用逗号/换行/空格分隔，如 US14412875, CN101172339B, EP1234567B1",
+          },
+          anchor_patent: {
+            type: "string",
+            description: "（可选）指定锚点专利号，默认使用第一个专利",
+          },
+        },
+        required: ["patent_numbers"],
+      },
+      execute: async function (args) {
+        var prepResult = await AgentTools.execute("prepare_claim_comparison", {
+          patent_numbers: args.patent_numbers,
+          anchor_patent: args.anchor_patent
+        }, {});
+
+        if (!prepResult.ok) {
+          return prepResult;
+        }
+
+        var execResult = await AgentTools.execute("execute_claim_comparison", {
+          anchor_claim: prepResult.anchorPatent ? prepResult.anchorPatent + ":1" : "",
+          auto_export: true
+        }, {});
+
+        return execResult;
+      },
+    });
+  }
+
+  return { registerAll: registerAll };
+})();
