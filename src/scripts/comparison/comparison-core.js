@@ -15,6 +15,7 @@ var ComparisonCore = (function () {
     abortController: null,
     mode: 'manual',
     inputMode: 'manual',
+    activeTab: 'prepare',
     pendingPatentClaims: null,
     loadedPatents: {},
     similarityMatrix: null,
@@ -326,6 +327,7 @@ var ComparisonCore = (function () {
     _state.failedPatents = {};
     _state.manualLabelText = '';
     _state.manualContentText = '';
+    _state.activeTab = 'prepare';
     emit('itemsChanged', getItems());
     emit('anchorChanged', null);
     emit('resultCleared', null);
@@ -351,6 +353,16 @@ var ComparisonCore = (function () {
   function setInputMode(inputMode) {
     _state.inputMode = inputMode;
     emit('inputModeChanged', inputMode);
+  }
+
+  function setActiveTab(tab) {
+    if (['prepare', 'preview', 'result'].indexOf(tab) === -1) return;
+    _state.activeTab = tab;
+    emit('activeTabChanged', tab);
+  }
+
+  function getActiveTab() {
+    return _state.activeTab;
   }
 
   function abort() {
@@ -474,6 +486,9 @@ var ComparisonCore = (function () {
     if (result && result.anchor) {
       _state.anchorId = result.anchor.id;
     }
+    if (result) {
+      _state.activeTab = 'result';
+    }
     emit('resultReady', result);
   }
 
@@ -552,6 +567,7 @@ var ComparisonCore = (function () {
     _state.patentNumbersText = '';
     _state.manualLabelText = '';
     _state.manualContentText = '';
+    _state.activeTab = 'prepare';
     emit('itemsChanged', getItems());
     emit('anchorChanged', null);
     emit('resultCleared', null);
@@ -737,6 +753,8 @@ var ComparisonCore = (function () {
     moveItem: moveItem,
     setMode: setMode,
     setInputMode: setInputMode,
+    setActiveTab: setActiveTab,
+    getActiveTab: getActiveTab,
     runComparison: runComparison,
     abort: abort,
     getResult: getResult,

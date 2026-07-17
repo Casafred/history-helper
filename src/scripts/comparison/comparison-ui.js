@@ -44,8 +44,18 @@ var ComparisonUI = (function () {
     var isLoading = ComparisonCore.isLoading();
     var result = ComparisonCore.getResult();
     var inputMode = ComparisonCore.getState().inputMode;
+    var activeTab = ComparisonCore.getActiveTab();
+
+    var canPreview = selected.length >= 2 && anchor && !isLoading;
+    if (result && activeTab !== 'result') {
+      activeTab = 'result';
+    }
+    if (!isLoading && !result && activeTab === 'result') {
+      activeTab = canPreview ? 'preview' : 'prepare';
+    }
 
     var html = '';
+
     html += '<div class="comparison-header">';
     html += '  <div class="comparison-title">';
     html += '    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/><path d="M9 9l6 6"/><path d="M15 9l-6 6"/></svg>';
@@ -55,16 +65,61 @@ var ComparisonUI = (function () {
     html += '  <button class="btn-secondary" onclick="ComparisonCore.clearItems();ComparisonUI.render();">清空全部</button>';
     html += '</div>';
 
-    html += '<div class="comparison-usage-hint">';
-    html += '  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
-    html += '  <span>点击任意文本项的 <strong>⭐ 设为锚点</strong> 按钮将其作为基准，其他文本将逐一与锚点对比。支持相似度矩阵和原文并排对照。</span>';
+    html += '<div class="cmp-step-tabs">';
+    html += renderStepTab('prepare', '①', '准备数据', '添加文本或查询专利权利要求', activeTab === 'prepare', true);
+    html += '<div class="cmp-step-connector' + (canPreview || activeTab !== 'prepare' ? ' done' : '') + '"></div>';
+    html += renderStepTab('preview', '②', '预览确认', '确认锚点与并排对照', activeTab === 'preview', canPreview || activeTab === 'preview' || activeTab === 'result');
+    html += '<div class="cmp-step-connector' + (result ? ' done' : '') + '"></div>';
+    html += renderStepTab('result', '③', '分析结果', 'AI比对分析报告', activeTab === 'result', !!result);
     html += '</div>';
+
+    html += '<div class="cmp-tab-content">';
+
+    if (activeTab === 'prepare') {
+      html += renderPrepareTab(inputMode, items, selected, anchor);
+    } else if (activeTab === 'preview') {
+      html += renderPreviewTab(selected, anchor);
+    } else if (activeTab === 'result') {
+      html += '<div id="comparison-result-container" style="min-height:300px;"></div>';
+    }
+
+    html += '</div>';
+
+    html += renderActionBar(activeTab, isLoading, selected, anchor, result, canPreview);
+
+    container.innerHTML = html;
+    bindEvents(container);
+
+    if (activeTab === 'prepare') {
+      ComparisonInput.renderInputArea(document.getElementById('comparison-input-area'), inputMode);
+    }
+    if (activeTab === 'result') {
+      renderResultArea(document.getElementById('comparison-result-container'));
+    }
+  }
+
+  function renderStepTab(tabId, num, title, subtitle, isActive, isEnabled) {
+    var cls = 'cmp-step-tab';
+    if (isActive) cls += ' active';
+    if (!isEnabled) cls += ' disabled';
+    var onclick = isEnabled ? ' onclick="ComparisonCore.setActiveTab(\'' + tabId + '\');ComparisonUI.render();"' : '';
+    var html = '<div class="' + cls + '" data-tab="' + tabId + '"' + onclick + '>';
+    html += '  <div class="cmp-step-num">' + num + '</div>';
+    html += '  <div class="cmp-step-text">';
+    html += '    <div class="cmp-step-title">' + title + '</div>';
+    html += '    <div class="cmp-step-subtitle">' + subtitle + '</div>';
+    html += '  </div>';
+    html += '</div>';
+    return html;
+  }
+
+  function renderPrepareTab(inputMode, items, selected, anchor) {
+    var html = '';
 
     html += '<div class="comparison-input-tabs">';
     html += '  <button class="comparison-input-tab' + (inputMode === 'manual' ? ' active' : '') + '" data-input-mode="manual">手动输入文本</button>';
     html += '  <button class="comparison-input-tab' + (inputMode === 'patent' ? ' active' : '') + '" data-input-mode="patent">专利号查询</button>';
     html += '</div>';
-
     html += '<div id="comparison-input-area"></div>';
 
     html += renderHistoryPanel();
@@ -83,12 +138,12 @@ var ComparisonUI = (function () {
     }
     html += '    </div>';
     html += '  </div>';
-    html += '  <div class="comparison-items-list">';
+    html += '  <div class="comparison-items-list" style="max-height:400px;overflow-y:auto;">';
 
     if (items.length === 0) {
       html += '    <div class="comparison-empty-list">';
       html += '      <p>暂无待比对项</p>';
-      html += '      <p style="font-size:12px;margin-top:8px;">请通过上方"手动输入文本"添加，或使用"专利号查询"导入权利要求</p>';
+      html += '      <p style="font-size:12px;margin-top:8px;">通过上方"手动输入文本"添加，或使用"专利号查询"导入权利要求。至少需要2项（含锚点）才能开始比对。</p>';
       html += '    </div>';
     } else {
       items.forEach(function(item, idx) {
@@ -99,39 +154,71 @@ var ComparisonUI = (function () {
     html += '  </div>';
     html += '</div>';
 
-    if (selected.length >= 2 && anchor && !isLoading && !result) {
-      html += renderSimilarityMatrix(selected, anchor);
-    }
+    return html;
+  }
 
-    if (selected.length >= 2 && anchor && !isLoading && !result) {
-      html += renderSideBySide(selected, anchor);
-    }
+  function renderPreviewTab(selected, anchor) {
+    var html = '';
 
-    html += '<div class="comparison-actions-bar">';
-    if (isLoading) {
-      html += '  <button class="btn-danger comparison-abort-btn" onclick="ComparisonCore.abort()">中止比对</button>';
-    } else {
-      var canRun = selected.length >= 2 && anchor;
-      var hint = '';
-      if (!anchor) {
-        hint = '请先选择一个文本作为锚点（点击 ⭐ 按钮）';
-      } else if (selected.length < 2) {
-        hint = '请至少选择2项进行比对（含锚点）';
-      } else {
-        hint = '锚点: ' + anchor.label + '，将与另外 ' + (selected.length - 1) + ' 项比对';
-      }
-      html += '  <button class="btn-primary comparison-run-btn" onclick="ComparisonUI.runComparison()" ' + (canRun ? '' : 'disabled') + '>开始锚定比对</button>';
-      html += '  <span class="comparison-hint">' + hint + '</span>';
-    }
+    html += '<div class="cmp-preview-summary">';
+    html += '  <div class="cmp-preview-summary-item">';
+    html += '    <svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px;color:var(--accent);"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+    html += '    <span><strong>锚点：</strong>' + ComparisonUtils.escapeHtml(anchor ? anchor.label : '未设置') + '</span>';
+    html += '  </div>';
+    html += '  <div class="cmp-preview-summary-item">';
+    html += '    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;color:var(--accent);"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>';
+    html += '    <span>共 <strong>' + selected.length + '</strong> 项待比对（含锚点），将对比 <strong>' + (selected.length - 1) + '</strong> 组</span>';
+    html += '  </div>';
     html += '</div>';
 
-    html += '<div id="comparison-result-container"></div>';
+    html += renderSimilarityMatrix(selected, anchor);
+    html += renderSideBySide(selected, anchor);
 
-    container.innerHTML = html;
-    bindEvents(container);
+    return html;
+  }
 
-    ComparisonInput.renderInputArea(document.getElementById('comparison-input-area'), inputMode);
-    renderResultArea(document.getElementById('comparison-result-container'));
+  function renderActionBar(activeTab, isLoading, selected, anchor, result, canPreview) {
+    var html = '<div class="cmp-action-bar">';
+
+    if (isLoading) {
+      html += '  <div class="cmp-loading-indicator">';
+      html += '    <div class="cmp-spinner"></div>';
+      html += '    <span>AI正在分析比对，请稍候...</span>';
+      html += '  </div>';
+      html += '  <button class="btn-danger" onclick="ComparisonCore.abort()">中止比对</button>';
+    } else if (activeTab === 'prepare') {
+      var hint = '';
+      var canGoNext = selected.length >= 2 && anchor;
+      if (!anchor) {
+        hint = '请先点击 ⭐ 按钮选择一个文本作为锚点（比对基准）';
+      } else if (selected.length < 2) {
+        hint = '请至少勾选2项（含锚点）才能进入预览';
+      } else {
+        hint = '锚点: ' + ComparisonUtils.truncateText(anchor.label, 30) + '，已选 ' + selected.length + ' 项';
+      }
+      html += '  <span class="comparison-hint">' + hint + '</span>';
+      html += '  <button class="btn-primary" onclick="ComparisonCore.setActiveTab(\'preview\');ComparisonUI.render();" ' + (canGoNext ? '' : 'disabled') + '>下一步：预览确认 →</button>';
+    } else if (activeTab === 'preview') {
+      html += '  <button class="btn-secondary" onclick="ComparisonCore.setActiveTab(\'prepare\');ComparisonUI.render();">← 返回修改</button>';
+      html += '  <span style="flex:1;"></span>';
+      html += '  <span class="comparison-hint">确认锚点和比对项无误后，开始AI分析</span>';
+      html += '  <button class="btn-primary comparison-run-btn" onclick="ComparisonUI.runComparison();">开始锚定比对</button>';
+    } else if (activeTab === 'result') {
+      html += '  <button class="btn-secondary" onclick="ComparisonCore.setActiveTab(\'prepare\');ComparisonUI.render();">← 返回准备</button>';
+      html += '  <span style="flex:1;"></span>';
+      if (result && result.markdownContent) {
+        html += '  <button class="btn-secondary" onclick="if(confirm(\'确定清空当前结果重新比对吗？\')){ComparisonCore.clearItems();ComparisonUI.render();}">重新比对</button>';
+        html += '  <button class="btn-primary" onclick="ComparisonReport.exportHtml();">';
+        html += '    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:4px;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+        html += '    导出HTML报告';
+        html += '  </button>';
+      } else {
+        html += '  <button class="btn-primary" onclick="ComparisonUI.runComparison();">重新开始比对</button>';
+      }
+    }
+
+    html += '</div>';
+    return html;
   }
 
   var _latestHistoryId = null;
@@ -634,6 +721,7 @@ var ComparisonUI = (function () {
 
   function runComparison() {
     _streamContent = '';
+    ComparisonCore.setActiveTab('result');
     ComparisonCore.runComparison().then(function() {
       render();
     }).catch(function(err) {
