@@ -635,12 +635,19 @@ var ComparisonCore = (function () {
     },
 
     save: function(result, patentNumbersText, fetchedPatents) {
-      if (!result) return null;
+      if (!result) {
+        console.warn('[ComparisonHistory] save called with no result');
+        return null;
+      }
+      console.log('[ComparisonHistory] saving comparison result:', result.sessionId, 'items:', (result.items||[]).length);
       var patentNums = [];
       if (patentNumbersText && patentNumbersText.trim()) {
-        patentNums = patentNumbersText.trim().split(/\n/).map(function(s) {
+        patentNums = patentNumbersText.trim().split(/[\n,;]+/).map(function(s) {
           return s.trim();
         }).filter(Boolean);
+      }
+      if (patentNums.length === 0 && fetchedPatents) {
+        patentNums = Object.keys(fetchedPatents);
       }
       var claimsSnapshot = {};
       if (fetchedPatents) {
@@ -662,12 +669,22 @@ var ComparisonCore = (function () {
         timestamp: result.timestamp || Date.now(),
         patentNumbers: patentNums,
         anchorLabel: anchor.label || '',
+        anchorId: anchor.id || '',
+        patentNumbersText: patentNumbersText || '',
         itemCount: (result.items || []).length,
         markdownContent: result.markdownContent || '',
         htmlContent: result.htmlContent || '',
         claimsSnapshot: claimsSnapshot,
         itemsSummary: (result.items || []).map(function(i) {
-          return { label: i.label, patentNumber: i.patentNumber || '', source: i.source || '' };
+          return {
+            id: i.id,
+            label: i.label,
+            patentNumber: i.patentNumber || '',
+            source: i.source || '',
+            claimNum: i.claimNum || '',
+            originalText: i.originalText || '',
+            isSelected: i.isSelected !== false
+          };
         })
       };
       var list = this._getAll();
@@ -678,6 +695,7 @@ var ComparisonCore = (function () {
         list = list.slice(0, this.MAX_ENTRIES);
       }
       this._save(list);
+      console.log('[ComparisonHistory] saved successfully, total entries:', list.length);
       return entry;
     },
 

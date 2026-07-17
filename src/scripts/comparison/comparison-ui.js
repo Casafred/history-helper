@@ -137,36 +137,52 @@ var ComparisonUI = (function () {
 
   function renderHistoryPanel() {
     var history = ComparisonCore.history.getAll();
-    if (history.length === 0) return '';
     var html = '<div class="comparison-history-panel">';
-    html += '<div class="comparison-history-header" onclick="var d=document.getElementById(\'cmp-history-list\');d.style.display=d.style.display===\'none\'?\'block\':\'none\';">';
+    html += '<div class="comparison-history-header" onclick="ComparisonUI.toggleHistoryList();">';
     html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
     html += '<span>比对历史记录 (' + history.length + ')</span>';
-    html += '<span class="comparison-history-toggle">展开/收起</span>';
+    html += '<span class="comparison-history-toggle" id="cmp-history-toggle-text">展开</span>';
     html += '</div>';
     html += '<div id="cmp-history-list" style="display:none;">';
-    history.forEach(function(entry) {
-      var date = new Date(entry.timestamp || 0);
-      var dateStr = (date.getMonth() + 1) + '/' + date.getDate() + ' ' + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
-      var patentStr = (entry.patentNumbers || []).join(', ');
-      if (patentStr.length > 40) patentStr = patentStr.substring(0, 40) + '...';
-      html += '<div class="comparison-history-item" data-history-id="' + entry.id + '">';
-      html += '<div class="comparison-history-item-info">';
-      html += '<span class="comparison-history-date">' + dateStr + '</span>';
-      html += '<span class="comparison-history-patents">' + ComparisonUtils.escapeHtml(patentStr) + '</span>';
-      html += '<span class="comparison-history-meta">' + (entry.itemCount || 0) + '项' + (entry.anchorLabel ? ' | 锚点: ' + ComparisonUtils.escapeHtml(entry.anchorLabel) : '') + '</span>';
-      html += '</div>';
-      html += '<div class="comparison-history-item-actions">';
-      html += '<button class="btn-secondary btn-small" data-action="view" data-id="' + entry.id + '">查看</button>';
-      html += '<button class="btn-secondary btn-small" data-action="restore" data-id="' + entry.id + '">恢复</button>';
-      html += '<button class="btn-secondary btn-small" data-action="delete" data-id="' + entry.id + '">删除</button>';
-      html += '</div>';
-      html += '</div>';
-    });
-    html += '<button class="btn-secondary btn-small" data-action="clear-all" style="margin-top:8px;">清空全部历史</button>';
+    if (history.length === 0) {
+      html += '<div style="padding:12px;text-align:center;color:var(--text-secondary);font-size:12px;">暂无比对历史记录，完成一次比对后将自动保存</div>';
+    } else {
+      history.forEach(function(entry) {
+        var date = new Date(entry.timestamp || 0);
+        var dateStr = (date.getMonth() + 1) + '/' + date.getDate() + ' ' + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+        var patentStr = (entry.patentNumbers || []).join(', ');
+        if (patentStr.length > 40) patentStr = patentStr.substring(0, 40) + '...';
+        html += '<div class="comparison-history-item" data-history-id="' + entry.id + '">';
+        html += '<div class="comparison-history-item-info">';
+        html += '<span class="comparison-history-date">' + dateStr + '</span>';
+        html += '<span class="comparison-history-patents">' + ComparisonUtils.escapeHtml(patentStr || '手动输入') + '</span>';
+        html += '<span class="comparison-history-meta">' + (entry.itemCount || 0) + '项' + (entry.anchorLabel ? ' | 锚点: ' + ComparisonUtils.escapeHtml(entry.anchorLabel) : '') + '</span>';
+        html += '</div>';
+        html += '<div class="comparison-history-item-actions">';
+        html += '<button class="btn-secondary btn-small" data-action="view" data-id="' + entry.id + '">查看</button>';
+        html += '<button class="btn-secondary btn-small" data-action="restore" data-id="' + entry.id + '">恢复</button>';
+        html += '<button class="btn-secondary btn-small" data-action="delete" data-id="' + entry.id + '">删除</button>';
+        html += '</div>';
+        html += '</div>';
+      });
+      html += '<button class="btn-secondary btn-small" data-action="clear-all" style="margin-top:8px;">清空全部历史</button>';
+    }
     html += '</div>';
     html += '</div>';
     return html;
+  }
+
+  function toggleHistoryList() {
+    var list = document.getElementById('cmp-history-list');
+    var toggleText = document.getElementById('cmp-history-toggle-text');
+    if (!list) return;
+    if (list.style.display === 'none') {
+      list.style.display = 'block';
+      if (toggleText) toggleText.textContent = '收起';
+    } else {
+      list.style.display = 'none';
+      if (toggleText) toggleText.textContent = '展开';
+    }
   }
 
   function renderItem(item, idx, anchor) {
@@ -379,25 +395,33 @@ var ComparisonUI = (function () {
   function _restoreHistory(id) {
     var entry = ComparisonCore.history.get(id);
     if (!entry) return;
-    // Clear current state
+    console.log('[ComparisonHistory] restoring:', entry.id);
     ComparisonCore.clearItems();
-    // Restore items from summary
+    var restoredItems = [];
+    var anchorItem = null;
     if (entry.itemsSummary) {
-      entry.itemsSummary.forEach(function(i) {
-        ComparisonCore.addItem({
+      entry.itemsSummary.forEach(function(i, idx) {
+        var item = {
+          id: i.id || ('restored_' + idx + '_' + Date.now()),
           label: i.label,
           source: i.source || 'manual',
           patentNumber: i.patentNumber || '',
-          originalText: '',
-          isSelected: true
-        });
+          claimNum: i.claimNum || '',
+          originalText: i.originalText || '',
+          isSelected: i.isSelected !== false
+        };
+        ComparisonCore.addItem(item);
+        restoredItems.push(item);
+        if (entry.anchorId && entry.anchorId === i.id) {
+          anchorItem = item;
+        }
       });
     }
-    // Restore patent numbers text
-    if (entry.patentNumbers && entry.patentNumbers.length > 0) {
+    if (entry.patentNumbersText) {
+      ComparisonCore.setPatentNumbersText(entry.patentNumbersText);
+    } else if (entry.patentNumbers && entry.patentNumbers.length > 0) {
       ComparisonCore.setPatentNumbersText(entry.patentNumbers.join('\n'));
     }
-    // Restore fetched patents from snapshot
     if (entry.claimsSnapshot && Object.keys(entry.claimsSnapshot).length > 0) {
       var fetched = {};
       Object.keys(entry.claimsSnapshot).forEach(function(key) {
@@ -411,22 +435,40 @@ var ComparisonUI = (function () {
       });
       ComparisonCore.setFetchedPatents(fetched, [], {});
     }
-    // Restore result
+    if (restoredItems.length > 0) {
+      if (!anchorItem) anchorItem = restoredItems[0];
+      ComparisonCore.setAnchor(anchorItem.id);
+    }
     if (entry.markdownContent || entry.htmlContent) {
+      var resultItems = restoredItems.length > 0 ? restoredItems : (entry.itemsSummary || []).map(function(i, idx) {
+        return {
+          id: i.id || ('restored_' + idx + '_' + Date.now()),
+          label: i.label,
+          patentNumber: i.patentNumber,
+          source: i.source,
+          claimNum: i.claimNum || '',
+          originalText: i.originalText || '',
+          isSelected: true
+        };
+      });
+      var resultAnchor = anchorItem || { label: entry.anchorLabel || '', id: 'restored_anchor', isSelected: true, originalText: '' };
       ComparisonCore.setResult({
         sessionId: entry.id,
         timestamp: entry.timestamp,
+        anchor: resultAnchor,
+        items: resultItems,
+        others: resultItems.filter(function(i) { return i.id !== resultAnchor.id; }),
         markdownContent: entry.markdownContent || '',
         htmlContent: entry.htmlContent || '',
-        items: (entry.itemsSummary || []).map(function(i) {
-          return { label: i.label, patentNumber: i.patentNumber, source: i.source, id: 'restored_' + Math.random().toString(36).substr(2, 9), isSelected: true, originalText: '' };
-        }),
-        anchor: { label: entry.anchorLabel || '', id: 'restored_anchor', isSelected: true, originalText: '' },
-        others: [],
         similarityMatrix: null,
         aiSimilarityScores: null,
         aiSimilarityMatrix: null
       });
+    }
+    if (entry.patentNumbersText || (entry.claimsSnapshot && Object.keys(entry.claimsSnapshot).length > 0)) {
+      ComparisonCore.setInputMode('patent');
+    } else {
+      ComparisonCore.setInputMode('manual');
     }
     render();
   }
@@ -641,6 +683,7 @@ var ComparisonUI = (function () {
     runComparison: runComparison,
     previewItem: previewItem,
     restoreHistory: _restoreHistory,
+    toggleHistoryList: toggleHistoryList,
     init: init
   };
 })();
