@@ -24,6 +24,10 @@ var AgentUI = (function () {
   var currentStepsList = null;
   var stepsCount = 0;
   var completedSteps = 0;
+  var isBallHidden = false;
+  var restoreBtn = null;
+
+  var HIDE_KEY = "patentlens_agent_ball_hidden";
 
   function renderMarkdown(text) {
     if (typeof marked !== "undefined") {
@@ -241,17 +245,43 @@ var AgentUI = (function () {
   }
 
   function createPanel() {
+    try { isBallHidden = localStorage.getItem(HIDE_KEY) === "1"; } catch(e) { isBallHidden = false; }
+
     toggleBtn = document.createElement("button");
     toggleBtn.className = "agent-toggle-btn";
-    toggleBtn.title = "PatentLens 智能助手 (拖拽可移动位置)";
-    toggleBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>';
+    toggleBtn.title = "PatentLens 智能助手 (拖拽移动位置，点击 × 隐藏)";
+    toggleBtn.innerHTML =
+      '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>' +
+      '<span class="agent-toggle-hide" title="隐藏悬浮球">×</span>';
     toggleBtn.addEventListener("click", function(e) {
+      if (e.target.classList.contains("agent-toggle-hide")) return;
       if (!toggleBtn._dragged) {
         togglePanel();
       }
       toggleBtn._dragged = false;
     });
+    var hideBtn = toggleBtn.querySelector(".agent-toggle-hide");
+    if (hideBtn) {
+      hideBtn.addEventListener("click", function(e) {
+        e.stopPropagation();
+        hideBall();
+      });
+    }
     document.body.appendChild(toggleBtn);
+
+    restoreBtn = document.createElement("button");
+    restoreBtn.className = "agent-restore-btn";
+    restoreBtn.title = "显示 AI 助手 (Ctrl+Shift+A)";
+    restoreBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>';
+    restoreBtn.addEventListener("click", showBall);
+    document.body.appendChild(restoreBtn);
+
+    if (isBallHidden) {
+      toggleBtn.style.display = "none";
+      restoreBtn.style.display = "flex";
+    } else {
+      restoreBtn.style.display = "none";
+    }
 
     panelEl = document.createElement("div");
     panelEl.className = "agent-panel";
@@ -1054,9 +1084,34 @@ var AgentUI = (function () {
     return d.innerHTML;
   }
 
+  function hideBall() {
+    isBallHidden = true;
+    if (toggleBtn) toggleBtn.style.display = "none";
+    if (panelEl) panelEl.classList.remove("open");
+    if (restoreBtn) restoreBtn.style.display = "flex";
+    try { localStorage.setItem(HIDE_KEY, "1"); } catch(e) {}
+  }
+
+  function showBall() {
+    isBallHidden = false;
+    if (toggleBtn) toggleBtn.style.display = "";
+    if (restoreBtn) restoreBtn.style.display = "none";
+    try { localStorage.setItem(HIDE_KEY, "0"); } catch(e) {}
+  }
+
+  function toggleBallVisibility() {
+    if (isBallHidden) { showBall(); } else { hideBall(); }
+  }
+
   function init() {
     if (panelEl) return;
     createPanel();
+    document.addEventListener("keydown", function(e) {
+      if (e.ctrlKey && e.shiftKey && (e.key === "A" || e.key === "a")) {
+        e.preventDefault();
+        toggleBallVisibility();
+      }
+    });
   }
 
   return {
@@ -1064,5 +1119,7 @@ var AgentUI = (function () {
     openPanel: openPanel,
     closePanel: closePanel,
     togglePanel: togglePanel,
+    showBall: showBall,
+    hideBall: hideBall,
   };
 })();

@@ -42,7 +42,16 @@ var AgentLLM = (function () {
       start = messages.length - windowSize;
     }
     for (var i = start; i < messages.length; i++) {
-      msgs.push(messages[i]);
+      var msg = messages[i];
+      if (msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length === 0) {
+        var cleaned = {};
+        for (var k in msg) {
+          if (k !== "tool_calls") cleaned[k] = msg[k];
+        }
+        msgs.push(cleaned);
+      } else {
+        msgs.push(msg);
+      }
     }
     return msgs;
   }

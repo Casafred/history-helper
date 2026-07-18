@@ -173,7 +173,7 @@ var AgentPatentTools = (function () {
 
         if (typeof doSearch === "function") {
           try {
-            await doSearch(normalizedPn);
+            await doSearch(normalizedPn, { silent: true });
           } catch (e) {
             return { error: "查询失败: " + e.message };
           }
@@ -751,7 +751,7 @@ var AgentPatentTools = (function () {
         patentInput.value = normalizedPn;
         if (typeof doSearch === "function") {
           try {
-            await doSearch(normalizedPn);
+            await doSearch(normalizedPn, { silent: true });
           } catch (e) {
             return { error: "查询失败: " + e.message };
           }

@@ -208,7 +208,7 @@ var AgentCore = (function () {
 
         console.log("[AgentCore] iteration", iteration);
 
-        var assistantMsg = { role: "assistant", content: "", tool_calls: [] };
+        var assistantMsg = { role: "assistant", content: "" };
         var reasoningBuf = "";
         var contentBuf = "";
         var gotToolCall = false;
