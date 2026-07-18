@@ -1454,7 +1454,7 @@ searchBtn.addEventListener("click", async () => {
   }
   if (cachedMeta) {
     const cachedEntry = await PatentCache.getFullAsync(cachedKey);
-    if (cachedEntry && cachedEntry.kanbanState && (cachedEntry.kanbanState.analysis || Object.keys(cachedEntry.kanbanState.extractions || {}).length > 0)) {
+    if (cachedEntry && cachedEntry.kanbanState) {
       const cacheAge = cachedEntry.timestamp ? timeAgo(cachedEntry.timestamp) : "";
       const useCache = confirm("发现本地缓存" + (cacheAge ? "（" + cacheAge + "保存）" : "") + "。\n\n点击【确定】使用缓存（快速）\n点击【取消】从网络重新加载最新数据");
       if (useCache) {
@@ -4928,6 +4928,15 @@ async function doSearch(input, options) {
       applicantName: result.applicantName || "",
       title: patentTitle,
     });
+    // Save full state to cache so future searches can restore from cache
+    // and history items show as cached
+    try {
+      const entry = PatentCache.captureCurrentState();
+      if (entry) {
+        PatentCache.save(entry.patentNumber, entry);
+        kanbanState.hasUnsavedWork = false;
+      }
+    } catch (ce) { console.warn("cache save after search failed:", ce); }
     // Refresh history list after new search
     refreshHistoryList();
   } catch (e) {
@@ -6390,18 +6399,22 @@ async function doRestoreFromCache(patentNumber) {
   document.querySelectorAll(".search-mode-btn").forEach(b => {
     b.classList.toggle("active", b.dataset.mode === "dossier");
   });
+  if (searchBtn) searchBtn.style.display = "";
+  if (patentInput) { patentInput.style.display = ""; patentInput.value = patentNumber; }
   if (batchSearchToggleBtn) batchSearchToggleBtn.style.display = "none";
   if (patentDetailSection) patentDetailSection.classList.add("hidden");
   const _extSec = document.getElementById("extract-mode-section");
   if (_extSec) _extSec.classList.add("hidden");
+  const _cmpSec = document.getElementById("comparison-section");
+  if (_cmpSec) _cmpSec.classList.add("hidden");
   const appEl = document.getElementById("app");
   if (appEl) appEl.classList.remove("home-mode");
   resultSection.classList.remove("hidden");
-  if (patentInput) patentInput.value = patentNumber;
   const key = _dossierMakeKey(patentNumber);
   const prep = _dossierPrepareTab(key, patentNumber);
   if (prep.action === "abort") return;
   if (prep.action === "existing") {
+    if (patentInput) patentInput.value = patentNumber;
     refreshHistoryList();
     updateFloatingBallsVisibility();
     showDataSourceBadge("本地缓存", "已切换到已有缓存标签页");
@@ -6410,6 +6423,7 @@ async function doRestoreFromCache(patentNumber) {
   const success = PatentCache.restoreState(entry);
   if (success) {
     _dossierRegisterCurrentTab();
+    if (patentInput) patentInput.value = patentNumber;
     refreshHistoryList();
     updateFloatingBallsVisibility();
     showDataSourceBadge("本地缓存", "从缓存恢复，无需重新查询");
