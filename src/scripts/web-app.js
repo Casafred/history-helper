@@ -507,6 +507,7 @@ function _dossierApplyTab(tab) {
   try {
     const analysisContentEl = document.getElementById("kanban-analysis-content");
     const analysisSection = document.getElementById("kanban-analysis");
+    const emptyStateEl = document.getElementById("ai-empty-state");
     let contentToShow = "";
     if (savedActiveView === "citedRefs" && savedCitedRefsAnalysis) {
       contentToShow = savedCitedRefsAnalysis;
@@ -519,8 +520,9 @@ function _dossierApplyTab(tab) {
       } else {
         analysisContentEl.innerHTML = renderAnalysisModules(contentToShow);
       }
-      analysisSection.classList.remove("hidden");
     }
+    // Use _updateAIAnalysisView to correctly toggle visibility
+    _updateAIAnalysisView();
   } catch (_) {}
 
   // Show analysis chat toggle if there's analysis content
@@ -826,7 +828,7 @@ function _dossierPrepareTab(key, rawPn) {
     _dossierSaveActiveTab();
     _dossierActiveKey = key;
     _dossierApplyTab(existing);
-    if (patentInput) patentInput.value = "";
+    if (patentInput) patentInput.value = rawPn || "";
     return { action: "existing" };
   }
   if (_dossierTabs.length >= DOSSIER_MAX_TABS) {
@@ -1412,13 +1414,88 @@ patentInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") searchBtn.click();
 });
 
+async function _promptCacheChoice(cacheKey) {
+  const meta = PatentCache.get(cacheKey);
+  if (!meta) return { choice: "none", entry: null };
+  const entry = await PatentCache.getFullAsync(cacheKey);
+  if (!entry || !entry.kanbanState) return { choice: "none", entry: null };
+  const cacheAge = entry.timestamp ? timeAgo(entry.timestamp) : "";
+  const useCache = confirm("发现本地缓存" + (cacheAge ? "（" + cacheAge + "保存）" : "") + "。\n\n点击【确定】使用缓存（快速）\n点击【取消】从网络重新加载最新数据");
+  return { choice: useCache ? "cache" : "reload", entry: useCache ? entry : null };
+}
+
+function _dossierCloseTabByKey(key) {
+  const idx = _dossierTabs.findIndex(t => t.key === key);
+  if (idx < 0) return false;
+  const tab = _dossierTabs[idx];
+  _dossierCleanupTabPdfAnnots(tab);
+  _dossierTabs.splice(idx, 1);
+  if (_dossierActiveKey === key) {
+    if (typeof closeReader === "function") { try { closeReader(); } catch(e){} }
+    try {
+      const ap = document.getElementById("analysis-chat-panel");
+      if (ap) ap.classList.remove("open");
+    } catch(e){}
+    if (_dossierTabs.length > 0) {
+      const next = _dossierTabs[Math.max(0, idx - 1)];
+      _dossierActiveKey = next.key;
+      _dossierApplyTab(next);
+    } else {
+      _dossierActiveKey = null;
+      currentData = null;
+      kanbanState.documents = [];
+      kanbanState.extractions = {};
+      kanbanState.analysis = "";
+      kanbanState.analysisSystemPrompt = "";
+      kanbanState.analysisUserMessage = "";
+      kanbanState.citedRefsAnalysis = "";
+      kanbanState.traceIndex = {};
+      kanbanState.hasUnsavedWork = false;
+      const appEl = document.getElementById("app");
+      if (appEl) appEl.classList.add("home-mode");
+      resultSection.classList.add("hidden");
+      pdfViewState.active = false;
+      pdfViewState.currentDocIdx = null;
+      pdfViewState.currentDocKey = null;
+      pdfViewState.renderedPages = {};
+      if (typeof _pdfDocCache !== "undefined") _pdfDocCache = {};
+      _updateAnnotCloseFlag();
+      updateFloatingBallsVisibility();
+    }
+  }
+  _updateAnnotCloseFlag();
+  _dossierRenderTabs();
+  return true;
+}
+
 searchBtn.addEventListener("click", async () => {
   const input = patentInput.value.trim();
   if (!input) return;
 
   // Patent detail mode - use tab system
   if (searchMode === "patent") {
-    _openPdPatent(input);
+    const raw = input.trim().toUpperCase().replace(/[\s\/]/g, "");
+    if (raw) {
+      const gpEntry = GPCache.getEntry(raw);
+      const pdMemCached = typeof _pdPatentCache !== 'undefined' && _pdPatentCache[raw];
+      const pdCached = pdMemCached || (gpEntry && gpEntry.data);
+      if (pdCached) {
+        const cacheAge = gpEntry && gpEntry.timestamp ? timeAgo(gpEntry.timestamp) : "";
+        const useCache = confirm("发现本地缓存" + (cacheAge ? "（" + cacheAge + "保存）" : "") + "。\n\n点击【确定】使用缓存（快速）\n点击【取消】从网络重新加载最新数据");
+        if (!useCache) {
+          if (typeof _pdPatentCache !== 'undefined') delete _pdPatentCache[raw];
+          if (gpEntry) GPCache.remove(raw);
+          if (typeof _pdOpenPatents !== 'undefined') {
+            const tabIdx = _pdOpenPatents.indexOf(raw);
+            if (tabIdx >= 0) {
+              _pdOpenPatents.splice(tabIdx, 1);
+              if (_pdActivePatent === raw) _pdActivePatent = null;
+            }
+          }
+        }
+      }
+    }
+    _openPdPatent(input, { skipCachePrompt: true });
     return;
   }
 
@@ -1431,57 +1508,50 @@ searchBtn.addEventListener("click", async () => {
     return;
   }
 
-  // Dossier mode - route through the multi-tab system.
+  // Dossier mode - check cache FIRST before any tab operations
+  const pn = parsePatentNumber(input);
+  const rawPn = pn ? (pn.raw || String(input).trim().toUpperCase().replace(/[\s\/]/g, "")) : String(input).trim().toUpperCase().replace(/[\s\/]/g, "");
+  const cacheKey = _dossierMakeKey(rawPn);
+
+  // Check cache and ask user BEFORE creating/switching tabs
+  const cacheResult = await _promptCacheChoice(cacheKey);
+  const cacheChoice = cacheResult.choice;
+  const cachedEntry = cacheResult.entry;
+  if (cacheChoice === "reload") {
+    PatentCache.remove(cacheKey);
+    PatentCache.removeHistory(cacheKey);
+    _dossierCloseTabByKey(cacheKey);
+  }
+
   // _dossierNewTabFromSearch handles: switching to existing tab if duplicate,
   // evicting oldest tab (with confirm if unsaved), creating a new empty tab,
   // and saving the previous active tab state. It returns true when a new tab
   // is ready for doSearch to populate.
   const shouldDoSearch = _dossierNewTabFromSearch(input);
   if (!shouldDoSearch) {
+    if (patentInput) patentInput.value = rawPn;
+    refreshHistoryList();
+    updateFloatingBallsVisibility();
+    if (cacheChoice === "cache") {
+      showDataSourceBadge("本地缓存", "已切换到已有缓存标签页");
+    }
     return;
   }
-  // Check cache before doing a fresh API fetch
-  const pn = parsePatentNumber(input);
-  const cacheLookupKeys = [];
-  if (pn && pn.raw) cacheLookupKeys.push(pn.raw);
-  const normalizedKey = _dossierMakeKey(input);
-  if (normalizedKey && !cacheLookupKeys.includes(normalizedKey)) cacheLookupKeys.push(normalizedKey);
-  let cachedMeta = null;
-  let cachedKey = null;
-  for (const k of cacheLookupKeys) {
-    const m = PatentCache.get(k);
-    if (m) { cachedMeta = m; cachedKey = k; break; }
-  }
-  if (cachedMeta) {
-    const cachedEntry = await PatentCache.getFullAsync(cachedKey);
-    if (cachedEntry && cachedEntry.kanbanState) {
-      const cacheAge = cachedEntry.timestamp ? timeAgo(cachedEntry.timestamp) : "";
-      const useCache = confirm("发现本地缓存" + (cacheAge ? "（" + cacheAge + "保存）" : "") + "。\n\n点击【确定】使用缓存（快速）\n点击【取消】从网络重新加载最新数据");
-      if (useCache) {
-        const key = _dossierMakeKey(cachedKey);
-        const prep = _dossierPrepareTab(key, cachedKey);
-        if (prep.action === "abort") return;
-        if (prep.action === "existing") {
-          if (patentInput) patentInput.value = cachedKey;
-          refreshHistoryList();
-          updateFloatingBallsVisibility();
-          showDataSourceBadge("本地缓存", "已切换到已有缓存标签页");
-          return;
-        }
-        const success = PatentCache.restoreState(cachedEntry);
-        if (success) {
-          _dossierRegisterCurrentTab();
-          if (patentInput) patentInput.value = cachedKey;
-          refreshHistoryList();
-          updateFloatingBallsVisibility();
-          showDataSourceBadge("本地缓存", "从缓存恢复，无需重新查询");
-        } else {
-          doSearch(input);
-        }
-        return;
-      }
+
+  if (cacheChoice === "cache" && cachedEntry) {
+    const success = PatentCache.restoreState(cachedEntry);
+    if (success) {
+      _dossierRegisterCurrentTab();
+      if (patentInput) patentInput.value = rawPn;
+      refreshHistoryList();
+      updateFloatingBallsVisibility();
+      showDataSourceBadge("本地缓存", "从缓存恢复，无需重新查询");
+    } else {
+      doSearch(input);
     }
+    return;
   }
+
   doSearch(input);
 });
 
@@ -5716,6 +5786,8 @@ const PatentCache = {
       } else {
         if (analysisContentEl) analysisContentEl.innerHTML = "";
       }
+      // Correctly toggle AI panel visibility
+      _updateAIAnalysisView();
 
       // Restore extraction display in kanban cards
       for (const [idx, ext] of Object.entries(kanbanState.extractions)) {
@@ -5813,6 +5885,21 @@ const GPCache = {
     const entry = all[patentNumber];
     if (!entry || !entry.data) return null;
     return entry.data;
+  },
+
+  getEntry(patentNumber) {
+    const all = this.getAll();
+    return all[patentNumber] || null;
+  },
+
+  remove(patentNumber) {
+    const all = this.getAll();
+    delete all[patentNumber];
+    try {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+    } catch (e) {
+      console.warn("GPCache remove failed:", e);
+    }
   },
 
   set(patentNumber, data) {
@@ -6182,7 +6269,7 @@ function refreshHistoryList() {
               refreshHistoryList();
             });
           }
-          item.addEventListener("click", () => {
+          item.addEventListener("click", async () => {
             const patentNumber = item.dataset.patent;
             const type = item.dataset.type;
             const source = item.dataset.source;
@@ -6206,7 +6293,26 @@ function refreshHistoryList() {
               if (_extSec2) _extSec2.classList.add("hidden");
               const appEl = document.getElementById("app");
               if (appEl) appEl.classList.remove("home-mode");
-              _openPdPatent(patentNumber);
+              const raw = patentNumber.trim().toUpperCase().replace(/[\s\/]/g, "");
+              const gpEntry = GPCache.getEntry(raw);
+              const pdMemCached = typeof _pdPatentCache !== 'undefined' && _pdPatentCache[raw];
+              const pdCached = pdMemCached || (gpEntry && gpEntry.data);
+              if (pdCached) {
+                const cacheAge = gpEntry && gpEntry.timestamp ? timeAgo(gpEntry.timestamp) : "";
+                const useCache = confirm("发现本地缓存" + (cacheAge ? "（" + cacheAge + "保存）" : "") + "。\n\n点击【确定】使用缓存（快速）\n点击【取消】从网络重新加载最新数据");
+                if (!useCache) {
+                  if (typeof _pdPatentCache !== 'undefined') delete _pdPatentCache[raw];
+                  if (gpEntry) GPCache.remove(raw);
+                  if (typeof _pdOpenPatents !== 'undefined') {
+                    const tabIdx = _pdOpenPatents.indexOf(raw);
+                    if (tabIdx >= 0) {
+                      _pdOpenPatents.splice(tabIdx, 1);
+                      if (_pdActivePatent === raw) _pdActivePatent = null;
+                    }
+                  }
+                }
+              }
+              _openPdPatent(patentNumber, { skipCachePrompt: true });
             } else {
               searchMode = "dossier";
               document.querySelectorAll(".search-mode-btn").forEach(b => {
@@ -6220,13 +6326,8 @@ function refreshHistoryList() {
               if (_extSec) _extSec.classList.add("hidden");
               const _cmpSec = document.getElementById("comparison-section");
               if (_cmpSec) _cmpSec.classList.add("hidden");
-              const isCached = item.dataset.cached === "1";
-              if (isCached) {
-                doRestoreFromCache(patentNumber);
-              } else {
-                if (patentInput) patentInput.value = patentNumber;
-                searchBtn.click();
-              }
+              if (patentInput) patentInput.value = patentNumber;
+              searchBtn.click();
             }
           });
         }
@@ -6319,7 +6420,25 @@ function refreshHistoryList() {
         item.addEventListener("click", (ev) => {
           if (ev.target.closest(".cache-delete-btn")) return;
           const pn = item.dataset.patent;
-          if (pn) restoreFromCache(pn);
+          if (pn) {
+            searchMode = "dossier";
+            document.querySelectorAll(".search-mode-btn").forEach(b => {
+              b.classList.toggle("active", b.dataset.mode === "dossier");
+            });
+            if (patentInput) {
+              patentInput.style.display = "";
+              patentInput.value = pn;
+            }
+            if (patentDetailSection) patentDetailSection.classList.add("hidden");
+            resultSection.classList.add("hidden");
+            const _extSec = document.getElementById("extract-mode-section");
+            if (_extSec) _extSec.classList.add("hidden");
+            const _cmpSec = document.getElementById("comparison-section");
+            if (_cmpSec) _cmpSec.classList.add("hidden");
+            const appEl = document.getElementById("app");
+            if (appEl) appEl.classList.remove("home-mode");
+            searchBtn.click();
+          }
         });
       });
 
@@ -16497,7 +16616,7 @@ if (batchSearchBtn) {
           </div>`;
         card.addEventListener("click", () => {
           if (_pdPatentCache[pn]) {
-            _openPdPatent(pn);
+            _openPdPatent(pn, { skipCachePrompt: true });
           }
         });
         batchResultsGrid.appendChild(card);
@@ -16742,7 +16861,8 @@ function _closePdTab(pn) {
   }
 }
 
-function _openPdPatent(pn) {
+function _openPdPatent(pn, options) {
+  const skipPrompt = options && options.skipCachePrompt;
   const raw = pn.trim().toUpperCase().replace(/[\s\/]/g, "");
   if (!raw) return;
 
@@ -16783,25 +16903,36 @@ function _openPdPatent(pn) {
     return;
   }
 
-  if (_pdPatentCache[raw]) {
-    _pdOpenPatents.push(raw);
-    _pdActivePatent = raw;
-    renderPatentDetail(_pdPatentCache[raw]);
-    window._currentPatentData = _pdPatentCache[raw];
-    if (patentInput) patentInput.value = raw;
-    _renderPdTabs();
-    showDataSourceBadge("本地缓存", "从本地缓存恢复，无需重新查询");
-    return;
-  }
+  // Check for cached data (memory or localStorage)
+  const pdMemCached = _pdPatentCache[raw];
+  const gpEntry = GPCache.getEntry(raw);
+  const gpCached = pdMemCached || (gpEntry && gpEntry.data);
 
-  // Check localStorage GP cache
-  const gpCached = GPCache.get(raw);
-  if (gpCached) {
-    _pdPatentCache[raw] = gpCached;
+  if (!skipPrompt && gpCached) {
+    const cacheAge = gpEntry && gpEntry.timestamp ? timeAgo(gpEntry.timestamp) : "";
+    const useCache = confirm("发现本地缓存" + (cacheAge ? "（" + cacheAge + "保存）" : "") + "。\n\n点击【确定】使用缓存（快速）\n点击【取消】从网络重新加载最新数据");
+    if (!useCache) {
+      delete _pdPatentCache[raw];
+      GPCache.remove(raw);
+    } else {
+      const cachedData = pdMemCached || gpCached;
+      _pdPatentCache[raw] = cachedData;
+      _pdOpenPatents.push(raw);
+      _pdActivePatent = raw;
+      renderPatentDetail(cachedData);
+      window._currentPatentData = cachedData;
+      if (patentInput) patentInput.value = raw;
+      _renderPdTabs();
+      showDataSourceBadge("本地缓存", "从本地缓存恢复，无需重新查询");
+      return;
+    }
+  } else if (gpCached) {
+    const cachedData = pdMemCached || gpCached;
+    _pdPatentCache[raw] = cachedData;
     _pdOpenPatents.push(raw);
     _pdActivePatent = raw;
-    renderPatentDetail(gpCached);
-    window._currentPatentData = gpCached;
+    renderPatentDetail(cachedData);
+    window._currentPatentData = cachedData;
     if (patentInput) patentInput.value = raw;
     _renderPdTabs();
     showDataSourceBadge("本地缓存", "从本地缓存恢复，无需重新查询");
@@ -16888,7 +17019,7 @@ function _openPdPatent(pn) {
         '<button class="pd-gp-link pd-ep-link" data-pd-ep="' + escapeHtml(raw) + '">Espacenet</button>' +
         '</div></div>';
       var retryBtn = patentDetailContent.querySelector('[data-pd-retry]');
-      if (retryBtn) retryBtn.addEventListener('click', function() { _openPdPatent(raw); });
+      if (retryBtn) retryBtn.addEventListener('click', function() { _openPdPatent(raw, { skipCachePrompt: true }); });
       var gpBtn = patentDetailContent.querySelector('[data-pd-gp]');
       if (gpBtn) gpBtn.addEventListener('click', function() { openInAppWebview('https://patents.google.com/patent/' + encodeURIComponent(raw), 'Google Patents: ' + raw); });
       var epBtn = patentDetailContent.querySelector('[data-pd-ep]');
