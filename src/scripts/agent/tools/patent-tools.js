@@ -844,12 +844,21 @@ var AgentPatentTools = (function () {
       },
       execute: function (args) {
         try {
-          if (typeof openInAppWebview === "function") {
-            openInAppWebview(args.url, args.title || "外部链接");
-            return Promise.resolve({ ok: true, action: "已在应用内打开链接: " + args.url });
+          var url = args.url;
+          if (!url || typeof url !== "string") {
+            return Promise.resolve({ ok: false, error: "URL is required" });
           }
-          window.open(args.url, "_blank");
-          return Promise.resolve({ ok: true, action: "已在新窗口打开链接: " + args.url });
+          var allowedSchemes = /^https?:$/i;
+          var schemeMatch = url.match(/^([a-z][a-z0-9+.-]*):/i);
+          if (schemeMatch && !allowedSchemes.test(schemeMatch[1] + ":")) {
+            return Promise.resolve({ ok: false, error: "URL scheme not allowed: " + schemeMatch[1] });
+          }
+          if (typeof openInAppWebview === "function") {
+            openInAppWebview(url, args.title || "外部链接");
+            return Promise.resolve({ ok: true, action: "已在应用内打开链接: " + url });
+          }
+          window.open(url, "_blank");
+          return Promise.resolve({ ok: true, action: "已在新窗口打开链接: " + url });
         } catch (e) {
           return Promise.resolve({ ok: false, error: "打开链接失败: " + e.message });
         }

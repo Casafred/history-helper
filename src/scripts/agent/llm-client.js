@@ -133,10 +133,14 @@ var AgentLLM = (function () {
           };
           return;
         }
+        var parsed;
         try {
-          var parsed = JSON.parse(dataStr);
-          rawChunkCount++;
-          var choice = parsed.choices && parsed.choices[0];
+          parsed = JSON.parse(dataStr);
+        } catch (e) {
+          continue;
+        }
+        rawChunkCount++;
+        var choice = parsed.choices && parsed.choices[0];
           var delta = choice && choice.delta;
           // 检查finish_reason
           if (choice && choice.finish_reason) {
@@ -218,12 +222,10 @@ var AgentLLM = (function () {
             }
           }
 
-          // 某些provider在带finish_reason的chunk中同时给出完整message.tool_calls
           if (choice && choice.message && choice.message.tool_calls) {
             console.log("[AgentLLM] found message.tool_calls alongside delta:", choice.message.tool_calls.length);
             _mergeMessageToolCalls(currentToolCalls, toolCallArgsMap, choice.message.tool_calls);
           }
-        } catch (e) { /* ignore malformed JSON line */ }
       }
     }
 

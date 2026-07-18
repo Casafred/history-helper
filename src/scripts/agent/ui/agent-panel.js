@@ -25,6 +25,14 @@ var AgentUI = (function () {
   var stepsCount = 0;
   var completedSteps = 0;
 
+  function sanitizeHtml(html) {
+    return html
+      .replace(/<\s*(script|style|iframe|object|embed|form|input|link|meta|base)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "")
+      .replace(/<\s*(script|style|iframe|object|embed|form|input|link|meta|base)\b[^>]*\/?>/gi, "")
+      .replace(/\s(on\w+)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+      .replace(/\s(href|src)\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi, "");
+  }
+
   function renderMarkdown(text) {
     if (typeof marked !== "undefined") {
       try {
@@ -32,7 +40,7 @@ var AgentUI = (function () {
           breaks: true,
           gfm: true,
         });
-        return marked.parse(text || "");
+        return sanitizeHtml(marked.parse(text || ""));
       } catch (e) {
         return escapeHtml(text);
       }
@@ -364,6 +372,11 @@ var AgentUI = (function () {
       updateButtons();
       toggleBtn.classList.remove("running");
       addSystemMessage("已停止");
+      if (pendingQuestionCallback) {
+        var cb = pendingQuestionCallback;
+        pendingQuestionCallback = null;
+        cb("__ABORTED__");
+      }
     });
 
     BUS.on(EVT.TODOS_UPDATED, function (data) {
@@ -964,7 +977,11 @@ var AgentUI = (function () {
     currentStepsList = null;
     stepsCount = 0;
     completedSteps = 0;
-    pendingQuestionCallback = null;
+    if (pendingQuestionCallback) {
+      var cb = pendingQuestionCallback;
+      pendingQuestionCallback = null;
+      cb("__ABORTED__");
+    }
     isProcessing = false;
     updateButtons();
     toggleBtn.classList.remove("running");

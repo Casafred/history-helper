@@ -356,9 +356,31 @@ function proxyDpmaDownload(reqUrl, res) {
     return;
   }
 
+  let parsed;
+  try {
+    parsed = new URL(targetUrl);
+  } catch (e) {
+    res.writeHead(400, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({ error: "Invalid uri parameter" }));
+    return;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    res.writeHead(400, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({ error: "Invalid uri scheme" }));
+    return;
+  }
+  const allowedHosts = [".dpma.de"];
+  const hostOk = allowedHosts.some(h => parsed.hostname === h.replace(/^\./, "") || parsed.hostname.endsWith(h));
+  if (!hostOk) {
+    res.writeHead(400, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({ error: "Host not allowed" }));
+    return;
+  }
+
   const args = [
     "-s", "-w", " HTTP_CODE_%{http_code}",
     "--max-time", "60",
+    "--proto", "-all,https,http",
     "-H", "Accept: application/pdf,*/*",
     "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
     targetUrl,
@@ -1248,14 +1270,32 @@ const server = http.createServer((req, res) => {
   let urlPath = req.url === "/" ? "/web.html" : req.url;
   const qIdx = urlPath.indexOf("?");
   if (qIdx !== -1) urlPath = urlPath.substring(0, qIdx);
-  // /fonts/* served from workspace root fonts/ directory (for CJK font embedding in PDF export)
-  let filePath;
-  if (urlPath.startsWith("/fonts/")) {
-    filePath = path.join(__dirname, urlPath);
-  } else {
-    filePath = path.join(__dirname, "src", urlPath);
+  try {
+    urlPath = decodeURIComponent(urlPath);
+  } catch (e) {
+    res.writeHead(400);
+    res.end("Bad Request");
+    return;
   }
-  serveStatic(filePath, res);
+  if (urlPath.includes("\0")) {
+    res.writeHead(400);
+    res.end("Bad Request");
+    return;
+  }
+  // /fonts/* served from workspace root fonts/ directory (for CJK font embedding in PDF export)
+  let rootDir;
+  if (urlPath.startsWith("/fonts/")) {
+    rootDir = path.resolve(__dirname, "fonts");
+  } else {
+    rootDir = path.resolve(__dirname, "src");
+  }
+  const resolvedPath = path.resolve(path.join(rootDir, urlPath.replace(/^\/(fonts\/)?/, "")));
+  if (resolvedPath !== rootDir && !resolvedPath.startsWith(rootDir + path.sep)) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+  serveStatic(resolvedPath, res);
 });
 
 async function extractPdfText(req, res) {

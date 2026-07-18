@@ -177,7 +177,8 @@ var AgentCore = (function () {
 
     isRunning = true;
     currentAbortController = new AbortController();
-    var signal = currentAbortController.signal;
+    var myController = currentAbortController;
+    var signal = myController.signal;
     // Multi-turn conversation: append to existing memory instead of resetting.
     // Reset only happens via explicit reset() call (user clicks clear button).
     if (!memory || memory.length === 0) {
@@ -218,9 +219,9 @@ var AgentCore = (function () {
 
         // 超时保护
         var timeoutId = setTimeout(function() {
-          if (currentAbortController) {
+          if (myController && !myController.signal.aborted) {
             console.warn("[AgentCore] LLM timeout, aborting...");
-            try { currentAbortController.abort(); } catch(e) {}
+            try { myController.abort(); } catch(e) {}
           }
         }, LLM_TIMEOUT_MS);
 
@@ -437,6 +438,10 @@ var AgentCore = (function () {
             name: tc.name,
             content: resultStr,
           });
+
+          if (signal.aborted) {
+            throw new DOMException("Aborted", "AbortError");
+          }
         }
 
         // 如果调用了finish工具，结束循环
@@ -484,15 +489,21 @@ var AgentCore = (function () {
       }
 
       BUS.emit(EVT.SESSION_FINISHED, { answer: finalAnswer, context: sessionContext });
-      isRunning = false;
+      if (currentAbortController === myController) {
+        isRunning = false;
+      }
       return { answer: finalAnswer, context: sessionContext };
     } catch (err) {
-      isRunning = false;
+      if (currentAbortController === myController) {
+        isRunning = false;
+      }
       console.error("[AgentCore] error:", err);
       BUS.emit(EVT.SESSION_ERROR, { error: err.message || String(err) });
       throw err;
     } finally {
-      currentAbortController = null;
+      if (currentAbortController === myController) {
+        currentAbortController = null;
+      }
     }
   }
 

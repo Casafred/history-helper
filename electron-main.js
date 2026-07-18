@@ -723,15 +723,19 @@ async function mergePdfDocs(req, res) {
       const pdfPath = path.join(tempDir, `${mergeId}_doc${idx}.pdf`);
       let downloadUrl = item.downloadUrl;
 
+      if (typeof downloadUrl !== "string" || !downloadUrl) {
+        return { success: false, pdfPath, error: "Missing downloadUrl" };
+      }
+
       // Convert relative URLs to absolute GD API URLs
       if (downloadUrl.startsWith("/api/gd/")) {
         downloadUrl = GD_API_BASE + downloadUrl.replace("/api/gd", "");
-      }
-
-      // JPO URLs need token auth
-      if (downloadUrl.startsWith("/api/jpo/")) {
+      } else if (downloadUrl.startsWith("/api/jpo/")) {
         // JPO not supported in merge export for Electron version yet
         return { success: false, pdfPath, error: "JPO docs not supported in merge export" };
+      } else {
+        // Reject absolute or unknown URLs to prevent SSRF
+        return { success: false, pdfPath, error: "Invalid downloadUrl: only /api/gd/ relative URLs are allowed" };
       }
 
       try {
