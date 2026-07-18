@@ -10,5 +10,5 @@
 // __PATENTLENS_COPYRIGHT__: Alfred Shi 2026
 
 fn main() {
-  app_lib::run();
+    app_lib::run();
 }

@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
@@ -13,7 +13,9 @@ const TOKEN_REFRESH_MARGIN_SECS: u64 = 300;
 
 #[derive(Error, Debug)]
 pub enum JpoApiError {
-    #[error("JPO API credentials not configured. Set JPO_API_USERNAME and JPO_API_PASSWORD in .env")]
+    #[error(
+        "JPO API credentials not configured. Set JPO_API_USERNAME and JPO_API_PASSWORD in .env"
+    )]
     MissingCredentials,
     #[error("Failed to obtain access token: {0}")]
     TokenError(String),
@@ -96,15 +98,13 @@ pub struct JpoClient {
     username: String,
     password: String,
     token_url: String,
-    cached_token: Arc<Mutex<Option<CachedToken>>>,
+    cached_token: Arc<RwLock<Option<CachedToken>>>,
 }
 
 impl JpoClient {
     pub fn new() -> Result<Self, JpoApiError> {
-        let username = env::var("JPO_API_USERNAME")
-            .map_err(|_| JpoApiError::MissingCredentials)?;
-        let password = env::var("JPO_API_PASSWORD")
-            .map_err(|_| JpoApiError::MissingCredentials)?;
+        let username = env::var("JPO_API_USERNAME").map_err(|_| JpoApiError::MissingCredentials)?;
+        let password = env::var("JPO_API_PASSWORD").map_err(|_| JpoApiError::MissingCredentials)?;
 
         let token_url = env::var("JPO_API_TOKEN_URL")
             .unwrap_or_else(|_| format!("{}/oauth2/token", JPO_API_BASE));
@@ -119,7 +119,7 @@ impl JpoClient {
             username,
             password,
             token_url,
-            cached_token: Arc::new(Mutex::new(None)),
+            cached_token: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -129,16 +129,18 @@ impl JpoClient {
 
     async fn get_access_token(&self) -> Result<String, JpoApiError> {
         {
-            let guard = self.cached_token.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = self.cached_token.read().unwrap_or_else(|e| e.into_inner());
             if let Some(ref token) = *guard {
-                if token.expires_at > Instant::now() + Duration::from_secs(TOKEN_REFRESH_MARGIN_SECS) {
+                if token.expires_at
+                    > Instant::now() + Duration::from_secs(TOKEN_REFRESH_MARGIN_SECS)
+                {
                     return Ok(token.access_token.clone());
                 }
             }
         }
 
         let refresh_token = {
-            let guard = self.cached_token.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = self.cached_token.read().unwrap_or_else(|e| e.into_inner());
             guard.as_ref().map(|t| t.refresh_token.clone())
         };
 
@@ -169,7 +171,10 @@ impl JpoClient {
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
-            return Err(JpoApiError::TokenError(format!("HTTP {} - {}", status, body)));
+            return Err(JpoApiError::TokenError(format!(
+                "HTTP {} - {}",
+                status, body
+            )));
         }
 
         let token_data: TokenResponse = resp
@@ -185,7 +190,7 @@ impl JpoClient {
         };
 
         {
-            let mut guard = self.cached_token.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = self.cached_token.write().unwrap_or_else(|e| e.into_inner());
             *guard = Some(cached);
         }
 
@@ -224,7 +229,7 @@ impl JpoClient {
 
         let access_token = token_data.access_token;
         {
-            let mut guard = self.cached_token.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = self.cached_token.write().unwrap_or_else(|e| e.into_inner());
             *guard = Some(cached);
         }
 
@@ -259,7 +264,8 @@ impl JpoClient {
                     let status_code = status.as_u16();
                     if status_code == 401 {
                         {
-                            let mut guard = self.cached_token.lock().unwrap_or_else(|e| e.into_inner());
+                            let mut guard =
+                                self.cached_token.write().unwrap_or_else(|e| e.into_inner());
                             *guard = None;
                         }
                         last_error = Some(JpoApiError::TokenError("Token invalidated".to_string()));
@@ -269,7 +275,11 @@ impl JpoClient {
                         return Ok(resp);
                     }
                     if status_code == 429 {
-                        log::warn!("JPO rate limited, retrying (attempt {}/{})", attempt + 1, MAX_RETRIES);
+                        log::warn!(
+                            "JPO rate limited, retrying (attempt {}/{})",
+                            attempt + 1,
+                            MAX_RETRIES
+                        );
                         last_error = Some(JpoApiError::RateLimited);
                         continue;
                     }
@@ -278,7 +288,10 @@ impl JpoClient {
                         return Err(JpoApiError::NotFound(body));
                     }
                     let body = resp.text().await.unwrap_or_default();
-                    return Err(JpoApiError::ApiError { status: status_code, message: body });
+                    return Err(JpoApiError::ApiError {
+                        status: status_code,
+                        message: body,
+                    });
                 }
                 Err(e) => {
                     last_error = Some(JpoApiError::RequestFailed(e));
@@ -299,7 +312,10 @@ impl JpoClient {
 
     /// Download refusal reason document (拒絶理由通知書) as ZIP bytes
     pub async fn get_refusal_reason_doc(&self, app_number: &str) -> Result<Vec<u8>, JpoApiError> {
-        let url = format!("{}/api/patent/v1/app_doc_cont_refusal_reason/{}", JPO_API_BASE, app_number);
+        let url = format!(
+            "{}/api/patent/v1/app_doc_cont_refusal_reason/{}",
+            JPO_API_BASE, app_number
+        );
         let resp = self.get_with_retry(&url).await?;
         let bytes = resp.bytes().await?.to_vec();
         Ok(bytes)
@@ -307,7 +323,10 @@ impl JpoClient {
 
     /// Download dispatched documents (発送書類) as ZIP bytes
     pub async fn get_dispatch_doc(&self, app_number: &str) -> Result<Vec<u8>, JpoApiError> {
-        let url = format!("{}/api/patent/v1/app_doc_cont_dispatch/{}", JPO_API_BASE, app_number);
+        let url = format!(
+            "{}/api/patent/v1/app_doc_cont_dispatch/{}",
+            JPO_API_BASE, app_number
+        );
         let resp = self.get_with_retry(&url).await?;
         let bytes = resp.bytes().await?.to_vec();
         Ok(bytes)
@@ -315,7 +334,10 @@ impl JpoClient {
 
     /// Download submitted documents (提出書類) as ZIP bytes
     pub async fn get_submission_doc(&self, app_number: &str) -> Result<Vec<u8>, JpoApiError> {
-        let url = format!("{}/api/patent/v1/app_doc_cont_submission/{}", JPO_API_BASE, app_number);
+        let url = format!(
+            "{}/api/patent/v1/app_doc_cont_submission/{}",
+            JPO_API_BASE, app_number
+        );
         let resp = self.get_with_retry(&url).await?;
         let bytes = resp.bytes().await?.to_vec();
         Ok(bytes)
@@ -323,7 +345,10 @@ impl JpoClient {
 
     /// Download trial documents (審判書類) as ZIP bytes
     pub async fn get_trial_doc(&self, app_number: &str) -> Result<Vec<u8>, JpoApiError> {
-        let url = format!("{}/api/patent/v1/app_doc_cont_trial/{}", JPO_API_BASE, app_number);
+        let url = format!(
+            "{}/api/patent/v1/app_doc_cont_trial/{}",
+            JPO_API_BASE, app_number
+        );
         let resp = self.get_with_retry(&url).await?;
         let bytes = resp.bytes().await?.to_vec();
         Ok(bytes)
@@ -338,8 +363,9 @@ impl JpoClient {
         let mut documents = Vec::new();
 
         for i in 0..archive.len() {
-            let mut file = archive.by_index(i)
-                .map_err(|e| JpoApiError::ZipError(format!("Failed to read ZIP entry {}: {}", i, e)))?;
+            let mut file = archive.by_index(i).map_err(|e| {
+                JpoApiError::ZipError(format!("Failed to read ZIP entry {}: {}", i, e))
+            })?;
 
             let name = file.name().to_string();
             let mut content = String::new();

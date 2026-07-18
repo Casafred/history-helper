@@ -42,13 +42,24 @@ impl PatentOffice {
     }
 
     pub fn supports_examination_history(&self) -> bool {
-        matches!(self, PatentOffice::US | PatentOffice::EP | PatentOffice::JP | PatentOffice::DE | PatentOffice::WO)
+        matches!(
+            self,
+            PatentOffice::US
+                | PatentOffice::EP
+                | PatentOffice::JP
+                | PatentOffice::DE
+                | PatentOffice::WO
+        )
     }
 
     pub fn api_unavailable_message(&self) -> Option<String> {
         match self {
-            PatentOffice::CN => Some("中国国家知识产权局 (CNIPA) 暂无公开 API，请访问 cnipa.gov.cn 网站查询".to_string()),
-            PatentOffice::KR => Some("韩国特许厅 (KIPO) KIPRIS API 需单独注册，请访问 kipris.or.kr 网站查询".to_string()),
+            PatentOffice::CN => Some(
+                "中国国家知识产权局 (CNIPA) 暂无公开 API，请访问 cnipa.gov.cn 网站查询".to_string(),
+            ),
+            PatentOffice::KR => Some(
+                "韩国特许厅 (KIPO) KIPRIS API 需单独注册，请访问 kipris.or.kr 网站查询".to_string(),
+            ),
             _ => None,
         }
     }

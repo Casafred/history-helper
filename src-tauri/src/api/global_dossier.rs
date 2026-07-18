@@ -131,10 +131,7 @@ impl GlobalDossierClient {
 
     #[allow(dead_code)]
     pub async fn get_providing_offices(&self) -> Result<serde_json::Value, GlobalDossierError> {
-        let url = format!(
-            "{}/patent-family/svc/wipo/providingoffices",
-            GD_API_BASE
-        );
+        let url = format!("{}/patent-family/svc/wipo/providingoffices", GD_API_BASE);
         let resp = self.get_with_retry(&url).await?;
         let data = resp.json::<serde_json::Value>().await?;
         Ok(data)
