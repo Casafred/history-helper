@@ -84,12 +84,12 @@ async fn fetch_patent(
     let cache_key = CacheStore::make_cache_key(&office, &doc_num, "patent_data");
 
     {
-        let mut cache_guard = state
+        let cache_guard = state
             .cache
             .lock()
             .map_err(|e| format!("Cache lock error: {}", e))?;
 
-        if let Some(ref mut cache_store) = *cache_guard {
+        if let Some(ref cache_store) = *cache_guard {
             if let Some(cached_data) = cache_store.get(&cache_key) {
                 if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&cached_data) {
                     if let Some(obj) = val.as_object_mut() {
@@ -104,7 +104,10 @@ async fn fetch_patent(
     let client = GlobalDossierClient::new();
     let mut result = serde_json::Map::new();
     result.insert("office".into(), serde_json::Value::String(office.clone()));
-    result.insert("applicationNumber".into(), serde_json::Value::String(doc_num.clone()));
+    result.insert(
+        "applicationNumber".into(),
+        serde_json::Value::String(doc_num.clone()),
+    );
     result.insert("queryType".into(), serde_json::Value::String(qtype.clone()));
     let mut warnings: Vec<String> = Vec::new();
 
@@ -134,7 +137,10 @@ async fn fetch_patent(
         result.insert(
             "warnings".into(),
             serde_json::Value::Array(
-                warnings.into_iter().map(serde_json::Value::String).collect(),
+                warnings
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
             ),
         );
     }
@@ -142,14 +148,23 @@ async fn fetch_patent(
     let result_val = serde_json::Value::Object(result);
 
     {
-        let mut cache_guard = state
+        let cache_guard = state
             .cache
             .lock()
             .map_err(|e| format!("Cache lock error: {}", e))?;
 
-        if let Some(ref mut cache_store) = *cache_guard {
+        if let Some(ref cache_store) = *cache_guard {
             if let Ok(serialized) = serde_json::to_string(&result_val) {
-                cache_store.set(&cache_key, &office, &doc_num, "patent_data", &serialized, DEFAULT_TTL_SECS);
+                if let Err(e) = cache_store.set(
+                    &cache_key,
+                    &office,
+                    &doc_num,
+                    "patent_data",
+                    &serialized,
+                    DEFAULT_TTL_SECS,
+                ) {
+                    log::warn!("Failed to cache patent data: {}", e);
+                }
             }
         }
     }
@@ -158,10 +173,7 @@ async fn fetch_patent(
 }
 
 #[tauri::command]
-async fn fetch_family(
-    input: String,
-    query_type: Option<String>,
-) -> Result<CommandResult, String> {
+async fn fetch_family(input: String, query_type: Option<String>) -> Result<CommandResult, String> {
     let pn = match parse_patent_number(&input) {
         Ok(pn) => pn,
         Err(e) => return Ok(CommandResult::err(e.to_string())),
@@ -179,9 +191,7 @@ async fn fetch_family(
 }
 
 #[tauri::command]
-async fn fetch_documents(
-    input: String,
-) -> Result<CommandResult, String> {
+async fn fetch_documents(input: String) -> Result<CommandResult, String> {
     let pn = match parse_patent_number(&input) {
         Ok(pn) => pn,
         Err(e) => return Ok(CommandResult::err(e.to_string())),
@@ -206,7 +216,10 @@ async fn download_document(
     format: String,
 ) -> Result<CommandResult, String> {
     let client = GlobalDossierClient::new();
-    match client.get_document(&country, &doc_number, &doc_id, &pages, &format).await {
+    match client
+        .get_document(&country, &doc_number, &doc_id, &pages, &format)
+        .await
+    {
         Ok(data) => {
             let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
             Ok(CommandResult::ok(serde_json::json!({
@@ -254,10 +267,7 @@ async fn extract_text(
         return Ok(CommandResult::err("下载的文件过小，文档可能暂不可用"));
     }
 
-    let pdf_base64 = base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        &pdf_bytes,
-    );
+    let pdf_base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &pdf_bytes);
 
     let ocr_client = OcrClient::new();
     let result = ocr_client.extract(&pdf_base64, &engine, &api_key).await;
@@ -285,7 +295,9 @@ async fn jpo_fetch_progress(app_number: String) -> Result<CommandResult, String>
         Err(e) => return Ok(CommandResult::err(format!("JPO API 未配置: {}", e))),
     };
     match client.get_progress(&app_number).await {
-        Ok(data) => Ok(CommandResult::ok(serde_json::to_value(data).unwrap_or_default())),
+        Ok(data) => Ok(CommandResult::ok(
+            serde_json::to_value(data).unwrap_or_default(),
+        )),
         Err(e) => Ok(CommandResult::err(format!("JPO 审查经纬查询失败: {}", e))),
     }
 }
@@ -306,37 +318,39 @@ async fn jpo_fetch_doc(app_number: String, doc_type: String) -> Result<CommandRe
     };
 
     match zip_bytes {
-        Ok(bytes) => {
-            match api::jpo::JpoClient::extract_text_from_zip(&bytes) {
-                Ok(docs) => {
-                    let contents: Vec<serde_json::Value> = docs.iter().map(|d| {
+        Ok(bytes) => match api::jpo::JpoClient::extract_text_from_zip(&bytes) {
+            Ok(docs) => {
+                let contents: Vec<serde_json::Value> = docs
+                    .iter()
+                    .map(|d| {
                         serde_json::json!({
                             "filename": d.filename,
                             "content": d.content,
                             "docType": format!("{:?}", d.doc_type),
                         })
-                    }).collect();
-                    Ok(CommandResult::ok(serde_json::json!({
-                        "office": "JP",
-                        "appNumber": app_number,
-                        "docType": doc_type,
-                        "documents": contents,
-                        "rawSize": bytes.len(),
-                    })))
-                }
-                Err(_) => {
-                    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
-                    Ok(CommandResult::ok(serde_json::json!({
-                        "office": "JP",
-                        "appNumber": app_number,
-                        "docType": doc_type,
-                        "rawData": encoded,
-                        "rawSize": bytes.len(),
-                        "format": "zip",
-                    })))
-                }
+                    })
+                    .collect();
+                Ok(CommandResult::ok(serde_json::json!({
+                    "office": "JP",
+                    "appNumber": app_number,
+                    "docType": doc_type,
+                    "documents": contents,
+                    "rawSize": bytes.len(),
+                })))
             }
-        }
+            Err(_) => {
+                let encoded =
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                Ok(CommandResult::ok(serde_json::json!({
+                    "office": "JP",
+                    "appNumber": app_number,
+                    "docType": doc_type,
+                    "rawData": encoded,
+                    "rawSize": bytes.len(),
+                    "format": "zip",
+                })))
+            }
+        },
         Err(e) => Ok(CommandResult::err(format!("JPO 文档下载失败: {}", e))),
     }
 }
@@ -355,7 +369,9 @@ async fn dpma_status() -> Result<CommandResult, String> {
 async fn dpma_register_info(number: String) -> Result<CommandResult, String> {
     let client = api::dpma::DpmaClient::new();
     match client.get_register_info(&number).await {
-        Ok(info) => Ok(CommandResult::ok(serde_json::to_value(&info).unwrap_or_default())),
+        Ok(info) => Ok(CommandResult::ok(
+            serde_json::to_value(&info).unwrap_or_default(),
+        )),
         Err(e) => Ok(CommandResult::err(format!("DPMA 注册信息查询失败: {}", e))),
     }
 }
@@ -382,7 +398,10 @@ pub fn run() {
             match CacheStore::new(&db_path) {
                 Ok(cache_store) => {
                     let state = app.state::<AppState>();
-                    let mut guard = state.cache.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+                    let mut guard = state
+                        .cache
+                        .lock()
+                        .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
                     *guard = Some(cache_store);
                 }
                 Err(e) => {

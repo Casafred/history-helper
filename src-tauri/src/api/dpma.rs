@@ -72,7 +72,10 @@ impl DpmaClient {
             let response = self
                 .client
                 .get(url)
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header(
+                    "Accept",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                )
                 .header("Accept-Language", "de,en-US;q=0.7,en;q=0.3")
                 .send()
                 .await;
@@ -85,7 +88,11 @@ impl DpmaClient {
                     }
                     let status_code = status.as_u16();
                     if status_code == 429 {
-                        log::warn!("DPMA rate limited, retrying (attempt {}/{})", attempt + 1, MAX_RETRIES);
+                        log::warn!(
+                            "DPMA rate limited, retrying (attempt {}/{})",
+                            attempt + 1,
+                            MAX_RETRIES
+                        );
                         last_error = Some(DpmaError::RateLimited);
                         continue;
                     }
@@ -94,7 +101,10 @@ impl DpmaClient {
                         return Err(DpmaError::NotFound(body));
                     }
                     let body = resp.text().await.unwrap_or_default();
-                    return Err(DpmaError::ApiError { status: status_code, message: body });
+                    return Err(DpmaError::ApiError {
+                        status: status_code,
+                        message: body,
+                    });
                 }
                 Err(e) => {
                     last_error = Some(DpmaError::RequestFailed(e));
@@ -120,7 +130,10 @@ impl DpmaClient {
 
         // 检查是否找到了专利
         if html.contains("Kein Treffer") || html.contains("keine Ergebnisse") {
-            return Err(DpmaError::NotFound(format!("DPMAregister 中未找到: {}", number)));
+            return Err(DpmaError::NotFound(format!(
+                "DPMAregister 中未找到: {}",
+                number
+            )));
         }
 
         self.parse_register_page(&html, &akz)
@@ -141,7 +154,10 @@ impl DpmaClient {
             n.pop();
         }
         // 去除空格和点
-        n = n.chars().filter(|c| !c.is_whitespace() && *c != '.').collect();
+        n = n
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != '.')
+            .collect();
 
         // 如果是11位纯数字（10位+校验位），直接返回
         if n.len() == 11 && n.chars().all(|c| c.is_ascii_digit()) {
@@ -185,9 +201,22 @@ impl DpmaClient {
         let erwiderungen_count = self.extract_count(html, "Erwiderungen");
         let publication_pdf_url = self.extract_publication_pdf_link(html);
 
+        let aktenzeichen = if akz.len() >= 12 {
+            Some(format!(
+                "{} {} {} {}.{}",
+                &akz[0..2],
+                &akz[2..6],
+                &akz[6..9],
+                &akz[9..11],
+                &akz[11..12]
+            ))
+        } else {
+            None
+        };
+
         Ok(DpmaRegisterInfo {
             file_number: akz.to_string(),
-            aktenzeichen: Some(format!("{} {} {} {}.{}", &akz[0..2], &akz[2..6], &akz[6..9], &akz[9..11], &akz[11..12])),
+            aktenzeichen,
             status,
             applicant,
             inventor,
@@ -274,7 +303,8 @@ impl DpmaClient {
                         if let Some(gt) = after[url_start + url_end..].find('>') {
                             let text_start = url_start + url_end + gt + 1;
                             if let Some(lt) = after[text_start..].find('<') {
-                                let class_text = after[text_start..text_start + lt].trim().to_string();
+                                let class_text =
+                                    after[text_start..text_start + lt].trim().to_string();
                                 if !class_text.is_empty() && class_text.len() < 20 {
                                     classes.push(class_text);
                                 }
@@ -285,7 +315,9 @@ impl DpmaClient {
                 } else {
                     break;
                 }
-                if pos > 5000 { break; }
+                if pos > 5000 {
+                    break;
+                }
             }
         }
         classes
@@ -298,7 +330,13 @@ impl DpmaClient {
             // 查找紧跟的数字
             for c in after.chars().take(20) {
                 if c.is_ascii_digit() {
-                    if let Some(num_str) = after.chars().take(20).collect::<String>().split(|c: char| !c.is_ascii_digit()).next() {
+                    if let Some(num_str) = after
+                        .chars()
+                        .take(20)
+                        .collect::<String>()
+                        .split(|c: char| !c.is_ascii_digit())
+                        .next()
+                    {
                         if let Ok(n) = num_str.parse::<i64>() {
                             return Some(n);
                         }
@@ -338,13 +376,9 @@ impl DpmaClient {
     }
 
     fn strip_html_tags(&self, html: &str) -> String {
-        let mut result = html.to_string();
-        while let Some(start) = result.find('<') {
-            if let Some(end) = result[start..].find('>') {
-                result.replace_range(start..start + end + 1, "");
-            } else { break; }
-        }
-        result
+        html.split('<')
+            .filter_map(|s| s.split('>').nth(1))
+            .collect()
     }
 }
 

@@ -2,10 +2,13 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-const PADDLE_OCR_V2_URL: &str =
-    "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs";
-const PADDLE_OCR_V2_TOKEN: &str = "70b270c8275606a7a97f8c4e8617cdeb935ed74c";
+const PADDLE_OCR_V2_URL: &str = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs";
 const PADDLE_OCR_V2_MODEL: &str = "PaddleOCR-VL-1.6";
+
+fn get_paddle_ocr_token() -> String {
+    std::env::var("PADDLE_OCR_TOKEN")
+        .unwrap_or_else(|_| "70b270c8275606a7a97f8c4e8617cdeb935ed74c".to_string())
+}
 const PADDLE_OCR_V2_POLL_INTERVAL_SECS: u64 = 5;
 const PADDLE_OCR_V2_POLL_TIMEOUT_SECS: u64 = 300;
 const GLM_OCR_URL: &str = "https://open.bigmodel.cn/api/paas/v4/layout_parsing";
@@ -90,13 +93,18 @@ impl OcrClient {
                 reqwest::multipart::Part::bytes(pdf_bytes)
                     .file_name("document.pdf")
                     .mime_str("application/pdf")
-                    .unwrap_or_else(|_| reqwest::multipart::Part::bytes(vec![]).file_name("document.pdf")),
+                    .unwrap_or_else(|_| {
+                        reqwest::multipart::Part::bytes(vec![]).file_name("document.pdf")
+                    }),
             );
 
         let submit_resp = match self
             .client
             .post(PADDLE_OCR_V2_URL)
-            .header("Authorization", format!("bearer {}", PADDLE_OCR_V2_TOKEN))
+            .header(
+                "Authorization",
+                format!("bearer {}", get_paddle_ocr_token()),
+            )
             .multipart(form)
             .timeout(Duration::from_secs(30))
             .send()
@@ -112,8 +120,16 @@ impl OcrClient {
         let submit_status = submit_resp.status();
         if !submit_status.is_success() {
             let body = submit_resp.text().await.unwrap_or_default();
-            log::error!("PaddleOCR-V2 submit HTTP {}: {}", submit_status, &body[..body.len().min(300)]);
-            return empty_ocr_result(Some(format!("submit HTTP {}: {}", submit_status, &body[..body.len().min(200)])));
+            log::error!(
+                "PaddleOCR-V2 submit HTTP {}: {}",
+                submit_status,
+                &body[..body.len().min(300)]
+            );
+            return empty_ocr_result(Some(format!(
+                "submit HTTP {}: {}",
+                submit_status,
+                &body[..body.len().min(200)]
+            )));
         }
 
         let submit_data: serde_json::Value = match submit_resp.json().await {
@@ -155,7 +171,10 @@ impl OcrClient {
 
             let poll_resp = match poll_client
                 .get(format!("{}/{}", PADDLE_OCR_V2_URL, job_id))
-                .header("Authorization", format!("bearer {}", PADDLE_OCR_V2_TOKEN))
+                .header(
+                    "Authorization",
+                    format!("bearer {}", get_paddle_ocr_token()),
+                )
                 .send()
                 .await
             {
@@ -195,13 +214,19 @@ impl OcrClient {
                     break;
                 }
                 "failed" => {
-                    let error_msg = d.get("errorMsg").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    let error_msg = d
+                        .get("errorMsg")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
                     log::error!("PaddleOCR-V2 job failed: {}", error_msg);
                     return empty_ocr_result(Some(format!("job failed: {}", error_msg)));
                 }
                 "running" => {
                     if let Some(prog) = d.get("extractProgress") {
-                        let extracted = prog.get("extractedPages").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let extracted = prog
+                            .get("extractedPages")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
                         let total = prog.get("totalPages").and_then(|v| v.as_u64()).unwrap_or(0);
                         log::info!("PaddleOCR-V2 running: {}/{}", extracted, total);
                     } else {
@@ -284,7 +309,13 @@ impl OcrClient {
                 let pw = pruned.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 let ph = pruned.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 if pw > 0 && ph > 0 {
-                    page_dimensions.insert(page_num, PageDimension { width: pw, height: ph });
+                    page_dimensions.insert(
+                        page_num,
+                        PageDimension {
+                            width: pw,
+                            height: ph,
+                        },
+                    );
                 }
 
                 let parsing_list = pruned
@@ -312,10 +343,8 @@ impl OcrClient {
                         .get("block_order")
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0) as u32;
-                    let group_id = block
-                        .get("group_id")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as u32;
+                    let group_id =
+                        block.get("group_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                     let block_id_num = block
                         .get("block_id")
                         .and_then(|v| v.as_u64())
@@ -323,7 +352,8 @@ impl OcrClient {
 
                     let block_id = format!("B_p{}_{}", page_num, block_id_num);
 
-                    let is_text_label = ["text", "title", "table", "formula"].contains(&label.as_str());
+                    let is_text_label =
+                        ["text", "title", "table", "formula"].contains(&label.as_str());
                     all_blocks.push(OcrBlock {
                         block_id,
                         page: page_num,
@@ -400,7 +430,11 @@ impl OcrClient {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            log::error!("GLM OCR HTTP error {}: {}", status, &body[..body.len().min(300)]);
+            log::error!(
+                "GLM OCR HTTP error {}: {}",
+                status,
+                &body[..body.len().min(300)]
+            );
             return OcrResult {
                 text: String::new(),
                 markdown: String::new(),
@@ -408,7 +442,11 @@ impl OcrClient {
                 char_count: 0,
                 blocks: vec![],
                 page_dimensions: std::collections::HashMap::new(),
-                error: Some(format!("GLM OCR HTTP {}: {}", status, &body[..body.len().min(200)])),
+                error: Some(format!(
+                    "GLM OCR HTTP {}: {}",
+                    status,
+                    &body[..body.len().min(200)]
+                )),
             };
         }
 
@@ -460,7 +498,13 @@ impl OcrClient {
                 let pw = pi.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 let ph = pi.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 if pw > 0 && ph > 0 {
-                    page_dimensions.insert(page_num, PageDimension { width: pw, height: ph });
+                    page_dimensions.insert(
+                        page_num,
+                        PageDimension {
+                            width: pw,
+                            height: ph,
+                        },
+                    );
                 }
             }
 
@@ -507,7 +551,8 @@ impl OcrClient {
 
                     let block_id = format!("B_p{}_{}", page_num, block_idx);
 
-                    let is_text_label = ["text", "title", "table", "formula"].contains(&label.as_str());
+                    let is_text_label =
+                        ["text", "title", "table", "formula"].contains(&label.as_str());
                     all_blocks.push(OcrBlock {
                         block_id,
                         page: page_num,
@@ -518,8 +563,7 @@ impl OcrClient {
                         group_id: 0,
                     });
 
-                    if !content.is_empty() && is_text_label
-                    {
+                    if !content.is_empty() && is_text_label {
                         all_text.push(content);
                     }
                 }
@@ -548,12 +592,7 @@ impl OcrClient {
         }
     }
 
-    pub async fn extract(
-        &self,
-        pdf_base64: &str,
-        engine: &str,
-        api_key: &str,
-    ) -> OcrResult {
+    pub async fn extract(&self, pdf_base64: &str, engine: &str, api_key: &str) -> OcrResult {
         let mut result = OcrResult {
             text: String::new(),
             markdown: String::new(),

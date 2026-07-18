@@ -159,7 +159,11 @@ impl UsptoClient {
                     }
                     let status = resp.status().as_u16();
                     if status == 429 {
-                        log::warn!("Rate limited, retrying (attempt {}/{})", attempt + 1, MAX_RETRIES);
+                        log::warn!(
+                            "Rate limited, retrying (attempt {}/{})",
+                            attempt + 1,
+                            MAX_RETRIES
+                        );
                         last_error = Some(UsptoApiError::RateLimited);
                         continue;
                     }
@@ -254,7 +258,10 @@ impl UsptoClient {
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
-            return Err(UsptoApiError::ApiError { status, message: body });
+            return Err(UsptoApiError::ApiError {
+                status,
+                message: body,
+            });
         }
 
         let data = resp.bytes().await?.to_vec();

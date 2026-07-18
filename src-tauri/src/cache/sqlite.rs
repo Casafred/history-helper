@@ -39,10 +39,8 @@ impl CacheStore {
         Ok(Self { conn })
     }
 
-    pub fn get(&mut self, key: &str) -> Option<String> {
+    pub fn get(&self, key: &str) -> Option<String> {
         let now = epoch_secs();
-
-        self.cleanup_expired();
 
         let mut stmt = self
             .conn
@@ -60,15 +58,16 @@ impl CacheStore {
         data_type: &str,
         data: &str,
         ttl_secs: i64,
-    ) {
+    ) -> Result<(), CacheError> {
         let now = epoch_secs();
         let expires_at = now + ttl_secs;
 
-        let _ = self.conn.execute(
+        self.conn.execute(
             "INSERT OR REPLACE INTO api_cache (cache_key, office, app_number, data_type, response_data, created_at, expires_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![key, office, app_number, data_type, data, now, expires_at],
-        );
+        )?;
+        Ok(())
     }
 
     pub fn cleanup_expired(&mut self) {
