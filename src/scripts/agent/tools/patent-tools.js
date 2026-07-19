@@ -649,13 +649,13 @@ var AgentPatentTools = (function () {
 
     AgentTools.register({
       name: "run_ai_analysis",
-      description: "触发AI审查意见梳理。调用后会在界面上弹出文档勾选面板，用户需要手动勾选要分析的文档并点击确认后才会开始分析。仅当用户明确要求AI梳理/深度分析时才调用此工具，不要自动触发。需要先调用fetch_patent。",
+      description: "触发AI审查意见梳理。默认自动选择全部文档并开始分析（auto_select=true），无需用户手动操作。仅当用户明确要求AI梳理/深度分析时才调用此工具，不要自动触发。需要先调用fetch_patent。",
       parameters: {
         type: "object",
         properties: {
           auto_select: {
             type: "boolean",
-            description: "是否自动选择全部文档（默认false）。设为true会自动全选并确认开始分析；设为false会弹出面板等待用户手动勾选。除非用户明确要求「全选」或「分析全部文档」，否则应使用默认值false",
+            description: "是否自动选择全部文档并确认开始分析，默认true。设为false会弹出面板等待用户手动勾选。通常应使用true自动执行，除非用户明确要求自行选择文档。",
           },
         },
       },
@@ -663,7 +663,7 @@ var AgentPatentTools = (function () {
         var data = getCurrentPatentData();
         if (!data) return Promise.resolve({ error: "请先调用fetch_patent查询专利" });
         switchToTab("ai-analysis");
-        var autoSelect = args.auto_select === true;
+        var autoSelect = args.auto_select !== false;
         setTimeout(function () {
           try {
             var analyzeBtn = document.getElementById("kanban-manual-select-btn");
@@ -728,13 +728,17 @@ var AgentPatentTools = (function () {
 
     AgentTools.register({
       name: "fetch_dossier_and_analyze",
-      description: "一站式查询专利审查档案并弹出AI分析文档勾选面板：查询审查文档→获取时间线→打开文档勾选面板。用户需要在面板上手动选择文档并确认后才会开始分析。仅当用户明确要求「梳理审查意见」时使用。",
+      description: "一站式查询专利审查档案并触发AI分析：查询审查文档→获取时间线→自动全选文档并开始AI梳理（默认auto_select=true自动执行，无需用户手动操作）。仅当用户明确要求「梳理审查意见」时使用。",
       parameters: {
         type: "object",
         properties: {
           patent_number: {
             type: "string",
             description: "专利号",
+          },
+          auto_select: {
+            type: "boolean",
+            description: "是否自动选择全部文档并开始分析，默认true。设为false会弹出面板等待用户手动勾选。",
           },
         },
         required: ["patent_number"],
@@ -771,21 +775,36 @@ var AgentPatentTools = (function () {
           if (Array.isArray(data.documents)) docCount = data.documents.length;
           else if (data.documents.list) docCount = data.documents.list.length;
         }
+        var autoSelect = args.auto_select !== false;
         setTimeout(function () {
           switchToTab("ai-analysis");
           setTimeout(function () {
             var analyzeBtn = document.getElementById("kanban-manual-select-btn");
-            if (analyzeBtn && !analyzeBtn.disabled) analyzeBtn.click();
+            if (analyzeBtn && !analyzeBtn.disabled) {
+              analyzeBtn.click();
+              if (autoSelect) {
+                setTimeout(function () {
+                  var confirmBtns = document.querySelectorAll(".ai-manual-select .btn-primary, #confirm-select-btn");
+                  if (confirmBtns.length > 0) {
+                    var lastBtn = confirmBtns[confirmBtns.length - 1];
+                    lastBtn.click();
+                  }
+                }, 800);
+              }
+            }
           }, 500);
         }, 800);
+        var tip = autoSelect
+          ? "已自动选择全部文档并开始AI审查意见梳理，请稍候在AI分析标签页查看结果"
+          : "审查文档已加载，请在界面上勾选需要分析的文档并确认。用户确认后AI将开始梳理";
         return {
           ok: true,
           patentNumber: data.patentNumber,
           title: data.title || "",
           documentCount: docCount,
-          action: "已查询专利并打开文档勾选面板",
-          tip: "审查文档已加载，请在界面上勾选需要分析的文档并确认。用户确认后AI将开始梳理",
-          waitForUser: true,
+          action: autoSelect ? "已查询专利并自动开始AI分析" : "已查询专利并打开文档勾选面板",
+          tip: tip,
+          waitForUser: !autoSelect,
           openInApp: { patentNumber: data.patentNumber, mode: "dossier" },
         };
       },

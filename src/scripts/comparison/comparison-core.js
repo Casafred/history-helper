@@ -71,10 +71,12 @@ var ComparisonCore = (function () {
 
   function setAnchor(id) {
     var item = _state.items.find(function(i) { return i.id === id; });
+    _state.items.forEach(function(i) { i.isAnchor = false; });
     if (!item) {
       _state.anchorId = null;
     } else {
       _state.anchorId = id;
+      item.isAnchor = true;
       if (!item.isSelected) {
         item.isSelected = true;
       }
@@ -244,7 +246,7 @@ var ComparisonCore = (function () {
 
   function addItem(options) {
     var item = {
-      id: ComparisonUtils.generateId(),
+      id: options.id || ComparisonUtils.generateId(),
       label: options.label || ('文本' + (_state.items.length + 1)),
       source: options.source || 'manual',
       patentNumber: options.patentNumber || '',
@@ -253,12 +255,14 @@ var ComparisonCore = (function () {
       originalLang: options.originalLang || ComparisonUtils.detectLanguage(options.originalText || ''),
       translatedText: options.translatedText || '',
       isSelected: options.isSelected !== false,
-      isAnchor: false,
+      isAnchor: !!options.isAnchor,
       metadata: options.metadata || {}
     };
     _state.items.push(item);
 
-    if (!_state.anchorId && _state.items.length === 1) {
+    if (options.isAnchor) {
+      _state.anchorId = item.id;
+    } else if (!_state.anchorId && _state.items.length === 1) {
       _state.anchorId = item.id;
     }
 

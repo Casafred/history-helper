@@ -184,6 +184,7 @@ var AgentComparisonTools = (function () {
         var results = {};
         var errors = [];
         var allIndeps = {};
+        var patentDataCache = {};
 
         for (var i = 0; i < numbers.length; i++) {
           var pn = numbers[i];
@@ -201,6 +202,7 @@ var AgentComparisonTools = (function () {
               fromCache: result.fromCache
             };
             allIndeps[pn] = indeps;
+            patentDataCache[pn] = result.data;
             log(pn + " 查询成功（" + (result.data.claims || []).length + "项权利要求，" + indeps.length + "项独权）");
           } else {
             errors.push(pn + ": " + result.error);
@@ -228,24 +230,21 @@ var AgentComparisonTools = (function () {
           results: results,
           errors: errors,
           anchorPatent: anchorPatent,
-          allIndeps: allIndeps
+          allIndeps: allIndeps,
+          patentDataCache: patentDataCache
         };
 
         if (typeof ComparisonCore !== "undefined") {
           var fetchedPatents = {};
-          Object.keys(results).forEach(function (key) {
+          Object.keys(patentDataCache).forEach(function (key) {
+            var d = patentDataCache[key];
             var r = results[key];
-            var fullData = null;
-            if (typeof GPCache !== "undefined") fullData = GPCache.get(key);
-            if (!fullData && window._pdPatentCache) fullData = window._pdPatentCache[key];
-            if (fullData) {
-              fetchedPatents[key] = {
-                patentNumber: fullData.patent_number || fullData.patentNumber || key,
-                title: fullData.title || r.title,
-                applicant: fullData.assignee || fullData.applicant || r.applicant,
-                claims: fullData.claims || []
-              };
-            }
+            fetchedPatents[key] = {
+              patentNumber: d.patent_number || d.patentNumber || key,
+              title: d.title || r.title,
+              applicant: d.assignee || d.applicant || r.applicant,
+              claims: d.claims || []
+            };
           });
           ComparisonCore.setFetchedPatents(fetchedPatents, errors, {});
           ComparisonCore.setPatentNumbersText(numbers.join("\n"));
@@ -352,10 +351,11 @@ var AgentComparisonTools = (function () {
 
         var itemsToAdd = [];
         var anchorId = null;
+        var dataCache = state.patentDataCache || {};
 
         Object.keys(claimSelections).forEach(function (pn) {
-          var patentData = null;
-          if (typeof GPCache !== "undefined") patentData = GPCache.get(pn);
+          var patentData = dataCache[pn];
+          if (!patentData && typeof GPCache !== "undefined") patentData = GPCache.get(pn);
           if (!patentData && window._pdPatentCache) patentData = window._pdPatentCache[pn];
           if (!patentData || !patentData.claims) return;
 
@@ -373,6 +373,7 @@ var AgentComparisonTools = (function () {
               }
             }
             if (!claim) return;
+            var isAnchor = (pn === anchorPatent && cnum == anchorNum);
             var label = pn + " 权" + cnum;
             var itemId = "cmp_" + pn + "_" + cnum;
             var item = {
@@ -382,10 +383,11 @@ var AgentComparisonTools = (function () {
               patentNumber: pn,
               claimNum: cnum,
               originalText: claim.text || "",
-              isSelected: true
+              isSelected: true,
+              isAnchor: isAnchor
             };
             itemsToAdd.push(item);
-            if (pn === anchorPatent && cnum == anchorNum && !anchorId) {
+            if (isAnchor && !anchorId) {
               anchorId = itemId;
             }
           });

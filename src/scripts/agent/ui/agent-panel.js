@@ -26,6 +26,8 @@ var AgentUI = (function () {
   var completedSteps = 0;
   var isBallHidden = false;
   var restoreBtn = null;
+  var userScrolledUp = false;
+  var scrollStickyThreshold = 80;
 
   var HIDE_KEY = "patentlens_agent_ball_hidden";
 
@@ -325,6 +327,11 @@ var AgentUI = (function () {
     sendBtn = panelEl.querySelector("#agent-send-btn");
     stopBtn = panelEl.querySelector("#agent-stop-btn");
 
+    messagesEl.addEventListener("scroll", function () {
+      var distanceFromBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+      userScrolledUp = distanceFromBottom > scrollStickyThreshold;
+    });
+
     panelEl.querySelector("#agent-close-btn").addEventListener("click", closePanel);
     panelEl.querySelector("#agent-reset-btn").addEventListener("click", resetChat);
     sendBtn.addEventListener("click", sendMessage);
@@ -534,13 +541,14 @@ var AgentUI = (function () {
 
   function addUserMessage(text) {
     removeWelcome();
+    userScrolledUp = false;
     var msg = document.createElement("div");
     msg.className = "agent-msg user";
     msg.innerHTML =
       '<div class="agent-msg-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>' +
       '<div class="agent-msg-body"><div class="agent-msg-bubble">' + escapeHtml(text) + '</div></div>';
     messagesEl.appendChild(msg);
-    scrollToBottom();
+    scrollToBottom(true);
   }
 
   function startAssistantBubble() {
@@ -1072,9 +1080,11 @@ var AgentUI = (function () {
     if (welcome) welcome.remove();
   }
 
-  function scrollToBottom() {
+  function scrollToBottom(force) {
     requestAnimationFrame(function () {
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      if (force || !userScrolledUp) {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
     });
   }
 
