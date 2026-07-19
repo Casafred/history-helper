@@ -649,13 +649,13 @@ var AgentPatentTools = (function () {
 
     AgentTools.register({
       name: "run_ai_analysis",
-      description: "触发AI审查意见梳理。默认自动选择全部文档并开始分析（auto_select=true），无需用户手动操作。仅当用户明确要求AI梳理/深度分析时才调用此工具，不要自动触发。需要先调用fetch_patent。",
+      description: "触发AI审查意见梳理，在后台自动执行（无需用户操作界面）。通常在用户通过对话确认要分析哪些文档后调用。如果用户说「全部文档」「所有文档」「直接分析」，直接调用即可（默认全选）。需要先调用fetch_patent。",
       parameters: {
         type: "object",
         properties: {
           auto_select: {
             type: "boolean",
-            description: "是否自动选择全部文档并确认开始分析，默认true。设为false会弹出面板等待用户手动勾选。通常应使用true自动执行，除非用户明确要求自行选择文档。",
+            description: "是否自动选择全部文档并开始分析，默认true。后台自动完成，不会弹出面板让用户操作。",
           },
         },
       },
@@ -681,14 +681,11 @@ var AgentPatentTools = (function () {
             }
           } catch (e) {}
         }, 500);
-        var tip = autoSelect
-          ? "已自动选择全部文档并开始AI分析，请稍候在AI分析标签页查看结果"
-          : "已打开文档勾选面板，请在界面上选择需要分析的文档并点击确认。用户确认后AI将开始梳理";
         return Promise.resolve({
           ok: true,
-          action: autoSelect ? "已自动开始AI分析" : "已弹出文档选择面板",
-          tip: tip,
-          waitForUser: !autoSelect,
+          action: "已在后台启动AI审查意见梳理",
+          tip: "AI正在分析审查文档，请稍候在AI分析标签页查看结果。分析完成后您可以在页面上查看完整梳理内容。",
+          waitForUser: false,
         });
       },
     });
@@ -728,7 +725,7 @@ var AgentPatentTools = (function () {
 
     AgentTools.register({
       name: "fetch_dossier_and_analyze",
-      description: "一站式查询专利审查档案并触发AI分析：查询审查文档→获取时间线→自动全选文档并开始AI梳理（默认auto_select=true自动执行，无需用户手动操作）。仅当用户明确要求「梳理审查意见」时使用。",
+      description: "一站式查询专利审查档案。查询成功后返回审查文档列表，你可以在对话中向用户展示并询问要分析哪些文档。如果用户说「全部」「直接分析」，传auto_select=true即可在后台自动开始AI分析（无需用户操作界面）。仅当用户明确要求「梳理审查意见」时使用。",
       parameters: {
         type: "object",
         properties: {
@@ -738,7 +735,7 @@ var AgentPatentTools = (function () {
           },
           auto_select: {
             type: "boolean",
-            description: "是否自动选择全部文档并开始分析，默认true。设为false会弹出面板等待用户手动勾选。",
+            description: "是否查询完成后自动全选文档并开始AI分析，默认false（只查询返回文档列表，在对话中问用户选择）。设为true则后台自动执行。",
           },
         },
         required: ["patent_number"],
@@ -770,19 +767,30 @@ var AgentPatentTools = (function () {
           return { ok: false, error: "查询失败，未获取到专利数据。请确认专利号格式正确，如 US14412875, EP1234567B1, WO2023123456" };
         }
         AgentCore.updateContext({ patentData: data, patentNumber: args.patent_number });
-        var docCount = 0;
+        var docs = [];
+        var docList = [];
         if (data.documents) {
-          if (Array.isArray(data.documents)) docCount = data.documents.length;
-          else if (data.documents.list) docCount = data.documents.list.length;
+          if (Array.isArray(data.documents)) docList = data.documents;
+          else if (data.documents.list) docList = data.documents.list;
+          else if (Array.isArray(data.documents.docs)) docList = data.documents.docs;
         }
-        var autoSelect = args.auto_select !== false;
-        setTimeout(function () {
-          switchToTab("ai-analysis");
+        docList.forEach(function (d, i) {
+          docs.push({
+            idx: d.idx || i,
+            type: d.type || d.docType || "",
+            date: d.date || d.pubDate || "",
+            title: d.title || d.description || "",
+            docCode: d.docCode || "",
+          });
+        });
+        var autoSelect = args.auto_select === true;
+        if (autoSelect) {
           setTimeout(function () {
-            var analyzeBtn = document.getElementById("kanban-manual-select-btn");
-            if (analyzeBtn && !analyzeBtn.disabled) {
-              analyzeBtn.click();
-              if (autoSelect) {
+            switchToTab("ai-analysis");
+            setTimeout(function () {
+              var analyzeBtn = document.getElementById("kanban-manual-select-btn");
+              if (analyzeBtn && !analyzeBtn.disabled) {
+                analyzeBtn.click();
                 setTimeout(function () {
                   var confirmBtns = document.querySelectorAll(".ai-manual-select .btn-primary, #confirm-select-btn");
                   if (confirmBtns.length > 0) {
@@ -791,19 +799,19 @@ var AgentPatentTools = (function () {
                   }
                 }, 800);
               }
-            }
-          }, 500);
-        }, 800);
-        var tip = autoSelect
-          ? "已自动选择全部文档并开始AI审查意见梳理，请稍候在AI分析标签页查看结果"
-          : "审查文档已加载，请在界面上勾选需要分析的文档并确认。用户确认后AI将开始梳理";
+            }, 500);
+          }, 800);
+        }
         return {
           ok: true,
           patentNumber: data.patentNumber,
           title: data.title || "",
-          documentCount: docCount,
-          action: autoSelect ? "已查询专利并自动开始AI分析" : "已查询专利并打开文档勾选面板",
-          tip: tip,
+          documentCount: docs.length,
+          documents: docs,
+          action: autoSelect ? "已查询专利并在后台启动AI分析" : "已查询专利，返回文档列表",
+          tip: autoSelect
+            ? "已在后台自动选择全部文档并开始AI审查意见梳理，请稍候在AI分析标签页查看结果。"
+            : "审查档案已查询成功，共" + docs.length + "份文档。请在对话中展示文档列表，询问用户要分析哪些文档；用户确认后调用run_ai_analysis(auto_select=true)后台执行。绝不要让用户去界面上手动勾选！",
           waitForUser: !autoSelect,
           openInApp: { patentNumber: data.patentNumber, mode: "dossier" },
         };
