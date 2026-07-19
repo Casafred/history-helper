@@ -62,28 +62,39 @@ var AgentComparisonTools = (function () {
   }
 
   async function fetchPatentData(patentNum) {
+    var pn = normalizePatentNumber(patentNum);
     if (typeof GPCache !== "undefined") {
-      var cached = GPCache.get(patentNum);
+      var cached = GPCache.get(pn);
       if (cached && cached.claims && cached.claims.length > 0) {
         return { ok: true, fromCache: true, data: cached };
       }
     }
-    if (window._pdPatentCache && window._pdPatentCache[patentNum]) {
-      var sessionCached = window._pdPatentCache[patentNum];
+    if (window._pdPatentCache && window._pdPatentCache[pn]) {
+      var sessionCached = window._pdPatentCache[pn];
       if (sessionCached.claims && sessionCached.claims.length > 0) {
         return { ok: true, fromCache: true, data: sessionCached };
       }
     }
     if (typeof fetchPatentWithRetry === "function") {
       try {
-        var data = await fetchPatentWithRetry(patentNum, 3);
-        if (data && data.claims && data.claims.length > 0) {
-          if (typeof GPCache !== "undefined") {
-            GPCache.set(patentNum, data);
+        var resp = await fetchPatentWithRetry(pn, 3);
+        if (resp && resp.success && resp.data) {
+          var patentData = resp.data;
+          if (patentData.claims && patentData.claims.length > 0 && patentData.data_source !== "Espacenet") {
+            if (typeof GPCache !== "undefined") {
+              GPCache.set(pn, patentData);
+            }
+            if (window._pdPatentCache) {
+              window._pdPatentCache[pn] = patentData;
+            }
+            return { ok: true, fromCache: false, data: patentData };
           }
-          return { ok: true, fromCache: false, data: data };
+          if (patentData.data_source === "Espacenet") {
+            return { ok: false, error: "Espacenet降级数据不含权利要求" };
+          }
+          return { ok: false, error: "未找到权利要求数据" };
         }
-        return { ok: false, error: "未找到权利要求数据" };
+        return { ok: false, error: (resp && resp.error) ? resp.error : "查询失败" };
       } catch (e) {
         return { ok: false, error: e.message || String(e) };
       }
