@@ -35,11 +35,43 @@ var AgentLLM = (function () {
     if (systemPrompt) {
       msgs.push({ role: "system", content: systemPrompt });
     }
-    // Sliding window: keep last ~30 messages to avoid token overflow in multi-turn convos
     var windowSize = 30;
     var start = 0;
     if (messages.length > windowSize) {
       start = messages.length - windowSize;
+      while (start < messages.length) {
+        var firstMsg = messages[start];
+        if (firstMsg.role === "user") {
+          break;
+        }
+        if (firstMsg.role === "tool") {
+          start++;
+          continue;
+        }
+        if (firstMsg.role === "assistant" && firstMsg.tool_calls && firstMsg.tool_calls.length > 0) {
+          var toolCallIds = {};
+          firstMsg.tool_calls.forEach(function(tc) { if (tc.id) toolCallIds[tc.id] = true; });
+          var j = start + 1;
+          while (j < messages.length && Object.keys(toolCallIds).length > 0) {
+            if (messages[j].role === "tool" && messages[j].tool_call_id) {
+              delete toolCallIds[messages[j].tool_call_id];
+            }
+            j++;
+          }
+          if (Object.keys(toolCallIds).length === 0) {
+            break;
+          }
+          start++;
+          continue;
+        }
+        start++;
+      }
+      if (start >= messages.length) {
+        start = messages.length - 1;
+        while (start > 0 && messages[start].role !== "user") {
+          start--;
+        }
+      }
     }
     for (var i = start; i < messages.length; i++) {
       var msg = messages[i];
