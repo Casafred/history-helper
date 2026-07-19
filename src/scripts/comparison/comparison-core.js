@@ -701,7 +701,7 @@ var ComparisonCore = (function () {
             label: i.label,
             patentNumber: i.patentNumber || '',
             source: i.source || '',
-            claimNum: i.claimNum || '',
+            claimNumber: i.claimNumber || '',
             originalText: i.originalText || '',
             isSelected: i.isSelected !== false
           };

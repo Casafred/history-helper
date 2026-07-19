@@ -382,7 +382,7 @@ var AgentComparisonTools = (function () {
               label: label,
               source: "patent",
               patentNumber: pn,
-              claimNum: cnum,
+              claimNumber: cnum,
               originalText: claim.text || "",
               isSelected: true,
               isAnchor: isAnchor
