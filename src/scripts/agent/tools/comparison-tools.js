@@ -184,6 +184,7 @@ var AgentComparisonTools = (function () {
         var results = {};
         var errors = [];
         var allIndeps = {};
+        var patentDataCache = {};
 
         for (var i = 0; i < numbers.length; i++) {
           var pn = numbers[i];
@@ -201,6 +202,7 @@ var AgentComparisonTools = (function () {
               fromCache: result.fromCache
             };
             allIndeps[pn] = indeps;
+            patentDataCache[pn] = result.data;
             log(pn + " 查询成功（" + (result.data.claims || []).length + "项权利要求，" + indeps.length + "项独权）");
           } else {
             errors.push(pn + ": " + result.error);
@@ -228,24 +230,21 @@ var AgentComparisonTools = (function () {
           results: results,
           errors: errors,
           anchorPatent: anchorPatent,
-          allIndeps: allIndeps
+          allIndeps: allIndeps,
+          patentDataCache: patentDataCache
         };
 
         if (typeof ComparisonCore !== "undefined") {
           var fetchedPatents = {};
-          Object.keys(results).forEach(function (key) {
+          Object.keys(patentDataCache).forEach(function (key) {
+            var d = patentDataCache[key];
             var r = results[key];
-            var fullData = null;
-            if (typeof GPCache !== "undefined") fullData = GPCache.get(key);
-            if (!fullData && window._pdPatentCache) fullData = window._pdPatentCache[key];
-            if (fullData) {
-              fetchedPatents[key] = {
-                patentNumber: fullData.patent_number || fullData.patentNumber || key,
-                title: fullData.title || r.title,
-                applicant: fullData.assignee || fullData.applicant || r.applicant,
-                claims: fullData.claims || []
-              };
-            }
+            fetchedPatents[key] = {
+              patentNumber: d.patent_number || d.patentNumber || key,
+              title: d.title || r.title,
+              applicant: d.assignee || d.applicant || r.applicant,
+              claims: d.claims || []
+            };
           });
           ComparisonCore.setFetchedPatents(fetchedPatents, errors, {});
           ComparisonCore.setPatentNumbersText(numbers.join("\n"));
@@ -263,6 +262,7 @@ var AgentComparisonTools = (function () {
           errorCount: errors.length,
           errors: errors,
           anchorPatent: anchorPatent,
+          defaultAnchorClaim: anchorPatent + ":1",
           patents: {}
         };
 
@@ -276,35 +276,35 @@ var AgentComparisonTools = (function () {
             independentClaims: r.independentClaims.map(function (c) {
               return {
                 num: c.num,
-                preview: c.textPreview
+                textPreview: c.textPreview,
+                claimId: pn + ":" + c.num
               };
             })
           };
         });
 
-        summary.tip = "已完成 " + successCount + " 个专利的查询。默认将选择各专利的**所有独立权利要求**进行比对，以「" + anchorPatent + "」的权1作为锚点基准。如果需要调整选择（如只选权1、选择不同的锚点等），请告知；如确认使用默认设置，请回复「确认」或「开始比对」，我将自动执行比对并生成HTML报告供下载。";
-        summary.waitForConfirmation = true;
+        summary.tip = "已成功查询到 " + successCount + " 个专利的独立权利要求。请在对话中用清晰的表格/列表向用户展示各专利的独权选项（专利号、权项号、内容预览），然后用ask_user询问：1）要比对哪些权项（默认全部独权）；2）以哪个为锚点（默认" + anchorPatent + "权1）。用户可以用自然语言回答（如「全部都要」「只选权1」「用美国专利做基准」等），理解后调用execute_claim_comparison传参后台执行。绝不要让用户去界面上手动选择锚点或点击按钮！";
         return summary;
       },
     });
 
     AgentTools.register({
       name: "execute_claim_comparison",
-      description: "确认选择后执行权利要求比对：在prepare_claim_comparison查询完成、用户确认独权选择后调用此工具。工具会自动将选中的独权加入比对列表、设置锚点、运行AI比对，并在完成后生成HTML报告供用户下载。",
+      description: "在后台自动执行权利要求AI比对：添加选中的权项、设置锚点、运行AI语义比对、生成HTML报告并自动触发下载。**完全在后台执行，不需要用户在界面上操作任何东西。** 用户通过对话确认选择后调用此工具。",
       parameters: {
         type: "object",
         properties: {
           selected_claims: {
             type: "string",
-            description: "（可选）指定要比对的权利要求，格式为「专利号:权项号」，多个用逗号分隔。例如：US14412875:1, CN101172339B:1, EP1234567B:1。留空或不填则默认选择所有专利的全部独立权利要求。",
+            description: "（可选）指定要比对的权利要求，格式为「专利号:权项号」，多个用逗号分隔。例如：US11148275B2:1, US11148275B2:18, EP3481593B1:1。留空或不填则默认选择所有专利的全部独立权利要求。",
           },
           anchor_claim: {
             type: "string",
-            description: "（可选）指定锚点权利要求，格式为「专利号:权项号」。如不指定则使用第一个专利的权1。",
+            description: "（可选）指定锚点权利要求，格式为「专利号:权项号」。如不指定则使用第一个专利的权1作为锚点。",
           },
           auto_export: {
             type: "boolean",
-            description: "（可选）是否在比对完成后自动导出HTML报告，默认true。",
+            description: "（可选）是否在比对完成后自动导出并下载HTML报告，默认true。",
           },
         },
       },
@@ -352,10 +352,11 @@ var AgentComparisonTools = (function () {
 
         var itemsToAdd = [];
         var anchorId = null;
+        var dataCache = state.patentDataCache || {};
 
         Object.keys(claimSelections).forEach(function (pn) {
-          var patentData = null;
-          if (typeof GPCache !== "undefined") patentData = GPCache.get(pn);
+          var patentData = dataCache[pn];
+          if (!patentData && typeof GPCache !== "undefined") patentData = GPCache.get(pn);
           if (!patentData && window._pdPatentCache) patentData = window._pdPatentCache[pn];
           if (!patentData || !patentData.claims) return;
 
@@ -373,6 +374,7 @@ var AgentComparisonTools = (function () {
               }
             }
             if (!claim) return;
+            var isAnchor = (pn === anchorPatent && cnum == anchorNum);
             var label = pn + " 权" + cnum;
             var itemId = "cmp_" + pn + "_" + cnum;
             var item = {
@@ -382,10 +384,11 @@ var AgentComparisonTools = (function () {
               patentNumber: pn,
               claimNum: cnum,
               originalText: claim.text || "",
-              isSelected: true
+              isSelected: true,
+              isAnchor: isAnchor
             };
             itemsToAdd.push(item);
-            if (pn === anchorPatent && cnum == anchorNum && !anchorId) {
+            if (isAnchor && !anchorId) {
               anchorId = itemId;
             }
           });
@@ -439,14 +442,18 @@ var AgentComparisonTools = (function () {
 
         _prepState = null;
 
+        var markdownContent = result.markdownContent || "";
+        var summaryPreview = markdownContent.length > 3000 ? markdownContent.substring(0, 3000) + "..." : markdownContent;
+
         return {
           ok: true,
           action: "权利要求比对完成",
           itemCount: itemsToAdd.length,
           anchor: (itemsToAdd.find(function(i){return i.id===anchorId;})||{}).label,
-          markdownLength: (result.markdownContent || "").length,
           htmlReportExported: autoExport,
-          tip: "比对分析已完成，结果已显示在智能比对页面中。HTML报告已开始下载，您也可以在页面上点击「导出HTML报告」按钮重新导出。报告包含AI语义相似度分析、异同点梳理和原文对照附录。",
+          markdownPreview: summaryPreview,
+          markdownLength: markdownContent.length,
+          tip: "比对分析已完成！HTML报告已自动触发下载。请根据markdownPreview中的比对结果，整理成清晰的结构化总结（如：保护范围差异、技术特征增减、各国独权异同点等）告知用户。用户可切换到智能比对标签页查看完整交互结果，或点击导出按钮重新下载报告。",
           resultReady: true
         };
       },
@@ -454,7 +461,7 @@ var AgentComparisonTools = (function () {
 
     AgentTools.register({
       name: "quick_compare_claims",
-      description: "快捷权利要求比对：一站式完成多专利独权比对。输入专利号后自动查询→自动选择所有独权→以第一个专利为锚点→直接运行AI比对→生成并下载HTML报告。无需中间确认步骤，适用于用户明确说「直接比对」「帮我对比这几个专利」等快速场景。如果用户说要先看独权列表再确认，请使用prepare_claim_comparison。",
+      description: "快捷一站式权利要求比对：自动查询→自动选全部独权→以第一个专利权1为锚点→后台运行AI比对→自动下载HTML报告。不需要中间确认/选择步骤。适用于用户明确说「直接比对」「快速对比」「帮我对比一下」等不需要选择权项的快速场景。如果用户说要先看独权列表、要选特定权项、要换锚点，请使用prepare_claim_comparison流程。",
       parameters: {
         type: "object",
         properties: {
