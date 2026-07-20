@@ -1367,13 +1367,21 @@ function parsePatentNumber(input) {
   return { office, raw: trimmed, applicationNumber: appNum, kindCode: kindCode, queryType };
 }
 
-// GD/EPO 双失败引导：当 EPO 也被 Cloudflare 拦截或限流时，提示用户去浏览器完成验证
+// GD/EPO 双失败引导：当 EPO 也被 Cloudflare 拦截时，在 Electron 环境下打开内嵌窗口
+// 让用户完成 Cloudflare 验证并自动复用 cookie 重新查询；
+// 非 Electron 环境回退到外部浏览器打开 + confirm。
 // 同一次 doSearch 内 patent-family 和 doc-list 都可能失败，用 throttle 避免重复弹框
 let _gdEpoPromptedAt = 0;
+let _gdEpoVerifying = false;  // 正在内嵌窗口验证中，避免重复触发
 function _promptGdEpoBrowserOpen(e, kind) {
   if (!e) return;
   if (!e.cloudflare && !e.rateLimited) return;
   if (!e.browserUrl) return;
+  // 正在验证中，跳过
+  if (_gdEpoVerifying) {
+    console.info("[GD→EPO] 验证窗口已打开，跳过重复触发", kind);
+    return;
+  }
   // 10 秒内只弹一次
   const now = Date.now();
   if (now - _gdEpoPromptedAt < 10000) {
@@ -1381,6 +1389,41 @@ function _promptGdEpoBrowserOpen(e, kind) {
     return;
   }
   _gdEpoPromptedAt = now;
+
+  // Electron 环境：用内嵌 BrowserWindow 完成验证并复用 cookie 自动重试
+  if (window.electronAPI && typeof window.electronAPI.epoVerifyAndFetchCookies === "function") {
+    _gdEpoVerifying = true;
+    const reason = e.cloudflare ? "Cloudflare 人机验证" : "限流";
+    showToast(`正在打开内嵌窗口完成 EPO ${reason}，验证后将自动重试查询…`, 5000);
+    window.electronAPI.epoVerifyAndFetchCookies(e.browserUrl).then((result) => {
+      _gdEpoVerifying = false;
+      if (result && result.ok) {
+        console.info("[GD→EPO] 验证完成，cookies=" + result.cookieCount + "，自动重试查询");
+        showToast(`✅ EPO 验证通过（保存了 ${result.cookieCount || 0} 个 cookie），正在重新查询…`, 4000);
+        // 重置 throttle 让重试能完整跑一遍
+        _gdEpoPromptedAt = 0;
+        // 自动触发当前输入框的重新查询
+        setTimeout(() => {
+          try {
+            const searchBtn = document.getElementById("search-btn");
+            if (searchBtn && !searchBtn.disabled) searchBtn.click();
+            else console.info("[GD→EPO] searchBtn 不可用，用户需手动重新查询");
+          } catch (clickErr) { console.warn("[GD→EPO] auto-retry click failed:", clickErr); }
+        }, 500);
+      } else {
+        const reason = result && result.reason ? result.reason : "未知原因";
+        console.warn("[GD→EPO] 验证未完成: " + reason);
+        showToast("EPO 验证未完成（" + reason + "），请稍后重试或手动查询", 5000);
+      }
+    }).catch((err) => {
+      _gdEpoVerifying = false;
+      console.error("[GD→EPO] epoVerifyAndFetchCookies error:", err);
+      showToast("打开验证窗口失败: " + (err.message || err), 5000);
+    });
+    return;
+  }
+
+  // 非 Electron 环境：弹 confirm + 外部浏览器打开
   const reason = e.cloudflare ? "需要人机验证" : "被限流";
   const tip = e.cloudflare
     ? "在浏览器中完成 Cloudflare 人机验证后，回到本应用重新查询即可生效。"

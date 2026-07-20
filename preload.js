@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   setHasAnnotations: (val, summary) => ipcRenderer.send("set-has-annotations", !!val, Array.isArray(summary) ? summary : []),
   openPopoutWindow: (url, title, opts) => ipcRenderer.send("open-popout-window", url, title, opts || null),
+  epoVerifyAndFetchCookies: (url) => ipcRenderer.invoke("epo-verify-and-fetch-cookies", url),
   downloadFile: (url, filename) => ipcRenderer.send("download-file", url, filename || null),
   exportPdfWithAnnotations: (data) => ipcRenderer.invoke("export-pdf-annotations", data),
   getImmersiveTranslateScript: () => ipcRenderer.invoke("get-immersive-translate-script"),
