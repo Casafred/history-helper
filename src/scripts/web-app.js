@@ -1374,9 +1374,26 @@ function parsePatentNumber(input) {
 let _gdEpoPromptedAt = 0;
 let _gdEpoVerifying = false;  // 正在内嵌窗口验证中，避免重复触发
 function _promptGdEpoBrowserOpen(e, kind) {
+  console.info("[GD→EPO] _promptGdEpoBrowserOpen called", {
+    kind,
+    hasError: !!e,
+    cloudflare: !!(e && e.cloudflare),
+    rateLimited: !!(e && e.rateLimited),
+    browserUrl: e && e.browserUrl,
+    hasElectronAPI: !!(window.electronAPI),
+    hasEpoVerify: !!(window.electronAPI && typeof window.electronAPI.epoVerifyAndFetchCookies === "function"),
+    verifying: _gdEpoVerifying,
+    sinceLastPrompt: Date.now() - _gdEpoPromptedAt,
+  });
   if (!e) return;
-  if (!e.cloudflare && !e.rateLimited) return;
-  if (!e.browserUrl) return;
+  if (!e.cloudflare && !e.rateLimited) {
+    console.warn("[GD→EPO] 错误对象无 cloudflare/rateLimited 标志，跳过引导。错误信息:", e.message);
+    return;
+  }
+  if (!e.browserUrl) {
+    console.warn("[GD→EPO] 错误对象无 browserUrl，跳过引导");
+    return;
+  }
   // 正在验证中，跳过
   if (_gdEpoVerifying) {
     console.info("[GD→EPO] 验证窗口已打开，跳过重复触发", kind);
@@ -1395,8 +1412,10 @@ function _promptGdEpoBrowserOpen(e, kind) {
     _gdEpoVerifying = true;
     const reason = e.cloudflare ? "Cloudflare 人机验证" : "限流";
     showToast(`正在打开内嵌窗口完成 EPO ${reason}，验证后将自动重试查询…`, 5000);
+    console.info("[GD→EPO] 调用 electronAPI.epoVerifyAndFetchCookies 打开内嵌验证窗口", e.browserUrl);
     window.electronAPI.epoVerifyAndFetchCookies(e.browserUrl).then((result) => {
       _gdEpoVerifying = false;
+      console.info("[GD→EPO] 验证窗口返回", result);
       if (result && result.ok) {
         console.info("[GD→EPO] 验证完成，cookies=" + result.cookieCount + "，自动重试查询");
         showToast(`✅ EPO 验证通过（保存了 ${result.cookieCount || 0} 个 cookie），正在重新查询…`, 4000);
@@ -1424,6 +1443,7 @@ function _promptGdEpoBrowserOpen(e, kind) {
   }
 
   // 非 Electron 环境：弹 confirm + 外部浏览器打开
+  console.warn("[GD→EPO] 非 Electron 环境，回退到 confirm + window.open 方式。建议在 Electron 应用中运行以获得内嵌验证窗口体验。");
   const reason = e.cloudflare ? "需要人机验证" : "被限流";
   const tip = e.cloudflare
     ? "在浏览器中完成 Cloudflare 人机验证后，回到本应用重新查询即可生效。"

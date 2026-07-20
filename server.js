@@ -65,9 +65,17 @@ function serveStatic(filePath, res) {
       res.end("Not Found");
       return;
     }
-    res.writeHead(200, {
+    // HTML/JS/CSS 不缓存，确保用户每次拿到最新代码（避免新版本发布后旧代码仍生效）
+    const noCacheTypes = [".html", ".js", ".css", ".json"];
+    const headers = {
       "Content-Type": MIME_TYPES[ext] || "application/octet-stream",
-    });
+    };
+    if (noCacheTypes.includes(ext)) {
+      headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+      headers["Pragma"] = "no-cache";
+      headers["Expires"] = "0";
+    }
+    res.writeHead(200, headers);
     res.end(data);
   });
 }
