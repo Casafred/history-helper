@@ -339,7 +339,14 @@ var AgentUI = (function () {
       PatentLensAgent.stop();
     });
 
+    var isComposing = false;
+    inputEl.addEventListener("compositionstart", function () { isComposing = true; });
+    inputEl.addEventListener("compositionend", function () { isComposing = false; });
+
     inputEl.addEventListener("keydown", function (e) {
+      // IME 组合中（如中文输入法选词阶段）不拦截 Enter，否则会打断候选词确认，
+      // 导致输入法卡死、后续按键和点击都无响应。
+      if (e.isComposing || isComposing || e.keyCode === 229) return;
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         sendMessage();
@@ -347,6 +354,8 @@ var AgentUI = (function () {
     });
 
     inputEl.addEventListener("input", function () {
+      // 组合过程中不要重置高度，避免布局抖动影响 IME 候选窗位置
+      if (isComposing) return;
       inputEl.style.height = "auto";
       inputEl.style.height = Math.min(inputEl.scrollHeight, 100) + "px";
     });
@@ -511,7 +520,11 @@ var AgentUI = (function () {
     // Enter key in patent number input triggers the first quick action
     var pnInputEl = document.getElementById("agent-pn-input");
     if (pnInputEl) {
+      var pnComposing = false;
+      pnInputEl.addEventListener("compositionstart", function () { pnComposing = true; });
+      pnInputEl.addEventListener("compositionend", function () { pnComposing = false; });
       pnInputEl.addEventListener("keydown", function(e) {
+        if (e.isComposing || pnComposing || e.keyCode === 229) return;
         if (e.key === "Enter") {
           e.preventDefault();
           var firstBtn = messagesEl.querySelector(".agent-quick-btn");
