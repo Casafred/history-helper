@@ -212,6 +212,16 @@ function proxyGdApi(urlPath, res) {
           res.end(JSON.stringify({ error: "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试", cloudflare: true }));
           return;
         }
+        if (epoResult.rateLimited) {
+          // EPO IP 限流：告知用户根本原因和浏览器直查链接，避免用户误以为代码 bug
+          res.writeHead(503, { "Content-Type": "application/json", ...corsHeaders });
+          res.end(JSON.stringify({
+            error: `GD 不可用（HTTP ${gdResult.httpCode || 500}）；EPO Register 被限流：${epoResult.error}。请稍后重试或使用浏览器直接查询。`,
+            rateLimited: true,
+            browserUrl: epoResult.browserUrl,
+          }));
+          return;
+        }
         res.writeHead(502, { "Content-Type": "application/json", ...corsHeaders });
         res.end(JSON.stringify({ error: `GD: ${gdResult.error || "failed"}; EPO: ${epoResult.error || "failed"}` }));
       } else {
@@ -689,7 +699,21 @@ async function epoFetchDocList(office, docNumber, kindCode) {
     return { error: `EPO Register: ${office}${docNumber} not found` };
   }
   if (result.httpCode !== 200) {
-    return { error: `EPO Register HTTP ${result.httpCode}` };
+    const bodyStr = String(result.body || "").trim();
+    // EPO Register 限流：通常返回 HTTP 403 + "Rate Limit Exceeded"（短小纯文本，非 Cloudflare）。
+    // 这是 EPO 服务端对 IP 做的日访问上限，跟代码逻辑无关。
+    if (result.httpCode === 403 && /rate\s*limit/i.test(bodyStr)) {
+      return {
+        rateLimited: true,
+        error: `EPO Register IP 限流（HTTP 403: ${bodyStr}）。EPO 对服务器 IP 有日访问上限，请稍后重试，或在浏览器中直接访问：${url}`,
+        browserUrl: url,
+      };
+    }
+    // Cloudflare 拦截有时也以 403 形式返回，做兜底识别
+    if (result.httpCode === 403 && epoDetectCloudflare(bodyStr)) {
+      return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
+    }
+    return { error: `EPO Register HTTP ${result.httpCode}${bodyStr ? ": " + bodyStr.slice(0, 150) : ""}` };
   }
   if (epoDetectCloudflare(result.body)) {
     return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
