@@ -1421,14 +1421,27 @@ function _promptGdEpoBrowserOpen(e, kind) {
         showToast(`✅ EPO 验证通过（保存了 ${result.cookieCount || 0} 个 cookie），正在重新查询…`, 4000);
         // 重置 throttle 让重试能完整跑一遍
         _gdEpoPromptedAt = 0;
-        // 自动触发当前输入框的重新查询
-        setTimeout(() => {
+        // 自动触发重新查询：循环重试最多 6 次，每次间隔 800ms，
+        // 因为 doSearch 的 catch 块可能还在执行，searchBtn 还没启用。
+        const retryClick = (attempt) => {
+          if (attempt > 6) {
+            console.warn("[GD→EPO] auto-retry 放弃：searchBtn 持续不可用，请手动重新查询");
+            showToast("自动重试未生效，请手动点击查询按钮重试", 5000);
+            return;
+          }
           try {
             const searchBtn = document.getElementById("search-btn");
-            if (searchBtn && !searchBtn.disabled) searchBtn.click();
-            else console.info("[GD→EPO] searchBtn 不可用，用户需手动重新查询");
+            const inputEl = document.getElementById("patent-input");
+            if (searchBtn && !searchBtn.disabled && inputEl && inputEl.value) {
+              console.info("[GD→EPO] auto-retry attempt=" + attempt + ": searchBtn 可用，触发 click");
+              searchBtn.click();
+            } else {
+              console.info("[GD→EPO] auto-retry attempt=" + attempt + ": searchBtn 不可用，800ms 后再试");
+              setTimeout(() => retryClick(attempt + 1), 800);
+            }
           } catch (clickErr) { console.warn("[GD→EPO] auto-retry click failed:", clickErr); }
-        }, 500);
+        };
+        setTimeout(() => retryClick(1), 800);
       } else {
         const reason = result && result.reason ? result.reason : "未知原因";
         console.warn("[GD→EPO] 验证未完成: " + reason);

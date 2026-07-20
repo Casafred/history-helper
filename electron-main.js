@@ -2161,33 +2161,88 @@ function openEpoVerifyWindow(targetUrl) {
       console.warn("[EPO Verify] loadURL failed:", e.message);
     });
 
-    // 自动检测：每 2 秒看一次页面 title 和 URL，识别 Cloudflare 是否通过
+    // 严格的 Cloudflare 等待页标题识别（中英文多语言变体）。
+    // 注意：__cf_bm cookie 在 Cloudflare "请稍候" 等待期间就会下发，
+    // 所以不能仅凭 hasCfBm 判断验证通过——必须等页面真正加载出 EPO 应用内容。
+    const CF_WAITING_KEYWORDS = [
+      "just a moment", "attention required", "checking your browser",
+      "performing security", "verifying you are human", "请稍候", "请稍等",
+      "正在检查", "正在验证", "需要关注", "执行安全", "稍候片刻",
+    ];
+    const isCloudflareWaiting = (title) => {
+      const lower = String(title || "").toLowerCase();
+      return CF_WAITING_KEYWORDS.some((kw) => lower.includes(kw.toLowerCase()));
+    };
+
+    // 真正的"验证通过"判定：页面 title 不是 Cloudflare 等待页，
+    // AND 页面 DOM 中包含 EPO Register 应用特征元素（biblio 表格、proceedings 等）。
+    const checkEpoAppLoaded = async () => {
+      try {
+        return await win.webContents.executeJavaScript(`
+          (function() {
+            try {
+              var title = document.title || "";
+              var html = document.documentElement ? document.documentElement.outerHTML : "";
+              // EPO Register 应用页特征选择器
+              var hasEpoAppEl = !!document.querySelector(
+                "table.publicationData, table.biblio, #resultData, #applicationForm, " +
+                "div.bibliographic-data, #biblio, div.docListTable, table.docListTable, " +
+                "#proc_table, #documents, div.proceedings"
+              );
+              var hasEpoAppText = /Bibliographic data|Proceedings|About this application|Documents|European Patent Register/i.test(html);
+              return {
+                title: title,
+                hasEpoAppContent: !!(hasEpoAppEl || hasEpoAppText),
+                url: window.location.href,
+                htmlLen: html.length,
+              };
+            } catch(e) { return { title: "", hasEpoAppContent: false, url: "", error: e.message }; }
+          })();
+        `, true).catch(() => ({ title: "", hasEpoAppContent: false, url: "" }));
+      } catch (_) { return { title: "", hasEpoAppContent: false, url: "" }; }
+    };
+
+    // 自动检测：每 2 秒检查一次页面是否已加载出 EPO 应用内容
     autoVerifyTimer = setInterval(async () => {
       if (settled || win.isDestroyed()) return;
       try {
         const url = win.webContents.getURL();
-        const title = win.webContents.getTitle() || "";
         if (!url.includes("register.epo.org")) return;
-        const lower = title.toLowerCase();
-        const isCloudflarePage = lower.includes("just a moment") || lower.includes("attention required")
-          || lower.includes("checking your browser") || lower.includes("performing security");
-        // 通过判定：title 不再是 Cloudflare 页，且已经能拿到 __cf_bm cookie
-        const cookies = await verifySession.cookies.get({ domain: "epo.org" });
-        const hasCfBm = cookies.some(c => c.name === "__cf_bm");
-        if (!isCloudflarePage && hasCfBm) {
-          console.log(`[EPO Verify] auto-detected verification passed (title="${title}", cookies=${cookies.length})`);
-          finish(true, { title });
+        const pageState = await checkEpoAppLoaded();
+        if (!pageState) return;
+        if (isCloudflareWaiting(pageState.title)) {
+          // 还在 Cloudflare 等待页，继续等
+          return;
+        }
+        if (pageState.hasEpoAppContent) {
+          const cookies = await verifySession.cookies.get({ domain: "epo.org" });
+          console.log(`[EPO Verify] verification passed (title="${pageState.title}", cookies=${cookies.length}, url=${pageState.url})`);
+          finish(true, { title: pageState.title });
         }
       } catch (e) { /* ignore */ }
     }, 2000);
 
-    // 60 秒超时，让用户手动点按钮也行
+    // 页面每次完成加载时也检查一次（避免错过 did-finish-load 时机）
+    win.webContents.on("did-finish-load", async () => {
+      if (settled || win.isDestroyed()) return;
+      try {
+        const pageState = await checkEpoAppLoaded();
+        if (!pageState || isCloudflareWaiting(pageState.title)) return;
+        if (pageState.hasEpoAppContent) {
+          const cookies = await verifySession.cookies.get({ domain: "epo.org" });
+          console.log(`[EPO Verify] verification passed on did-finish-load (title="${pageState.title}", cookies=${cookies.length})`);
+          finish(true, { title: pageState.title });
+        }
+      } catch (_) {}
+    });
+
+    // 90 秒超时，超时后告知用户验证未完成（不会误判为 ok:true）
     setTimeout(() => {
       if (!settled) {
-        console.log("[EPO Verify] 60s timeout reached, allowing user manual close");
-        // 不强制 finish，等用户操作或关窗
+        console.log("[EPO Verify] 90s timeout reached, no EPO app content detected");
+        finish(false, { reason: "timeout_no_epo_content" });
       }
-    }, 60000);
+    }, 90000);
 
     win.on("closed", () => {
       if (!settled) finish(false, { reason: "window_closed_by_user" });
@@ -2221,14 +2276,19 @@ function openEpoVerifyWindow(targetUrl) {
           })();
         `, true).catch(() => {});
       } catch (_) {}
-      // 监听用户点击按钮的消息
+    });
+
+    // 监听用户点击"已完成验证"按钮：只创建一次 interval，避免 did-finish-load 多次触发导致泄漏
+    if (!manualCheckInterval) {
       manualCheckInterval = setInterval(async () => {
-        if (settled) return;
+        if (settled || win.isDestroyed()) return;
         try {
           const clicked = await win.webContents.executeJavaScript(`
             (function() {
-              var hint = document.getElementById("patentlens-verify-hint");
-              return hint && hint.textContent.includes("验证完成") ? true : false;
+              try {
+                var hint = document.getElementById("patentlens-verify-hint");
+                return hint && hint.textContent.includes("验证完成") ? true : false;
+              } catch(e) { return false; }
             })();
           `, true).catch(() => false);
           if (clicked) {
@@ -2237,7 +2297,7 @@ function openEpoVerifyWindow(targetUrl) {
           }
         } catch (_) {}
       }, 1000);
-    });
+    }
   });
 }
 
