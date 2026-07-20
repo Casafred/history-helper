@@ -611,7 +611,7 @@ var AgentPatentTools = (function () {
 
     AgentTools.register({
       name: "open_document_reader",
-      description: "在应用内打开审查文档阅读器查看特定文档。用户可以在阅读器中查看、翻译、OCR、标注文档。需要先调用fetch_patent。",
+      description: "在应用内打开审查文档阅读器查看特定文档。用户可以在阅读器中查看、翻译、OCR、标注文档。需要先调用fetch_patent。**注意：此工具仅在UI上打开阅读器，不会返回文档内容文本。如果Agent需要获取文档原文用于翻译/总结/分析/输出给用户，请改用ocr_document工具，它会直接返回OCR后的markdown文本。**",
       parameters: {
         type: "object",
         properties: {
@@ -644,6 +644,188 @@ var AgentPatentTools = (function () {
           action: "已打开文档阅读器",
           tip: "已为您切换到审查看板并打开阅读器",
         });
+      },
+    });
+
+    AgentTools.register({
+      name: "ocr_document",
+      description: "对指定审查文档执行OCR并返回识别文本（markdown格式）。需要先调用fetch_patent。当用户需要查看审查文档原文（如驳回意见、答复陈述、引用文献等）进行翻译/总结/分析时，使用此工具直接获取文本，而不是open_document_reader。OCR调用可能需要10-60秒。",
+      parameters: {
+        type: "object",
+        properties: {
+          document_index: {
+            type: "number",
+            description: "文档序号（从0开始），可通过get_documents_summary获取",
+          },
+          engine: {
+            type: "string",
+            enum: ["paddle_ocr_vl", "glm_ocr", "auto"],
+            description: "OCR引擎。paddle_ocr_vl：百度PaddleOCR-VL（默认，无需API Key，精度高，推荐）；glm_ocr：智谱GLM OCR（需要API Key）；auto：自动选择并降级",
+          },
+          max_length: {
+            type: "number",
+            description: "返回文本最大字符数，默认20000。审查文档OCR结果可能很长，超出部分会截断。如需完整内容可增大此值",
+          },
+        },
+        required: ["document_index"],
+      },
+      execute: async function (args) {
+        var data = getCurrentPatentData();
+        if (!data) {
+          return { error: "请先调用fetch_patent查询专利" };
+        }
+
+        var idx = args.document_index;
+        if (idx == null || idx < 0) {
+          return { error: "document_index不能为空且必须>=0" };
+        }
+
+        // 1. 取文档元信息（需要 docId / numberOfPages / docFormat）
+        //    优先从 kanbanState.documents（web-app.js 实际使用源），备选 currentData.documents
+        var doc = null;
+        try {
+          if (typeof kanbanState !== "undefined" && kanbanState && Array.isArray(kanbanState.documents)) {
+            for (var i = 0; i < kanbanState.documents.length; i++) {
+              if (kanbanState.documents[i].idx === idx) {
+                doc = kanbanState.documents[i];
+                break;
+              }
+            }
+          }
+        } catch (e) { /* ignore */ }
+
+        if (!doc) {
+          try {
+            if (typeof currentData !== "undefined" && currentData && currentData.documents) {
+              var docSource = currentData.documents;
+              var docList = [];
+              if (Array.isArray(docSource)) docList = docSource;
+              else if (docSource.list && Array.isArray(docSource.list)) docList = docSource.list;
+              else if (Array.isArray(docSource.docs)) docList = docSource.docs;
+              for (var j = 0; j < docList.length; j++) {
+                var d = docList[j];
+                if ((d.idx != null ? d.idx : j) === idx) { doc = d; break; }
+              }
+              if (!doc && docList[idx]) doc = docList[idx];
+            }
+          } catch (e) { /* ignore */ }
+        }
+
+        if (!doc) {
+          return { error: "找不到序号 " + idx + " 的文档。请先调用get_documents_summary确认文档列表" };
+        }
+
+        if (!doc.docId) {
+          return {
+            error: "文档 " + idx + " 缺少docId字段，无法下载PDF。该文档可能不支持OCR",
+            doc: { idx: doc.idx, docCode: doc.docCode || "", date: doc.date || "" },
+          };
+        }
+
+        // 2. 构造 doExtractText 所需的 urlDocNum（与 web-app.js L8755 一致）
+        //    US 用 applicationNumber 不 encode；其他用 docNumber 且 encodeURIComponent
+        var office = data.office || "";
+        var urlDocNum = "";
+        try {
+          if (office === "US") {
+            urlDocNum = (typeof currentData !== "undefined" && currentData && currentData.applicationNumber)
+              ? currentData.applicationNumber
+              : data.applicationNumber;
+          } else {
+            var dn = (typeof currentData !== "undefined" && currentData && currentData.docNumber)
+              ? currentData.docNumber
+              : (data.docNumber || data.applicationNumber || "");
+            urlDocNum = encodeURIComponent(dn);
+          }
+        } catch (e) { /* ignore */ }
+
+        if (!urlDocNum) {
+          return { error: "无法构造文档URL：缺少applicationNumber/docNumber" };
+        }
+
+        // 3. 选择引擎；GLM 需要API Key
+        var engine = args.engine || "paddle_ocr_vl";
+        var apiKey = "";
+        if (engine === "glm_ocr") {
+          try {
+            if (typeof window !== "undefined" && window.AI && typeof window.AI.getGlmOcrApiKey === "function") {
+              // 与 web-app.js L8746 一致：通过 window.AI.loadAIConfig() 取配置
+              var config = (typeof window.AI.loadAIConfig === "function") ? window.AI.loadAIConfig() : {};
+              apiKey = window.AI.getGlmOcrApiKey(config) || "";
+            }
+          } catch (e) { /* ignore */ }
+          if (!apiKey) {
+            return {
+              error: "GLM OCR 引擎需要API Key，但未检测到配置",
+              suggestion: "请改用 engine: 'paddle_ocr_vl'（默认，无需API Key），或在应用设置中配置智谱API Key后重试",
+            };
+          }
+        }
+
+        // 4. 调用 doExtractText（已封装 Tauri / Web 双环境 + JP JPO API + DE DPMA 降级）
+        var result;
+        try {
+          if (typeof doExtractText !== "function") {
+            return { error: "doExtractText 函数不可用，无法执行OCR" };
+          }
+          result = await doExtractText(
+            office,
+            urlDocNum,
+            doc.docId,
+            String(doc.numberOfPages || "1"),
+            doc.docFormat || "pdf",
+            engine,
+            apiKey
+          );
+        } catch (e) {
+          return {
+            error: "OCR调用失败: " + (e && e.message ? e.message : String(e)),
+            doc: { idx: doc.idx, docCode: doc.docCode || "", date: doc.date || "" },
+            engine: engine,
+          };
+        }
+
+        if (!result) {
+          return { error: "OCR返回空结果", engine: engine };
+        }
+
+        // 5. 错误且无有效文本 → 返回错误并建议切换引擎
+        if (result.error && !(result.text || result.markdown)) {
+          return {
+            error: "OCR返回错误: " + result.error,
+            engine: result.engine || engine,
+            suggestion: engine === "paddle_ocr_vl"
+              ? "可尝试改用 glm_ocr 引擎（需配置智谱API Key）"
+              : "可尝试改用 paddle_ocr_vl 引擎",
+          };
+        }
+
+        // 6. 截断并返回 markdown + text
+        var md = result.markdown || "";
+        var text = result.text || "";
+        var maxLen = args.max_length || 20000;
+        var truncated = false;
+        if (md.length > maxLen) { md = md.substring(0, maxLen); truncated = true; }
+        if (text.length > maxLen) { text = text.substring(0, maxLen); truncated = true; }
+
+        return {
+          ok: true,
+          patentNumber: data.patentNumber,
+          docIndex: idx,
+          docCode: doc.docCode || "",
+          docDate: doc.date || "",
+          docTitle: doc.name || doc.title || doc.desc || "",
+          engine: result.engine || engine,
+          charCount: (result.text || "").length,
+          markdownLength: (result.markdown || "").length,
+          blockCount: result.blocks ? result.blocks.length : 0,
+          truncated: truncated,
+          markdown: md,
+          text: text,
+          tip: truncated
+            ? "OCR结果已截断至" + maxLen + "字符。如需完整内容可增大max_length参数后重试"
+            : "OCR识别完成。markdown字段含结构化文本（含表格/公式标记），text字段为纯文本。可直接基于此内容做翻译/总结/分析",
+        };
       },
     });
 
