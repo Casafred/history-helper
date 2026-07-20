@@ -34,7 +34,7 @@ const EPO_COOKIE_JAR = (() => {
   const os = require("os");
   return path.join(os.tmpdir(), "patentlens_epo_cookies.txt");
 })();
-const EPO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const EPO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
 const EPO_OFFICES = new Set(["EP", "US", "JP", "KR", "CN", "WO"]);
 const GOOGLE_PATENTS_BASE = "https://patents.google.com";
 // EPO OPS（Open Patent Services）API v3.2 —— 作为 Google Patents 的降级数据源
@@ -740,23 +740,50 @@ async function epoFetchDocList(office, docNumber, kindCode) {
     url = `${EPO_REGISTER_BASE}/ipfwretrieve?apn=${encodeURIComponent(apn)}&lng=en`;
   }
 
-  const args = [
+  // 完整的浏览器特征 header，提高通过 Cloudflare Bot Management 的概率。
+  // 缺少 Sec-Fetch-* / Sec-Ch-Ua / Referer 时，Cloudflare 会判定为非浏览器请求，返回 403。
+  const buildArgs = (targetUrl) => [
     "-s", "-w", "\n__HTTP_CODE__%{http_code}",
     "--max-time", "45",
+    "--compressed",
     "--cookie-jar", EPO_COOKIE_JAR,
     "--cookie", EPO_COOKIE_JAR,
     "-L",
-    "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "-H", "Accept-Language: en-US,en;q=0.9",
+    "-H", "Accept-Encoding: gzip, deflate, br",
     "-H", "User-Agent: " + EPO_UA,
-    url,
+    "-H", "Sec-Ch-Ua: \"Chromium\";v=\"134\", \"Not:A-Brand\";v=\"24\"",
+    "-H", "Sec-Ch-Ua-Mobile: ?0",
+    "-H", "Sec-Ch-Ua-Platform: \"Windows\"",
+    "-H", "Sec-Fetch-Dest: document",
+    "-H", "Sec-Fetch-Mode: navigate",
+    "-H", "Sec-Fetch-Site: none",
+    "-H", "Sec-Fetch-User: ?1",
+    "-H", "Upgrade-Insecure-Requests: 1",
+    "-H", "Referer: https://register.epo.org/",
+    targetUrl,
   ];
 
   let result;
   try {
-    result = await epoCurl(args, false);
+    result = await epoCurl(buildArgs(url), false);
   } catch (e) {
     return { error: "EPO curl error: " + e.message };
+  }
+
+  // Cloudflare Bot Management 拦截：首次访问返回 403 + Set-Cookie __cf_bm。
+  // 此时 cookie jar 已存入 __cf_bm，先访问首页"激活" cookie，再重试目标 URL。
+  // 这是 register.epo.org 标准的 Cloudflare 防护流程，不是 IP 限流。
+  if (result.httpCode === 403) {
+    console.log("[EPO] 拿到 403，尝试访问首页预热 __cf_bm cookie 后重试...");
+    try {
+      await epoCurl(buildArgs("https://register.epo.org/"), false);
+      result = await epoCurl(buildArgs(url), false);
+      console.log("[EPO] 预热后重试 httpCode=" + result.httpCode);
+    } catch (e) {
+      console.warn("[EPO] 预热重试失败:", e.message);
+    }
   }
 
   if (result.httpCode === 404) {
@@ -764,23 +791,26 @@ async function epoFetchDocList(office, docNumber, kindCode) {
   }
   if (result.httpCode !== 200) {
     const bodyStr = String(result.body || "").trim();
-    // EPO Register 限流：通常返回 HTTP 403 + "Rate Limit Exceeded"（短小纯文本，非 Cloudflare）。
-    // 这是 EPO 服务端对 IP 做的日访问上限，跟代码逻辑无关。
+    // "Rate Limit Exceeded - B" 实际上是 Cloudflare Bot Management 的拦截文案，不是 EPO 服务端限流。
+    // 此时响应头会带 set-cookie: __cf_bm 和 server: cloudflare。
+    // 真正的 IP 日限流在 EPO 是不同的响应格式。
     if (result.httpCode === 403 && /rate\s*limit/i.test(bodyStr)) {
       return {
-        rateLimited: true,
-        error: `EPO Register IP 限流（HTTP 403: ${bodyStr}）。EPO 对服务器 IP 有日访问上限，请稍后重试，或在浏览器中直接访问：${url}`,
+        cloudflare: true,
+        error: `EPO Register 被 Cloudflare Bot Management 拦截（HTTP 403: ${bodyStr}）。` +
+               `这通常是因为服务器出口 IP 被 Cloudflare 风控，跟访问次数无关。` +
+               `请在浏览器中直接访问 register.epo.org 完成验证：${url}`,
         browserUrl: url,
       };
     }
-    // Cloudflare 拦截有时也以 403 形式返回，做兜底识别
+    // Cloudflare JS Challenge 页面
     if (result.httpCode === 403 && epoDetectCloudflare(bodyStr)) {
-      return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
+      return { cloudflare: true, error: "EPO Register requires Cloudflare verification", browserUrl: url };
     }
-    return { error: `EPO Register HTTP ${result.httpCode}${bodyStr ? ": " + bodyStr.slice(0, 150) : ""}` };
+    return { error: `EPO Register HTTP ${result.httpCode}${bodyStr ? ": " + bodyStr.slice(0, 150) : ""}`, browserUrl: url };
   }
   if (epoDetectCloudflare(result.body)) {
-    return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
+    return { cloudflare: true, error: "EPO Register requires Cloudflare verification", browserUrl: url };
   }
 
   if (!isEp && result.body.includes("Dossier documents are being retrieved")) {
