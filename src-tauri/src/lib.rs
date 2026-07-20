@@ -13,6 +13,7 @@ mod ocr;
 mod patent;
 // __PATENTLENS_WATERMARK__: Copyright Alfred Shi 2026 - Internal Use Only
 
+use api::epo_register::{EpoRegisterClient, EpoRegisterError};
 use api::global_dossier::GlobalDossierClient;
 use cache::{CacheStore, DB_FILENAME, DEFAULT_TTL_SECS};
 use ocr::OcrClient;
@@ -23,6 +24,7 @@ use tauri::Manager;
 
 struct AppState {
     cache: Mutex<Option<CacheStore>>,
+    epo_client: EpoRegisterClient,
 }
 
 #[derive(Serialize, Clone)]
@@ -111,6 +113,8 @@ async fn fetch_patent(
     result.insert("queryType".into(), serde_json::Value::String(qtype.clone()));
     let mut warnings: Vec<String> = Vec::new();
 
+    let supports_epo = matches!(office.as_str(), "EP" | "US" | "JP" | "KR" | "CN" | "WO");
+
     match client.get_family(&qtype, &office, &doc_num).await {
         Ok(data) => {
             result.insert("family".into(), data);
@@ -122,14 +126,36 @@ async fn fetch_patent(
         }
     }
 
-    match client.get_doc_list(&office, &doc_num, "A").await {
+    let docs_result = client.get_doc_list(&office, &doc_num, "A").await;
+    match docs_result {
         Ok(data) => {
             result.insert("documents".into(), data);
         }
-        Err(e) => {
-            let msg = format!("文档列表查询失败: {}", e);
-            log::warn!("{}", msg);
-            warnings.push(msg);
+        Err(gd_err) => {
+            let gd_msg = format!("GD文档列表查询失败: {}", gd_err);
+            log::warn!("{}", gd_msg);
+
+            if supports_epo {
+                log::info!("尝试EPO Register降级...");
+                match state.epo_client.get_doc_list(&office, &doc_num, "A").await {
+                    Ok(epo_data) => {
+                        result.insert("documents".into(), epo_data);
+                        warnings.push("GD不可用，已通过EPO Register获取数据（审查文档可能不完整）".to_string());
+                    }
+                    Err(epo_err) => {
+                        let epo_msg = match &epo_err {
+                            EpoRegisterError::CloudflareRequired => {
+                                "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试".to_string()
+                            }
+                            other => format!("EPO Register查询失败: {}", other),
+                        };
+                        log::warn!("{}", epo_msg);
+                        warnings.push(format!("{}; {}", gd_msg, epo_msg));
+                    }
+                }
+            } else {
+                warnings.push(gd_msg);
+            }
         }
     }
 
@@ -191,7 +217,10 @@ async fn fetch_family(input: String, query_type: Option<String>) -> Result<Comma
 }
 
 #[tauri::command]
-async fn fetch_documents(input: String) -> Result<CommandResult, String> {
+async fn fetch_documents(
+    input: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<CommandResult, String> {
     let pn = match parse_patent_number(&input) {
         Ok(pn) => pn,
         Err(e) => return Ok(CommandResult::err(e.to_string())),
@@ -199,11 +228,30 @@ async fn fetch_documents(input: String) -> Result<CommandResult, String> {
 
     let office = pn.office.to_string();
     let doc_num = pn.application_number.unwrap_or_else(|| input.clone());
+    let supports_epo = matches!(office.as_str(), "EP" | "US" | "JP" | "KR" | "CN" | "WO");
 
     let client = GlobalDossierClient::new();
     match client.get_doc_list(&office, &doc_num, "A").await {
         Ok(data) => Ok(CommandResult::ok(data)),
-        Err(e) => Ok(CommandResult::err(e.to_string())),
+        Err(gd_err) => {
+            if supports_epo {
+                log::info!("GD fetch_documents失败，尝试EPO Register降级...");
+                match state.epo_client.get_doc_list(&office, &doc_num, "A").await {
+                    Ok(data) => Ok(CommandResult::ok(data)),
+                    Err(epo_err) => {
+                        let msg = match &epo_err {
+                            EpoRegisterError::CloudflareRequired => {
+                                "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试".to_string()
+                            }
+                            other => format!("GD: {}; EPO: {}", gd_err, other),
+                        };
+                        Ok(CommandResult::err(msg))
+                    }
+                }
+            } else {
+                Ok(CommandResult::err(gd_err.to_string()))
+            }
+        }
     }
 }
 
@@ -214,21 +262,46 @@ async fn download_document(
     doc_id: String,
     pages: String,
     format: String,
+    state: tauri::State<'_, AppState>,
 ) -> Result<CommandResult, String> {
     let client = GlobalDossierClient::new();
-    match client
+    let supports_epo = matches!(country.as_str(), "EP" | "US" | "JP" | "KR" | "CN" | "WO");
+
+    let data = match client
         .get_document(&country, &doc_number, &doc_id, &pages, &format)
         .await
     {
-        Ok(data) => {
-            let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
-            Ok(CommandResult::ok(serde_json::json!({
-                "data": encoded,
-                "size": data.len(),
-            })))
+        Ok(data) => data,
+        Err(gd_err) => {
+            if supports_epo {
+                log::info!("GD下载失败，尝试EPO Register降级下载 docId={}", doc_id);
+                match state
+                    .epo_client
+                    .get_document_pdf_by_office(&country, &doc_number, &doc_id)
+                    .await
+                {
+                    Ok(data) => data,
+                    Err(epo_err) => {
+                        let msg = match &epo_err {
+                            EpoRegisterError::CloudflareRequired => {
+                                "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试".to_string()
+                            }
+                            other => format!("GD下载: {}; EPO下载: {}", gd_err, other),
+                        };
+                        return Ok(CommandResult::err(msg));
+                    }
+                }
+            } else {
+                return Ok(CommandResult::err(gd_err.to_string()));
+            }
         }
-        Err(e) => Ok(CommandResult::err(e.to_string())),
-    }
+    };
+
+    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
+    Ok(CommandResult::ok(serde_json::json!({
+        "data": encoded,
+        "size": data.len(),
+    })))
 }
 
 #[tauri::command]
@@ -253,14 +326,39 @@ async fn extract_text(
     format: String,
     engine: String,
     api_key: String,
+    state: tauri::State<'_, AppState>,
 ) -> Result<CommandResult, String> {
     let client = GlobalDossierClient::new();
+    let supports_epo = matches!(country.as_str(), "EP" | "US" | "JP" | "KR" | "CN" | "WO");
+
     let pdf_bytes = match client
         .get_document(&country, &doc_number, &doc_id, &pages, &format)
         .await
     {
         Ok(data) => data,
-        Err(e) => return Ok(CommandResult::err(e.to_string())),
+        Err(gd_err) => {
+            if supports_epo {
+                log::info!("GD extract_text下载失败，尝试EPO Register降级...");
+                match state
+                    .epo_client
+                    .get_document_pdf_by_office(&country, &doc_number, &doc_id)
+                    .await
+                {
+                    Ok(data) => data,
+                    Err(epo_err) => {
+                        let msg = match &epo_err {
+                            EpoRegisterError::CloudflareRequired => {
+                                "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试".to_string()
+                            }
+                            other => format!("GD下载: {}; EPO下载: {}", gd_err, other),
+                        };
+                        return Ok(CommandResult::err(msg));
+                    }
+                }
+            } else {
+                return Ok(CommandResult::err(gd_err.to_string()));
+            }
+        }
     };
 
     if pdf_bytes.len() < 100 {
@@ -376,6 +474,14 @@ async fn dpma_register_info(number: String) -> Result<CommandResult, String> {
     }
 }
 
+#[tauri::command]
+async fn epo_status(state: tauri::State<'_, AppState>) -> Result<CommandResult, String> {
+    match state.epo_client.status().await {
+        Ok(data) => Ok(CommandResult::ok(data)),
+        Err(e) => Ok(CommandResult::err(format!("EPO Register 状态异常: {}", e))),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Ok(path) = std::env::current_exe() {
@@ -391,6 +497,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState {
             cache: Mutex::new(None),
+            epo_client: EpoRegisterClient::new(),
         })
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
@@ -432,6 +539,7 @@ pub fn run() {
             jpo_fetch_doc,
             dpma_status,
             dpma_register_info,
+            epo_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
