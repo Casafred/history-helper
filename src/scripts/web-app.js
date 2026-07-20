@@ -1419,7 +1419,20 @@ function _promptGdEpoBrowserOpen(e, kind) {
       if (result && result.ok) {
         console.info("[GD→EPO] 验证完成，cookies=" + result.cookieCount + "，自动重试查询");
         showToast(`✅ EPO 验证通过（保存了 ${result.cookieCount || 0} 个 cookie），正在重新查询…`, 4000);
-        // 重置 throttle 让重试能完整跑一遍
+        // 如果验证窗口直接从页面提取到了审查文档数据，缓存起来，
+        // gdFetch 重试时会命中缓存直接返回，不再走网络——彻底避免死循环
+        if (result.parsedData && result.parsedData.docListData) {
+          _epoVerifyCache = {
+            office: result.parsedData.parsed.office,
+            docNumber: result.parsedData.parsed.docNumber,
+            docListData: result.parsedData.docListData,
+            familyData: result.parsedData.familyData,
+            timestamp: Date.now(),
+          };
+          console.info("[GD→EPO] 已缓存验证窗口提取的数据:", _epoVerifyCache.office + "/" + _epoVerifyCache.docNumber + ", docs=" + _epoVerifyCache.docListData.totalDocs);
+          showToast(`已从验证窗口提取 ${_epoVerifyCache.docListData.totalDocs} 份审查文档，正在填充看板…`, 4000);
+        }
+        // 重置 throttle 让重试能完整跑一遍（这次重试会命中缓存，不会再次弹窗）
         _gdEpoPromptedAt = 0;
         // 自动触发重新查询：循环重试最多 6 次，每次间隔 800ms，
         // 因为 doSearch 的 catch 块可能还在执行，searchBtn 还没启用。
@@ -1478,7 +1491,32 @@ function _promptGdEpoBrowserOpen(e, kind) {
   }
 }
 
+// EPO 验证窗口提取的数据缓存：验证通过后，electron-main 从窗口 webContents
+// 直接提取 EPO 页面 HTML 并解析出审查文档数据，返回给前端缓存。
+// gdFetch 重试时直接命中缓存，不再走网络——彻底避免"验证→关窗→重新查询→又失败"死循环。
+// 缓存 5 分钟内有效，超过后不再命中（让用户后续主动查询能拿到最新数据）。
+let _epoVerifyCache = null;  // { office, docNumber, docListData, familyData, timestamp }
+
 async function gdFetch(urlPath) {
+  // 优先命中 EPO 验证窗口提取的缓存数据（5 分钟内有效）
+  if (_epoVerifyCache && (Date.now() - _epoVerifyCache.timestamp) < 300000) {
+    const famMatch = urlPath.match(/\/patent-family\/svc\/family\/(?:application|publication|patent)\/([^/]+)\/([^/?]+)/);
+    const docListMatch = urlPath.match(/\/doc-list\/svc\/doclist\/([^/]+)\/([^/]+)\/([^/]+)/);
+    const cacheOffice = _epoVerifyCache.office;
+    const cacheDocNum = _epoVerifyCache.docNumber;
+    if (famMatch && famMatch[1].toUpperCase() === cacheOffice.toUpperCase() && famMatch[2] === cacheDocNum) {
+      console.info("[GD→EPO] 命中验证窗口缓存，直接返回 familyData:", cacheOffice + "/" + cacheDocNum);
+      return _epoVerifyCache.familyData;
+    }
+    if (docListMatch && docListMatch[1].toUpperCase() === cacheOffice.toUpperCase() && docListMatch[2] === cacheDocNum) {
+      console.info("[GD→EPO] 命中验证窗口缓存，直接返回 docListData:", cacheOffice + "/" + cacheDocNum);
+      return _epoVerifyCache.docListData;
+    }
+  } else if (_epoVerifyCache) {
+    // 缓存过期，清空
+    console.info("[GD→EPO] 验证窗口缓存已过期，清空");
+    _epoVerifyCache = null;
+  }
   if (isTauri) {
     const familyMatch = urlPath.match(/\/patent-family\/svc\/family\/([^/]+)\/([^/]+)\/([^/]+)/);
     const docListMatch = urlPath.match(/\/doc-list\/svc\/doclist\/([^/]+)\/([^/]+)\/([^/]+)/);

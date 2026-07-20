@@ -2157,6 +2157,96 @@ function openEpoVerifyWindow(targetUrl) {
       resolve({ ok: !!ok, cookieCount, cookieJar: EPO_COOKIE_JAR, ...(info || {}) });
     };
 
+    // 从 targetUrl 解析 office / docNumber / kindCode / apn
+    // 支持两种格式：
+    //   1) https://register.epo.org/ipfwretrieve?apn=US.12304032.A&lng=en
+    //   2) https://register.epo.org/application?number=EP3762180&lng=en&tab=doclist
+    const parseEpoVerifyUrl = (url) => {
+      try {
+        const u = new URL(url);
+        if (u.pathname.includes("ipfwretrieve")) {
+          const apn = u.searchParams.get("apn") || "";
+          const parts = apn.split(".");
+          if (parts.length >= 2) {
+            const office = parts[0];
+            const docNumber = parts[1];
+            const kindCode = parts[2] || "A";
+            return { office, docNumber, kindCode, apn, isEp: false };
+          }
+        } else if (u.pathname.includes("application")) {
+          const num = u.searchParams.get("number") || "";
+          // EP3762180 格式
+          const m = num.match(/^([A-Z]{2})(\d+)$/i);
+          if (m) {
+            return { office: m[1].toUpperCase(), docNumber: m[2], kindCode: "A", apn: num, isEp: true };
+          }
+        }
+      } catch (_) {}
+      return null;
+    };
+
+    // 验证通过后从窗口提取 EPO 页面 HTML，解析审查文档列表。
+    // 直接把数据塞进 result.parsedData 返回给前端，前端缓存后重试 doSearch 时
+    // gdFetch 会命中缓存，不再走网络——彻底避免"验证→关窗→重新查询→又失败→又验证"死循环。
+    const extractEpoDataFromWindow = async () => {
+      const parsed = parseEpoVerifyUrl(targetUrl);
+      if (!parsed) {
+        console.warn("[EPO Verify] cannot parse targetUrl:", targetUrl);
+        return null;
+      }
+      try {
+        const html = await win.webContents.executeJavaScript(
+          "document.documentElement.outerHTML", true
+        );
+        if (!html || html.length < 500) {
+          console.warn("[EPO Verify] extracted html too short:", html ? html.length : 0);
+          return null;
+        }
+        const entries = parsed.isEp
+          ? epoParseEpDocList(html, parsed.docNumber)
+          : epoParseGdDocList(html, parsed.apn);
+        const docs = entries.map(e => {
+          const cls = epoClassifyDoc(e.desc, e.phase);
+          return {
+            docId: e.docId, docCode: cls.docCode, docDesc: e.desc, documentDescription: e.desc,
+            documentDate: e.date, date: e.date, numberOfPages: e.pages, docFormat: "pdf",
+            documentType: cls.docCode, countryCode: parsed.office,
+            epoDocType: e.isGdDoc ? "gd" : "ep", apn: e.apn,
+          };
+        });
+        const familyData = {
+          corrAppNum: parsed.docNumber,
+          list: [{
+            countryCode: parsed.office,
+            appNum: parsed.docNumber,
+            docNum: { docNumber: parsed.docNumber },
+            title: "",
+          }],
+          source: "EPO Register fallback (in-app verify)",
+          totalMembers: 1,
+        };
+        const docListData = {
+          docs,
+          title: "",
+          docNumber: parsed.docNumber,
+          source: parsed.isEp ? "EPO Register" : "EPO Global Dossier",
+          totalDocs: docs.length,
+        };
+        console.log(`[EPO Verify] extracted ${docs.length} docs from window for ${parsed.office}/${parsed.docNumber}`);
+        return { parsed, docListData, familyData, htmlLength: html.length };
+      } catch (e) {
+        console.warn("[EPO Verify] extract data failed:", e.message);
+        return null;
+      }
+    };
+
+    // 验证通过后先提取数据，再 finish(true)
+    const finishWithExtract = async (info) => {
+      if (settled) return;
+      const extracted = await extractEpoDataFromWindow();
+      finish(true, { ...(info || {}), parsedData: extracted });
+    };
+
     win.loadURL(targetUrl, { userAgent: CHROME_UA }).catch((e) => {
       console.warn("[EPO Verify] loadURL failed:", e.message);
     });
@@ -2217,7 +2307,7 @@ function openEpoVerifyWindow(targetUrl) {
         if (pageState.hasEpoAppContent) {
           const cookies = await verifySession.cookies.get({ domain: "epo.org" });
           console.log(`[EPO Verify] verification passed (title="${pageState.title}", cookies=${cookies.length}, url=${pageState.url})`);
-          finish(true, { title: pageState.title });
+          finishWithExtract({ title: pageState.title });
         }
       } catch (e) { /* ignore */ }
     }, 2000);
@@ -2231,7 +2321,7 @@ function openEpoVerifyWindow(targetUrl) {
         if (pageState.hasEpoAppContent) {
           const cookies = await verifySession.cookies.get({ domain: "epo.org" });
           console.log(`[EPO Verify] verification passed on did-finish-load (title="${pageState.title}", cookies=${cookies.length})`);
-          finish(true, { title: pageState.title });
+          finishWithExtract({ title: pageState.title });
         }
       } catch (_) {}
     });
@@ -2293,7 +2383,7 @@ function openEpoVerifyWindow(targetUrl) {
           `, true).catch(() => false);
           if (clicked) {
             console.log("[EPO Verify] user clicked done button");
-            finish(true, { reason: "user_clicked_done" });
+            finishWithExtract({ reason: "user_clicked_done" });
           }
         } catch (_) {}
       }, 1000);
