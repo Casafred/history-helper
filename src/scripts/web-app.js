@@ -1367,6 +1367,41 @@ function parsePatentNumber(input) {
   return { office, raw: trimmed, applicationNumber: appNum, kindCode: kindCode, queryType };
 }
 
+// GD/EPO 双失败引导：当 EPO 也被 Cloudflare 拦截或限流时，提示用户去浏览器完成验证
+// 同一次 doSearch 内 patent-family 和 doc-list 都可能失败，用 throttle 避免重复弹框
+let _gdEpoPromptedAt = 0;
+function _promptGdEpoBrowserOpen(e, kind) {
+  if (!e) return;
+  if (!e.cloudflare && !e.rateLimited) return;
+  if (!e.browserUrl) return;
+  // 10 秒内只弹一次
+  const now = Date.now();
+  if (now - _gdEpoPromptedAt < 10000) {
+    console.info("[GD→EPO] 节流：跳过重复的浏览器引导弹框", kind);
+    return;
+  }
+  _gdEpoPromptedAt = now;
+  const reason = e.cloudflare ? "需要人机验证" : "被限流";
+  const tip = e.cloudflare
+    ? "在浏览器中完成 Cloudflare 人机验证后，回到本应用重新查询即可生效。"
+    : "EPO 对服务器 IP 有日访问上限。可在浏览器中直接查询，或稍后重试。";
+  const ok = confirm(
+    `GD 与 EPO 数据源均${reason}（${kind}查询失败）。\n\n` +
+    `${e.message || ""}\n\n` +
+    `${tip}\n\n` +
+    `点击「确定」立即在浏览器中打开查询页面。`
+  );
+  if (ok) {
+    try {
+      if (window.electronAPI && typeof window.electronAPI.openExternal === "function") {
+        window.electronAPI.openExternal(e.browserUrl);
+      } else {
+        window.open(e.browserUrl, "_blank");
+      }
+    } catch (openErr) { console.warn("openExternal failed:", openErr); }
+  }
+}
+
 async function gdFetch(urlPath) {
   if (isTauri) {
     const familyMatch = urlPath.match(/\/patent-family\/svc\/family\/([^/]+)\/([^/]+)\/([^/]+)/);
@@ -1396,6 +1431,8 @@ async function gdFetch(urlPath) {
     if (resp.status === 404) throw new Error("未找到该专利的记录 (404)");
     // 读取响应体，把 server.js 返回的真实错误（含 GD/EPO 降级结果）抛给上层
     let errMsg = `API 请求失败: HTTP ${resp.status}`;
+    // server.js 在 EPO Cloudflare/Rate Limit 时返回结构化标志，附在 Error 上让上层引导用户去浏览器
+    const errExtras = {};
     try {
       const body = await resp.text();
       if (body) {
@@ -1403,12 +1440,19 @@ async function gdFetch(urlPath) {
           const errJson = JSON.parse(body);
           if (errJson.error) errMsg = errJson.error;
           else if (errJson.message) errMsg = errJson.message;
+          if (errJson.cloudflare) errExtras.cloudflare = true;
+          if (errJson.rateLimited) errExtras.rateLimited = true;
+          if (errJson.browserUrl) errExtras.browserUrl = errJson.browserUrl;
         } catch {
           if (body.length < 300) errMsg = body;
         }
       }
     } catch {}
-    throw new Error(errMsg);
+    const err = new Error(errMsg);
+    if (errExtras.cloudflare) err.cloudflare = true;
+    if (errExtras.rateLimited) err.rateLimited = true;
+    if (errExtras.browserUrl) err.browserUrl = errExtras.browserUrl;
+    throw err;
   }
   // server.js 在 GD 失败、EPO 降级成功时设置 X-Epo-Fallback: 1 头
   const _epoFallback = resp.headers.get("X-Epo-Fallback");
@@ -4936,6 +4980,7 @@ async function doSearch(input, options) {
       }
     } catch (e) {
       warnings.push("同族查询失败: " + e.message);
+      _promptGdEpoBrowserOpen(e, "同族");
     }
 
     // 使用修正后的申请号查询文档列表
@@ -4959,6 +5004,7 @@ async function doSearch(input, options) {
       }
     } catch (e) {
       warnings.push("文档列表查询失败: " + e.message);
+      _promptGdEpoBrowserOpen(e, "文档列表");
     }
 
     if (warnings.length > 0) result.warnings = warnings;

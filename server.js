@@ -77,15 +77,25 @@ function proxyGdApi(urlPath, res) {
   (async () => {
     const isDocContent = urlPath.includes("/doc-content/");
     const isDocList = urlPath.includes("/doc-list/");
+    const isFamily = urlPath.includes("/patent-family/");
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Headers": "Content-Type, user-type",
       "Access-Control-Allow-Methods": "GET, OPTIONS",
     };
 
+    // doclist/doccontent 路径正则：/svc/{doclist|doccontent}/{office}/{docNum}[/docId/.../...]
     const pathMatch = urlPath.match(/\/svc\/(?:doclist|doccontent)\/([^/]+)\/([^/]+)(?:\/([^/]+)\/([^/]+)\/([^/]+))?/);
-    const office = pathMatch ? decodeURIComponent(pathMatch[1]) : null;
-    const docNumber = pathMatch ? decodeURIComponent(pathMatch[2]) : null;
+    // family 路径正则：/svc/family/{queryType}/{office}/{docNum}
+    const familyPathMatch = isFamily
+      ? urlPath.match(/\/svc\/family\/(?:application|publication|patent)\/([^/]+)\/([^/?]+)/)
+      : null;
+    const office = pathMatch
+      ? decodeURIComponent(pathMatch[1])
+      : (familyPathMatch ? decodeURIComponent(familyPathMatch[1]) : null);
+    const docNumber = pathMatch
+      ? decodeURIComponent(pathMatch[2])
+      : (familyPathMatch ? decodeURIComponent(familyPathMatch[2]) : null);
     const docId = pathMatch && pathMatch[3] ? decodeURIComponent(pathMatch[3]) : null;
     const supportsEpo = office && EPO_OFFICES.has(office.toUpperCase());
 
@@ -194,7 +204,11 @@ function proxyGdApi(urlPath, res) {
         }
         if (epoResult.cloudflare) {
           res.writeHead(503, { "Content-Type": "application/json", ...corsHeaders });
-          res.end(JSON.stringify({ error: "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试", cloudflare: true }));
+          res.end(JSON.stringify({
+            error: "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试",
+            cloudflare: true,
+            browserUrl: `https://register.epo.org/application?number=${office}${docNumber}&lng=en&tab=doclist`,
+          }));
           return;
         }
         res.writeHead(502, { "Content-Type": "application/json", ...corsHeaders });
@@ -209,7 +223,11 @@ function proxyGdApi(urlPath, res) {
         }
         if (epoResult.cloudflare) {
           res.writeHead(503, { "Content-Type": "application/json", ...corsHeaders });
-          res.end(JSON.stringify({ error: "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试", cloudflare: true }));
+          res.end(JSON.stringify({
+            error: "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试",
+            cloudflare: true,
+            browserUrl: epoResult.browserUrl || (`https://register.epo.org/application?number=${office}${docNumber}&lng=en&tab=doclist`),
+          }));
           return;
         }
         if (epoResult.rateLimited) {
@@ -224,6 +242,52 @@ function proxyGdApi(urlPath, res) {
         }
         res.writeHead(502, { "Content-Type": "application/json", ...corsHeaders });
         res.end(JSON.stringify({ error: `GD: ${gdResult.error || "failed"}; EPO: ${epoResult.error || "failed"}` }));
+      } else if (isFamily) {
+        // patent-family 路径：GD 失败时探测 EPO 状态。EPO Register 没有同族接口，
+        // 但调用 epoFetchDocList 可以探测 EPO 是否可用（cloudflare/rateLimited），
+        // 同时如果 EPO 可用，构造一个最小 familyData 让前端能继续走 doc-list 流程。
+        const epoResult = await epoFetchDocList(office, docNumber, "A");
+        if (epoResult.docs) {
+          // EPO 可用：构造一个最小可用 familyData，corrAppNum=docNumber 让前端继续
+          const familyData = {
+            corrAppNum: docNumber,
+            list: [{
+              countryCode: office,
+              appNum: docNumber,
+              docNum: { docNumber: docNumber },
+              title: "",
+            }],
+            source: "EPO Register fallback (no family data)",
+            totalMembers: 1,
+          };
+          console.log(`[EPO Fallback] family GD failed, using EPO Register docNumber for ${office}/${docNumber}`);
+          res.writeHead(200, { "Content-Type": "application/json", "X-Epo-Fallback": "1", ...corsHeaders });
+          res.end(JSON.stringify(familyData));
+          return;
+        }
+        if (epoResult.cloudflare) {
+          res.writeHead(503, { "Content-Type": "application/json", ...corsHeaders });
+          res.end(JSON.stringify({
+            error: "GD 同族不可用，且 EPO Register 需要人机验证。请在浏览器中打开 register.epo.org 完成验证后重试。",
+            cloudflare: true,
+            browserUrl: epoResult.browserUrl || (`https://register.epo.org/application?number=${office}${docNumber}&lng=en&tab=doclist`),
+          }));
+          return;
+        }
+        if (epoResult.rateLimited) {
+          res.writeHead(503, { "Content-Type": "application/json", ...corsHeaders });
+          res.end(JSON.stringify({
+            error: `GD 同族不可用（HTTP ${gdResult.httpCode || 500}），且 EPO Register 被限流：${epoResult.error}。请稍后重试或使用浏览器直接查询。`,
+            rateLimited: true,
+            browserUrl: epoResult.browserUrl,
+          }));
+          return;
+        }
+        res.writeHead(502, { "Content-Type": "application/json", ...corsHeaders });
+        res.end(JSON.stringify({
+          error: `GD family: ${gdResult.error || "failed"}; EPO: ${epoResult.error || "failed"}`,
+          browserUrl: `https://register.epo.org/application?number=${office}${docNumber}&lng=en&tab=doclist`,
+        }));
       } else {
         res.writeHead(gdResult.httpCode || 502, { "Content-Type": "application/json", ...corsHeaders });
         if (gdResult.body) res.end(gdResult.body); else res.end(JSON.stringify({ error: gdResult.error || "GD request failed" }));
