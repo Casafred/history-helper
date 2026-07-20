@@ -818,7 +818,8 @@ function _dossierCreateEmptyTab(key, label) {
   if (typeof closeReader === "function") closeReader();
   const analysisPanel = document.getElementById("analysis-chat-panel");
   if (analysisPanel) analysisPanel.classList.remove("open");
-  if (patentInput) patentInput.value = "";
+  // 注意：此处不要清空 patentInput.value，否则用户搜索后输入框里的号码就消失了，
+  // 不方便再次查询或切换号码。查询动作会保留输入框中的号码。
   _dossierRenderTabs();
 }
 
@@ -1393,7 +1394,26 @@ async function gdFetch(urlPath) {
   const resp = await fetch(url);
   if (!resp.ok) {
     if (resp.status === 404) throw new Error("未找到该专利的记录 (404)");
-    throw new Error(`API 请求失败: HTTP ${resp.status}`);
+    // 读取响应体，把 server.js 返回的真实错误（含 GD/EPO 降级结果）抛给上层
+    let errMsg = `API 请求失败: HTTP ${resp.status}`;
+    try {
+      const body = await resp.text();
+      if (body) {
+        try {
+          const errJson = JSON.parse(body);
+          if (errJson.error) errMsg = errJson.error;
+          else if (errJson.message) errMsg = errJson.message;
+        } catch {
+          if (body.length < 300) errMsg = body;
+        }
+      }
+    } catch {}
+    throw new Error(errMsg);
+  }
+  // server.js 在 GD 失败、EPO 降级成功时设置 X-Epo-Fallback: 1 头
+  const _epoFallback = resp.headers.get("X-Epo-Fallback");
+  if (_epoFallback === "1") {
+    console.info("[GD→EPO] GD 不可用，已通过 EPO Register 降级获取数据");
   }
   return resp.json();
 }
@@ -1518,8 +1538,9 @@ searchBtn.addEventListener("click", async () => {
   const cacheChoice = cacheResult.choice;
   const cachedEntry = cacheResult.entry;
   if (cacheChoice === "reload") {
-    PatentCache.remove(cacheKey);
-    PatentCache.removeHistory(cacheKey);
+    // 注意：不要预先删除 PatentCache 缓存！
+    // 如果新查询失败（没拿到审查文档），需要保留老缓存供下次复用，
+    // 而不是被空的查询结果覆盖。缓存会在 doSearch 拿到有效文档后再覆盖。
     _dossierCloseTabByKey(cacheKey);
   }
 
@@ -1552,6 +1573,8 @@ searchBtn.addEventListener("click", async () => {
     return;
   }
 
+  // 让输入框保留用户刚查询的号码（规范化为大写格式），方便再次查询或修改
+  if (patentInput) patentInput.value = rawPn;
   doSearch(input);
 });
 
@@ -4929,6 +4952,11 @@ async function doSearch(input, options) {
       if (docData && docData.docNumber) {
         result.docNumber = docData.docNumber;
       }
+      // EPO 降级成功时，server.js 在响应里塞入 source 字段（"EPO Register" 或 "EPO Global Dossier"）
+      if (docData && (docData.source === "EPO Register" || docData.source === "EPO Global Dossier")) {
+        result.dataSource = docData.source;
+        result.epoFallback = true;
+      }
     } catch (e) {
       warnings.push("文档列表查询失败: " + e.message);
     }
@@ -4966,6 +4994,12 @@ async function doSearch(input, options) {
     try { renderFamily(result); } catch (e) { console.error("renderFamily:", e); }
     try { renderTimeline(result); } catch (e) { console.error("renderTimeline:", e); }
 
+    // GD 不可用时通过 EPO Register/Global Dossier 降级取得文档列表，明确告知用户
+    if (result.epoFallback && result.dataSource) {
+      showToast("GD 不可用，已降级到 " + result.dataSource + " 获取审查文档", 5000);
+      console.info("[GD→EPO] 降级成功，数据源: " + result.dataSource);
+    }
+
     if (warnings.length > 0) {
       warnings.forEach(w => showError("警告: " + w));
     }
@@ -4998,15 +5032,22 @@ async function doSearch(input, options) {
       applicantName: result.applicantName || "",
       title: patentTitle,
     });
-    // Save full state to cache so future searches can restore from cache
-    // and history items show as cached
-    try {
-      const entry = PatentCache.captureCurrentState();
-      if (entry) {
-        PatentCache.save(entry.patentNumber, entry);
-        kanbanState.hasUnsavedWork = false;
-      }
-    } catch (ce) { console.warn("cache save after search failed:", ce); }
+    // 缓存策略：只有当本次查询拿到了有效的审查文档时，才覆盖缓存。
+    // 如果本次查询失败（GD/EPO 都失败、或文档列表为空），保留老缓存不被覆盖，
+    // 用户下次查询时仍可从老缓存恢复。
+    const _newDocs = result.documents ? (extractDocuments(result.documents) || []) : [];
+    const hasNewDocs = _newDocs.length > 0;
+    if (hasNewDocs) {
+      try {
+        const entry = PatentCache.captureCurrentState();
+        if (entry) {
+          PatentCache.save(entry.patentNumber, entry);
+          kanbanState.hasUnsavedWork = false;
+        }
+      } catch (ce) { console.warn("cache save after search failed:", ce); }
+    } else {
+      console.info("[Cache] 本次查询未拿到审查文档，保留旧缓存不覆盖:", result.raw || (result.office + result.applicationNumber));
+    }
     // Refresh history list after new search
     refreshHistoryList();
   } catch (e) {
