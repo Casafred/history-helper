@@ -4462,6 +4462,8 @@ function linkifyPatentNumbers(text) {
   // - JP年号连字符: JP 59-104108, JP 2005-066804
   // - 带分隔符紧凑格式: US-12345678-B2, US/12345678/B2
   // - 纯紧凑格式: US12345678B2
+  // - 中文国别+专利+第X号: 美国专利第11,897,095号、日本专利第59-104108号
+  // - 中文专利申请号: 专利申请号: 18/439,466、申请号 18/439,466
   // 分隔符支持：空格、连字符、斜杠、逗号；kind代码支持 A/A1/B2/U1/P 等
   const parts = text.split(/(<[^>]+>)/);
   function _normalizeCountry(prefix) {
@@ -4471,12 +4473,24 @@ function linkifyPatentNumbers(text) {
     if (p.startsWith('US')) return 'US';
     return p;
   }
+  // 中文国别 → ISO 国家代码
+  function _normalizeChineseCountry(zh) {
+    var map = {
+      '美国': 'US', '美': 'US', '中国': 'CN', '中': 'CN', '日本': 'JP', '日': 'JP',
+      '韩国': 'KR', '韩': 'KR', '德国': 'DE', '德': 'DE', '英国': 'GB',
+      '法国': 'FR', '法': 'FR', '欧洲': 'EP', '欧盟': 'EP', '欧': 'EP',
+      '国际': 'WO', '国际申请': 'WO', 'PCT': 'WO'
+    };
+    return map[zh] || '';
+  }
   function _makeLink(label, pn) {
     return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + label + '</a>';
   }
   var COUNTRY = '(?:U\\.?S\\.?|US|EP|DE|JP|KR|CN|WO|GB|FR)';
   var COUNTRY_2 = '(?:US|EP|DE|JP|KR|CN|WO|GB|FR)';
   var KIND = '[A-Z]\\d{0,2}(?![A-Za-z])';
+  // 中文国别（用于规则5）
+  var ZH_COUNTRY = '(?:美国|中国|日本|韩国|德国|英国|法国|欧洲|欧盟|国际)';
 
   return parts.map(function (part, i) {
     if (i % 2 === 1) return part; // HTML tag, skip
@@ -4604,6 +4618,60 @@ function linkifyPatentNumbers(text) {
       while ((m = re.exec(part)) !== null) {
         if (m[0].length < 7) continue;
         matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: m[1] });
+      }
+    })();
+
+    // 5. 中文国别+专利+第X号: "美国专利第11,897,095号"、"日本专利第59-104108号"、"中国专利第CN12345678号"
+    (function () {
+      var re = new RegExp('(' + ZH_COUNTRY + ')\\s*(?:发明|实用新型|外观)?\\s*(专利|申请)\\s*(?:公开|公告|公开说明书)?\\s*第?\\s*(\\d[\\d,\\s/\\-]*\\d)\\s*号', 'g');
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        var country = _normalizeChineseCountry(m[1]);
+        if (!country) continue;
+        var raw = m[3];
+        // 申请号含斜杠时保留斜杠分隔格式（如 US18/439466），其他情况去除逗号/空格
+        var pn;
+        if (raw.indexOf('/') !== -1) {
+          var slashParts = raw.split('/').map(function (s) { return s.replace(/[,\s]/g, ''); });
+          pn = country + slashParts[0] + '/' + slashParts.slice(1).join('');
+        } else if (raw.indexOf('-') !== -1 && country === 'JP') {
+          // JP年号连字符: 59-104108 → 59104108
+          pn = country + raw.replace(/[\s-]/g, '');
+        } else {
+          pn = country + raw.replace(/[,\s]/g, '');
+        }
+        if (pn.replace(/[^\d]/g, '').length < 4) continue;
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: pn });
+      }
+    })();
+
+    // 6. 中文专利申请号（无国别前缀）: "专利申请号: 18/439,466"、"申请号 18/439,466"
+    // 典型US申请号格式：XX/XXX,XXX 或 XX/XXXXXX
+    (function () {
+      var re = /(?:专利)?(?:申请|公开|公告)\s*号\s*[:：]?\s*(\d{1,2}\s*\/\s*\d{3}(?:,\d{3})?|\d{1,2}\s*\/\s*\d{4,7})/g;
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        var digits = m[1].replace(/[,\s]/g, '');
+        if (digits.length < 5) continue;
+        // 默认归为US申请号（最常见的中文申请号引用场景）
+        var pn = 'US' + digits;
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: pn });
+      }
+    })();
+
+    // 7. 中文"专利号: X" / "公开号: X"（无国别前缀，纯数字或紧凑格式）
+    (function () {
+      var re = /(?:专利|公开|公告)\s*号\s*[:：]?\s*((?:US|EP|DE|JP|KR|CN|WO|GB|FR)?\d{5,}(?:[A-Z]\d{0,2})?)/g;
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        var raw = m[1];
+        var pn;
+        if (/^(US|EP|DE|JP|KR|CN|WO|GB|FR)/.test(raw)) {
+          pn = raw;
+        } else {
+          pn = 'US' + raw; // 默认归为US（中文语境下最常见的引用）
+        }
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: pn });
       }
     })();
 
