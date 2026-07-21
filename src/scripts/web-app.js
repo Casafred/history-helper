@@ -119,10 +119,12 @@ function exitKanbanSelectMode() {
   if (board) board.classList.remove("select-mode");
   const selectBar = document.getElementById("kanban-select-bar");
   if (selectBar) selectBar.classList.add("hidden");
+  const hintEl = document.getElementById("kanban-select-append-hint");
+  if (hintEl) hintEl.classList.add("hidden");
   document.querySelectorAll(".kanban-card.selected").forEach(c => c.classList.remove("selected"));
 }
 
-function enterKanbanSelectMode(mode) {
+function enterKanbanSelectMode(mode, options) {
   if (!kanbanState.documents || kanbanState.documents.length === 0) {
     showError("请先查询专利并加载审查文档");
     return;
@@ -135,29 +137,46 @@ function enterKanbanSelectMode(mode) {
   }
   exitKanbanSelectMode();
   _kanbanSelectMode = mode;
+  const opts = options || {};
   const board = document.getElementById("kanban-board");
   if (board) board.classList.add("select-mode");
   const selectBar = document.getElementById("kanban-select-bar");
   if (selectBar) selectBar.classList.remove("hidden");
   const modeLabel = document.getElementById("kanban-select-mode-label");
-  if (modeLabel) modeLabel.textContent = mode === "citedRefs" ? "选择引用文献文件" : "选择审查意见文件";
+  if (modeLabel) modeLabel.textContent = mode === "citedRefs" ? "选择引用文献文件" : (opts.append ? "追加文件后重新梳理审查意见" : "选择审查意见文件");
   const confirmBtn = document.getElementById("kanban-select-confirm-btn");
-  if (confirmBtn) confirmBtn.textContent = mode === "citedRefs" ? "确认并梳理引用文献" : "确认并梳理审查意见";
+  if (confirmBtn) confirmBtn.textContent = mode === "citedRefs" ? "确认并梳理引用文献" : (opts.append ? "确认追加并重新梳理" : "确认并梳理审查意见");
 
-  // Pre-select default documents
+  // Pre-select documents
   _kanbanSelected.clear();
-  kanbanState.documents.forEach(it => {
-    let shouldSelect = false;
-    if (mode === "review") {
-      shouldSelect = shouldIncludeInAIAnalysis(office, it.type);
-    } else {
-      const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
-      shouldSelect = CITED_DOC_CODES.includes(it.docCode);
-    }
-    if (shouldSelect) _kanbanSelected.add(it.idx);
-  });
+  if (opts.append && opts.preSelectedIdxs && opts.preSelectedIdxs.length > 0) {
+    // Append mode: keep previously selected files selected
+    opts.preSelectedIdxs.forEach(idx => _kanbanSelected.add(idx));
+  } else {
+    // Fresh select: use default selection rules
+    kanbanState.documents.forEach(it => {
+      let shouldSelect = false;
+      if (mode === "review") {
+        shouldSelect = shouldIncludeInAIAnalysis(office, it.type);
+      } else {
+        const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
+        shouldSelect = CITED_DOC_CODES.includes(it.docCode);
+      }
+      if (shouldSelect) _kanbanSelected.add(it.idx);
+    });
+  }
   _applyKanbanSelection();
   _updateKanbanSelectSummary();
+  // Show append hint if in append mode
+  const hintEl = document.getElementById("kanban-select-append-hint");
+  if (hintEl) {
+    if (opts.append) {
+      hintEl.textContent = "当前为追加模式：已选中的文件会保留OCR结果，新选择的文件将进行OCR后与原有文件一起重新梳理。";
+      hintEl.classList.remove("hidden");
+    } else {
+      hintEl.classList.add("hidden");
+    }
+  }
 }
 
 function _applyKanbanSelection() {
@@ -233,6 +252,12 @@ function _updateAIAnalysisView() {
     const isCited = kanbanState.activeAnalysisView === "citedRefs";
     reviewBtn.classList.toggle("active", !isCited);
     citedBtn.classList.toggle("active", isCited);
+  }
+  // Show/hide append files button (only when there's existing review analysis)
+  const appendBtn = document.getElementById("append-files-btn");
+  if (appendBtn) {
+    const showAppend = !!(kanbanState.analysis && !activeAnalysisProcess && kanbanState.activeAnalysisView !== "citedRefs");
+    appendBtn.style.display = showAppend ? "" : "none";
   }
 }
 
@@ -465,6 +490,8 @@ function _dossierApplyTab(tab) {
   const savedTraceIndex = savedKs.traceIndex || {};
   const savedHasUnsaved = !!savedKs.hasUnsavedWork;
   const savedActiveView = savedKs.activeAnalysisView || "review";
+  const savedLastAnalyzedIdxs = savedKs.lastAnalyzedIdxs || [];
+  const savedLastAnalyzedCitedIdxs = savedKs.lastAnalyzedCitedIdxs || [];
 
   try { renderKanban(currentData); } catch (e) { console.error("renderKanban:", e); }
 
@@ -480,6 +507,8 @@ function _dossierApplyTab(tab) {
   kanbanState.traceIndex = JSON.parse(JSON.stringify(savedTraceIndex));
   kanbanState.hasUnsavedWork = savedHasUnsaved;
   kanbanState.activeAnalysisView = savedActiveView;
+  kanbanState.lastAnalyzedIdxs = savedLastAnalyzedIdxs;
+  kanbanState.lastAnalyzedCitedIdxs = savedLastAnalyzedCitedIdxs;
   kanbanState.documents.forEach((d, i) => { if (d.idx == null) d.idx = i; });
 
   // Restore extraction previews in kanban cards
@@ -666,6 +695,8 @@ function _dossierCloseTab(key) {
         kanbanState.citedRefsAnalysis = "";
         kanbanState.traceIndex = {};
         kanbanState.hasUnsavedWork = false;
+        kanbanState.lastAnalyzedIdxs = [];
+        kanbanState.lastAnalyzedCitedIdxs = [];
         const appEl = document.getElementById("app");
         if (appEl) appEl.classList.add("home-mode");
         resultSection.classList.add("hidden");
@@ -770,7 +801,7 @@ function _dossierCreateEmptyTab(key, label) {
     label: label || key,
     title: "",
     currentData: null,
-    kanbanState: { documents: [], extractions: {}, analysis: "", analysisSystemPrompt: "", analysisUserMessage: "", citedRefsAnalysis: "", traceIndex: {}, hasUnsavedWork: false, activeAnalysisView: "review" },
+    kanbanState: { documents: [], extractions: {}, analysis: "", analysisSystemPrompt: "", analysisUserMessage: "", citedRefsAnalysis: "", traceIndex: {}, hasUnsavedWork: false, activeAnalysisView: "review", lastAnalyzedIdxs: [], lastAnalyzedCitedIdxs: [] },
     activeInnerTab: "overview",
   };
   _dossierTabs.push(newTab);
@@ -785,6 +816,8 @@ function _dossierCreateEmptyTab(key, label) {
   kanbanState.traceIndex = {};
   kanbanState.hasUnsavedWork = false;
   kanbanState.activeAnalysisView = "review";
+  kanbanState.lastAnalyzedIdxs = [];
+  kanbanState.lastAnalyzedCitedIdxs = [];
   pdfViewState.active = false;
   pdfViewState.currentDocIdx = null;
   pdfViewState.currentDocKey = null;
@@ -1629,6 +1662,8 @@ function _dossierCloseTabByKey(key) {
       kanbanState.citedRefsAnalysis = "";
       kanbanState.traceIndex = {};
       kanbanState.hasUnsavedWork = false;
+      kanbanState.lastAnalyzedIdxs = [];
+      kanbanState.lastAnalyzedCitedIdxs = [];
       const appEl = document.getElementById("app");
       if (appEl) appEl.classList.add("home-mode");
       resultSection.classList.add("hidden");
@@ -5133,6 +5168,8 @@ async function doSearch(input, options) {
     kanbanState.traceIndex = {};
     kanbanState.hasUnsavedWork = false;
     kanbanState.activeAnalysisView = "review";
+    kanbanState.lastAnalyzedIdxs = [];
+    kanbanState.lastAnalyzedCitedIdxs = [];
     const _kaPanel = document.getElementById("kanban-analysis");
     if (_kaPanel) _kaPanel.classList.add("hidden");
     const _emptyState = document.getElementById("ai-empty-state");
@@ -5772,6 +5809,8 @@ const PatentCache = {
         citedRefsAnalysis: kanbanState.citedRefsAnalysis || "",
         activeAnalysisView: kanbanState.activeAnalysisView || "review",
         hasUnsavedWork: !!kanbanState.hasUnsavedWork,
+        lastAnalyzedIdxs: kanbanState.lastAnalyzedIdxs || [],
+        lastAnalyzedCitedIdxs: kanbanState.lastAnalyzedCitedIdxs || [],
       },
       hasOCR,
       hasAnalysis,
@@ -5887,6 +5926,8 @@ const PatentCache = {
       kanbanState.citedRefsAnalysis = cacheEntry.kanbanState.citedRefsAnalysis || "";
       kanbanState.hasUnsavedWork = false;
       kanbanState.activeAnalysisView = cacheEntry.kanbanState.activeAnalysisView || "review";
+      kanbanState.lastAnalyzedIdxs = cacheEntry.kanbanState.lastAnalyzedIdxs || [];
+      kanbanState.lastAnalyzedCitedIdxs = cacheEntry.kanbanState.lastAnalyzedCitedIdxs || [];
       kanbanState.documents.forEach((d, i) => { if (d.idx == null) d.idx = i; });
 
       // Restore extractions - use saved pageDimensions directly for correct OCR bbox mapping
@@ -6831,6 +6872,8 @@ function renderKanban(data) {
   kanbanState.traceIndex = {};
   kanbanState.hasUnsavedWork = false;
   kanbanState.activeAnalysisView = "review";
+  kanbanState.lastAnalyzedIdxs = [];
+  kanbanState.lastAnalyzedCitedIdxs = [];
 
   // Clear previous analysis content from DOM
   const analysisContentEl = document.getElementById("kanban-analysis-content");
@@ -9056,11 +9099,22 @@ const _gotoKanbanBtn = document.getElementById("ai-goto-kanban-btn");
 if (_gotoKanbanBtn) _gotoKanbanBtn.addEventListener("click", () => _switchToTab("kanban"));
 const _newAnalysisBtn = document.getElementById("new-analysis-btn");
 if (_newAnalysisBtn) _newAnalysisBtn.addEventListener("click", () => {
-  kanbanState.analysis = "";
-  kanbanState.citedRefsAnalysis = "";
-  const ac = document.getElementById("kanban-analysis-content");
-  if (ac) ac.innerHTML = "";
+  // Return to kanban to let user choose files (fresh selection)
+  kanbanState.activeAnalysisView = "review";
   _switchToTab("kanban");
+  enterKanbanSelectMode("review");
+});
+// Append files button: go to kanban in append mode (pre-select previously analyzed files)
+const _appendFilesBtn = document.getElementById("append-files-btn");
+if (_appendFilesBtn) _appendFilesBtn.addEventListener("click", () => {
+  kanbanState.activeAnalysisView = "review";
+  _switchToTab("kanban");
+  const hasExisting = !!(kanbanState.analysis && kanbanState.lastAnalyzedIdxs && kanbanState.lastAnalyzedIdxs.length > 0);
+  if (hasExisting) {
+    enterKanbanSelectMode("review", { append: true, preSelectedIdxs: kanbanState.lastAnalyzedIdxs });
+  } else {
+    enterKanbanSelectMode("review");
+  }
 });
 const _reviewViewBtn = document.getElementById("kanban-analysis-result-btn");
 const _citedViewBtn = document.getElementById("kanban-analysis-cited-btn");
@@ -9555,6 +9609,9 @@ async function runCitedRefsAnalysis(selectedIdxs) {
   });
   if (citedRefsAbortBtn) citedRefsAbortBtn.classList.remove("hidden");
 
+  // Ensure correct UI state: hide empty state, show analysis section
+  _updateAIAnalysisView();
+
   try {
     const citedDocs = kanbanState.documents.filter(d => selectedIdxs.includes(d.idx));
 
@@ -9565,6 +9622,8 @@ async function runCitedRefsAnalysis(selectedIdxs) {
       return;
     }
     analysisSection.classList.remove("hidden");
+    const emptyState = document.getElementById("ai-empty-state");
+    if (emptyState) emptyState.classList.add("hidden");
     analysisContent.innerHTML = renderAiProgressUI("extract", "正在提取引用文献内容...", -1);
 
     // 先提取引用文献文档内容（如果尚未提取）— 断点续OCR
@@ -9680,13 +9739,15 @@ async function runCitedRefsAnalysis(selectedIdxs) {
 
     const prompt = `你是一位资深专利分析师，专注于引用文献分析。请根据以下引用文献相关文档，进行系统梳理和分析。\n\n${lines.join("\n")}`;
 
-    analysisContent.innerHTML = '<div class="kanban-analysis-content markdown-body"></div>';
-    const streamContainer = analysisContent.querySelector(".kanban-analysis-content");
-    // 思考区 + 回答区分层，避免 innerHTML 覆盖思考区
+    analysisContent.innerHTML = "";
+    // Thinking host container
+    const thinkingContainer = document.createElement("div");
+    analysisContent.appendChild(thinkingContainer);
+    // Answer container - directly in analysisContent
     const answerContainer = document.createElement("div");
-    answerContainer.className = "kanban-analysis-answer";
-    streamContainer.appendChild(answerContainer);
-    const thinkingHost = _createThinkingHost(streamContainer);
+    answerContainer.className = "markdown-body";
+    analysisContent.appendChild(answerContainer);
+    const thinkingHost = _createThinkingHost(thinkingContainer);
     let _citedContentStarted = false;
     let fullText = "";
     let _streamRafPending = false;
@@ -9730,11 +9791,14 @@ async function runCitedRefsAnalysis(selectedIdxs) {
       }
     }
     if (thinkingHost) thinkingHost.finish();
-    // Final render
-    if (answerContainer) answerContainer.innerHTML = marked.parse(fullText);
+    // Final render: clean up and render directly
+    if (thinkingContainer.parentNode) thinkingContainer.remove();
+    analysisContent.innerHTML = marked.parse(fullText);
 
     kanbanState.citedRefsAnalysis = fullText;
     kanbanState.hasUnsavedWork = true;
+    // Save which files were analyzed (for append mode)
+    kanbanState.lastAnalyzedCitedIdxs = [...selectedIdxs];
     autoSaveCache();
     prefetchPatentLinks();
   } catch (e) {
@@ -9917,9 +9981,14 @@ async function startReviewAnalysis(selectedIdxs) {
   const abortBtn = document.getElementById("cited-refs-abort-btn");
   if (abortBtn) abortBtn.classList.remove("hidden");
 
+  // Ensure correct UI state: hide empty state, show analysis section
+  _updateAIAnalysisView();
+
   const analysisSection = document.getElementById("kanban-analysis");
   const analysisContent = document.getElementById("kanban-analysis-content");
   analysisSection.classList.remove("hidden");
+  const emptyState = document.getElementById("ai-empty-state");
+  if (emptyState) emptyState.classList.add("hidden");
   analysisContent.innerHTML = renderAiProgressUI("extract", "正在准备文档提取...", -1);
 
   const selectedItems = items.filter(it => selectedIdxs.includes(it.idx));
@@ -10130,20 +10199,18 @@ async function startReviewAnalysis(selectedIdxs) {
     kanbanState.hasUnsavedWork = true;
     // Clear previous content (including any previous progress UI)
     analysisContent.innerHTML = "";
-    // Create a stable container once to avoid full DOM replacement on each chunk
     // Keep the progress bar visible initially; it will be replaced when first content arrives
     const progressPlaceholder = document.createElement("div");
     progressPlaceholder.innerHTML = renderAiProgressUI("analyzing", "AI 正在梳理审查历史，等待响应...", -1);
     analysisContent.appendChild(progressPlaceholder);
-    const streamContainer = document.createElement("div");
-    streamContainer.className = "kanban-analysis-content markdown-body";
-    analysisContent.appendChild(streamContainer);
-    // 思考区挂在 streamContainer 内（renderMarkdownWithTrace 只会改 innerHTML，需保留思考区）
-    // 为避免被覆盖，把回答放到内层 .kanban-analysis-answer
+    // Thinking host container (for reasoning/thinking display)
+    const thinkingContainer = document.createElement("div");
+    analysisContent.appendChild(thinkingContainer);
+    // Answer container - directly in analysisContent, no extra nesting
     const answerContainer = document.createElement("div");
-    answerContainer.className = "kanban-analysis-answer";
-    streamContainer.appendChild(answerContainer);
-    const thinkingHost = _createThinkingHost(streamContainer);
+    answerContainer.className = "markdown-body";
+    analysisContent.appendChild(answerContainer);
+    const thinkingHost = _createThinkingHost(thinkingContainer);
     let _streamContentStarted = false;
     let _streamRafPending = false;
     let _lastRenderLen = 0;
@@ -10176,7 +10243,7 @@ async function startReviewAnalysis(selectedIdxs) {
           _streamRafPending = true;
           requestAnimationFrame(() => {
             if (answerContainer) {
-              answerContainer.innerHTML = renderMarkdownWithTrace(fullText);
+              answerContainer.innerHTML = renderAnalysisModules(fullText);
             }
             kanbanState.analysis = fullText;
             kanbanState.hasUnsavedWork = true;
@@ -10187,13 +10254,24 @@ async function startReviewAnalysis(selectedIdxs) {
       }
     }
     if (thinkingHost) thinkingHost.finish();
+    // Clean up: remove thinking container and progress placeholder, render final content directly
+    if (thinkingContainer.parentNode) thinkingContainer.remove();
+    if (progressPlaceholder.parentNode) progressPlaceholder.remove();
     // Final render to ensure all content is displayed (with module sections)
-    if (answerContainer) answerContainer.innerHTML = renderAnalysisModules(fullText);
+    analysisContent.innerHTML = renderAnalysisModules(fullText);
     kanbanState.analysis = fullText;
     kanbanState.hasUnsavedWork = true;
+    // Re-setup IntersectionObserver for module tabs after final render
+    if (window._analysisScrollObserver) {
+      analysisContent.querySelectorAll(".analysis-module[data-module-id]").forEach(mod => {
+        window._analysisScrollObserver.observe(mod);
+      });
+    }
     // Save context for continued chat
     kanbanState.analysisSystemPrompt = systemPrompt;
     kanbanState.analysisUserMessage = userMessage;
+    // Save which files were analyzed (for append mode)
+    kanbanState.lastAnalyzedIdxs = [...selectedIdxs];
     analysisChatHistory = [];
     showAnalysisChatToggle();
     autoSaveCache();
