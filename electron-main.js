@@ -785,6 +785,8 @@ async function epoFetchViaBrowser(targetUrl, options) {
     };
 
     let tryExtractRunning = false;
+    let retrieveDetectedAt = 0;
+    let retrieveReloadedAt = 0;
     const tryExtract = async () => {
       if (settled || win.isDestroyed() || tryExtractRunning) return;
       tryExtractRunning = true;
@@ -798,6 +800,52 @@ async function epoFetchViaBrowser(targetUrl, options) {
           }
           return; // 继续等
         }
+
+        // HTML (doclist) 请求：先检测页面是否真正就绪
+        // EPO 对非 EP 局会先返回 "Dossier documents are being retrieved" 中间页，
+        // 需要等 8s 后重新加载才能拿到真正的文档列表（原 curl 路径已处理此情况）
+        if (!wantPdf) {
+          const pageInfo = await win.webContents.executeJavaScript(`
+            (function() {
+              try {
+                var html = document.documentElement ? document.documentElement.outerHTML : "";
+                return {
+                  isRetrieving: /being retrieved|Dossier documents are being/i.test(html),
+                  hasDocList: !!document.querySelector(
+                    "table.docListTable, #documents, div.docListTable, " +
+                    "#resultData, #applicationForm, table.publicationData, " +
+                    "#proc_table, div.proceedings, table.biblio"
+                  ),
+                  title: document.title,
+                  htmlLen: html.length,
+                  url: window.location.href
+                };
+              } catch(e) { return { isRetrieving: false, hasDocList: false, error: e.message }; }
+            })();
+          `, true).catch(() => ({ isRetrieving: false, hasDocList: false }));
+
+          console.log(`[EPO Browser] page state:`, JSON.stringify(pageInfo).slice(0, 200));
+
+          // 中间页：等 8s 后重新加载
+          if (pageInfo.isRetrieving) {
+            if (!retrieveDetectedAt) {
+              retrieveDetectedAt = Date.now();
+              console.log("[EPO Browser] detected 'being retrieved' intermediate page, waiting 8s before reload...");
+            }
+            if (Date.now() - retrieveDetectedAt > 8000 && !retrieveReloadedAt) {
+              retrieveReloadedAt = Date.now();
+              console.log("[EPO Browser] reloading after 'being retrieved' wait");
+              try { win.webContents.reload(); } catch (_) {}
+            }
+            return; // 继续等
+          }
+
+          // 页面没有 doclist 特征元素：可能还在加载，继续等
+          if (!pageInfo.hasDocList) {
+            return;
+          }
+        }
+
         const result = await extractFromPage();
         if (result.error && /fetch|network|Failed to fetch/i.test(result.error)) {
           // 网络错误，下次定时器再试
@@ -812,7 +860,18 @@ async function epoFetchViaBrowser(targetUrl, options) {
       }
     };
 
-    win.webContents.on("did-finish-load", tryExtract);
+    win.webContents.on("did-finish-load", () => {
+      console.log("[EPO Browser] did-finish-load, url:", win.webContents.getURL());
+      tryExtract();
+    });
+    win.webContents.on("did-fail-load", (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (isMainFrame && errorCode !== -3) {
+        console.warn(`[EPO Browser] did-fail-load: code=${errorCode}, desc=${errorDescription}, url=${validatedURL}`);
+      }
+    });
+    win.webContents.on("did-navigate", (_e, url) => {
+      console.log("[EPO Browser] did-navigate:", url);
+    });
 
     const checkInterval = setInterval(() => {
       if (settled || win.isDestroyed()) {
