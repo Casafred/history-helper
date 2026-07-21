@@ -4621,24 +4621,25 @@ function linkifyPatentNumbers(text) {
       }
     })();
 
-    // 5. 中文国别+专利+第X号: "美国专利第11,897,095号"、"日本专利第59-104108号"、"中国专利第CN12345678号"
+    // 5. 中文国别+专利+第X号: "美国专利第11,897,095号"、"美国专利第11，897，095号"、"日本专利第59-104108号"、"中国专利第CN12345678号"
+    // 支持英文逗号、中文逗号（，）、中文顿号（、）、空格作为千位分隔符
     (function () {
-      var re = new RegExp('(' + ZH_COUNTRY + ')\\s*(?:发明|实用新型|外观)?\\s*(专利|申请)\\s*(?:公开|公告|公开说明书)?\\s*第?\\s*(\\d[\\d,\\s/\\-]*\\d)\\s*号', 'g');
+      var re = new RegExp('(' + ZH_COUNTRY + ')\\s*(?:发明|实用新型|外观)?\\s*(专利|申请)\\s*(?:公开|公告|公开说明书)?\\s*第?\\s*(\\d[\\d,，、\\s/\\-]*\\d)\\s*号', 'g');
       var m;
       while ((m = re.exec(part)) !== null) {
         var country = _normalizeChineseCountry(m[1]);
         if (!country) continue;
         var raw = m[3];
-        // 申请号含斜杠时保留斜杠分隔格式（如 US18/439466），其他情况去除逗号/空格
+        // 申请号含斜杠时保留斜杠分隔格式（如 US18/439466），其他情况去除逗号/中文逗号/顿号/空格
         var pn;
         if (raw.indexOf('/') !== -1) {
-          var slashParts = raw.split('/').map(function (s) { return s.replace(/[,\s]/g, ''); });
+          var slashParts = raw.split('/').map(function (s) { return s.replace(/[,，、\s]/g, ''); });
           pn = country + slashParts[0] + '/' + slashParts.slice(1).join('');
         } else if (raw.indexOf('-') !== -1 && country === 'JP') {
           // JP年号连字符: 59-104108 → 59104108
           pn = country + raw.replace(/[\s-]/g, '');
         } else {
-          pn = country + raw.replace(/[,\s]/g, '');
+          pn = country + raw.replace(/[,，、\s]/g, '');
         }
         if (pn.replace(/[^\d]/g, '').length < 4) continue;
         matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: pn });
