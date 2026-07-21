@@ -695,24 +695,30 @@ async function epoFetchPdf(office, docNumber, docId) {
   return { body: result.body };
 }
 
-// ── EPO Register via hidden BrowserWindow（参考 espacenet 弹窗成功策略）─────
+// ── EPO Register via 可见 BrowserWindow（参考 espacenet 弹窗成功策略）─────
 // 完全复制 espacenet 弹窗过 Cloudflare 的策略：
-//   1. 用隐藏 BrowserWindow + 默认 session（复用 mainWindow 已通过的 CF cookie）
+//   1. 可见 BrowserWindow（show:true）+ 默认 session（复用 mainWindow 已通过的 CF cookie）
 //   2. 不设置任何 UA、不注入 sec-ch-ua headers（与 espacenet 弹窗一致）
 //   3. 完整 Chromium 引擎能执行 Cloudflare JS challenge
-//   4. did-finish-load 后用 fetch/outerHTML 提取数据
+//   4. 用户可见窗口，CF 触发人工挑战时用户能主动完成
+//   5. 自动检测页面就绪后用 executeJavaScript 提取数据，自动关闭窗口
+//   6. 保留"我已完成验证"按钮兜底，避免自动检测漏判
 // 仅在 EPO 直走模式（epoDirect=true）下使用，作为 curl 路径的替代。
 async function epoFetchViaBrowser(targetUrl, options) {
   options = options || {};
   const wantPdf = !!options.wantPdf;
-  const timeout = options.timeout || 60000;
+  const timeout = options.timeout || 120000;
   return new Promise((resolve) => {
-    // 用默认 session（不设 partition），复用 mainWindow 的 cookie
-    // 不调用 setUserAgent、不注入 onBeforeSendHeaders —— 完全复制 espacenet 弹窗策略
+    // 用默认 session（不设 partition），复用 mainWindow 的 cookie —— 与 espacenet 弹窗一致
+    // 不调用 setUserAgent、不注入 onBeforeSendHeaders —— 与 espacenet 弹窗一致
+    // show: true（可见窗口）—— 与 espacenet 弹窗一致，CF 人工挑战时用户能看见并完成
     const win = new BrowserWindow({
-      show: false,
-      width: 800,
-      height: 600,
+      show: true,
+      width: 1100,
+      height: 800,
+      title: wantPdf
+        ? "EPO Register - 正在获取审查文档 PDF..."
+        : "EPO Register - 正在获取审查文档列表...",
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
@@ -722,6 +728,8 @@ async function epoFetchViaBrowser(targetUrl, options) {
 
     let settled = false;
     let cfWaitCount = 0;
+    let userClickedDone = false;
+    let autoExtractedOk = false;
     const CF_WAITING_KEYWORDS = [
       "just a moment", "attention required", "checking your browser",
       "performing security", "verifying you are human", "请稍候", "请稍等",
@@ -795,8 +803,8 @@ async function epoFetchViaBrowser(targetUrl, options) {
         if (isCfWaiting(title)) {
           cfWaitCount++;
           console.log(`[EPO Browser] Cloudflare waiting (title="${title}", count=${cfWaitCount})`);
-          if (cfWaitCount > 30) {
-            finish({ cloudflare: true, error: "Cloudflare verification timeout (60s)" });
+          if (cfWaitCount > 60) {
+            finish({ cloudflare: true, error: "Cloudflare verification timeout (120s)" });
           }
           return; // 继续等
         }
@@ -841,7 +849,8 @@ async function epoFetchViaBrowser(targetUrl, options) {
           }
 
           // 页面没有 doclist 特征元素：可能还在加载，继续等
-          if (!pageInfo.hasDocList) {
+          // 但如果用户已点击"完成验证"按钮，强制提取一次（避免自动检测漏判）
+          if (!pageInfo.hasDocList && !userClickedDone) {
             return;
           }
         }
@@ -852,6 +861,10 @@ async function epoFetchViaBrowser(targetUrl, options) {
           console.log("[EPO Browser] transient fetch error, will retry:", result.error);
           return;
         }
+        if (result.body) {
+          autoExtractedOk = true;
+          console.log("[EPO Browser] auto-extracted successfully, closing window");
+        }
         finish(result);
       } catch (e) {
         console.warn("[EPO Browser] tryExtract error:", e.message);
@@ -860,8 +873,60 @@ async function epoFetchViaBrowser(targetUrl, options) {
       }
     };
 
+    // 监听用户主动点击"完成验证"按钮：强制提取一次，避免自动检测漏判
+    const checkUserDone = async () => {
+      if (settled || win.isDestroyed()) return;
+      try {
+        const clicked = await win.webContents.executeJavaScript(`
+          (function() {
+            try {
+              var hint = document.getElementById("patentlens-verify-hint");
+              return hint && hint.textContent.includes("验证完成") ? true : false;
+            } catch(e) { return false; }
+          })();
+        `, true).catch(() => false);
+        if (clicked && !userClickedDone) {
+          userClickedDone = true;
+          console.log("[EPO Browser] user clicked done button, force extracting...");
+          // 延迟 500ms 让页面稳定后强制提取
+          setTimeout(tryExtract, 500);
+        }
+      } catch (_) {}
+    };
+
     win.webContents.on("did-finish-load", () => {
       console.log("[EPO Browser] did-finish-load, url:", win.webContents.getURL());
+      // 注入工具栏：提示用户当前状态 + "我已完成"按钮（参考 openEpoVerifyWindow 的做法）
+      try {
+        win.webContents.executeJavaScript(`
+          (function() {
+            if (document.getElementById("patentlens-epo-direct-bar")) return;
+            var bar = document.createElement("div");
+            bar.id = "patentlens-epo-direct-bar";
+            bar.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:99999;background:#2563eb;color:#fff;padding:8px 16px;display:flex;align-items:center;gap:12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.2);box-sizing:border-box;";
+            var hint = document.createElement("span");
+            hint.id = "patentlens-verify-hint";
+            hint.style.cssText = "flex:1;min-width:0;";
+            hint.textContent = ${JSON.stringify(
+              wantPdf
+                ? "PatentLens: 正在从 EPO Register 获取审查文档 PDF，请稍候... 若页面卡在 Cloudflare 验证，请完成验证后点击右侧按钮"
+                : "PatentLens: 正在从 EPO Register 获取审查文档列表，请稍候... 若页面卡在 Cloudflare 验证，请完成验证后点击右侧按钮"
+            )};
+            var btn = document.createElement("button");
+            btn.id = "patentlens-verify-btn";
+            btn.textContent = "✓ 我已完成验证，继续";
+            btn.style.cssText = "background:#22c55e;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:13px;cursor:pointer;white-space:nowrap;";
+            btn.addEventListener("click", function() {
+              hint.textContent = "✅ 验证完成，正在保存会话并提取数据...";
+              window.postMessage({ type: "patentlens-epo-direct-done" }, "*");
+            });
+            bar.appendChild(hint);
+            bar.appendChild(btn);
+            (document.body || document.documentElement).appendChild(bar);
+            if (document.body) document.body.style.setProperty('margin-top', '40px', 'important');
+          })();
+        `, true).catch(() => {});
+      } catch (_) {}
       tryExtract();
     });
     win.webContents.on("did-fail-load", (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
@@ -879,9 +944,10 @@ async function epoFetchViaBrowser(targetUrl, options) {
         return;
       }
       tryExtract();
+      checkUserDone();
     }, 2000);
 
-    // 超时
+    // 超时（120s，给 CF 人工验证留足时间）
     setTimeout(() => {
       if (!settled) {
         finish({ cloudflare: true, error: `Browser fetch timeout (${timeout}ms)` });
@@ -889,11 +955,11 @@ async function epoFetchViaBrowser(targetUrl, options) {
     }, timeout);
 
     win.on("closed", () => {
-      if (!settled) finish({ error: "window closed" });
+      if (!settled) finish({ error: "window closed by user" });
     });
 
     // 加载 URL（不设 userAgent，用 Electron 默认 UA，与 espacenet 弹窗一致）
-    console.log("[EPO Browser] loading URL (default UA, default session):", targetUrl);
+    console.log("[EPO Browser] loading URL (visible window, default UA, default session):", targetUrl);
     win.loadURL(targetUrl).catch(e => {
       console.warn("[EPO Browser] loadURL failed:", e.message);
     });
