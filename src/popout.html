@@ -1424,7 +1424,16 @@
         if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
         timeoutTimer = setTimeout(function () {
           if (!_wvLoaded && !_wvFailed) {
-            // Check if the page is a Cloudflare challenge - don't timeout during verification
+            // 对 Cloudflare 保护的站点（espacenet/epo 等），不超时重建 webview。
+            // 重建会打断 Cloudflare JS challenge 执行，导致验证循环。
+            // 这些站点验证可能需要 30-90 秒，给足时间让验证在同一 webview 内完成。
+            var _url = currentUrl || "";
+            var _isCfSite = /espacenet\.com|\.epo\.org/i.test(_url);
+            if (_isCfSite) {
+              console.log("[popout] Cloudflare-protected site (" + _url + "), not timing out (verification in progress)");
+              return;
+            }
+            // 其他站点：检测 Cloudflare 等待页 title 延长超时
             try {
               var title = wv.getTitle ? wv.getTitle() : "";
               var lowerTitle = String(title || "").toLowerCase();
@@ -1432,14 +1441,13 @@
                 "performing security", "verifying you are human", "请稍候", "请稍等",
                 "正在检查", "正在验证", "需要关注", "执行安全", "稍候片刻"];
               if (cfKeywords.some(function(kw) { return lowerTitle.indexOf(kw.toLowerCase()) !== -1; })) {
-                console.log("[popout] Cloudflare verification in progress, extending timeout...");
+                console.log("[popout] Cloudflare verification in progress (title), extending timeout...");
                 timeoutTimer = setTimeout(function() {
                   if (!_wvLoaded && !_wvFailed) {
                     console.warn("[popout] webview extended timeout (Cloudflare)");
-                    _wvFailed = true;
                     showFallback("Cloudflare 验证超时，请尝试在外部浏览器中打开", "-118");
                   }
-                }, 60000);
+                }, 120000);
                 return;
               }
             } catch(e) {}
@@ -1589,6 +1597,17 @@
           if (e && e.errorCode === -3) return;
           if (e && e.isMainFrame === false) return;
           if (e && e.errorCode === -3) return;
+          // Cloudflare 验证页面（espacenet / register.epo.org 等）在验证过程中
+          // 会触发多次 did-fail-load（子资源失败、重定向等），如果此时重建 webview
+          // 会打断 Cloudflare JS challenge 的执行，导致验证永远无法完成 → 死循环。
+          // 所以对这类站点，不重建 webview，让验证在同一 webview 内完成。
+          var _url = (e && e.validatedURL) || currentUrl || "";
+          var _needsCfCheck = /espacenet\.com|\.epo\.org|cloudflare/i.test(_url);
+          if (_needsCfCheck) {
+            console.log("[popout] did-fail-load on Cloudflare-protected site, not recreating webview");
+            // 不设置 _wvFailed，不重建，继续等待 cloudflare 验证完成
+            return;
+          }
           _wvFailed = true;
           if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
           if (!_wvLoaded && loadAttempts <= MAX_AUTO_RETRY && classifyError(e && e.errorCode) === "network") {
