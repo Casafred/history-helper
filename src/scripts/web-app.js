@@ -4451,19 +4451,22 @@ function openPatentImageViewer(images, startIndex) {
 
 // ── 在文本中识别专利号并转为可跳转链接 ──
 function linkifyPatentNumbers(text) {
-  // Match patent numbers in multiple formats:
-  // 0a. Natural language bracket format: [U.S. Patent No. 3,474,369], [U.S. Patent No. 6,726,857]
-  // 0b. Country + number in brackets without "Patent No": [DE 1971624 U], [JP 59-104108]
-  // 0c. Name + bracketed country/number: Keogh [U.S. Patent No. 3,474,369], Ono (JP 59-104108)
-  // 1. Compact: US12345678B2, EP4252965A3, CN119052083A, WO2024123456A1
-  // 2. Spaced with slash: US 2019/0009398, US 2019/0308309
-  // 3. Spaced without slash (single group): EP 4252965 A3, US 20190308309
-  // 4. Multi-spaced (digit groups separated by spaces): DE 42 39 799 A1, JP 2005 066804 A, EP 2 368 670 A2
-  // Only replace in text nodes, not inside HTML tags
+  // 专利号链接化：支持多种格式，收集所有匹配后去重，从后往前替换避免双重包裹。
+  // 支持格式：
+  // - 自然语言（带括号）: [U.S. Patent No. 3,474,369], (JP 59-104108)
+  // - 自然语言（不带括号）: U.S. Patent No. 3,474,369, see US Patent No. 6,726,857
+  // - 国别+逗号分隔数字: US 3,474,369
+  // - 斜杠分隔: US 2019/0009398
+  // - 多空格分隔: DE 42 39 799 A1, EP 2 368 670 A2
+  // - 单组数字+kind: EP 4252965 A3, US 12345678-B2
+  // - JP年号连字符: JP 59-104108, JP 2005-066804
+  // - 带分隔符紧凑格式: US-12345678-B2, US/12345678/B2
+  // - 纯紧凑格式: US12345678B2
+  // 分隔符支持：空格、连字符、斜杠、逗号；kind代码支持 A/A1/B2/U1/P 等
   const parts = text.split(/(<[^>]+>)/);
   function _normalizeCountry(prefix) {
     if (!prefix) return "";
-    const p = prefix.replace(/[.\s]/g, '').toUpperCase();
+    const p = prefix.replace(/[.\s-]/g, '').toUpperCase();
     if (p === 'US' || p === 'USPATENTNO' || p === 'USPATENT') return 'US';
     if (p.startsWith('US')) return 'US';
     return p;
@@ -4471,84 +4474,157 @@ function linkifyPatentNumbers(text) {
   function _makeLink(label, pn) {
     return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + label + '</a>';
   }
-  return parts.map((part, i) => {
+  var COUNTRY = '(?:U\\.?S\\.?|US|EP|DE|JP|KR|CN|WO|GB|FR)';
+  var COUNTRY_2 = '(?:US|EP|DE|JP|KR|CN|WO|GB|FR)';
+  var KIND = '[A-Z]\\d{0,2}(?![A-Za-z])';
+
+  return parts.map(function (part, i) {
     if (i % 2 === 1) return part; // HTML tag, skip
-    let result = part;
 
-    // 0a. [U.S. Patent No. 3,474,369] / [U.S. Patent No. 6,726,857] / [U.S. Patent No. 4,745,966]
-    result = result.replace(/\[((?:U\.?S\.?|US|EP|DE|JP|KR|CN|WO|GB|FR)\.?\s*(?:Patent(?:\s+No\.?)?|Patentnummer|Patentschrift|Offenlegungsschrift)?\s*[:,]?\s*)(\d[\d,\s]*\d)(?:\s*[,;]\s*([A-Z]\d{0,3}))?\s*\]/gi, (match, prefix, numStr, kind) => {
-      const m = prefix.match(/^[A-Za-z.]+/);
-      const country = _normalizeCountry(m ? m[0] : "US");
-      const digits = numStr.replace(/[,\s]/g, '');
-      const pn = country + digits + (kind || '');
-      return _makeLink(match, pn);
-    });
+    // 收集所有匹配: { start, end, text, pn }
+    var matches = [];
 
-    // 0b. [DE 1971624 U], [JP 59-104108], [US 4745966 A]
-    result = result.replace(/\[((?:US|EP|DE|JP|KR|CN|WO|GB|FR))\s+(\d[\d\s,]*\d)(?:\s*-\s*(\d+))?\s+([A-Z]\d{0,3})?\]/gi, (match, country, numStr, suffixNum, kind) => {
-      const c = country.toUpperCase();
-      let digits = numStr.replace(/[,\s]/g, '');
-      if (suffixNum) digits += suffixNum;
-      const pn = c + digits + (kind || '');
-      return _makeLink(match, pn);
-    });
-
-    // 0c. JP imperial-era with hyphen (with or without brackets/parens): "JP 59-104108", "(JP 59-104108)", "JP S59-104108"
-    result = result.replace(/(\(|\[)?(JP)\s+(?:S|H|H\.|平|昭)?(\d{1,4})\s*-\s*(\d{3,7})(?:\s+([A-Z]\d{0,3}))?(\)|\])?/gi, (match, openB, country, era, num, kind, closeB) => {
-      const pn = 'JP' + era + num + (kind || '');
-      return _makeLink(match, pn);
-    });
-
-    // 0d. (U.S. Patent No. 4,745,966) - parens version
-    result = result.replace(/\((U\.?S\.?|US)\.?\s*Patent(?:\s+No\.?)?\s*[:,]?\s*(\d[\d,\s]*\d)(?:\s*[,;]\s*([A-Z]\d{0,3}))?\s*\)/gi, (match, prefix, numStr, kind) => {
-      const country = _normalizeCountry(prefix);
-      const digits = numStr.replace(/[,\s]/g, '');
-      const pn = country + digits + (kind || '');
-      return _makeLink(match, pn);
-    });
-
-    // 0e. (JP 59-104108) - parens version (already handled by 0c if no space before kind)
-    result = result.replace(/\((JP)\s+(?:S|H|H\.|平|昭)?(\d{1,4})\s*-\s*(\d{3,7})(?:\s+([A-Z]\d{0,3}))?\s*\)/gi, (match, country, era, num, kind) => {
-      const pn = 'JP' + era + num + (kind || '');
-      return _makeLink(match, pn);
-    });
-
-    // 1. Spaced with slash: "US 2019/0009398" → "US20190009398"
-    result = result.replace(/\b([A-Z]{2})\s+(\d{4})\s*\/\s*(\d{4,7})\s*([A-Z]\d?)?\b/g, (match, country, year, num, kind) => {
-      const pn = country + year + num + (kind || '');
-      return _makeLink(match, pn);
-    });
-    // 2. Multi-spaced format: "DE 42 39 799 A1", "JP 2005 066804 A", "EP 2 368 670 A2"
-    //    Requires at least 2 digit groups separated by spaces (e.g. "42 39 799")
-    result = result.replace(/\b([A-Z]{2})\s+(\d{1,4}(?:\s+\d{1,7}){1,4})\s*([A-Z]\d?)?\b/g, (match, country, numGroup, kind) => {
-      const pn = country + numGroup.replace(/\s+/g, '') + (kind || '');
-      return _makeLink(match, pn);
-    });
-    // 3. Spaced without slash (single group): "US 20190308309" or "EP 4252965 A3"
-    result = result.replace(/\b([A-Z]{2})\s+(\d{5,})\s*([A-Z]\d?)?\b/g, (match, country, num, kind) => {
-      // Skip if already wrapped in a link
-      if (match.length < 7) return match;
-      const pn = country + num + (kind || '');
-      return _makeLink(match, pn);
-    });
-    // 4. Compact format: US12345678B2
-    // Track positions already inside links to avoid double-wrapping
-    const linkRanges = [];
-    const linkRegex = /<a[^>]*class="pd-patent-link-inline"[^>]*>/g;
-    let lr;
-    while ((lr = linkRegex.exec(result)) !== null) {
-      const linkStart = lr.index;
-      const linkEnd = result.indexOf('</a>', linkStart);
-      if (linkEnd !== -1) linkRanges.push([linkStart, linkEnd + 4]);
-    }
-    result = result.replace(/\b([A-Z]{2}\d{5,}[A-Z]?\d?)\b/g, (match, pn, offset) => {
-      if (match.length < 7) return match;
-      // Skip if this position is already inside a link
-      for (const [s, e] of linkRanges) {
-        if (offset >= s && offset < e) return match;
+    // 0a. 方括号自然语言: [U.S. Patent No. 3,474,369]
+    (function () {
+      var re = new RegExp('\\[(' + COUNTRY + ')\\.?\\s*(?:Patent(?:\\s+No\\.?)?|Patentnummer|Patentschrift|Offenlegungsschrift)?\\s*[:,]?\\s*(\\d[\\d,\\s]*\\d)(?:\\s*[,;\\/\\-]\\s*(' + KIND + '))?\\s*\\]', 'gi');
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        var country = _normalizeCountry(m[1]);
+        var digits = m[2].replace(/[,\s]/g, '');
+        if (digits.length < 4) continue;
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: country + digits + (m[3] || '') });
       }
-      return _makeLink(match, pn);
-    });
+    })();
+
+    // 0b. 方括号国别+数字: [DE 1971624 U], [JP 59-104108]
+    (function () {
+      var re = new RegExp('\\[(' + COUNTRY_2 + ')\\s+(\\d[\\d\\s,]*\\d)(?:\\s*-\\s*(\\d+))?\\s+(' + KIND + ')?\\]', 'gi');
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        var c = m[1].toUpperCase();
+        var digits = m[2].replace(/[,\s]/g, '');
+        if (m[3]) digits += m[3];
+        if (digits.length < 5) continue;
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: c + digits + (m[4] || '') });
+      }
+    })();
+
+    // 0c. JP年号连字符: JP 59-104108 / (JP 59-104108) / [JP S59-104108]
+    (function () {
+      var re = /(\(|\[)?(JP)\s+(?:S|H|H\.|平|昭)?(\d{1,4})\s*-\s*(\d{3,7})(?:\s+([A-Z]\d{0,3}(?![A-Za-z])))?(\)|\])?/gi;
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        var eraNum = m[3] + m[4];
+        if (eraNum.length < 5) continue;
+        var pn = 'JP' + eraNum + (m[5] || '');
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: pn });
+      }
+    })();
+
+    // 0d. 圆括号自然语言: (U.S. Patent No. 4,745,966)
+    (function () {
+      var re = new RegExp('\\((' + COUNTRY + ')\\.?\\s*(?:Patent(?:\\s+No\\.?)?|Patentnummer|Patentschrift|Offenlegungsschrift)?\\s*[:,]?\\s*(\\d[\\d,\\s]*\\d)(?:\\s*[,;\\/\\-]\\s*(' + KIND + '))?\\s*\\)', 'gi');
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        var country = _normalizeCountry(m[1]);
+        var digits = m[2].replace(/[,\s]/g, '');
+        if (digits.length < 4) continue;
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: country + digits + (m[3] || '') });
+      }
+    })();
+
+    // 0e. 不带括号的自然语言（要求Patent关键词）: "U.S. Patent No. 3,474,369" / "see US Patent No. 6,726,857"
+    (function () {
+      var re = new RegExp('(\\b' + COUNTRY + ')\\.?\\s+(Patent(?:\\s+No\\.?)?|Patentnummer|Patentschrift|Offenlegungsschrift)\\s*[:,]?\\s*(\\d[\\d,\\s]*\\d)(?:\\s*[,;\\/\\-]?\\s*(' + KIND + '))?', 'gi');
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        var country = _normalizeCountry(m[1]);
+        var digits = m[3].replace(/[,\s]/g, '');
+        if (digits.length < 4) continue;
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: country + digits + (m[4] || '') });
+      }
+    })();
+
+    // 0f. 国别+逗号分隔数字（无Patent关键词）: "US 3,474,369"
+    (function () {
+      var re = new RegExp('\\b(' + COUNTRY_2 + ')\\s+(\\d{1,3}(?:,\\d{3})+)(?:\\s+(' + KIND + '))?', 'g');
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        var digits = m[2].replace(/,/g, '');
+        if (digits.length < 5) continue;
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: m[1] + digits + (m[3] || '') });
+      }
+    })();
+
+    // 1. 斜杠分隔: "US 2019/0009398"
+    (function () {
+      var re = new RegExp('\\b(' + COUNTRY_2 + ')\\s+(\\d{4})\\s*\\/\\s*(\\d{4,7})(?:\\s*[-\\/,]?\\s*(' + KIND + '))?', 'g');
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        var pn = m[1] + m[2] + m[3] + (m[4] || '');
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: pn });
+      }
+    })();
+
+    // 2. 多空格分隔: "DE 42 39 799 A1", "EP 2 368 670 A2"
+    (function () {
+      var re = new RegExp('\\b(' + COUNTRY_2 + ')\\s+(\\d{1,4}(?:\\s+\\d{1,7}){1,4})(?:\\s*[-\\/,]?\\s*(' + KIND + '))?', 'g');
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        var pn = m[1] + m[2].replace(/\s+/g, '') + (m[3] || '');
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: pn });
+      }
+    })();
+
+    // 3. 单组数字+kind: "EP 4252965 A3", "US 12345678-B2", "US 12345678 P"
+    (function () {
+      var re = new RegExp('\\b(' + COUNTRY_2 + ')\\s+(\\d{5,})(?:\\s*[-\\/,]?\\s*(' + KIND + '))?', 'g');
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        if (m[0].length < 7) continue;
+        var pn = m[1] + m[2] + (m[3] || '');
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: pn });
+      }
+    })();
+
+    // 4a. 带分隔符紧凑格式: "US-12345678-B2", "US/12345678/B2"
+    (function () {
+      var re = new RegExp('\\b(' + COUNTRY_2 + ')[-\\/](\\d{5,})(?:[-\\/](' + KIND + '))?', 'g');
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        var pn = m[1] + m[2] + (m[3] || '');
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: pn });
+      }
+    })();
+
+    // 4b. 纯紧凑格式: "US12345678B2"
+    (function () {
+      var re = new RegExp('\\b(' + COUNTRY_2 + '\\d{5,}[A-Z]?\\d?)', 'g');
+      var m;
+      while ((m = re.exec(part)) !== null) {
+        if (m[0].length < 7) continue;
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], pn: m[1] });
+      }
+    })();
+
+    // 按start排序，start相同则保留更长匹配；去除重叠
+    matches.sort(function (a, b) { return a.start - b.start || b.end - a.end; });
+    var nonOverlapping = [];
+    var lastEnd = 0;
+    for (var k = 0; k < matches.length; k++) {
+      var mt = matches[k];
+      if (mt.start >= lastEnd) {
+        nonOverlapping.push(mt);
+        lastEnd = mt.end;
+      }
+    }
+
+    // 从后往前替换，避免offset变化
+    var result = part;
+    for (var j = nonOverlapping.length - 1; j >= 0; j--) {
+      var mt2 = nonOverlapping[j];
+      result = result.slice(0, mt2.start) + _makeLink(mt2.text, mt2.pn) + result.slice(mt2.end);
+    }
     return result;
   }).join("");
 }

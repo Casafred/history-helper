@@ -119,6 +119,7 @@ var PATENT_STATUS = {
       "IDS.FEE.ASSN": { name: "关于信息披露声明(IDS)超页费声明(SB/08C) (Assertion regarding IDS Size Fee)", type: "citation", stage: "审查中" },
       "PET.OP.REV": { name: "请愿处审查请愿 (Petition for review by the Office of Petitions)", type: "response", stage: "审查中" },
       "RFP": { name: "继续审查请求 (Request for Further Processing)", type: "response", stage: "审查中" },
+      "SPEC.AMD.NE": { name: "说明书修改未录入 (Specification-Amendment Not Entered)", type: "notification", stage: "审查中" },
     },
     typeNames: {
       "office_action": "审查意见",
@@ -174,6 +175,8 @@ var PATENT_STATUS = {
       "notice to file missing parts": "补正缺失部分通知 (Notice to File Missing Parts)",
       "authorization or rescission of authorization to access application by digital access service": "DAS/PDX访问授权或撤销 (Authorization or Rescission of Authorization to Access Application by Digital Access Service /Priority Document Exchange Office)",
       "change of address": "地址变更 (Change of Address)",
+      "specification-amendment not entered": "说明书修改未录入 (Specification-Amendment Not Entered)",
+      "specification amendment not entered": "说明书修改未录入 (Specification-Amendment Not Entered)",
     },
     stageNames: {
       "审查前": "审查前",
@@ -499,7 +502,7 @@ function classifyDocCode(code, desc) {
   // Claims, specification, abstract, drawings, sequence listing
   if (/\bclaims?\b/.test(text) && !/cited/.test(text)) return "patent_doc";
   if (/claim\s*(worksheet|index|translation)/i.test(text)) return "patent_doc";
-  if (/specification/.test(text) && !/notice|notification|communication/.test(text)) return "patent_doc";
+  if (/specification/.test(text) && !/notice|notification|communication|not entered|amendment not/.test(text)) return "patent_doc";
   if (/\bdescription\b/.test(text) && !/notice|notification|communication|amended/i.test(text)) return "patent_doc";
   if (/\babstract\b/.test(text)) return "patent_doc";
   if (/drawings?\s*(-|—)\s*other than black and white/i.test(text)) return "patent_doc";
@@ -720,8 +723,30 @@ function isClaimsDocument(it) {
 
 // Default selection rule for "review" and "mergeExport" modes:
 // all office_action + all response + claims-type patent documents.
+// 申请人答复(response)和专利文件(patent_doc)栏中的"表"类型（如权利要求工作表、
+// 费用工作表等）不纳入默认选择——这些表格通常是程序性附件，对审查意见梳理无价值。
 function shouldDefaultSelectForAnalysis(it) {
   if (!it) return false;
-  if (it.type === "office_action" || it.type === "response") return true;
-  return isClaimsDocument(it);
+  if (it.type === "office_action") return true;
+  if (it.type === "response") return !isTableLikeDocument(it);
+  if (it.type === "patent_doc") {
+    if (isTableLikeDocument(it)) return false;
+    return isClaimsDocument(it);
+  }
+  return false;
+}
+
+// 判断是否为"表"类型文档：权利要求工作表/费用工作表/书目数据表/任何 worksheet/table/sheet
+function isTableLikeDocument(it) {
+  if (!it) return false;
+  const code = String(it.docCode || "").toUpperCase();
+  const name = String(it.name || "") + " " + String(it.desc || "");
+  const nameLower = name.toLowerCase();
+  // 已知"表"类文档代码
+  if (/^WFEE$|^CLMSTRAN$|^BIB$/.test(code)) return true;
+  // 中文含"表"字（排除"表达"/"表示"等词组，但表格类文档名通常含"工作表"/"数据表"/"索引表"）
+  if (/工作表|数据表|索引表|费用表|书目表/.test(name)) return true;
+  // 英文 worksheet / table / sheet
+  if (/\bworksheet\b|\btable\b|\bsheet\b/i.test(nameLower)) return true;
+  return false;
 }
