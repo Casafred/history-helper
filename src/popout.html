@@ -1424,6 +1424,25 @@
         if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
         timeoutTimer = setTimeout(function () {
           if (!_wvLoaded && !_wvFailed) {
+            // Check if the page is a Cloudflare challenge - don't timeout during verification
+            try {
+              var title = wv.getTitle ? wv.getTitle() : "";
+              var lowerTitle = String(title || "").toLowerCase();
+              var cfKeywords = ["just a moment", "attention required", "checking your browser",
+                "performing security", "verifying you are human", "请稍候", "请稍等",
+                "正在检查", "正在验证", "需要关注", "执行安全", "稍候片刻"];
+              if (cfKeywords.some(function(kw) { return lowerTitle.indexOf(kw.toLowerCase()) !== -1; })) {
+                console.log("[popout] Cloudflare verification in progress, extending timeout...");
+                timeoutTimer = setTimeout(function() {
+                  if (!_wvLoaded && !_wvFailed) {
+                    console.warn("[popout] webview extended timeout (Cloudflare)");
+                    _wvFailed = true;
+                    showFallback("Cloudflare 验证超时，请尝试在外部浏览器中打开", "-118");
+                  }
+                }, 60000);
+                return;
+              }
+            } catch(e) {}
             console.warn("[popout] webview " + (LOAD_TIMEOUT_MS/1000) + "s timeout");
             _wvFailed = true;
             if (loadAttempts <= MAX_AUTO_RETRY) {
@@ -1891,6 +1910,10 @@
         _wvEventsBound = false;
         wv = document.createElement("webview");
         wv.setAttribute("allowpopups", "");
+        // Use persistent partition so Cloudflare verification cookies are preserved
+        // across webview recreations. Without this, Cloudflare verification may loop
+        // indefinitely because the verification cookie is lost when webview is recreated.
+        wv.setAttribute("partition", "persist:webview");
         var chromeUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
         wv.setAttribute("useragent", chromeUA);
         wv.style.width = "100%";

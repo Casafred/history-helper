@@ -44,7 +44,7 @@ var PATENT_STATUS = {
       "CLM": { name: "权利要求 (Claims)", type: "patent_doc", stage: "审查中" },
       "SPEC": { name: "说明书 (Specification)", type: "patent_doc", stage: "审查中" },
       "ABST": { name: "摘要 (Abstract)", type: "patent_doc", stage: "审查中" },
-      "IDS": { name: "信息披露声明 (Information Disclosure Statement)", type: "response", stage: "审查中" },
+      "IDS": { name: "信息披露声明 (Information Disclosure Statement)", type: "citation", stage: "审查中" },
       "FOR": { name: "外国引用文献 (Foreign Reference)", type: "citation", stage: "审查中" },
       "892": { name: "审查员引用文献列表 (List of References Cited by Examiner)", type: "citation", stage: "审查中" },
       "1449": { name: "申请人引用且审查员考虑的文献列表 (List of References Cited by Applicant and Considered by Examiner)", type: "citation", stage: "审查中" },
@@ -55,7 +55,7 @@ var PATENT_STATUS = {
       "EXIN": { name: "审查员面谈记录 (Examiner Interview Summary Record)", type: "notification", stage: "审查中" },
       "IIFW": { name: "授权信息 (Issue Information including Classification, Examiner, Name, Claim, Renumbering, etc.)", type: "allowance", stage: "授权" },
       "ISSUE.NTF": { name: "授权公告通知 (Issue Notification)", type: "allowance", stage: "授权" },
-      "IFEE": { name: "授权费缴纳 (Issue Fee Payment)", type: "response", stage: "授权" },
+      "IFEE": { name: "授权费缴纳 (Issue Fee Payment)", type: "allowance", stage: "授权" },
       "WFEE": { name: "费用工作表 (Fee Worksheet)", type: "misc", stage: "审查中" },
       "N417": { name: "电子提交确认回执 (Electronic Filing System Acknowledgment Receipt)", type: "notification", stage: "审查中" },
       "N570": { name: "代理委托书沟通 (Communication - Re: Power of Attorney)", type: "notification", stage: "审查中" },
@@ -116,7 +116,7 @@ var PATENT_STATUS = {
       "COFC.REQ": { name: "更正证书请求 (Request for Certificate of Correction)", type: "response", stage: "授权" },
       "PTA.PET": { name: "专利期限调整请愿 (Patent Term Adjustment Petition)", type: "response", stage: "授权" },
       "MFEE.ADDR": { name: "年费地址变更 (Maintenance Fee Address Change)", type: "response", stage: "授权" },
-      "IDS.FEE.ASSN": { name: "关于信息披露声明(IDS)超页费声明(SB/08C) (Assertion regarding IDS Size Fee)", type: "response", stage: "审查中" },
+      "IDS.FEE.ASSN": { name: "关于信息披露声明(IDS)超页费声明(SB/08C) (Assertion regarding IDS Size Fee)", type: "citation", stage: "审查中" },
       "PET.OP.REV": { name: "请愿处审查请愿 (Petition for review by the Office of Petitions)", type: "response", stage: "审查中" },
       "RFP": { name: "继续审查请求 (Request for Further Processing)", type: "response", stage: "审查中" },
     },
@@ -124,7 +124,7 @@ var PATENT_STATUS = {
       "office_action": "审查意见",
       "response": "申请人答复",
       "patent_doc": "专利文件",
-      "citation": "审查员引用",
+      "citation": "审查员引用与IDS",
       "allowance": "授权通知",
       "notification": "通知",
       "misc": "其他文件",
@@ -168,6 +168,12 @@ var PATENT_STATUS = {
       "request for further processing": "继续审查请求 (Request for Further Processing)",
       "miscellaneous incoming letter": "杂项来函 (Miscellaneous Incoming Letter)",
       "incoming letter": "来函 (Incoming Letter)",
+      "response to election / restriction filed": "选举/限制要求答复 (Response to Election / Restriction Filed)",
+      "change of address via patent application information retrieval": "通过PAIR变更地址 (Change of Address via Patent Application Information Retrieval (PAIR))",
+      "applicant initiated interview summary": "申请人发起的面谈摘要 (Applicant Initiated Interview Summary (PTOL-413))",
+      "notice to file missing parts": "补正缺失部分通知 (Notice to File Missing Parts)",
+      "authorization or rescission of authorization to access application by digital access service": "DAS/PDX访问授权或撤销 (Authorization or Rescission of Authorization to Access Application by Digital Access Service /Priority Document Exchange Office)",
+      "change of address": "地址变更 (Change of Address)",
     },
     stageNames: {
       "审查前": "审查前",
@@ -180,7 +186,7 @@ var PATENT_STATUS = {
       "office_action": "审查员发出审查意见",
       "response": "申请人提交答复/请求",
       "patent_doc": "专利基础文件",
-      "citation": "审查员引用文献/检索",
+      "citation": "审查员引用文献/IDS/检索",
       "allowance": "审查员同意授权",
       "notification": "官方通知",
       "misc": "其他往来文件",
@@ -211,7 +217,7 @@ var PATENT_STATUS = {
     },
     typeNames: {
       "office_action": "审查意见", "response": "申请人答复",
-      "patent_doc": "专利文件", "citation": "审查员引用",
+      "patent_doc": "专利文件", "citation": "审查员引用与IDS",
       "allowance": "授权通知", "notification": "通知", "misc": "其他文件"
     },
     stageNames: {
@@ -392,7 +398,7 @@ var PATENT_STATUS = {
     },
     typeNames: {
       "office_action": "审查意见", "response": "申请人答复",
-      "patent_doc": "专利文件", "citation": "审查员引用",
+      "patent_doc": "专利文件", "citation": "审查员引用与IDS",
       "allowance": "授权通知", "notification": "通知", "misc": "其他文件"
     },
     stageNames: {
@@ -431,7 +437,7 @@ var PATENT_STATUS = {
     },
     typeNames: {
       "office_action": "审查意见", "response": "申请人答复",
-      "patent_doc": "专利文件", "citation": "审查员引用",
+      "patent_doc": "专利文件", "citation": "审查员引用与IDS",
       "allowance": "授权通知", "notification": "通知", "misc": "其他文件"
     },
     stageNames: {
@@ -472,7 +478,7 @@ var PATENT_STATUS = {
     },
     typeNames: {
       "office_action": "审查意见", "response": "申请人答复",
-      "patent_doc": "专利文件", "citation": "审查员引用",
+      "patent_doc": "专利文件", "citation": "审查员引用与IDS",
       "allowance": "授权通知", "notification": "通知", "misc": "其他文件"
     },
     stageNames: {
@@ -518,7 +524,8 @@ function classifyDocCode(code, desc) {
   if (/search information.*classification/i.test(text)) return "citation";
   if (/bibliographic data|bibliograph/i.test(text)) return "citation";
   if (/recherche/.test(descLower)) return "citation";
-  if (/^892$|^1449$|^SRNT$|^SRFW$|^BIB$|^FOR$|^1503$|^1503SS$|^SRCHSTRAEP$|^CDOCNPL$|^ISA210|^PRSR$|^PRSR-X$|^ISR$/.test(codeUpper)) return "citation";
+  if (/information disclosure statement|\bids\b/i.test(text)) return "citation";
+  if (/^892$|^1449$|^SRNT$|^SRFW$|^BIB$|^FOR$|^1503$|^1503SS$|^SRCHSTRAEP$|^CDOCNPL$|^ISA210|^PRSR$|^PRSR-X$|^ISR$|^IDS$|^IDS\.FEE\.ASSN$/.test(codeUpper)) return "citation";
 
   // === Office Actions (审查意见) ===
   if (/european search opinion/.test(descLower)) return "office_action";
@@ -594,11 +601,9 @@ function classifyDocCode(code, desc) {
   if (/certificate of correction/.test(text) && /request/.test(text)) return "response";
   if (/patent term adjustment petition/.test(text)) return "response";
   if (/maintenance fee address change/.test(text)) return "response";
-  if (/assertion regarding.*ids/.test(text)) return "response";
   if (/petition for review by the office of petitions/.test(text)) return "response";
-  if (/ids.*size fee|sb\/08c/i.test(text)) return "response";
   if (/^CTED$|^CTEQ$|^AMSB$|^A\.NE$|^A\.NE\.AFCP$|^A\.NA$|^REM$|^RCEX$|^AFCP$|^BRAP$|^REBR$|^PABC$|^NOAP$|^RCFR$|^XT\//.test(codeUpper)) return "response";
-  if (/^IFEE$|^R46C\.REQ$|^PET\.PCT$|^RFN\.REQ$|^136A$|^PA$|^IDS$|^COFC\.REQ$|^PTA\.PET$|^MFEE\.ADDR$|^IDS\.FEE\.ASSN$|^PET\.OP\.REV$/.test(codeUpper)) return "response";
+  if (/^IFEE$|^R46C\.REQ$|^PET\.PCT$|^RFN\.REQ$|^136A$|^PA$|^COFC\.REQ$|^PTA\.PET$|^MFEE\.ADDR$|^PET\.OP\.REV$/.test(codeUpper)) return "response";
   if (/^ABEX$|^CLMSABEX$|^DESCABEX$|^EXRE3$|^EXRE92$|^FORAREPLY$|^CLMS-HWA$|^DESC-HWA$|^IGRA7$|^RO-DESC-26$|^1001P$|^1200P$|^RO101E$/.test(codeUpper)) return "response";
   if (/^200104-CN$|^200105-CN$|^200106-CN$|^200107-CN$|^200108-CN$/.test(codeUpper)) return "response";
   if (/^A53$|^A523$|^A621$/.test(codeUpper)) return "response";
