@@ -2584,6 +2584,27 @@ function createPopoutWindow(targetUrl, title, port, opts) {
     console.log("[Electron] popout webview attached");
     guestWebContents.setUserAgent(CHROME_UA);
 
+    // 注入 sec-ch-ua Client Hints header 并删除 X-Electron-Version
+    // 关键：Cloudflare 会根据 sec-ch-ua 中是否含 "Google Chrome" 品牌判断是否真实浏览器。
+    // webview 默认 session 不带这些 header，且会暴露 X-Electron-Version，导致 Cloudflare
+    // 无限触发 JS challenge（验证循环）。与 CNIPA session 使用相同的 header 配置。
+    try {
+      const guestSession = guestWebContents.session;
+      guestSession.webRequest.onBeforeSendHeaders((details, callback) => {
+        const headers = { ...details.requestHeaders };
+        headers["sec-ch-ua"] = '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"';
+        headers["sec-ch-ua-mobile"] = "?0";
+        headers["sec-ch-ua-platform"] = '"Windows"';
+        if (!headers["accept-language"]) {
+          headers["accept-language"] = "zh-CN,zh;q=0.9,en;q=0.8";
+        }
+        delete headers["X-Electron-Version"];
+        callback({ requestHeaders: headers });
+      });
+    } catch (e) {
+      console.warn("[Electron] failed to set webRequest on guest session:", e.message);
+    }
+
     const isCNIPAUrl = (u) => u && (u.indexOf("cnipa.gov.cn") !== -1 || u.indexOf("cpquery") !== -1);
 
     guestWebContents.on("did-start-loading", () => {
