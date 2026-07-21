@@ -165,10 +165,12 @@ function enterKanbanSelectMode(mode, options) {
     kanbanState.documents.forEach(it => {
       let shouldSelect = false;
       if (mode === "review") {
-        shouldSelect = shouldIncludeInAIAnalysis(office, it.type);
+        // Default: all office_action + all response + claims-type patent documents
+        shouldSelect = shouldDefaultSelectForAnalysis(it);
       } else if (mode === "mergeExport") {
-        // For merge export: pre-select all downloadable documents
-        shouldSelect = !!buildMergeDownloadUrl(it);
+        // For merge export: default to analysis set (office_action + response + claims),
+        // only include documents that are actually downloadable
+        shouldSelect = shouldDefaultSelectForAnalysis(it) && !!buildMergeDownloadUrl(it);
       } else {
         const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
         shouldSelect = CITED_DOC_CODES.includes(it.docCode);
@@ -9135,12 +9137,14 @@ if (_sbNone) _sbNone.addEventListener("click", () => {
 const _sbDefault = document.getElementById("kanban-select-default-btn");
 if (_sbDefault) _sbDefault.addEventListener("click", () => {
   if (!_kanbanSelectMode) return;
-  const office = currentData && currentData.office;
   _kanbanSelected.clear();
   (kanbanState.documents || []).forEach(it => {
     let shouldSelect = false;
     if (_kanbanSelectMode === "review") {
-      shouldSelect = shouldIncludeInAIAnalysis(office, it.type);
+      // Default: all office_action + all response + claims-type patent documents
+      shouldSelect = shouldDefaultSelectForAnalysis(it);
+    } else if (_kanbanSelectMode === "mergeExport") {
+      shouldSelect = shouldDefaultSelectForAnalysis(it) && !!buildMergeDownloadUrl(it);
     } else {
       const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
       shouldSelect = CITED_DOC_CODES.includes(it.docCode);

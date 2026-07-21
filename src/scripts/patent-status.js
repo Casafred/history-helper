@@ -704,3 +704,24 @@ function shouldIncludeInAIAnalysis(office, type) {
   if (!officeMap || !officeMap.aiAnalysisTypes) return type === "office_action" || type === "response";
   return officeMap.aiAnalysisTypes.indexOf(type) !== -1;
 }
+
+// Check if a document is a claims-type patent document (e.g. CLM, FWCLM, ETCL, CLMS, translations)
+// Used to determine default selection for AI review and merge export.
+function isClaimsDocument(it) {
+  if (!it) return false;
+  if (it.type !== "patent_doc") return false;
+  const code = String(it.docCode || "").toUpperCase();
+  // Common claims document codes across offices
+  if (/^CLM|^FWCLM|^ETCL$|^CLMS/.test(code)) return true;
+  const name = String(it.name || "") + " " + String(it.desc || "");
+  if (/权利要求/.test(name)) return true;
+  return false;
+}
+
+// Default selection rule for "review" and "mergeExport" modes:
+// all office_action + all response + claims-type patent documents.
+function shouldDefaultSelectForAnalysis(it) {
+  if (!it) return false;
+  if (it.type === "office_action" || it.type === "response") return true;
+  return isClaimsDocument(it);
+}
