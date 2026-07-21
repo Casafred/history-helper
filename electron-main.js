@@ -25,7 +25,10 @@ const { app, BrowserWindow, shell, ipcMain, dialog, session, clipboard } = requi
 // 全局命令行配置：模拟真实Chrome浏览器环境，用于绕过WAF检测
 const CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
 app.commandLine.appendSwitch("disable-blink-features", "AutomationControlled");
-app.commandLine.appendSwitch("user-agent", CHROME_UA);
+// 不全局设置 user-agent switch：强制 Chrome/134 UA 会与 Electron 实际 Chromium 版本不一致，
+// Cloudflare JS challenge 检测到 UA 欺骗后无限触发验证循环（espacenet/epo 受影响）。
+// 411f29c 时未设置全局 UA switch，使用 Electron 默认 UA 能通过 Cloudflare。
+// 需要 CHROME_UA 的站点（CNIPA 等）通过 session.setUserAgent / webContents.setUserAgent 显式设置。
 app.commandLine.appendSwitch("lang", "zh-CN");
 
 const http = require("http");
@@ -2582,27 +2585,31 @@ function createPopoutWindow(targetUrl, title, port, opts) {
   // 同域链接在当前 webview 内导航（通过 executeJavaScript 重定向），外部链接开带工具栏的新弹窗
   win.webContents.on("did-attach-webview", (_event, guestWebContents) => {
     console.log("[Electron] popout webview attached");
-    guestWebContents.setUserAgent(CHROME_UA);
-
-    // 注入 sec-ch-ua Client Hints header 并删除 X-Electron-Version
-    // 关键：Cloudflare 会根据 sec-ch-ua 中是否含 "Google Chrome" 品牌判断是否真实浏览器。
-    // webview 默认 session 不带这些 header，且会暴露 X-Electron-Version，导致 Cloudflare
-    // 无限触发 JS challenge（验证循环）。与 CNIPA session 使用相同的 header 配置。
-    try {
-      const guestSession = guestWebContents.session;
-      guestSession.webRequest.onBeforeSendHeaders((details, callback) => {
-        const headers = { ...details.requestHeaders };
-        headers["sec-ch-ua"] = '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"';
-        headers["sec-ch-ua-mobile"] = "?0";
-        headers["sec-ch-ua-platform"] = '"Windows"';
-        if (!headers["accept-language"]) {
-          headers["accept-language"] = "zh-CN,zh;q=0.9,en;q=0.8";
-        }
-        delete headers["X-Electron-Version"];
-        callback({ requestHeaders: headers });
-      });
-    } catch (e) {
-      console.warn("[Electron] failed to set webRequest on guest session:", e.message);
+    // 对 espacenet/epo.org：不修改 UA、不注入 headers，使用 Electron 默认环境。
+    // 411f29c 验证过：Electron 默认 UA 能通过 Cloudflare JS challenge。
+    // 强制 Chrome/134 UA 会与 Electron 实际 Chromium 版本不一致，
+    // Cloudflare 检测到 UA 欺骗后无限触发验证循环。
+    const _isEpoSite = /espacenet\.com|\.epo\.org/i.test(targetUrl || "");
+    if (!_isEpoSite) {
+      guestWebContents.setUserAgent(CHROME_UA);
+      try {
+        const guestSession = guestWebContents.session;
+        guestSession.webRequest.onBeforeSendHeaders((details, callback) => {
+          const headers = { ...details.requestHeaders };
+          headers["sec-ch-ua"] = '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"';
+          headers["sec-ch-ua-mobile"] = "?0";
+          headers["sec-ch-ua-platform"] = '"Windows"';
+          if (!headers["accept-language"]) {
+            headers["accept-language"] = "zh-CN,zh;q=0.9,en;q=0.8";
+          }
+          delete headers["X-Electron-Version"];
+          callback({ requestHeaders: headers });
+        });
+      } catch (e) {
+        console.warn("[Electron] failed to set webRequest on guest session:", e.message);
+      }
+    } else {
+      console.log("[Electron] EPO/Espacenet site: using Electron default UA (no header injection)");
     }
 
     const isCNIPAUrl = (u) => u && (u.indexOf("cnipa.gov.cn") !== -1 || u.indexOf("cpquery") !== -1);
@@ -2658,7 +2665,13 @@ function createPopoutWindow(targetUrl, title, port, opts) {
         var isHelp = lowUrl.indexOf("/help") !== -1 || lowUrl.indexOf("/faq") !== -1 || lowUrl.indexOf("/print") !== -1;
         if (newHost && curHost && newHost === curHost && !isPdf && !isHelp) {
           // Same host content page: navigate within the webview
-          guestWebContents.loadURL(url, { userAgent: CHROME_UA });
+          // EPO/espacenet 站点不用 CHROME_UA，使用 Electron 默认 UA 避免 UA 欺骗检测
+          var _navIsEpo = /espacenet\.com|\.epo\.org/i.test(url);
+          if (_navIsEpo) {
+            guestWebContents.loadURL(url);
+          } else {
+            guestWebContents.loadURL(url, { userAgent: CHROME_UA });
+          }
           return { action: "deny" };
         }
         if (isPdf || isHelp) {
