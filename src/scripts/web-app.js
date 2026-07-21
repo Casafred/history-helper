@@ -131,7 +131,7 @@ function enterKanbanSelectMode(mode, options) {
   }
   const office = currentData && currentData.office;
   const canAnalyze = office === "US" || office === "EP" || office === "CN" || office === "WO" || office === "KR";
-  if (!canAnalyze) {
+  if (!canAnalyze && mode !== "mergeExport") {
     showError("当前国家/地区暂不支持AI梳理");
     return;
   }
@@ -143,9 +143,17 @@ function enterKanbanSelectMode(mode, options) {
   const selectBar = document.getElementById("kanban-select-bar");
   if (selectBar) selectBar.classList.remove("hidden");
   const modeLabel = document.getElementById("kanban-select-mode-label");
-  if (modeLabel) modeLabel.textContent = mode === "citedRefs" ? "选择引用文献文件" : (opts.append ? "追加文件后重新梳理审查意见" : "选择审查意见文件");
+  if (modeLabel) {
+    if (mode === "citedRefs") modeLabel.textContent = "选择引用文献文件";
+    else if (mode === "mergeExport") modeLabel.textContent = "选择要合并导出的文档";
+    else modeLabel.textContent = opts.append ? "追加文件后重新梳理审查意见" : "选择审查意见文件";
+  }
   const confirmBtn = document.getElementById("kanban-select-confirm-btn");
-  if (confirmBtn) confirmBtn.textContent = mode === "citedRefs" ? "确认并梳理引用文献" : (opts.append ? "确认追加并重新梳理" : "确认并梳理审查意见");
+  if (confirmBtn) {
+    if (mode === "citedRefs") confirmBtn.textContent = "确认并梳理引用文献";
+    else if (mode === "mergeExport") confirmBtn.textContent = "确认合并导出";
+    else confirmBtn.textContent = opts.append ? "确认追加并重新梳理" : "确认并梳理审查意见";
+  }
 
   // Pre-select documents
   _kanbanSelected.clear();
@@ -158,6 +166,9 @@ function enterKanbanSelectMode(mode, options) {
       let shouldSelect = false;
       if (mode === "review") {
         shouldSelect = shouldIncludeInAIAnalysis(office, it.type);
+      } else if (mode === "mergeExport") {
+        // For merge export: pre-select all downloadable documents
+        shouldSelect = !!buildMergeDownloadUrl(it);
       } else {
         const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
         shouldSelect = CITED_DOC_CODES.includes(it.docCode);
@@ -167,11 +178,14 @@ function enterKanbanSelectMode(mode, options) {
   }
   _applyKanbanSelection();
   _updateKanbanSelectSummary();
-  // Show append hint if in append mode
+  // Show hint for special modes
   const hintEl = document.getElementById("kanban-select-append-hint");
   if (hintEl) {
     if (opts.append) {
       hintEl.textContent = "当前为追加模式：已选中的文件会保留OCR结果，新选择的文件将进行OCR后与原有文件一起重新梳理。";
+      hintEl.classList.remove("hidden");
+    } else if (mode === "mergeExport") {
+      hintEl.textContent = "合并导出：选择需要合并的文档，按日期倒序排列，每个文档前将插入封面页作为分隔。";
       hintEl.classList.remove("hidden");
     } else {
       hintEl.classList.add("hidden");
@@ -1850,8 +1864,13 @@ document.querySelectorAll(".search-mode-btn").forEach(btn => {
       patentInput.placeholder = "输入专利号查询原文信息（如 US12030161B2, EP4252965A3）";
       searchBtn.textContent = "查询";
       searchBtn.style.display = "";
+      // Re-enable search button when switching to patent mode (it may be disabled by ongoing dossier query)
+      searchBtn.disabled = false;
       patentInput.style.display = "";
       resultSection.classList.add("hidden");
+      // Remove any content loading overlay from dossier query
+      const _contentOverlay = document.getElementById("content-loading-overlay");
+      if (_contentOverlay && _contentOverlay.parentNode) _contentOverlay.parentNode.removeChild(_contentOverlay);
       if (extractSection) extractSection.classList.add("hidden");
       const comparisonSection = document.getElementById("comparison-section");
       if (comparisonSection) comparisonSection.classList.add("hidden");
@@ -4431,31 +4450,84 @@ function openPatentImageViewer(images, startIndex) {
 // ── 在文本中识别专利号并转为可跳转链接 ──
 function linkifyPatentNumbers(text) {
   // Match patent numbers in multiple formats:
+  // 0a. Natural language bracket format: [U.S. Patent No. 3,474,369], [U.S. Patent No. 6,726,857]
+  // 0b. Country + number in brackets without "Patent No": [DE 1971624 U], [JP 59-104108]
+  // 0c. Name + bracketed country/number: Keogh [U.S. Patent No. 3,474,369], Ono (JP 59-104108)
   // 1. Compact: US12345678B2, EP4252965A3, CN119052083A, WO2024123456A1
   // 2. Spaced with slash: US 2019/0009398, US 2019/0308309
   // 3. Spaced without slash (single group): EP 4252965 A3, US 20190308309
   // 4. Multi-spaced (digit groups separated by spaces): DE 42 39 799 A1, JP 2005 066804 A, EP 2 368 670 A2
   // Only replace in text nodes, not inside HTML tags
   const parts = text.split(/(<[^>]+>)/);
+  function _normalizeCountry(prefix) {
+    if (!prefix) return "";
+    const p = prefix.replace(/[.\s]/g, '').toUpperCase();
+    if (p === 'US' || p === 'USPATENTNO' || p === 'USPATENT') return 'US';
+    if (p.startsWith('US')) return 'US';
+    return p;
+  }
+  function _makeLink(label, pn) {
+    return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + label + '</a>';
+  }
   return parts.map((part, i) => {
     if (i % 2 === 1) return part; // HTML tag, skip
+    let result = part;
+
+    // 0a. [U.S. Patent No. 3,474,369] / [U.S. Patent No. 6,726,857] / [U.S. Patent No. 4,745,966]
+    result = result.replace(/\[((?:U\.?S\.?|US|EP|DE|JP|KR|CN|WO|GB|FR)\.?\s*(?:Patent(?:\s+No\.?)?|Patentnummer|Patentschrift|Offenlegungsschrift)?\s*[:,]?\s*)(\d[\d,\s]*\d)(?:\s*[,;]\s*([A-Z]\d{0,3}))?\s*\]/gi, (match, prefix, numStr, kind) => {
+      const m = prefix.match(/^[A-Za-z.]+/);
+      const country = _normalizeCountry(m ? m[0] : "US");
+      const digits = numStr.replace(/[,\s]/g, '');
+      const pn = country + digits + (kind || '');
+      return _makeLink(match, pn);
+    });
+
+    // 0b. [DE 1971624 U], [JP 59-104108], [US 4745966 A]
+    result = result.replace(/\[((?:US|EP|DE|JP|KR|CN|WO|GB|FR))\s+(\d[\d\s,]*\d)(?:\s*-\s*(\d+))?\s+([A-Z]\d{0,3})?\]/gi, (match, country, numStr, suffixNum, kind) => {
+      const c = country.toUpperCase();
+      let digits = numStr.replace(/[,\s]/g, '');
+      if (suffixNum) digits += suffixNum;
+      const pn = c + digits + (kind || '');
+      return _makeLink(match, pn);
+    });
+
+    // 0c. JP imperial-era with hyphen (with or without brackets/parens): "JP 59-104108", "(JP 59-104108)", "JP S59-104108"
+    result = result.replace(/(\(|\[)?(JP)\s+(?:S|H|H\.|平|昭)?(\d{1,4})\s*-\s*(\d{3,7})(?:\s+([A-Z]\d{0,3}))?(\)|\])?/gi, (match, openB, country, era, num, kind, closeB) => {
+      const pn = 'JP' + era + num + (kind || '');
+      return _makeLink(match, pn);
+    });
+
+    // 0d. (U.S. Patent No. 4,745,966) - parens version
+    result = result.replace(/\((U\.?S\.?|US)\.?\s*Patent(?:\s+No\.?)?\s*[:,]?\s*(\d[\d,\s]*\d)(?:\s*[,;]\s*([A-Z]\d{0,3}))?\s*\)/gi, (match, prefix, numStr, kind) => {
+      const country = _normalizeCountry(prefix);
+      const digits = numStr.replace(/[,\s]/g, '');
+      const pn = country + digits + (kind || '');
+      return _makeLink(match, pn);
+    });
+
+    // 0e. (JP 59-104108) - parens version (already handled by 0c if no space before kind)
+    result = result.replace(/\((JP)\s+(?:S|H|H\.|平|昭)?(\d{1,4})\s*-\s*(\d{3,7})(?:\s+([A-Z]\d{0,3}))?\s*\)/gi, (match, country, era, num, kind) => {
+      const pn = 'JP' + era + num + (kind || '');
+      return _makeLink(match, pn);
+    });
+
     // 1. Spaced with slash: "US 2019/0009398" → "US20190009398"
-    let result = part.replace(/\b([A-Z]{2})\s+(\d{4})\s*\/\s*(\d{4,7})\s*([A-Z]\d?)?\b/g, (match, country, year, num, kind) => {
+    result = result.replace(/\b([A-Z]{2})\s+(\d{4})\s*\/\s*(\d{4,7})\s*([A-Z]\d?)?\b/g, (match, country, year, num, kind) => {
       const pn = country + year + num + (kind || '');
-      return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + match + '</a>';
+      return _makeLink(match, pn);
     });
     // 2. Multi-spaced format: "DE 42 39 799 A1", "JP 2005 066804 A", "EP 2 368 670 A2"
     //    Requires at least 2 digit groups separated by spaces (e.g. "42 39 799")
     result = result.replace(/\b([A-Z]{2})\s+(\d{1,4}(?:\s+\d{1,7}){1,4})\s*([A-Z]\d?)?\b/g, (match, country, numGroup, kind) => {
       const pn = country + numGroup.replace(/\s+/g, '') + (kind || '');
-      return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + match + '</a>';
+      return _makeLink(match, pn);
     });
     // 3. Spaced without slash (single group): "US 20190308309" or "EP 4252965 A3"
     result = result.replace(/\b([A-Z]{2})\s+(\d{5,})\s*([A-Z]\d?)?\b/g, (match, country, num, kind) => {
       // Skip if already wrapped in a link
       if (match.length < 7) return match;
       const pn = country + num + (kind || '');
-      return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + match + '</a>';
+      return _makeLink(match, pn);
     });
     // 4. Compact format: US12345678B2
     // Track positions already inside links to avoid double-wrapping
@@ -4473,7 +4545,7 @@ function linkifyPatentNumbers(text) {
       for (const [s, e] of linkRanges) {
         if (offset >= s && offset < e) return match;
       }
-      return '<a class="pd-patent-link-inline" data-patent="' + pn + '" title="点击查询 ' + pn + ' 专利原文（Ctrl+点击跳转 Google Patents）">' + pn + '</a>';
+      return _makeLink(match, pn);
     });
     return result;
   }).join("");
@@ -6912,7 +6984,7 @@ function renderKanban(data) {
     items.forEach(it => { typeCounts[it.type] = (typeCounts[it.type] || 0) + 1; });
     const typeNames = (typeof PATENT_STATUS !== 'undefined' && PATENT_STATUS[office] && PATENT_STATUS[office].typeNames) || {
       "office_action": "审查意见", "response": "申请人答复",
-      "patent_doc": "专利文件", "citation": "审查员引用",
+      "patent_doc": "专利文件", "citation": "审查员引用与IDS",
       "allowance": "授权通知", "notification": "通知", "misc": "其他文件"
     };
     let filterHtml = '<input type="text" id="kanban-filter-input" class="doc-filter-input" placeholder="搜索文档名称、代码...">';
@@ -6963,7 +7035,7 @@ function renderKanban(data) {
     { key: "office_action", title: "审查意见", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg>', color: "kanban-col-oa" },
     { key: "response", title: "申请人答复", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>', color: "kanban-col-response" },
     { key: "patent_doc", title: "专利文件", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>', color: "kanban-col-patent-doc" },
-    { key: "citation", title: "审查员引用", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>', color: "kanban-col-citation" },
+    { key: "citation", title: "审查员引用与IDS", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>', color: "kanban-col-citation" },
     { key: "allowance", title: "授权通知", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>', color: "kanban-col-allowance" },
     { key: "notification", title: "通知", icon: '<svg class="svg-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>', color: "kanban-col-notification" },
   ];
@@ -7182,7 +7254,7 @@ function renderOverview(data) {
       statusHtml += '<div class="info-row"><span class="info-label">专利文件</span><span class="info-value">' + patentDocCount + ' 份</span></div>';
     }
     if (citationCount > 0) {
-      statusHtml += '<div class="info-row"><span class="info-label">审查员引用</span><span class="info-value">' + citationCount + ' 份</span></div>';
+      statusHtml += '<div class="info-row"><span class="info-label">审查员引用与IDS</span><span class="info-value">' + citationCount + ' 份</span></div>';
     }
     if (allowCount > 0) {
       statusHtml += '<div class="info-row"><span class="info-label">授权通知</span><span class="info-value">' + allowCount + ' 份</span></div>';
@@ -8687,7 +8759,7 @@ function renderDocuments(data) {
 
   const typeNames = (PATENT_STATUS[office] && PATENT_STATUS[office].typeNames) || {
     "office_action": "审查意见", "response": "申请人答复", "patent_doc": "专利文件",
-    "citation": "审查员引用", "allowance": "授权通知", "notification": "通知"
+    "citation": "审查员引用与IDS", "allowance": "授权通知", "notification": "通知"
   };
 
   let filterHtml = '<div class="doc-filter-bar">';
@@ -9086,10 +9158,14 @@ if (_sbConfirm) _sbConfirm.addEventListener("click", async () => {
   const selectedIdxs = [..._kanbanSelected];
   const mode = _kanbanSelectMode;
   exitKanbanSelectMode();
-  _switchToTab("ai-analysis");
-  if (mode === "citedRefs") {
+  if (mode === "mergeExport") {
+    // Direct merge export without switching tab
+    await doMergeExportWithItems(selectedIdxs);
+  } else if (mode === "citedRefs") {
+    _switchToTab("ai-analysis");
     await runCitedRefsAnalysis(selectedIdxs);
   } else {
+    _switchToTab("ai-analysis");
     await startReviewAnalysis(selectedIdxs);
   }
 });
@@ -14668,7 +14744,7 @@ async function exportToWord() {
 
     const sortedDocs = [...kanbanState.documents].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     sortedDocs.forEach((it, idx) => {
-      const typeNames = { "office_action": "审查意见", "response": "申请人答复", "patent_doc": "专利文件", "citation": "审查员引用", "allowance": "授权通知", "notification": "通知" };
+      const typeNames = { "office_action": "审查意见", "response": "申请人答复", "patent_doc": "专利文件", "citation": "审查员引用与IDS", "allowance": "授权通知", "notification": "通知" };
       tlRows.push(new docx.TableRow({
         children: [
           new docx.TableCell({ children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(idx + 1), size: 18, font: "Microsoft YaHei" })] })] }),
@@ -15536,7 +15612,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const mergeExportModal = document.getElementById("merge-export-modal");
   const mergeExportOverlay = mergeExportModal ? mergeExportModal.querySelector(".modal-overlay") : null;
 
-  if (mergeExportBtn) mergeExportBtn.addEventListener("click", openMergeExportModal);
+  if (mergeExportBtn) mergeExportBtn.addEventListener("click", () => {
+    _switchToTab("kanban");
+    enterKanbanSelectMode("mergeExport");
+  });
   if (mergeExportCloseBtn) mergeExportCloseBtn.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
   if (mergeExportCancelBtn) mergeExportCancelBtn.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
   if (mergeExportOverlay) mergeExportOverlay.addEventListener("click", () => mergeExportModal.classList.add("hidden"));
@@ -16174,7 +16253,7 @@ function openMergeExportModal() {
     const canDownload = !!downloadUrl;
     const typeNames = {
       "office_action": "审查意见", "response": "申请人答复", "patent_doc": "专利文件",
-      "citation": "审查员引用", "allowance": "授权通知", "notification": "通知"
+      "citation": "审查员引用与IDS", "allowance": "授权通知", "notification": "通知"
     };
 
     html += `
