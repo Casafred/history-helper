@@ -10328,6 +10328,18 @@ async function startReviewAnalysis(selectedIdxs) {
 
   // 断点续OCR：已有缓存（kanbanState.extractions）的跳过，只提取缺失的
   const missing = oaItems.filter(it => !kanbanState.extractions[it.idx] || (!kanbanState.extractions[it.idx].text && !kanbanState.extractions[it.idx].markdown));
+  // 已有缓存的文档直接计入成功（复用之前的OCR结果）
+  const cachedItems = oaItems.filter(it => kanbanState.extractions[it.idx] && (kanbanState.extractions[it.idx].text || kanbanState.extractions[it.idx].markdown));
+  cachedItems.forEach(it => {
+    const ext = kanbanState.extractions[it.idx];
+    extractReport.success.push({
+      name: it.name,
+      docCode: it.docCode,
+      chars: (ext.markdown || ext.text || "").length,
+      engine: ext.engine || "cached",
+      cached: true
+    });
+  });
   if (missing.length > 0) {
     for (let i = 0; i < missing.length; i++) {
       const it = missing[i];
@@ -10361,8 +10373,18 @@ async function startReviewAnalysis(selectedIdxs) {
     if (statusEl) statusEl.textContent = `${successCount} 个文档提取成功，${failedCount} 个失败（${failedNames}），正在用 AI 整理...`;
     analysisContent.innerHTML = renderAiProgressUI("analyzing", successCount + " 个文档提取成功，" + failedCount + " 个失败，AI 梳理中...", -1);
   } else {
-    if (statusEl) statusEl.textContent = "全部文档提取完成，正在用 AI 整理审查历史...";
-    analysisContent.innerHTML = renderAiProgressUI("analyzing", "全部文档提取完成，AI 梳理中...", -1);
+    const cachedCount = extractReport.success.filter(s => s.cached).length;
+    const newCount = successCount - cachedCount;
+    let msg = "全部文档就绪，AI 梳理中...";
+    if (cachedCount > 0 && newCount > 0) {
+      msg = `复用 ${cachedCount} 个已OCR文档 + 新提取 ${newCount} 个文档，AI 梳理中...`;
+    } else if (cachedCount > 0 && newCount === 0) {
+      msg = `复用 ${cachedCount} 个已OCR文档，AI 梳理中...`;
+    } else {
+      msg = "全部文档提取完成，AI 梳理中...";
+    }
+    if (statusEl) statusEl.textContent = msg;
+    analysisContent.innerHTML = renderAiProgressUI("analyzing", msg, -1);
   }
   analysisContent.innerHTML = renderAiProgressUI("analyzing", "AI 正在梳理审查历史...", -1);
 
