@@ -671,7 +671,7 @@ function _dossierGetTabAnnotSummary(tab) {
       if (!d.docId) return;
       const isUS = tab.currentData.office === "US";
       const urlDocNum = isUS ? tab.currentData.applicationNumber : encodeURIComponent(tab.currentData.docNumber || tab.currentData.applicationNumber);
-      const pdfUrl = `/api/gd/doc-content/svc/doccontent/${tab.currentData.office}/${urlDocNum}/${encodeURIComponent(d.docId)}/${d.numberOfPages}/${d.docFormat}`;
+      const pdfUrl = withEpoDirect(`/api/gd/doc-content/svc/doccontent/${tab.currentData.office}/${urlDocNum}/${encodeURIComponent(d.docId)}/${d.numberOfPages}/${d.docFormat}`);
       const docKey = d.idx + '_' + pdfUrl;
       const list = pdfViewState.annotList[docKey];
       if (list && list.length > 0) {
@@ -761,7 +761,7 @@ function _dossierCleanupTabPdfAnnots(tab) {
       if (!d.docId || !tab.currentData) return;
       const isUS = tab.currentData.office === "US";
       const urlDocNum = isUS ? tab.currentData.applicationNumber : encodeURIComponent(tab.currentData.docNumber || tab.currentData.applicationNumber);
-      const pdfUrl = `/api/gd/doc-content/svc/doccontent/${tab.currentData.office}/${urlDocNum}/${encodeURIComponent(d.docId)}/${d.numberOfPages}/${d.docFormat}`;
+      const pdfUrl = withEpoDirect(`/api/gd/doc-content/svc/doccontent/${tab.currentData.office}/${urlDocNum}/${encodeURIComponent(d.docId)}/${d.numberOfPages}/${d.docFormat}`);
       const docKey = d.idx + '_' + pdfUrl;
       delete pdfViewState.annotList[docKey];
       delete pdfViewState.annotUndoStack[docKey];
@@ -1072,6 +1072,22 @@ function getOpsSettings() {
   const ops = window.AI.getOpsConfig(config);
   const enabled = localStorage.getItem("patentlens_ops_enabled") !== "false"; // 默认启用
   return { enabled: enabled, consumerKey: ops.consumerKey || "", consumerSecret: ops.consumerSecret || "" };
+}
+
+// ── EPO Register 直走模式（测试用）─────────────────────────────────────────
+// 开启后审查文档列表与 PDF 下载/提取绕过 Global Dossier，直接从 EPO Register 获取，
+// 用于验证 EPO 作为 GD 降级源能否正常填充审查看板/时间线等。
+const EPO_DIRECT_STORAGE_KEY = "patentlens_epo_direct";
+function getEpoDirectMode() {
+  return localStorage.getItem(EPO_DIRECT_STORAGE_KEY) === "true";
+}
+function setEpoDirectMode(enabled) {
+  localStorage.setItem(EPO_DIRECT_STORAGE_KEY, enabled ? "true" : "false");
+}
+// 给 /api/gd/* URL 追加 epoDirect=1 标记（server.js 据此跳过 GD，直走 EPO）
+function withEpoDirect(url) {
+  if (!getEpoDirectMode()) return url;
+  return url + (url.includes("?") ? "&" : "?") + "epoDirect=1";
 }
 
 const aiSettingsBtn = document.getElementById("ai-settings-btn");
@@ -1566,6 +1582,25 @@ async function gdFetch(urlPath) {
     console.info("[GD→EPO] 验证窗口缓存已过期，清空");
     _epoVerifyCache = null;
   }
+  // EPO 直走模式：同族信息 EPO Register 不提供，构造最小 familyData 让前端继续走 doc-list 流程
+  // （对 Tauri 和 server.js 两条路径统一处理，避免无谓的 GD 网络请求）
+  if (getEpoDirectMode()) {
+    const famMatchDirect = urlPath.match(/\/patent-family\/svc\/family\/(?:application|publication|patent)\/([^/]+)\/([^/?]+)/);
+    if (famMatchDirect) {
+      console.info("[EPO直走] 同族查询绕过 GD，构造最小 familyData:", famMatchDirect[1] + "/" + famMatchDirect[2]);
+      return {
+        corrAppNum: famMatchDirect[2],
+        list: [{
+          countryCode: famMatchDirect[1],
+          appNum: famMatchDirect[2],
+          docNum: { docNumber: famMatchDirect[2] },
+          title: "",
+        }],
+        source: "EPO Register direct mode (no family data)",
+        totalMembers: 1,
+      };
+    }
+  }
   if (isTauri) {
     const familyMatch = urlPath.match(/\/patent-family\/svc\/family\/([^/]+)\/([^/]+)\/([^/]+)/);
     const docListMatch = urlPath.match(/\/doc-list\/svc\/doclist\/([^/]+)\/([^/]+)\/([^/]+)/);
@@ -1580,15 +1615,22 @@ async function gdFetch(urlPath) {
     }
 
     if (docListMatch) {
-      const result = await tauriInvoke("fetch_documents", {
+      // EPO 直走模式：传 epoDirect 标记，让 Tauri 后端跳过 GD、直接调用 EPO Register
+      const invokeArgs = {
         input: docListMatch[2].startsWith("US") ? docListMatch[3] : docListMatch[3],
-      });
+      };
+      if (getEpoDirectMode()) {
+        invokeArgs.epoDirect = true;
+        console.info("[EPO直走] doclist 绕过 GD，直接调用 EPO Register:", docListMatch[1] + "/" + docListMatch[2]);
+      }
+      const result = await tauriInvoke("fetch_documents", invokeArgs);
       if (result && result.success && result.data) return result.data;
       throw new Error(result?.error || "Tauri documents fetch failed");
     }
   }
 
-  const url = GD_API_BASE + urlPath;
+  // EPO 直走模式（server.js 路径）：给 URL 追加 epoDirect=1，server.js 据此跳过 GD
+  const url = withEpoDirect(GD_API_BASE + urlPath);
   const resp = await fetch(url);
   if (!resp.ok) {
     if (resp.status === 404) throw new Error("未找到该专利的记录 (404)");
@@ -7223,8 +7265,8 @@ function renderKanban(data) {
             extractUrl = null;
             downloadUrl = null;
           } else {
-            extractUrl = `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
-            downloadUrl = `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+            extractUrl = withEpoDirect(`/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`);
+            downloadUrl = withEpoDirect(`/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`);
           }
         }
         html += `
@@ -8940,8 +8982,8 @@ function renderDocuments(data) {
     }
 
     const encodedDocId = encodeURIComponent(docId);
-    const downloadUrl = (docId && canDownload) ? `/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
-    const extractUrl = (docId && canDownload) ? `/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
+    const downloadUrl = (docId && canDownload) ? withEpoDirect(`/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}`) : null;
+    const extractUrl = (docId && canDownload) ? withEpoDirect(`/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}`) : null;
 
     html += `
       <div class="doc-item" data-filter-type="${filterType}" data-search-text="${escapeHtml((docType + ' ' + desc + ' ' + date + ' ' + status.name).toLowerCase())}">
@@ -9182,6 +9224,7 @@ async function downloadDocument(url, filename) {
           docId: docContentMatch[3],
           pages: docContentMatch[4],
           format: docContentMatch[5],
+          epoDirect: getEpoDirectMode(),
         });
         if (result && result.success && result.data) {
           const binaryStr = atob(result.data.data);
@@ -9727,6 +9770,7 @@ async function doExtractText(office, docNum, docId, pages, docFormat, engine, ap
       format: docFormat,
       engine: engine,
       apiKey: apiKey || "",
+      epoDirect: getEpoDirectMode(),
     });
     if (result && result.success && result.data) {
       const d = result.data;
@@ -9742,7 +9786,7 @@ async function doExtractText(office, docNum, docId, pages, docFormat, engine, ap
     throw new Error(result?.error || "Tauri extract_text failed");
   }
 
-  let extractUrl = `/api/gd/extract-text/${office}/${docNum}/${encodeURIComponent(docId)}/${pages}/${docFormat}?engine=${encodeURIComponent(engine)}`;
+  let extractUrl = withEpoDirect(`/api/gd/extract-text/${office}/${docNum}/${encodeURIComponent(docId)}/${pages}/${docFormat}?engine=${encodeURIComponent(engine)}`);
   if (engine === "glm_ocr" && apiKey) {
     extractUrl += "&api_key=" + encodeURIComponent(apiKey);
   }
@@ -11507,7 +11551,7 @@ async function renderPdfView(idx) {
   const isUS = currentData.office === "US";
   const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
   const encodedDocId = encodeURIComponent(it.docId);
-  const pdfUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+  const pdfUrl = withEpoDirect(`/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`);
 
   // Check if the same document is already cached
   if (typeof _pdfDocCache === 'undefined') window._pdfDocCache = {};
@@ -12358,7 +12402,7 @@ function _buildPdfDocKey(idx) {
   const isUS = currentData.office === "US";
   const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
   const encodedDocId = encodeURIComponent(it.docId);
-  const pdfUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+  const pdfUrl = withEpoDirect(`/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`);
   return idx + '_' + pdfUrl;
 }
 
@@ -12962,7 +13006,7 @@ async function exportPdfWithAnnotations() {
     const isUS = currentData.office === "US";
     const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
     const encodedDocId = encodeURIComponent(it.docId);
-    const pdfUrl = `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`;
+    const pdfUrl = withEpoDirect(`/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`);
     const resp = await fetch(pdfUrl, { headers: { "Accept": "application/pdf,*/*" } });
     if (!resp.ok) throw new Error("PDF 下载失败: HTTP " + resp.status);
     const pdfBytes = await resp.arrayBuffer();
@@ -16385,7 +16429,7 @@ function buildMergeDownloadUrl(item) {
     return `/api/jpo/doc/${jpDocType}/${urlDocNum}`;
   }
 
-  return `/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${item.numberOfPages}/${item.docFormat}`;
+  return withEpoDirect(`/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${item.numberOfPages}/${item.docFormat}`);
 }
 
 function openMergeExportModal() {
@@ -16832,6 +16876,7 @@ const opsTestBtn = document.getElementById("ops-test-btn");
 const opsTestResult = document.getElementById("ops-test-result");
 const opsQuotaDisplayGroup = document.getElementById("ops-quota-display-group");
 const opsRefreshQuotaBtn = document.getElementById("ops-refresh-quota-btn");
+const epoDirectCheckbox = document.getElementById("epo-direct-checkbox");
 
 // 回填 OPS 配置到表单（由 loadAISettingsToForm 调用）
 function loadOpsSettingsToForm() {
@@ -16839,11 +16884,23 @@ function loadOpsSettingsToForm() {
   if (opsEnabledCheckbox) opsEnabledCheckbox.checked = ops.enabled;
   if (opsConsumerKeyInput) opsConsumerKeyInput.value = ops.consumerKey;
   if (opsConsumerSecretInput) opsConsumerSecretInput.value = ops.consumerSecret;
+  if (epoDirectCheckbox) epoDirectCheckbox.checked = getEpoDirectMode();
   // 显示配额区域（如果有 key）
   if (opsQuotaDisplayGroup && ops.consumerKey) {
     opsQuotaDisplayGroup.style.display = "";
     refreshOpsQuota();
   }
+}
+
+// EPO 直走模式开关：即时保存，无需点击"保存"按钮
+if (epoDirectCheckbox) {
+  epoDirectCheckbox.addEventListener("change", () => {
+    setEpoDirectMode(epoDirectCheckbox.checked);
+    const msg = epoDirectCheckbox.checked
+      ? "已开启 EPO Register 直走模式：审查文档将绕过 GD 直接从 EPO 获取"
+      : "已关闭 EPO Register 直走模式：恢复 GD 优先、失败时降级 EPO 的正常流程";
+    showToast(msg, 3500);
+  });
 }
 
 // 刷新 OPS 配额显示
@@ -17968,7 +18025,7 @@ async function seedGroupsFromCache() {
       const isUS = office === "US";
       const urlDocNum = isUS ? (data.applicationNumber || pn) : encodeURIComponent(data.docNumber || data.applicationNumber || pn);
       const encodedDocId = encodeURIComponent(docId);
-      const extractUrl = (docId && canDownload) ? `/api/gd/extract-text/${office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
+      const extractUrl = (docId && canDownload) ? withEpoDirect(`/api/gd/extract-text/${office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}`) : null;
       const extraction = extractions[i];
       group.docs.push({
         idx: i,
@@ -18092,7 +18149,7 @@ async function fetchAndAddPatent(input) {
       const date = d.legalDateStr || d.documentDate || d.date || "";
       const numberOfPages = d.numberOfPages != null ? d.numberOfPages : 1;
       const docFormat = d.docFormat || "PDF";
-      const extractUrl = (docId && canDownload) ? `/api/gd/extract-text/${office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
+      const extractUrl = (docId && canDownload) ? withEpoDirect(`/api/gd/extract-text/${office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}`) : null;
       const status = getStatusInfo(office, docCode, desc);
       const prev = docId ? prevByDocId.get(docId) : null;
       return {
@@ -18167,7 +18224,7 @@ async function refreshExtractGroup(pn) {
       const date = d.legalDateStr || d.documentDate || d.date || "";
       const numberOfPages = d.numberOfPages != null ? d.numberOfPages : 1;
       const docFormat = d.docFormat || "PDF";
-      const extractUrl = (docId && canDownload) ? `/api/gd/extract-text/${office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}` : null;
+      const extractUrl = (docId && canDownload) ? withEpoDirect(`/api/gd/extract-text/${office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}`) : null;
       const status = getStatusInfo(office, docCode, desc);
       const prev = docId ? prevByDocId.get(docId) : null;
       return {
@@ -18575,7 +18632,7 @@ async function runExtractOcr(pn, idx) {
   const config = window.AI.loadAIConfig();
   const ocrConfig = window.AI.getOCRConfig ? window.AI.getOCRConfig(config) : {};
   const engine = ocrConfig.engine || "paddle_ocr_vl";
-  let url = d.extractUrl + "?engine=" + encodeURIComponent(engine);
+  let url = d.extractUrl + (d.extractUrl.includes("?") ? "&" : "?") + "engine=" + encodeURIComponent(engine);
   if (engine === "glm_ocr") {
     const glmKey = window.AI.getGlmOcrApiKey ? window.AI.getGlmOcrApiKey(config) : "";
     if (glmKey) url += "&api_key=" + encodeURIComponent(glmKey);

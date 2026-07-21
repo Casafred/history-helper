@@ -219,6 +219,7 @@ async fn fetch_family(input: String, query_type: Option<String>) -> Result<Comma
 #[tauri::command]
 async fn fetch_documents(
     input: String,
+    epo_direct: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> Result<CommandResult, String> {
     let pn = match parse_patent_number(&input) {
@@ -229,6 +230,23 @@ async fn fetch_documents(
     let office = pn.office.to_string();
     let doc_num = pn.application_number.unwrap_or_else(|| input.clone());
     let supports_epo = matches!(office.as_str(), "EP" | "US" | "JP" | "KR" | "CN" | "WO");
+    let skip_gd = epo_direct.unwrap_or(false) && supports_epo;
+
+    if skip_gd {
+        log::info!("[EPO直走] fetch_documents 跳过 GD，直接调用 EPO Register: {}/{}", office, doc_num);
+        match state.epo_client.get_doc_list(&office, &doc_num, "A").await {
+            Ok(data) => return Ok(CommandResult::ok(data)),
+            Err(epo_err) => {
+                let msg = match &epo_err {
+                    EpoRegisterError::CloudflareRequired => {
+                        "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试".to_string()
+                    }
+                    other => format!("EPO: {}", other),
+                };
+                return Ok(CommandResult::err(msg));
+            }
+        }
+    }
 
     let client = GlobalDossierClient::new();
     match client.get_doc_list(&office, &doc_num, "A").await {
@@ -262,11 +280,39 @@ async fn download_document(
     doc_id: String,
     pages: String,
     format: String,
+    epo_direct: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> Result<CommandResult, String> {
-    let client = GlobalDossierClient::new();
     let supports_epo = matches!(country.as_str(), "EP" | "US" | "JP" | "KR" | "CN" | "WO");
+    let skip_gd = epo_direct.unwrap_or(false) && supports_epo;
 
+    if skip_gd {
+        log::info!("[EPO直走] download_document 跳过 GD，直接调用 EPO Register: {}/{}/{}", country, doc_number, doc_id);
+        match state
+            .epo_client
+            .get_document_pdf_by_office(&country, &doc_number, &doc_id)
+            .await
+        {
+            Ok(data) => {
+                let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
+                return Ok(CommandResult::ok(serde_json::json!({
+                    "data": encoded,
+                    "size": data.len(),
+                })));
+            }
+            Err(epo_err) => {
+                let msg = match &epo_err {
+                    EpoRegisterError::CloudflareRequired => {
+                        "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试".to_string()
+                    }
+                    other => format!("EPO下载: {}", other),
+                };
+                return Ok(CommandResult::err(msg));
+            }
+        }
+    }
+
+    let client = GlobalDossierClient::new();
     let data = match client
         .get_document(&country, &doc_number, &doc_id, &pages, &format)
         .await
@@ -326,37 +372,59 @@ async fn extract_text(
     format: String,
     engine: String,
     api_key: String,
+    epo_direct: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> Result<CommandResult, String> {
-    let client = GlobalDossierClient::new();
     let supports_epo = matches!(country.as_str(), "EP" | "US" | "JP" | "KR" | "CN" | "WO");
+    let skip_gd = epo_direct.unwrap_or(false) && supports_epo;
 
-    let pdf_bytes = match client
-        .get_document(&country, &doc_number, &doc_id, &pages, &format)
-        .await
-    {
-        Ok(data) => data,
-        Err(gd_err) => {
-            if supports_epo {
-                log::info!("GD extract_text下载失败，尝试EPO Register降级...");
-                match state
-                    .epo_client
-                    .get_document_pdf_by_office(&country, &doc_number, &doc_id)
-                    .await
-                {
-                    Ok(data) => data,
-                    Err(epo_err) => {
-                        let msg = match &epo_err {
-                            EpoRegisterError::CloudflareRequired => {
-                                "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试".to_string()
-                            }
-                            other => format!("GD下载: {}; EPO下载: {}", gd_err, other),
-                        };
-                        return Ok(CommandResult::err(msg));
+    let pdf_bytes = if skip_gd {
+        log::info!("[EPO直走] extract_text 跳过 GD，直接调用 EPO Register: {}/{}/{}", country, doc_number, doc_id);
+        match state
+            .epo_client
+            .get_document_pdf_by_office(&country, &doc_number, &doc_id)
+            .await
+        {
+            Ok(data) => data,
+            Err(epo_err) => {
+                let msg = match &epo_err {
+                    EpoRegisterError::CloudflareRequired => {
+                        "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试".to_string()
                     }
+                    other => format!("EPO下载: {}", other),
+                };
+                return Ok(CommandResult::err(msg));
+            }
+        }
+    } else {
+        let client = GlobalDossierClient::new();
+        match client
+            .get_document(&country, &doc_number, &doc_id, &pages, &format)
+            .await
+        {
+            Ok(data) => data,
+            Err(gd_err) => {
+                if supports_epo {
+                    log::info!("GD extract_text下载失败，尝试EPO Register降级...");
+                    match state
+                        .epo_client
+                        .get_document_pdf_by_office(&country, &doc_number, &doc_id)
+                        .await
+                    {
+                        Ok(data) => data,
+                        Err(epo_err) => {
+                            let msg = match &epo_err {
+                                EpoRegisterError::CloudflareRequired => {
+                                    "EPO Register需要人机验证，请在浏览器中打开register.epo.org完成验证后重试".to_string()
+                                }
+                                other => format!("GD下载: {}; EPO下载: {}", gd_err, other),
+                            };
+                            return Ok(CommandResult::err(msg));
+                        }
+                    }
+                } else {
+                    return Ok(CommandResult::err(gd_err.to_string()));
                 }
-            } else {
-                return Ok(CommandResult::err(gd_err.to_string()));
             }
         }
     };
