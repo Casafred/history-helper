@@ -695,6 +695,196 @@ async function epoFetchPdf(office, docNumber, docId) {
   return { body: result.body };
 }
 
+// ── EPO Register via hidden BrowserWindow（参考 espacenet 弹窗成功策略）─────
+// 完全复制 espacenet 弹窗过 Cloudflare 的策略：
+//   1. 用隐藏 BrowserWindow + 默认 session（复用 mainWindow 已通过的 CF cookie）
+//   2. 不设置任何 UA、不注入 sec-ch-ua headers（与 espacenet 弹窗一致）
+//   3. 完整 Chromium 引擎能执行 Cloudflare JS challenge
+//   4. did-finish-load 后用 fetch/outerHTML 提取数据
+// 仅在 EPO 直走模式（epoDirect=true）下使用，作为 curl 路径的替代。
+async function epoFetchViaBrowser(targetUrl, options) {
+  options = options || {};
+  const wantPdf = !!options.wantPdf;
+  const timeout = options.timeout || 60000;
+  return new Promise((resolve) => {
+    // 用默认 session（不设 partition），复用 mainWindow 的 cookie
+    // 不调用 setUserAgent、不注入 onBeforeSendHeaders —— 完全复制 espacenet 弹窗策略
+    const win = new BrowserWindow({
+      show: false,
+      width: 800,
+      height: 600,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+      },
+    });
+
+    let settled = false;
+    let cfWaitCount = 0;
+    const CF_WAITING_KEYWORDS = [
+      "just a moment", "attention required", "checking your browser",
+      "performing security", "verifying you are human", "请稍候", "请稍等",
+      "正在检查", "正在验证", "需要关注", "执行安全", "稍候片刻",
+    ];
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (checkInterval) clearInterval(checkInterval);
+      try { win.close(); } catch (_) {}
+      resolve(result);
+    };
+
+    const isCfWaiting = (title) => {
+      const lower = String(title || "").toLowerCase();
+      return CF_WAITING_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
+    };
+
+    const extractFromPage = async () => {
+      try {
+        if (wantPdf) {
+          // PDF 请求：在 webContents 中通过 fetch 获取 PDF buffer（fetch 自动带 session cookie）
+          // 注意：此时 webContents 已导航到 register.epo.org 同源页面，fetch 同源 PDF 不会被 CORS 拦截
+          const result = await win.webContents.executeJavaScript(`
+            (async function() {
+              try {
+                const resp = await fetch(${JSON.stringify(targetUrl)}, {
+                  credentials: 'include',
+                  headers: { 'Accept': 'application/pdf,*/*' },
+                  redirect: 'follow'
+                });
+                if (!resp.ok) return { error: 'HTTP ' + resp.status };
+                const ab = await resp.arrayBuffer();
+                const arr = Array.from(new Uint8Array(ab));
+                return { buffer: arr, contentType: resp.headers.get('content-type') || '' };
+              } catch(e) { return { error: e.message }; }
+            })();
+          `, true);
+          if (result.error) return { error: result.error };
+          const buf = Buffer.from(result.buffer);
+          const isPdf = buf.length > 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
+          if (!isPdf) {
+            const headStr = buf.slice(0, Math.min(2000, buf.length)).toString("utf-8");
+            if (epoDetectCloudflare(headStr)) return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
+            return { error: "not a PDF, contentType=" + result.contentType + ", size=" + buf.length };
+          }
+          return { body: buf };
+        } else {
+          // HTML 请求：直接提取 outerHTML
+          const html = await win.webContents.executeJavaScript(
+            "document.documentElement.outerHTML", true
+          );
+          if (!html || html.length < 500) return { error: "html too short: " + (html ? html.length : 0) };
+          if (epoDetectCloudflare(html)) return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
+          return { body: html };
+        }
+      } catch (e) {
+        return { error: e.message };
+      }
+    };
+
+    let tryExtractRunning = false;
+    const tryExtract = async () => {
+      if (settled || win.isDestroyed() || tryExtractRunning) return;
+      tryExtractRunning = true;
+      try {
+        const title = win.webContents.getTitle();
+        if (isCfWaiting(title)) {
+          cfWaitCount++;
+          console.log(`[EPO Browser] Cloudflare waiting (title="${title}", count=${cfWaitCount})`);
+          if (cfWaitCount > 30) {
+            finish({ cloudflare: true, error: "Cloudflare verification timeout (60s)" });
+          }
+          return; // 继续等
+        }
+        const result = await extractFromPage();
+        if (result.error && /fetch|network|Failed to fetch/i.test(result.error)) {
+          // 网络错误，下次定时器再试
+          console.log("[EPO Browser] transient fetch error, will retry:", result.error);
+          return;
+        }
+        finish(result);
+      } catch (e) {
+        console.warn("[EPO Browser] tryExtract error:", e.message);
+      } finally {
+        tryExtractRunning = false;
+      }
+    };
+
+    win.webContents.on("did-finish-load", tryExtract);
+
+    const checkInterval = setInterval(() => {
+      if (settled || win.isDestroyed()) {
+        clearInterval(checkInterval);
+        return;
+      }
+      tryExtract();
+    }, 2000);
+
+    // 超时
+    setTimeout(() => {
+      if (!settled) {
+        finish({ cloudflare: true, error: `Browser fetch timeout (${timeout}ms)` });
+      }
+    }, timeout);
+
+    win.on("closed", () => {
+      if (!settled) finish({ error: "window closed" });
+    });
+
+    // 加载 URL（不设 userAgent，用 Electron 默认 UA，与 espacenet 弹窗一致）
+    console.log("[EPO Browser] loading URL (default UA, default session):", targetUrl);
+    win.loadURL(targetUrl).catch(e => {
+      console.warn("[EPO Browser] loadURL failed:", e.message);
+    });
+  });
+}
+
+// 构造 EPO Register doclist URL（供 epoFetchViaBrowser 路径使用）
+function epoBuildDocListUrl(office, docNumber, kindCode) {
+  const isEp = office.toUpperCase() === "EP";
+  if (isEp) {
+    return `${EPO_REGISTER_BASE}/application?number=EP${encodeURIComponent(docNumber)}&lng=en&tab=doclist`;
+  }
+  const apn = `${office}.${docNumber}.${kindCode || "A"}`;
+  return `${EPO_REGISTER_BASE}/ipfwretrieve?apn=${encodeURIComponent(apn)}&lng=en`;
+}
+
+// 构造 EPO Register PDF URL
+function epoBuildPdfUrl(office, docNumber, docId) {
+  const isEp = office.toUpperCase() === "EP";
+  if (isEp) {
+    return `${EPO_REGISTER_BASE}/application?showPdfPage=1&documentId=${encodeURIComponent(docId)}&appnumber=EP${encodeURIComponent(docNumber)}&proc=`;
+  }
+  const apn = `${office}.${docNumber}.A`;
+  return `${EPO_REGISTER_BASE}/ipApplication?documentId=${encodeURIComponent(docId)}&number=${encodeURIComponent(apn)}&patentScope=false`;
+}
+
+// 解析 EPO doclist HTML（提取自 epoFetchDocList，供 browser 路径复用）
+function epoParseDocListHtml(html, office, docNumber, kindCode) {
+  const isEp = office.toUpperCase() === "EP";
+  const isEmpty = html.includes("No files were found")
+    || html.includes("No files containing")
+    || html.includes("No dossier")
+    || html.includes("not available");
+  if (isEmpty) {
+    return { docs: [], title: "", docNumber, source: isEp ? "EPO Register" : "EPO Global Dossier", totalDocs: 0 };
+  }
+  const entries = isEp
+    ? epoParseEpDocList(html, docNumber)
+    : epoParseGdDocList(html, `${office}.${docNumber}.${kindCode || "A"}`);
+  const docs = entries.map(e => {
+    const cls = epoClassifyDoc(e.desc, e.phase);
+    return {
+      docId: e.docId, docCode: cls.docCode, docDesc: e.desc, documentDescription: e.desc,
+      documentDate: e.date, date: e.date, numberOfPages: e.pages, docFormat: "pdf",
+      documentType: cls.docCode, countryCode: office, epoDocType: e.isGdDoc ? "gd" : "ep", apn: e.apn,
+    };
+  });
+  return { docs, title: "", docNumber, source: isEp ? "EPO Register" : "EPO Global Dossier", totalDocs: docs.length };
+}
+
 // ── GD API proxy with EPO fallback ──────────────────────────────────────────
 
 async function proxyGdApi(urlPath, res) {
@@ -791,7 +981,11 @@ async function proxyGdApi(urlPath, res) {
 
   try {
     if (isDocContent && docId) {
-      const epoResult = await epoFetchPdf(office, docNumber, docId);
+      // EPO 直走模式：用隐藏 BrowserWindow + 默认 session（复用 espacenet 弹窗成功策略过 CF）
+      // 非 EPO 直走模式：保留原 curl 路径
+      const epoResult = epoDirect
+        ? await epoFetchViaBrowser(epoBuildPdfUrl(office, docNumber, docId), { wantPdf: true })
+        : await epoFetchPdf(office, docNumber, docId);
       if (epoResult.body) {
         console.log(`[EPO Fallback] EPO PDF succeeded for ${office}/${docNumber}/${docId}, size=${epoResult.body.length}`);
         res.writeHead(200, {
@@ -819,7 +1013,21 @@ async function proxyGdApi(urlPath, res) {
         browserUrl: `https://register.epo.org/application?number=${office}${docNumber}&lng=en&tab=doclist`,
       }));
     } else if (isDocList) {
-      const epoResult = await epoFetchDocList(office, docNumber, "A");
+      // EPO 直走模式：用隐藏 BrowserWindow 获取 HTML 后解析（绕过 CF JS challenge）
+      // 非 EPO 直走模式：保留原 curl 路径
+      let epoResult;
+      if (epoDirect) {
+        const browserUrl = epoBuildDocListUrl(office, docNumber, "A");
+        const browserResult = await epoFetchViaBrowser(browserUrl, { wantPdf: false });
+        if (browserResult.body) {
+          epoResult = epoParseDocListHtml(browserResult.body, office, docNumber, "A");
+        } else {
+          epoResult = browserResult; // 错误或 cloudflare 标记
+          if (!epoResult.browserUrl) epoResult.browserUrl = browserUrl;
+        }
+      } else {
+        epoResult = await epoFetchDocList(office, docNumber, "A");
+      }
       if (epoResult.docs) {
         console.log(`[EPO Fallback] EPO doclist succeeded for ${office}/${docNumber}, got ${epoResult.totalDocs} docs`);
         res.writeHead(200, { "Content-Type": "application/json", "X-Epo-Fallback": "1", ...corsHeaders });
@@ -1776,7 +1984,11 @@ async function extractPdfText(req, res) {
   if (!pdfBuffer && epSupported && epDocId) {
     console.log(`[EPO Fallback] extractPdfText GD failed (${gdFailReason}), trying EPO for ${epOffice}/${epDocNum}/${epDocId}...`);
     try {
-      const epoResult = await epoFetchPdf(epOffice, epDocNum, epDocId);
+      // EPO 直走模式：用隐藏 BrowserWindow 获取 PDF（参考 espacenet 弹窗策略过 CF）
+      // 非 EPO 直走模式：保留原 curl 路径
+      const epoResult = epoDirect
+        ? await epoFetchViaBrowser(epoBuildPdfUrl(epOffice, epDocNum, epDocId), { wantPdf: true, timeout: 90000 })
+        : await epoFetchPdf(epOffice, epDocNum, epDocId);
       if (epoResult.body) {
         console.log(`[EPO Fallback] extractPdfText EPO PDF succeeded, size=${epoResult.body.length}`);
         pdfBuffer = epoResult.body;
