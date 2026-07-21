@@ -166,6 +166,8 @@ var PATENT_STATUS = {
       "decision to allow further processing": "准予继续审查决定 (Decision to Allow Further Processing)",
       "english translation of the claims": "权利要求英文翻译 (English Translation of the Claims)",
       "request for further processing": "继续审查请求 (Request for Further Processing)",
+      "miscellaneous incoming letter": "杂项来函 (Miscellaneous Incoming Letter)",
+      "incoming letter": "来函 (Incoming Letter)",
     },
     stageNames: {
       "审查前": "审查前",
@@ -385,6 +387,8 @@ var PATENT_STATUS = {
       "search started": "检索开始",
       "letter relating to the revocation of the automatic debiting procedure": "关于撤销自动扣款程序的信函",
       "communication concerning the withdrawal of the automatic debiting procedure": "关于撤销自动扣款程序的通知",
+      "miscellaneous incoming letter": "杂项来函 (Miscellaneous Incoming Letter)",
+      "incoming letter": "来函 (Incoming Letter)",
     },
     typeNames: {
       "office_action": "审查意见", "response": "申请人答复",
