@@ -668,37 +668,175 @@ function classifyDocCode(code, desc) {
   return "notification";
 }
 
+// EPO Global Dossier 文档描述→中文翻译映射
+// EPO 降级源返回的文档标题是英文的，这里统一映射为中文（与 US codeMap 保持一致）
+// 键为小写英文描述片段（getStatusInfo 中用 includes 匹配，按长度降序排列）
+var EPO_DESC_MAP = {
+  // ── 审查意见类 ──
+  "non-final rejection": "非最终驳回 (Non-Final Rejection)",
+  "final rejection": "最终驳回 (Final Rejection)",
+  "examiner's answer": "审查员复审答辩意见 (Examiner's Answer)",
+  "office action": "审查意见 (Office Action)",
+  "examination report": "审查报告 (Examination Report)",
+  "examination communication": "审查通信 (Examination Communication)",
+  "search opinion": "检索意见 (Search Opinion)",
+  "written opinion": "书面意见 (Written Opinion)",
+  "search strategy": "检索策略 (Search Strategy)",
+  // ── 申请人答复类 ──
+  "amendment after non-final": "非最终驳回后修改 (Amendment after Non-Final)",
+  "amendment": "修改 (Amendment)",
+  "response": "答复 (Response)",
+  "reply": "答复 (Reply)",
+  "observations": "意见陈述 (Observations)",
+  "remarks": "意见陈述 (Remarks)",
+  "arguments": "申请人意见 (Arguments)",
+  "request for reconsideration": "重新考虑请求 (Request for Reconsideration)",
+  "request for continued examination": "请求继续审查 (Request for Continued Examination)",
+  "appeal brief": "复审请求书 (Appeal Brief)",
+  "reply brief": "复审答复书 (Reply Brief)",
+  // ── 授权通知类 ──
+  "notice of allowance": "授权通知 (Notice of Allowance)",
+  "intention to grant": "授权意向 (Intention to Grant)",
+  "grant notification": "授权通知 (Grant Notification)",
+  "issue notification": "授权公告通知 (Issue Notification)",
+  "decision to grant": "授权决定 (Decision to Grant)",
+  "grant of patent": "专利授权 (Grant of Patent)",
+  // ── 引用文献/IDS类 ──
+  "information disclosure": "信息披露声明 (Information Disclosure Statement)",
+  "foreign reference": "外国引用文献 (Foreign Reference)",
+  "priority documents electronically retrieved": "电子检索优先权文件 (Priority Documents electronically retrieved by USPTO from a participating IP Office)",
+  "list of references": "引用文献列表 (List of References)",
+  "cited by examiner": "审查员引用 (Cited by Examiner)",
+  "references cited": "引用文献 (References Cited)",
+  "european search report": "欧洲检索报告 (European Search Report)",
+  "search report": "检索报告 (Search Report)",
+  // ── 专利文件类 ──
+  "claims": "权利要求 (Claims)",
+  "specification": "说明书 (Specification)",
+  "drawings-only black and white line drawings": "黑白线条图 (Drawings - Black and White Line Drawings)",
+  "drawings": "附图 (Drawings)",
+  "abstract": "摘要 (Abstract)",
+  "bibliographic data": "书目数据 (Bibliographic Data)",
+  "sequence listing": "序列表 (Sequence Listing)",
+  "english translation of the claims": "权利要求英文翻译 (English Translation of the Claims)",
+  // ── 通知类 ──
+  "electronic filing system acknowledgment receipt": "电子提交确认回执 (Electronic Filing System Acknowledgment Receipt)",
+  "filing receipt": "申请受理回执 (Filing Receipt)",
+  "notice of publication": "公开通知 (Notice of Publication)",
+  "publication": "公开 (Publication)",
+  "power of attorney": "代理委托书 (Power of Attorney)",
+  "change of address": "地址变更 (Change of Address)",
+  "electronic fee payment": "电子缴费 (Electronic Fee Payment)",
+  "fee worksheet": "费用工作表 (Fee Worksheet)",
+  "issue fee": "授权费 (Issue Fee)",
+  "extension of time": "期限延长 (Extension of Time)",
+  "authorization for extension": "期限延长授权 (Authorization for Extension of Time)",
+  "transmittal letter": "传送信函 (Transmittal Letter)",
+  "transmittal": "传送 (Transmittal)",
+  "withdrawn": "撤回 (Withdrawn)",
+  "refused": "驳回 (Refused)",
+  "deemed": "视为 (Deemed)",
+  "entry into european phase": "进入欧洲阶段 (Entry into European Phase)",
+  "european phase": "欧洲阶段 (European Phase)",
+  "assignee": "受让人 (Assignee)",
+  "ownership": "所有权 (Ownership)",
+  "declaration": "声明 (Declaration)",
+  "oath": "宣誓 (Oath)",
+  // ── EPO/GD 特有 ──
+  "placeholder sheet indicating presence of supplemental content": "补充内容占位页 (Supplemental Complex Repository for Examiners - SCORE)",
+  "supplemental complex repository": "补充内容占位页 (Supplemental Complex Repository for Examiners - SCORE)",
+  "opposition": "异议 (Opposition)",
+};
+
+// 按键长度降序排列，确保长描述优先匹配（避免"non-final rejection"被"rejection"截胡）
+var _epoDescMapSortedKeys = Object.keys(EPO_DESC_MAP).sort((a, b) => b.length - a.length);
+
+// 根据 EPO 描述键推断文档类型（用于看板分类）
+function _classifyEpoDescType(key) {
+  // 审查意见类
+  if (["non-final rejection", "final rejection", "examiner's answer", "office action",
+       "examination report", "examination communication", "search opinion",
+       "written opinion", "search strategy"].includes(key)) return "office_action";
+  // 申请人答复类
+  if (["amendment after non-final", "amendment", "response", "reply", "observations",
+       "remarks", "arguments", "request for reconsideration",
+       "request for continued examination", "appeal brief", "reply brief"].includes(key)) return "response";
+  // 授权通知类
+  if (["notice of allowance", "intention to grant", "grant notification",
+       "issue notification", "decision to grant", "grant of patent"].includes(key)) return "allowance";
+  // 引用文献/IDS类
+  if (["information disclosure", "foreign reference",
+       "priority documents electronically retrieved", "list of references",
+       "cited by examiner", "references cited", "european search report",
+       "search report"].includes(key)) return "citation";
+  // 专利文件类
+  if (["claims", "specification", "drawings-only black and white line drawings",
+       "drawings", "abstract", "bibliographic data", "sequence listing",
+       "english translation of the claims"].includes(key)) return "patent_doc";
+  // 异议类
+  if (key === "opposition") return "misc";
+  // 默认为通知类
+  return "notification";
+}
+
+// 根据 EPO 描述键推断审查阶段
+function _classifyEpoDescStage(key) {
+  if (["notice of allowance", "intention to grant", "grant notification",
+       "issue notification", "decision to grant", "grant of patent",
+       "issue fee"].includes(key)) return "授权";
+  if (["appeal brief", "reply brief"].includes(key)) return "复审";
+  if (["filing receipt", "electronic filing system acknowledgment receipt",
+       "transmittal letter", "transmittal"].includes(key)) return "审查前";
+  return "审查中";
+}
+
 function getStatusInfo(office, code, desc) {
   const officeMap = PATENT_STATUS[office];
-  if (!officeMap) return { name: desc || code || "未知文件", type: "notification", stage: "未知" };
-
   const upperCode = (code || "").toUpperCase();
-  let result;
-  if (officeMap.codeMap[upperCode]) {
+
+  // 1) 优先用 office codeMap 精确匹配（GD 正常源返回的 docCode）
+  if (officeMap && officeMap.codeMap[upperCode]) {
     const info = officeMap.codeMap[upperCode];
-    result = { name: info.name, type: info.type, stage: info.stage };
-  } else {
-    const type = classifyDocCode(code, desc);
-    const typeName = officeMap.typeNames[type] || "通知";
-    let translatedName = desc || code || typeName;
-    if (officeMap.descMap && desc) {
-      const descLower = desc.toLowerCase();
-      const sortedKeys = Object.keys(officeMap.descMap).sort((a, b) => b.length - a.length);
-      for (const key of sortedKeys) {
-        if (descLower.includes(key)) {
-          translatedName = officeMap.descMap[key];
-          break;
-        }
-      }
-    }
-    result = { name: translatedName, type: type, stage: "审查中" };
+    return { name: info.name, type: info.type, stage: info.stage };
   }
 
+  // 2) office codeMap 未命中：先用 office descMap 模糊匹配（常规 GD 兜底）
+  //    命中即返回，避免被 EPO_DESC_MAP 的短键（如 "amendment"）截胡更精确的 descMap 条目
+  if (officeMap && officeMap.descMap && desc) {
+    const descLower = desc.toLowerCase();
+    const sortedKeys = Object.keys(officeMap.descMap).sort((a, b) => b.length - a.length);
+    for (const key of sortedKeys) {
+      if (descLower.includes(key)) {
+        let type = classifyDocCode(code, desc);
+        if (type === "misc") type = "notification";
+        return { name: officeMap.descMap[key], type, stage: "审查中" };
+      }
+    }
+  }
+
+  if (!officeMap) return { name: desc || code || "未知文件", type: "notification", stage: "未知" };
+
+  // 3) office codeMap + descMap 均未命中：尝试 EPO 描述映射（EPO 降级源返回的英文标题）
+  //    epoClassifyDoc 返回的 FREC/PUB/POA/TRANS/DWG 等码不在任何 office codeMap 中，
+  //    会走到这里；用 EPO_DESC_MAP 把英文标题翻译成中文
+  if (desc) {
+    const descLower = desc.toLowerCase();
+    for (const key of _epoDescMapSortedKeys) {
+      if (descLower.includes(key)) {
+        const epoType = _classifyEpoDescType(key);
+        return { name: EPO_DESC_MAP[key], type: epoType, stage: _classifyEpoDescStage(key) };
+      }
+    }
+  }
+
+  // 4) 最终兜底：返回原始描述/代码
+  const type = classifyDocCode(code, desc);
+  const typeName = officeMap.typeNames[type] || "通知";
+  let result = { name: desc || code || typeName, type, stage: "审查中" };
   if (result.type === "misc") {
     const fallbackType = classifyDocCode(code, desc);
     result.type = fallbackType === "misc" ? "notification" : fallbackType;
   }
-
   return result;
 }
 
