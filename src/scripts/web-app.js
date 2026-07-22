@@ -671,7 +671,7 @@ function _dossierGetTabAnnotSummary(tab) {
       if (!d.docId) return;
       const isUS = tab.currentData.office === "US";
       const urlDocNum = isUS ? tab.currentData.applicationNumber : encodeURIComponent(tab.currentData.docNumber || tab.currentData.applicationNumber);
-      const pdfUrl = withEpoDirect(`/api/gd/doc-content/svc/doccontent/${tab.currentData.office}/${urlDocNum}/${encodeURIComponent(d.docId)}/${d.numberOfPages}/${d.docFormat}`);
+      const pdfUrl = withEpoDirect(withEpoPdfUrl(`/api/gd/doc-content/svc/doccontent/${tab.currentData.office}/${urlDocNum}/${encodeURIComponent(d.docId)}/${d.numberOfPages}/${d.docFormat}`, d));
       const docKey = d.idx + '_' + pdfUrl;
       const list = pdfViewState.annotList[docKey];
       if (list && list.length > 0) {
@@ -761,7 +761,7 @@ function _dossierCleanupTabPdfAnnots(tab) {
       if (!d.docId || !tab.currentData) return;
       const isUS = tab.currentData.office === "US";
       const urlDocNum = isUS ? tab.currentData.applicationNumber : encodeURIComponent(tab.currentData.docNumber || tab.currentData.applicationNumber);
-      const pdfUrl = withEpoDirect(`/api/gd/doc-content/svc/doccontent/${tab.currentData.office}/${urlDocNum}/${encodeURIComponent(d.docId)}/${d.numberOfPages}/${d.docFormat}`);
+      const pdfUrl = withEpoDirect(withEpoPdfUrl(`/api/gd/doc-content/svc/doccontent/${tab.currentData.office}/${urlDocNum}/${encodeURIComponent(d.docId)}/${d.numberOfPages}/${d.docFormat}`, d));
       const docKey = d.idx + '_' + pdfUrl;
       delete pdfViewState.annotList[docKey];
       delete pdfViewState.annotUndoStack[docKey];
@@ -1088,6 +1088,15 @@ function setEpoDirectMode(enabled) {
 function withEpoDirect(url) {
   if (!getEpoDirectMode()) return url;
   return url + (url.includes("?") ? "&" : "?") + "epoDirect=1";
+}
+
+// 当文档带有从 dossier 页面解析得到的 epoPdfUrl（documentView 链接）时，
+// 追加为 query 参数，后端会优先使用该链接直接 fetch PDF，跳过 espacenet 跳转。
+function withEpoPdfUrl(baseUrl, doc) {
+  if (doc && doc.epoPdfUrl) {
+    return baseUrl + (baseUrl.includes("?") ? "&" : "?") + "epoPdfUrl=" + encodeURIComponent(doc.epoPdfUrl);
+  }
+  return baseUrl;
 }
 
 const aiSettingsBtn = document.getElementById("ai-settings-btn");
@@ -7271,7 +7280,7 @@ function renderKanban(data) {
             downloadUrl = null;
           } else {
             extractUrl = withEpoDirect(`/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`);
-            downloadUrl = withEpoDirect(`/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`);
+            downloadUrl = withEpoDirect(withEpoPdfUrl(`/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`, it));
           }
         }
         html += `
@@ -8987,7 +8996,7 @@ function renderDocuments(data) {
     }
 
     const encodedDocId = encodeURIComponent(docId);
-    const downloadUrl = (docId && canDownload) ? withEpoDirect(`/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}`) : null;
+    const downloadUrl = (docId && canDownload) ? withEpoDirect(withEpoPdfUrl(`/api/gd/doc-content/svc/doccontent/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}`, d)) : null;
     const extractUrl = (docId && canDownload) ? withEpoDirect(`/api/gd/extract-text/${data.office}/${urlDocNum}/${encodedDocId}/${numberOfPages}/${docFormat}`) : null;
 
     html += `
@@ -11556,7 +11565,7 @@ async function renderPdfView(idx) {
   const isUS = currentData.office === "US";
   const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
   const encodedDocId = encodeURIComponent(it.docId);
-  const pdfUrl = withEpoDirect(`/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`);
+  const pdfUrl = withEpoDirect(withEpoPdfUrl(`/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`, it));
 
   // Check if the same document is already cached
   if (typeof _pdfDocCache === 'undefined') window._pdfDocCache = {};
@@ -12407,7 +12416,7 @@ function _buildPdfDocKey(idx) {
   const isUS = currentData.office === "US";
   const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
   const encodedDocId = encodeURIComponent(it.docId);
-  const pdfUrl = withEpoDirect(`/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`);
+  const pdfUrl = withEpoDirect(withEpoPdfUrl(`/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`, it));
   return idx + '_' + pdfUrl;
 }
 
@@ -13011,7 +13020,7 @@ async function exportPdfWithAnnotations() {
     const isUS = currentData.office === "US";
     const urlDocNum = isUS ? currentData.applicationNumber : encodeURIComponent(currentData.docNumber || currentData.applicationNumber);
     const encodedDocId = encodeURIComponent(it.docId);
-    const pdfUrl = withEpoDirect(`/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`);
+    const pdfUrl = withEpoDirect(withEpoPdfUrl(`/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${it.numberOfPages}/${it.docFormat}`, it));
     const resp = await fetch(pdfUrl, { headers: { "Accept": "application/pdf,*/*" } });
     if (!resp.ok) throw new Error("PDF 下载失败: HTTP " + resp.status);
     const pdfBytes = await resp.arrayBuffer();
@@ -16434,7 +16443,7 @@ function buildMergeDownloadUrl(item) {
     return `/api/jpo/doc/${jpDocType}/${urlDocNum}`;
   }
 
-  return withEpoDirect(`/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${item.numberOfPages}/${item.docFormat}`);
+  return withEpoDirect(withEpoPdfUrl(`/api/gd/doc-content/svc/doccontent/${currentData.office}/${urlDocNum}/${encodedDocId}/${item.numberOfPages}/${item.docFormat}`, item));
 }
 
 function openMergeExportModal() {
