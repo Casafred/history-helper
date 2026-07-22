@@ -88,6 +88,7 @@ function proxyGdApi(urlPath, res) {
     const _queryString = _qIdx !== -1 ? urlPath.substring(_qIdx + 1) : "";
     const _queryParams = new URLSearchParams(_queryString);
     const epoDirect = _queryParams.get("epoDirect") === "1";
+    const epoPdfUrlParam = _queryParams.get("epoPdfUrl") || null;
     // 去掉 query string 后再做路径匹配
     const urlPathNoQuery = _qIdx !== -1 ? urlPath.substring(0, _qIdx) : urlPath;
 
@@ -209,9 +210,9 @@ function proxyGdApi(urlPath, res) {
 
     try {
       if (isDocContent && docId) {
-        const epoResult = await epoFetchPdf(office, docNumber, docId);
+        const epoResult = await epoFetchPdf(office, docNumber, docId, epoPdfUrlParam);
         if (epoResult.body) {
-          console.log(`[EPO Fallback] EPO PDF succeeded for ${office}/${docNumber}/${docId}, size=${epoResult.body.length}`);
+          console.log(`[EPO Fallback] EPO PDF succeeded for ${office}/${docNumber}/${docId}, size=${epoResult.body.length}${epoPdfUrlParam ? ' (using epoPdfUrl)' : ''}`);
           res.writeHead(200, {
             "Content-Type": "application/pdf",
             "Content-Disposition": 'attachment; filename="document.pdf"',
@@ -675,15 +676,24 @@ function epoClassifyDoc(desc, phase) {
 
 function epoParseEpDocList(html, appNumber) {
   const docs = [];
-  const re = /<tr>\s*<td[^>]*>\s*<input[^>]*type="checkbox"[^>]*value="([^"]+)"[^>]*>\s*<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>(?:<a[^>]*>)?(.*?)(?:<\/a>)?<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>([^<]*)<\/td>/gi;
+  const re = /<tr>\s*<td[^>]*>\s*<input[^>]*type="checkbox"[^>]*value="([^"]+)"[^>]*>\s*<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>(?:<a[^>]*href="([^"]*)"[^>]*>)?(.*?)(?:<\/a>)?<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>([^<]*)<\/td>/gi;
   let m;
   while ((m = re.exec(html)) !== null) {
     const docId = m[1];
     const date = epoHtmlUnescape(m[2]);
-    const desc = epoHtmlUnescape(m[3].replace(/<[^>]+>/g, ""));
-    const phase = epoHtmlUnescape(m[4].replace(/<[^>]+>/g, ""));
-    const pages = parseInt(String(m[5]).trim(), 10) || 1;
+    const href = m[3] || "";
+    const desc = epoHtmlUnescape(m[4].replace(/<[^>]+>/g, ""));
+    const phase = epoHtmlUnescape(m[5].replace(/<[^>]+>/g, ""));
+    const pages = parseInt(String(m[6]).trim(), 10) || 1;
     if (!docId || !desc || !date) continue;
+    let epoPdfUrl = null;
+    if (href) {
+      try {
+        epoPdfUrl = new URL(href, EPO_REGISTER_BASE).href;
+      } catch (_) {
+        epoPdfUrl = href.startsWith("http") ? href : EPO_REGISTER_BASE + (href.startsWith("/") ? "" : "/") + href;
+      }
+    }
     docs.push({
       docId,
       date: epoNormalizeDate(date),
@@ -693,6 +703,7 @@ function epoParseEpDocList(html, appNumber) {
       phase,
       isGdDoc: false,
       apn: "EP" + appNumber,
+      epoPdfUrl,
     });
   }
   return docs;
@@ -700,14 +711,24 @@ function epoParseEpDocList(html, appNumber) {
 
 function epoParseGdDocList(html, apn) {
   const docs = [];
-  const re = /<tr>\s*<td[^>]*>([^<]+)<\/td>\s*<td[^>]*>\s*<a[^>]*href="[^"]*documentId=([A-Z0-9]+)[^"]*"[^>]*>([^<]+)<\/a>\s*<\/td>\s*<td[^>]*>([^<]*)<\/td>/gi;
+  const re = /<tr>\s*<td[^>]*>([^<]+)<\/td>\s*<td[^>]*>\s*<a[^>]*href="([^"]*documentId=[A-Z0-9]+[^"]*)"[^>]*>([^<]+)<\/a>\s*<\/td>\s*<td[^>]*>([^<]*)<\/td>/gi;
   let m;
   while ((m = re.exec(html)) !== null) {
     const date = epoHtmlUnescape(m[1]);
-    const docId = m[2];
+    const href = m[2] || "";
+    const docIdMatch = href.match(/documentId=([A-Z0-9]+)/);
+    const docId = docIdMatch ? docIdMatch[1] : null;
     const desc = epoHtmlUnescape(m[3]);
     const pages = parseInt(String(m[4]).trim(), 10) || 1;
     if (!docId || !desc || !date) continue;
+    let epoPdfUrl = null;
+    if (href) {
+      try {
+        epoPdfUrl = new URL(href, EPO_REGISTER_BASE).href;
+      } catch (_) {
+        epoPdfUrl = href.startsWith("http") ? href : EPO_REGISTER_BASE + (href.startsWith("/") ? "" : "/") + href;
+      }
+    }
     docs.push({
       docId,
       date: epoNormalizeDate(date),
@@ -717,6 +738,7 @@ function epoParseGdDocList(html, apn) {
       phase: "",
       isGdDoc: true,
       apn: apn,
+      epoPdfUrl,
     });
   }
   return docs;
@@ -1046,6 +1068,7 @@ async function epoFetchDocList(office, docNumber, kindCode) {
       countryCode: office,
       epoDocType: e.isGdDoc ? "gd" : "ep",
       apn: e.apn,
+      epoPdfUrl: e.epoPdfUrl,
     };
   });
 
@@ -1058,10 +1081,12 @@ async function epoFetchDocList(office, docNumber, kindCode) {
   };
 }
 
-async function epoFetchPdf(office, docNumber, docId) {
+async function epoFetchPdf(office, docNumber, docId, epoPdfUrl) {
   const isEp = office.toUpperCase() === "EP";
   let url;
-  if (isEp) {
+  if (epoPdfUrl) {
+    url = epoPdfUrl;
+  } else if (isEp) {
     url = `${EPO_REGISTER_BASE}/application?showPdfPage=1&documentId=${encodeURIComponent(docId)}&appnumber=EP${encodeURIComponent(docNumber)}&proc=`;
   } else {
     const apn = `${office}.${docNumber}.A`;
@@ -1976,6 +2001,7 @@ async function extractPdfText(req, res) {
   const engine = urlObj.searchParams.get("engine") || "auto";
   const apiKey = urlObj.searchParams.get("api_key") || "";
   const epoDirect = urlObj.searchParams.get("epoDirect") === "1";
+  const epoPdfUrlParam = urlObj.searchParams.get("epoPdfUrl") || null;
   const gdUrl = `${GD_API_BASE}/doc-content/svc/doccontent${urlPath}`;
 
   const args = [
@@ -2045,9 +2071,9 @@ async function extractPdfText(req, res) {
   if (!pdfBuffer && epSupported && epDocId) {
     console.log(`[EPO Fallback] extractPdfText GD failed (${gdFailReason}), trying EPO for ${epOffice}/${epDocNum}/${epDocId}...`);
     try {
-      const epoResult = await epoFetchPdf(epOffice, epDocNum, epDocId);
+      const epoResult = await epoFetchPdf(epOffice, epDocNum, epDocId, epoPdfUrlParam);
       if (epoResult.body) {
-        console.log(`[EPO Fallback] extractPdfText EPO PDF succeeded, size=${epoResult.body.length}`);
+        console.log(`[EPO Fallback] extractPdfText EPO PDF succeeded, size=${epoResult.body.length}${epoPdfUrlParam ? ' (using epoPdfUrl)' : ''}`);
         pdfBuffer = epoResult.body;
       } else if (epoResult.cloudflare) {
         res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });

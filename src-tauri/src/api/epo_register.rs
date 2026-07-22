@@ -37,19 +37,20 @@ pub struct EpoDocEntry {
     pub phase: String,
     pub is_gd_doc: bool,
     pub apn: String,
+    pub epo_pdf_url: Option<String>,
 }
 
 fn ep_doc_row_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r#"<tr>\s*<td[^>]*>\s*<input[^>]*type="checkbox"[^>]*value="([^"]+)"[^>]*>\s*</td>\s*<td[^>]*>([^<]*)</td>\s*<td[^>]*>(?:<a[^>]*>)?(.*?)(?:</a>)?</td>\s*<td[^>]*>(.*?)</td>\s*<td[^>]*>([^<]*)</td>"#).unwrap()
+        Regex::new(r#"<tr>\s*<td[^>]*>\s*<input[^>]*type="checkbox"[^>]*value="([^"]+)"[^>]*>\s*</td>\s*<td[^>]*>([^<]*)</td>\s*<td[^>]*>(?:<a[^>]*href="([^"]*)"[^>]*>)?(.*?)(?:</a>)?</td>\s*<td[^>]*>(.*?)</td>\s*<td[^>]*>([^<]*)</td>"#).unwrap()
     })
 }
 
 fn gd_doc_row_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r#"<tr>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>\s*<a[^>]*href="[^"]*documentId=([A-Z0-9]+)[^"]*"[^>]*>([^<]+)</a>\s*</td>\s*<td[^>]*>([^<]*)</td>"#).unwrap()
+        Regex::new(r#"<tr>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>\s*<a[^>]*href="([^"]*documentId=[A-Z0-9]+[^"]*)"[^>]*>([^<]+)</a>\s*</td>\s*<td[^>]*>([^<]*)</td>"#).unwrap()
     })
 }
 
@@ -63,6 +64,22 @@ fn html_unescape(s: &str) -> String {
         .replace("&apos;", "'")
         .trim()
         .to_string()
+}
+
+fn resolve_epo_url(href: &str) -> Option<String> {
+    if href.is_empty() {
+        return None;
+    }
+    if href.starts_with("http://") || href.starts_with("https://") {
+        Some(href.to_string())
+    } else {
+        let path = if href.starts_with('/') {
+            href.to_string()
+        } else {
+            format!("/{}", href)
+        };
+        Some(format!("{}{}", EPO_REGISTER_BASE, path))
+    }
 }
 
 impl EpoRegisterClient {
@@ -260,14 +277,16 @@ impl EpoRegisterClient {
         for caps in re.captures_iter(html) {
             let doc_id = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
             let date_raw = caps.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
-            let desc_html = caps.get(3).map(|m| m.as_str().to_string()).unwrap_or_default();
-            let phase_html = caps.get(4).map(|m| m.as_str().to_string()).unwrap_or_default();
-            let pages_str = caps.get(5).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let href = caps.get(3).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let desc_html = caps.get(4).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let phase_html = caps.get(5).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let pages_str = caps.get(6).map(|m| m.as_str().to_string()).unwrap_or_default();
 
             let date = html_unescape(&date_raw);
             let desc = html_unescape(&desc_html);
             let phase = html_unescape(&phase_html);
             let pages: u32 = pages_str.trim().parse().unwrap_or(1);
+            let epo_pdf_url = resolve_epo_url(&href);
 
             if doc_id.is_empty() || desc.is_empty() || date.is_empty() {
                 continue;
@@ -282,6 +301,7 @@ impl EpoRegisterClient {
                 phase,
                 is_gd_doc: false,
                 apn: format!("EP{}", app_number),
+                epo_pdf_url,
             });
         }
 
@@ -294,13 +314,20 @@ impl EpoRegisterClient {
 
         for caps in re.captures_iter(html) {
             let date_raw = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-            let doc_id = caps.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let href = caps.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
             let desc_raw = caps.get(3).map(|m| m.as_str().to_string()).unwrap_or_default();
             let pages_str = caps.get(4).map(|m| m.as_str().to_string()).unwrap_or_default();
 
             let date = html_unescape(&date_raw);
             let desc = html_unescape(&desc_raw);
             let pages: u32 = pages_str.trim().parse().unwrap_or(1);
+            let doc_id = href
+                .split("documentId=")
+                .nth(1)
+                .and_then(|s| s.split('&').next())
+                .unwrap_or("")
+                .to_string();
+            let epo_pdf_url = resolve_epo_url(&href);
 
             if doc_id.is_empty() || desc.is_empty() || date.is_empty() {
                 continue;
@@ -315,6 +342,7 @@ impl EpoRegisterClient {
                 phase: String::new(),
                 is_gd_doc: true,
                 apn: apn.to_string(),
+                epo_pdf_url,
             });
         }
 
@@ -385,6 +413,7 @@ impl EpoRegisterClient {
                         "countryCode": office,
                         "epoDocType": if e.is_gd_doc { "gd" } else { "ep" },
                         "apn": e.apn,
+                        "epoPdfUrl": e.epo_pdf_url,
                     })
                 })
                 .collect();
@@ -475,6 +504,7 @@ impl EpoRegisterClient {
                     "countryCode": office,
                     "epoDocType": if e.is_gd_doc { "gd" } else { "ep" },
                     "apn": e.apn,
+                    "epoPdfUrl": e.epo_pdf_url,
                 })
             })
             .collect();
@@ -493,8 +523,11 @@ impl EpoRegisterClient {
         doc_id: &str,
         apn: &str,
         is_gd_doc: bool,
+        epo_pdf_url: Option<&str>,
     ) -> Result<Vec<u8>, EpoRegisterError> {
-        let url = if is_gd_doc {
+        let url = if let Some(custom_url) = epo_pdf_url {
+            custom_url.to_string()
+        } else if is_gd_doc {
             format!(
                 "{}/ipApplication?documentId={}&number={}&patentScope=false",
                 EPO_REGISTER_BASE,
@@ -550,15 +583,16 @@ impl EpoRegisterClient {
         office: &str,
         doc_number: &str,
         doc_id: &str,
+        epo_pdf_url: Option<&str>,
     ) -> Result<Vec<u8>, EpoRegisterError> {
         let is_ep = office.eq_ignore_ascii_case("EP");
         if is_ep {
             let apn = format!("EP{}", doc_number);
-            self.get_document_pdf(doc_id, &apn, false).await
+            self.get_document_pdf(doc_id, &apn, false, epo_pdf_url).await
         } else {
             let kind_code = "A";
             let apn = format!("{}.{}.{}", office, doc_number, kind_code);
-            self.get_document_pdf(doc_id, &apn, true).await
+            self.get_document_pdf(doc_id, &apn, true, epo_pdf_url).await
         }
     }
 

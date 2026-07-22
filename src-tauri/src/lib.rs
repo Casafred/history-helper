@@ -281,16 +281,18 @@ async fn download_document(
     pages: String,
     format: String,
     epo_direct: Option<bool>,
+    epo_pdf_url: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<CommandResult, String> {
     let supports_epo = matches!(country.as_str(), "EP" | "US" | "JP" | "KR" | "CN" | "WO");
     let skip_gd = epo_direct.unwrap_or(false) && supports_epo;
+    let epo_pdf_url_ref = epo_pdf_url.as_deref();
 
     if skip_gd {
         log::info!("[EPO直走] download_document 跳过 GD，直接调用 EPO Register: {}/{}/{}", country, doc_number, doc_id);
         match state
             .epo_client
-            .get_document_pdf_by_office(&country, &doc_number, &doc_id)
+            .get_document_pdf_by_office(&country, &doc_number, &doc_id, epo_pdf_url_ref)
             .await
         {
             Ok(data) => {
@@ -323,7 +325,7 @@ async fn download_document(
                 log::info!("GD下载失败，尝试EPO Register降级下载 docId={}", doc_id);
                 match state
                     .epo_client
-                    .get_document_pdf_by_office(&country, &doc_number, &doc_id)
+                    .get_document_pdf_by_office(&country, &doc_number, &doc_id, epo_pdf_url_ref)
                     .await
                 {
                     Ok(data) => data,
@@ -373,16 +375,18 @@ async fn extract_text(
     engine: String,
     api_key: String,
     epo_direct: Option<bool>,
+    epo_pdf_url: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<CommandResult, String> {
     let supports_epo = matches!(country.as_str(), "EP" | "US" | "JP" | "KR" | "CN" | "WO");
     let skip_gd = epo_direct.unwrap_or(false) && supports_epo;
+    let epo_pdf_url_ref = epo_pdf_url.as_deref();
 
     let pdf_bytes = if skip_gd {
         log::info!("[EPO直走] extract_text 跳过 GD，直接调用 EPO Register: {}/{}/{}", country, doc_number, doc_id);
         match state
             .epo_client
-            .get_document_pdf_by_office(&country, &doc_number, &doc_id)
+            .get_document_pdf_by_office(&country, &doc_number, &doc_id, epo_pdf_url_ref)
             .await
         {
             Ok(data) => data,
@@ -408,7 +412,7 @@ async fn extract_text(
                     log::info!("GD extract_text下载失败，尝试EPO Register降级...");
                     match state
                         .epo_client
-                        .get_document_pdf_by_office(&country, &doc_number, &doc_id)
+                        .get_document_pdf_by_office(&country, &doc_number, &doc_id, epo_pdf_url_ref)
                         .await
                     {
                         Ok(data) => data,
