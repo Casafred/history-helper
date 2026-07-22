@@ -28,6 +28,7 @@
       "output": "dist-electron"
     },
     "files": [
+      "LICENSE",
       "electron-main.js",
       "patent-parser.js",
       "preload.js",
