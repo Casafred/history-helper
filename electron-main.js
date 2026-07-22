@@ -707,6 +707,7 @@ async function epoFetchPdf(office, docNumber, docId) {
 async function epoFetchViaBrowser(targetUrl, options) {
   options = options || {};
   const wantPdf = !!options.wantPdf;
+  const viaEspacenet = !!options.viaEspacenet;
   const timeout = options.timeout || 120000;
   return new Promise((resolve) => {
     // 用默认 session（不设 partition），复用 mainWindow 的 cookie —— 与 espacenet 弹窗一致
@@ -718,7 +719,9 @@ async function epoFetchViaBrowser(targetUrl, options) {
       height: 800,
       title: wantPdf
         ? "EPO Register - 正在获取审查文档 PDF..."
-        : "EPO Register - 正在获取审查文档列表...",
+        : viaEspacenet
+          ? "Espacenet → EPO Register - 正在获取审查文档列表..."
+          : "EPO Register - 正在获取审查文档列表...",
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
@@ -795,6 +798,7 @@ async function epoFetchViaBrowser(targetUrl, options) {
     let tryExtractRunning = false;
     let retrieveDetectedAt = 0;
     let retrieveReloadedAt = 0;
+    let espacenetNavigatedToEpo = false; // 是否已从 espacenet 跳转到 register.epo.org
     const tryExtract = async () => {
       if (settled || win.isDestroyed() || tryExtractRunning) return;
       tryExtractRunning = true;
@@ -809,7 +813,72 @@ async function epoFetchViaBrowser(targetUrl, options) {
           return; // 继续等
         }
 
-        // HTML (doclist) 请求：先检测页面是否真正就绪
+        // 阶段 0：espacenet 跳转阶段（viaEspacenet=true 且尚未跳到 register.epo.org）
+        // 在 espacenet 详情页上查找 "Global Dossier" 链接，找到后导航到 register.epo.org
+        if (viaEspacenet && !espacenetNavigatedToEpo && !wantPdf) {
+          const currentUrl = win.webContents.getURL();
+          if (currentUrl.includes("espacenet.com")) {
+            // 查找 Global Dossier 链接（详情页才有）
+            const gdLink = await win.webContents.executeJavaScript(`
+              (function() {
+                try {
+                  // 优先找文本含 "Global Dossier" 且指向 register.epo.org 的链接
+                  var links = document.querySelectorAll('a[href*="register.epo.org/ipfwretrieve"]');
+                  for (var i = 0; i < links.length; i++) {
+                    if (links[i].textContent.includes("Global Dossier")) {
+                      return links[i].href;
+                    }
+                  }
+                  // 兜底：通过 class 匹配 publication-link
+                  var gdLinks = document.querySelectorAll('a[class*="publication-link__link"]');
+                  for (var i = 0; i < gdLinks.length; i++) {
+                    if (gdLinks[i].textContent.includes("Global Dossier") && gdLinks[i].href.includes("register.epo.org")) {
+                      return gdLinks[i].href;
+                    }
+                  }
+                  return null;
+                } catch(e) { return null; }
+              })();
+            `, true).catch(() => null);
+
+            if (gdLink) {
+              console.log("[EPO Browser] found Global Dossier link on espacenet, navigating to:", gdLink);
+              espacenetNavigatedToEpo = true;
+              // 更新工具栏提示
+              try {
+                win.webContents.executeJavaScript(`
+                  var hint = document.getElementById("patentlens-verify-hint");
+                  if (hint) hint.textContent = "✅ 已找到 Global Dossier 入口，正在跳转到 EPO Register...";
+                `, true).catch(() => {});
+              } catch (_) {}
+              win.webContents.loadURL(gdLink);
+              return;
+            } else {
+              // 还在 espacenet 搜索页或详情页尚未加载出 GD 链接
+              // 尝试自动点击第一个搜索结果（如果搜索结果列表存在）
+              const clicked = await win.webContents.executeJavaScript(`
+                (function() {
+                  try {
+                    // espacenet 搜索结果列表项
+                    var resultItems = document.querySelectorAll('article[class*="search-result"], li[class*="search-result"], a[class*="result__link"]');
+                    if (resultItems && resultItems.length === 1) {
+                      resultItems[0].click();
+                      return "clicked_single_result";
+                    }
+                    return null;
+                  } catch(e) { return null; }
+                })();
+              `, true).catch(() => null);
+              if (clicked) {
+                console.log("[EPO Browser] clicked single espacenet search result, waiting for detail page...");
+              }
+              console.log("[EPO Browser] on espacenet, waiting for Global Dossier link to appear...");
+              return; // 继续等
+            }
+          }
+        }
+
+        // 阶段 1：在 register.epo.org，检测页面是否真正就绪
         // EPO 对非 EP 局会先返回 "Dossier documents are being retrieved" 中间页，
         // 需要等 8s 后重新加载才能拿到真正的文档列表（原 curl 路径已处理此情况）
         if (!wantPdf) {
@@ -910,7 +979,9 @@ async function epoFetchViaBrowser(targetUrl, options) {
             hint.textContent = ${JSON.stringify(
               wantPdf
                 ? "PatentLens: 正在从 EPO Register 获取审查文档 PDF，请稍候... 若页面卡在 Cloudflare 验证，请完成验证后点击右侧按钮"
-                : "PatentLens: 正在从 EPO Register 获取审查文档列表，请稍候... 若页面卡在 Cloudflare 验证，请完成验证后点击右侧按钮"
+                : viaEspacenet
+                  ? "PatentLens: 正在通过 Espacenet 查找 Global Dossier 入口... 若页面卡在 Cloudflare 验证，请完成验证后点击右侧按钮"
+                  : "PatentLens: 正在从 EPO Register 获取审查文档列表，请稍候... 若页面卡在 Cloudflare 验证，请完成验证后点击右侧按钮"
             )};
             var btn = document.createElement("button");
             btn.id = "patentlens-verify-btn";
@@ -966,14 +1037,23 @@ async function epoFetchViaBrowser(targetUrl, options) {
   });
 }
 
-// 构造 EPO Register doclist URL（供 epoFetchViaBrowser 路径使用）
+// 构造 EPO Register doclist 初始 URL（供 epoFetchViaBrowser 路径使用）
+// EP 局：直接构造 register.epo.org application URL
+// 非 EP 局：无法直接构造 ipfwretrieve URL（需要申请号，前端拿到的可能是公开号），
+//          改为加载 espacenet 搜索页，通过详情页上的 "Global Dossier" 链接获取正确申请号 URL
 function epoBuildDocListUrl(office, docNumber, kindCode) {
   const isEp = office.toUpperCase() === "EP";
   if (isEp) {
-    return `${EPO_REGISTER_BASE}/application?number=EP${encodeURIComponent(docNumber)}&lng=en&tab=doclist`;
+    return {
+      url: `${EPO_REGISTER_BASE}/application?number=EP${encodeURIComponent(docNumber)}&lng=en&tab=doclist`,
+      viaEspacenet: false,
+    };
   }
-  const apn = `${office}.${docNumber}.${kindCode || "A"}`;
-  return `${EPO_REGISTER_BASE}/ipfwretrieve?apn=${encodeURIComponent(apn)}&lng=en`;
+  // 非 EP 局：走 espacenet 详情页找 Global Dossier 链接（与前端 espacenet 跳转一致）
+  return {
+    url: `https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(docNumber)}`,
+    viaEspacenet: true,
+  };
 }
 
 // 构造 EPO Register PDF URL
@@ -1138,17 +1218,21 @@ async function proxyGdApi(urlPath, res) {
         browserUrl: `https://register.epo.org/application?number=${office}${docNumber}&lng=en&tab=doclist`,
       }));
     } else if (isDocList) {
-      // EPO 直走模式：用隐藏 BrowserWindow 获取 HTML 后解析（绕过 CF JS challenge）
+      // EPO 直走模式：用可见 BrowserWindow 获取 HTML 后解析（绕过 CF JS challenge）
+      // 非 EP 局：先走 espacenet 详情页找 Global Dossier 链接，再跳转到 register.epo.org
       // 非 EPO 直走模式：保留原 curl 路径
       let epoResult;
       if (epoDirect) {
-        const browserUrl = epoBuildDocListUrl(office, docNumber, "A");
-        const browserResult = await epoFetchViaBrowser(browserUrl, { wantPdf: false });
+        const urlInfo = epoBuildDocListUrl(office, docNumber, "A");
+        const browserResult = await epoFetchViaBrowser(urlInfo.url, {
+          wantPdf: false,
+          viaEspacenet: urlInfo.viaEspacenet,
+        });
         if (browserResult.body) {
           epoResult = epoParseDocListHtml(browserResult.body, office, docNumber, "A");
         } else {
           epoResult = browserResult; // 错误或 cloudflare 标记
-          if (!epoResult.browserUrl) epoResult.browserUrl = browserUrl;
+          if (!epoResult.browserUrl) epoResult.browserUrl = urlInfo.url;
         }
       } else {
         epoResult = await epoFetchDocList(office, docNumber, "A");
