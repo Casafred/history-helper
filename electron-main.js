@@ -829,6 +829,9 @@ async function epoFetchViaBrowser(targetUrl, options) {
     let cfWaitCount = 0;
     let userClickedDone = false;
     let doclistReady = false; // doclist 页面是否已就绪（PDF 模式用）
+    let pdfRetryCount = 0; // PDF 自动获取重试次数
+    let manualMode = false; // 是否已切换到手动模式（用户手动点击 PDF 链接）
+    let willDownloadHandler = null; // will-download 事件处理器（手动模式下载用）
     const CF_WAITING_KEYWORDS = [
       "just a moment", "attention required", "checking your browser",
       "performing security", "verifying you are human", "请稍候", "请稍等",
@@ -850,6 +853,11 @@ async function epoFetchViaBrowser(targetUrl, options) {
       if (settled) return;
       settled = true;
       if (checkInterval) clearInterval(checkInterval);
+      // 清理 will-download 监听器（手动模式下载用）
+      if (willDownloadHandler) {
+        try { session.defaultSession.removeListener("will-download", willDownloadHandler); } catch (_) {}
+        willDownloadHandler = null;
+      }
       try { win.close(); } catch (_) {}
       resolve(result);
     };
@@ -918,13 +926,15 @@ async function epoFetchViaBrowser(targetUrl, options) {
     };
 
     // 从 doclist 页面内 fetch PDF（此时有 session cookie + 正确 Referer）
-    const fetchPdfFromPage = async () => {
+    // urlOverride: 用户手动点击的 PDF 链接（可选，不传则用原始 pdfUrl）
+    const fetchPdfFromPage = async (urlOverride) => {
+      const targetUrl = urlOverride || pdfUrl;
+      if (!targetUrl) return { error: "no PDF URL" };
       try {
-        updateHint("PatentLens: 审查文档列表已就绪，正在下载 PDF...");
         const result = await win.webContents.executeJavaScript(`
           (async function() {
             try {
-              const resp = await fetch(${JSON.stringify(pdfUrl)}, {
+              const resp = await fetch(${JSON.stringify(targetUrl)}, {
                 credentials: 'include',
                 headers: { 'Accept': 'application/pdf,*/*' },
                 redirect: 'follow'
@@ -949,6 +959,74 @@ async function epoFetchViaBrowser(targetUrl, options) {
         return { error: e.message };
       }
     };
+
+    // 用户手动点击 PDF 链接后的处理：多级降级获取 PDF
+    // 1. 先从页面内 fetch（有 session cookies + Referer）
+    // 2. fetch 失败则用 downloadURL + will-download 捕获
+    const handleManualPdfClick = async (clickedUrl) => {
+      if (settled || win.isDestroyed()) return;
+      console.log("[EPO Browser] user manually clicked document link:", clickedUrl);
+      updateHint("PatentLens: 正在下载您选择的文档 PDF...");
+
+      // 1. 先从页面内 fetch
+      const fetchResult = await fetchPdfFromPage(clickedUrl);
+      if (fetchResult.body) {
+        console.log("[EPO Browser] manual PDF fetched successfully, size=" + fetchResult.body.length);
+        finish({ body: fetchResult.body });
+        return;
+      }
+      console.log("[EPO Browser] manual fetch failed (" + fetchResult.error + "), trying downloadURL...");
+
+      // 2. fetch 失败，用 downloadURL + will-download 捕获
+      updateHint("PatentLens: 正在下载 PDF 文件...");
+      willDownloadHandler = (_event, item, wc) => {
+        if (wc !== win.webContents) return; // 不是我们的窗口
+        const tmpPath = path.join(require("os").tmpdir(), "patentlens-epo-" + Date.now() + ".pdf");
+        item.setSavePath(tmpPath);
+        item.once("done", () => {
+          try {
+            const buf = fs.readFileSync(tmpPath);
+            if (buf.length > 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) {
+              console.log("[EPO Browser] manual PDF downloaded successfully, size=" + buf.length);
+              finish({ body: buf });
+            } else {
+              finish({ error: "downloaded file is not a valid PDF, size=" + buf.length });
+            }
+            try { fs.unlinkSync(tmpPath); } catch (_) {}
+          } catch (e) {
+            finish({ error: "failed to read downloaded PDF: " + e.message });
+          }
+        });
+      };
+      session.defaultSession.on("will-download", willDownloadHandler);
+      try {
+        win.webContents.downloadURL(clickedUrl);
+      } catch (e) {
+        finish({ error: "downloadURL failed: " + e.message });
+      }
+    };
+
+    // wantPdf 模式：拦截用户点击 PDF 链接（javascript:openNewWindow 或直接 <a href>）
+    if (wantPdf) {
+      // 拦截新窗口打开（EPO 页面用 javascript:openNewWindow 调用 window.open）
+      win.webContents.setWindowOpenHandler(({ url }) => {
+        if (settled || win.isDestroyed()) return { action: "deny" };
+        if (url.includes("documentView") || url.includes("ipApplication")) {
+          const fullUrl = url.startsWith("http") ? url : EPO_REGISTER_BASE + "/" + url.replace(/^\//, "");
+          handleManualPdfClick(fullUrl);
+          return { action: "deny" };
+        }
+        return { action: "deny" };
+      });
+      // 拦截直接导航（普通 <a href> 点击）
+      win.webContents.on("will-navigate", (event, url) => {
+        if (settled || win.isDestroyed()) return;
+        if (url.includes("documentView") || url.includes("ipApplication")) {
+          event.preventDefault();
+          handleManualPdfClick(url);
+        }
+      });
+    }
 
     let tryExtractRunning = false;
     let retrieveDetectedAt = 0;
@@ -1071,18 +1149,30 @@ async function epoFetchViaBrowser(targetUrl, options) {
         doclistReady = true;
 
         if (wantPdf) {
-          // PDF 模式：从 doclist 页面内 fetch PDF（有 session + Referer）
-          updateHint("PatentLens: 审查档案已就绪，正在下载文档 PDF...");
-          const result = await fetchPdfFromPage();
-          if (result.error && /fetch|network|Failed to fetch|HTTP 4\d\d|HTTP 5\d\d/i.test(result.error)) {
-            console.log("[EPO Browser] PDF fetch error, will retry:", result.error);
-            updateHint("PatentLens: PDF 下载失败（" + result.error + "），正在重试... 若多次失败可点击右侧按钮手动操作");
+          if (manualMode) {
+            // 手动模式：等待用户点击 PDF 链接，不自动 fetch
             return;
           }
-          if (result.body) {
-            console.log("[EPO Browser] PDF fetched successfully, size=" + result.body.length + ", closing window");
+          // PDF 模式：从 doclist 页面内 fetch PDF（有 session + Referer）
+          pdfRetryCount++;
+          if (pdfRetryCount <= 3) {
+            updateHint(`PatentLens: 审查档案已就绪，正在下载文档 PDF... (尝试 ${pdfRetryCount}/3)`);
+            const result = await fetchPdfFromPage();
+            if (result.body) {
+              console.log("[EPO Browser] PDF fetched successfully, size=" + result.body.length + ", closing window");
+              finish(result);
+              return;
+            }
+            if (result.error) {
+              console.log(`[EPO Browser] PDF fetch error (attempt ${pdfRetryCount}/3):`, result.error);
+            }
+            if (pdfRetryCount < 3) return; // 继续重试
           }
-          finish(result);
+          // 3 次自动获取失败，切换到手动模式
+          manualMode = true;
+          console.log("[EPO Browser] auto PDF fetch failed after 3 attempts, switching to manual mode");
+          updateHint("PatentLens: 自动获取 PDF 失败。请在下方手动点击要查看的文档，系统会自动捕获 PDF 并回传到审查看板");
+          return;
         } else {
           // HTML 模式：提取 outerHTML + DOM 文档列表
           updateHint("PatentLens: 审查档案已就绪，正在提取文档列表...");
@@ -1184,11 +1274,13 @@ async function epoFetchViaBrowser(targetUrl, options) {
       checkUserDone();
     }, 2000);
 
+    // wantPdf 模式：手动模式需要更多时间，延长超时到 5 分钟
+    const effectiveTimeout = wantPdf ? Math.max(timeout, 300000) : timeout;
     setTimeout(() => {
       if (!settled) {
-        finish({ cloudflare: true, error: `Browser fetch timeout (${timeout}ms)` });
+        finish({ cloudflare: true, error: `Browser fetch timeout (${effectiveTimeout}ms)` });
       }
-    }, timeout);
+    }, effectiveTimeout);
 
     win.on("closed", () => {
       if (!settled) finish({ error: "window closed by user" });
