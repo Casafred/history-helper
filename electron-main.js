@@ -707,6 +707,7 @@ async function epoFetchPdf(office, docNumber, docId) {
 async function epoFetchViaBrowser(targetUrl, options) {
   options = options || {};
   const wantPdf = !!options.wantPdf;
+  const pdfUrl = options.pdfUrl || null; // PDF 模式下，先加载 doclist 页面，再 fetch 这个 PDF URL
   const viaEspacenet = !!options.viaEspacenet;
   const timeout = options.timeout || 120000;
   return new Promise((resolve) => {
@@ -719,9 +720,7 @@ async function epoFetchViaBrowser(targetUrl, options) {
       height: 800,
       title: wantPdf
         ? "EPO Register - 正在获取审查文档 PDF..."
-        : viaEspacenet
-          ? "Espacenet → EPO Register - 正在获取审查文档列表..."
-          : "EPO Register - 正在获取审查文档列表...",
+        : "Espacenet → EPO Register - 正在获取审查文档列表...",
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
@@ -732,12 +731,23 @@ async function epoFetchViaBrowser(targetUrl, options) {
     let settled = false;
     let cfWaitCount = 0;
     let userClickedDone = false;
-    let autoExtractedOk = false;
+    let doclistReady = false; // doclist 页面是否已就绪（PDF 模式用）
     const CF_WAITING_KEYWORDS = [
       "just a moment", "attention required", "checking your browser",
       "performing security", "verifying you are human", "请稍候", "请稍等",
       "正在检查", "正在验证", "需要关注", "执行安全", "稍候片刻",
     ];
+
+    // 动态更新工具栏提示文字
+    const updateHint = (text) => {
+      if (settled || win.isDestroyed()) return;
+      try {
+        win.webContents.executeJavaScript(`
+          var hint = document.getElementById("patentlens-verify-hint");
+          if (hint) hint.textContent = ${JSON.stringify(text)};
+        `, true).catch(() => {});
+      } catch (_) {}
+    };
 
     const finish = (result) => {
       if (settled) return;
@@ -752,44 +762,47 @@ async function epoFetchViaBrowser(targetUrl, options) {
       return CF_WAITING_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
     };
 
-    const extractFromPage = async () => {
+    const extractHtml = async () => {
       try {
-        if (wantPdf) {
-          // PDF 请求：在 webContents 中通过 fetch 获取 PDF buffer（fetch 自动带 session cookie）
-          // 注意：此时 webContents 已导航到 register.epo.org 同源页面，fetch 同源 PDF 不会被 CORS 拦截
-          const result = await win.webContents.executeJavaScript(`
-            (async function() {
-              try {
-                const resp = await fetch(${JSON.stringify(targetUrl)}, {
-                  credentials: 'include',
-                  headers: { 'Accept': 'application/pdf,*/*' },
-                  redirect: 'follow'
-                });
-                if (!resp.ok) return { error: 'HTTP ' + resp.status };
-                const ab = await resp.arrayBuffer();
-                const arr = Array.from(new Uint8Array(ab));
-                return { buffer: arr, contentType: resp.headers.get('content-type') || '' };
-              } catch(e) { return { error: e.message }; }
-            })();
-          `, true);
-          if (result.error) return { error: result.error };
-          const buf = Buffer.from(result.buffer);
-          const isPdf = buf.length > 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
-          if (!isPdf) {
-            const headStr = buf.slice(0, Math.min(2000, buf.length)).toString("utf-8");
-            if (epoDetectCloudflare(headStr)) return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
-            return { error: "not a PDF, contentType=" + result.contentType + ", size=" + buf.length };
-          }
-          return { body: buf };
-        } else {
-          // HTML 请求：直接提取 outerHTML
-          const html = await win.webContents.executeJavaScript(
-            "document.documentElement.outerHTML", true
-          );
-          if (!html || html.length < 500) return { error: "html too short: " + (html ? html.length : 0) };
-          if (epoDetectCloudflare(html)) return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
-          return { body: html };
+        const html = await win.webContents.executeJavaScript(
+          "document.documentElement.outerHTML", true
+        );
+        if (!html || html.length < 500) return { error: "html too short: " + (html ? html.length : 0) };
+        if (epoDetectCloudflare(html)) return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
+        return { body: html };
+      } catch (e) {
+        return { error: e.message };
+      }
+    };
+
+    // 从 doclist 页面内 fetch PDF（此时有 session cookie + 正确 Referer）
+    const fetchPdfFromPage = async () => {
+      try {
+        updateHint("PatentLens: 审查文档列表已就绪，正在下载 PDF...");
+        const result = await win.webContents.executeJavaScript(`
+          (async function() {
+            try {
+              const resp = await fetch(${JSON.stringify(pdfUrl)}, {
+                credentials: 'include',
+                headers: { 'Accept': 'application/pdf,*/*' },
+                redirect: 'follow'
+              });
+              if (!resp.ok) return { error: 'HTTP ' + resp.status };
+              const ab = await resp.arrayBuffer();
+              const arr = Array.from(new Uint8Array(ab));
+              return { buffer: arr, contentType: resp.headers.get('content-type') || '' };
+            } catch(e) { return { error: e.message }; }
+          })();
+        `, true);
+        if (result.error) return { error: result.error };
+        const buf = Buffer.from(result.buffer);
+        const isPdf = buf.length > 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
+        if (!isPdf) {
+          const headStr = buf.slice(0, Math.min(2000, buf.length)).toString("utf-8");
+          if (epoDetectCloudflare(headStr)) return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
+          return { error: "not a PDF, contentType=" + result.contentType + ", size=" + buf.length };
         }
+        return { body: buf };
       } catch (e) {
         return { error: e.message };
       }
@@ -798,7 +811,7 @@ async function epoFetchViaBrowser(targetUrl, options) {
     let tryExtractRunning = false;
     let retrieveDetectedAt = 0;
     let retrieveReloadedAt = 0;
-    let espacenetNavigatedToEpo = false; // 是否已从 espacenet 跳转到 register.epo.org
+    let espacenetNavigatedToEpo = false;
     const tryExtract = async () => {
       if (settled || win.isDestroyed() || tryExtractRunning) return;
       tryExtractRunning = true;
@@ -807,29 +820,27 @@ async function epoFetchViaBrowser(targetUrl, options) {
         if (isCfWaiting(title)) {
           cfWaitCount++;
           console.log(`[EPO Browser] Cloudflare waiting (title="${title}", count=${cfWaitCount})`);
+          updateHint(`PatentLens: Cloudflare 验证中... (${cfWaitCount}/60) 若需手动完成验证请在下方操作，完成后点击右侧按钮`);
           if (cfWaitCount > 60) {
             finish({ cloudflare: true, error: "Cloudflare verification timeout (120s)" });
           }
-          return; // 继续等
+          return;
         }
 
         // 阶段 0：espacenet 跳转阶段（viaEspacenet=true 且尚未跳到 register.epo.org）
-        // 在 espacenet 详情页上查找 "Global Dossier" 链接，找到后导航到 register.epo.org
-        if (viaEspacenet && !espacenetNavigatedToEpo && !wantPdf) {
+        if (viaEspacenet && !espacenetNavigatedToEpo) {
           const currentUrl = win.webContents.getURL();
           if (currentUrl.includes("espacenet.com")) {
-            // 查找 Global Dossier 链接（详情页才有）
+            updateHint("PatentLens: 正在 Espacenet 查找 Global Dossier 入口，请稍候...");
             const gdLink = await win.webContents.executeJavaScript(`
               (function() {
                 try {
-                  // 优先找文本含 "Global Dossier" 且指向 register.epo.org 的链接
                   var links = document.querySelectorAll('a[href*="register.epo.org/ipfwretrieve"]');
                   for (var i = 0; i < links.length; i++) {
                     if (links[i].textContent.includes("Global Dossier")) {
                       return links[i].href;
                     }
                   }
-                  // 兜底：通过 class 匹配 publication-link
                   var gdLinks = document.querySelectorAll('a[class*="publication-link__link"]');
                   for (var i = 0; i < gdLinks.length; i++) {
                     if (gdLinks[i].textContent.includes("Global Dossier") && gdLinks[i].href.includes("register.epo.org")) {
@@ -844,22 +855,13 @@ async function epoFetchViaBrowser(targetUrl, options) {
             if (gdLink) {
               console.log("[EPO Browser] found Global Dossier link on espacenet, navigating to:", gdLink);
               espacenetNavigatedToEpo = true;
-              // 更新工具栏提示
-              try {
-                win.webContents.executeJavaScript(`
-                  var hint = document.getElementById("patentlens-verify-hint");
-                  if (hint) hint.textContent = "✅ 已找到 Global Dossier 入口，正在跳转到 EPO Register...";
-                `, true).catch(() => {});
-              } catch (_) {}
+              updateHint("✅ 已找到 Global Dossier 入口，正在跳转到 EPO Register...");
               win.webContents.loadURL(gdLink);
               return;
             } else {
-              // 还在 espacenet 搜索页或详情页尚未加载出 GD 链接
-              // 尝试自动点击第一个搜索结果（如果搜索结果列表存在）
               const clicked = await win.webContents.executeJavaScript(`
                 (function() {
                   try {
-                    // espacenet 搜索结果列表项
                     var resultItems = document.querySelectorAll('article[class*="search-result"], li[class*="search-result"], a[class*="result__link"]');
                     if (resultItems && resultItems.length === 1) {
                       resultItems[0].click();
@@ -872,69 +874,80 @@ async function epoFetchViaBrowser(targetUrl, options) {
               if (clicked) {
                 console.log("[EPO Browser] clicked single espacenet search result, waiting for detail page...");
               }
-              console.log("[EPO Browser] on espacenet, waiting for Global Dossier link to appear...");
-              return; // 继续等
+              return;
             }
           }
         }
 
         // 阶段 1：在 register.epo.org，检测页面是否真正就绪
-        // EPO 对非 EP 局会先返回 "Dossier documents are being retrieved" 中间页，
-        // 需要等 8s 后重新加载才能拿到真正的文档列表（原 curl 路径已处理此情况）
-        if (!wantPdf) {
-          const pageInfo = await win.webContents.executeJavaScript(`
-            (function() {
-              try {
-                var html = document.documentElement ? document.documentElement.outerHTML : "";
-                return {
-                  isRetrieving: /being retrieved|Dossier documents are being/i.test(html),
-                  hasDocList: !!document.querySelector(
-                    "table.docListTable, #documents, div.docListTable, " +
-                    "#resultData, #applicationForm, table.publicationData, " +
-                    "#proc_table, div.proceedings, table.biblio"
-                  ),
-                  title: document.title,
-                  htmlLen: html.length,
-                  url: window.location.href
-                };
-              } catch(e) { return { isRetrieving: false, hasDocList: false, error: e.message }; }
-            })();
-          `, true).catch(() => ({ isRetrieving: false, hasDocList: false }));
+        const pageInfo = await win.webContents.executeJavaScript(`
+          (function() {
+            try {
+              var html = document.documentElement ? document.documentElement.outerHTML : "";
+              return {
+                isRetrieving: /being retrieved|Dossier documents are being/i.test(html),
+                hasDocList: !!document.querySelector(
+                  "table.docListTable, #documents, div.docListTable, " +
+                  "#resultData, #applicationForm, table.publicationData, " +
+                  "#proc_table, div.proceedings, table.biblio"
+                ),
+                title: document.title,
+                htmlLen: html.length,
+                url: window.location.href
+              };
+            } catch(e) { return { isRetrieving: false, hasDocList: false, error: e.message }; }
+          })();
+        `, true).catch(() => ({ isRetrieving: false, hasDocList: false }));
 
-          console.log(`[EPO Browser] page state:`, JSON.stringify(pageInfo).slice(0, 200));
-
-          // 中间页：等 8s 后重新加载
-          if (pageInfo.isRetrieving) {
-            if (!retrieveDetectedAt) {
-              retrieveDetectedAt = Date.now();
-              console.log("[EPO Browser] detected 'being retrieved' intermediate page, waiting 8s before reload...");
-            }
-            if (Date.now() - retrieveDetectedAt > 8000 && !retrieveReloadedAt) {
-              retrieveReloadedAt = Date.now();
-              console.log("[EPO Browser] reloading after 'being retrieved' wait");
-              try { win.webContents.reload(); } catch (_) {}
-            }
-            return; // 继续等
+        // 中间页：等 8s 后重新加载
+        if (pageInfo.isRetrieving) {
+          updateHint("PatentLens: EPO 正在检索档案，请稍候 8 秒后自动刷新...");
+          if (!retrieveDetectedAt) {
+            retrieveDetectedAt = Date.now();
+            console.log("[EPO Browser] detected 'being retrieved' intermediate page, waiting 8s before reload...");
           }
-
-          // 页面没有 doclist 特征元素：可能还在加载，继续等
-          // 但如果用户已点击"完成验证"按钮，强制提取一次（避免自动检测漏判）
-          if (!pageInfo.hasDocList && !userClickedDone) {
-            return;
+          if (Date.now() - retrieveDetectedAt > 8000 && !retrieveReloadedAt) {
+            retrieveReloadedAt = Date.now();
+            console.log("[EPO Browser] reloading after 'being retrieved' wait");
+            try { win.webContents.reload(); } catch (_) {}
           }
-        }
-
-        const result = await extractFromPage();
-        if (result.error && /fetch|network|Failed to fetch/i.test(result.error)) {
-          // 网络错误，下次定时器再试
-          console.log("[EPO Browser] transient fetch error, will retry:", result.error);
           return;
         }
-        if (result.body) {
-          autoExtractedOk = true;
-          console.log("[EPO Browser] auto-extracted successfully, closing window");
+
+        // 页面没有 doclist 特征元素：可能还在加载，继续等
+        if (!pageInfo.hasDocList && !userClickedDone) {
+          updateHint("PatentLens: 正在加载 EPO Register 审查档案页面，请稍候...");
+          return;
         }
-        finish(result);
+
+        // doclist 页面已就绪
+        doclistReady = true;
+
+        if (wantPdf) {
+          // PDF 模式：从 doclist 页面内 fetch PDF（有 session + Referer）
+          updateHint("PatentLens: 审查档案已就绪，正在下载文档 PDF...");
+          const result = await fetchPdfFromPage();
+          if (result.error && /fetch|network|Failed to fetch|HTTP 4\d\d|HTTP 5\d\d/i.test(result.error)) {
+            console.log("[EPO Browser] PDF fetch error, will retry:", result.error);
+            updateHint("PatentLens: PDF 下载失败（" + result.error + "），正在重试... 若多次失败可点击右侧按钮手动操作");
+            return;
+          }
+          if (result.body) {
+            console.log("[EPO Browser] PDF fetched successfully, size=" + result.body.length + ", closing window");
+          }
+          finish(result);
+        } else {
+          // HTML 模式：提取 outerHTML
+          updateHint("PatentLens: 审查档案已就绪，正在提取文档列表...");
+          const result = await extractHtml();
+          if (result.error && /fetch|network|Failed to fetch/i.test(result.error)) {
+            return;
+          }
+          if (result.body) {
+            console.log("[EPO Browser] HTML extracted successfully, closing window");
+          }
+          finish(result);
+        }
       } catch (e) {
         console.warn("[EPO Browser] tryExtract error:", e.message);
       } finally {
@@ -957,7 +970,6 @@ async function epoFetchViaBrowser(targetUrl, options) {
         if (clicked && !userClickedDone) {
           userClickedDone = true;
           console.log("[EPO Browser] user clicked done button, force extracting...");
-          // 延迟 500ms 让页面稳定后强制提取
           setTimeout(tryExtract, 500);
         }
       } catch (_) {}
@@ -965,36 +977,30 @@ async function epoFetchViaBrowser(targetUrl, options) {
 
     win.webContents.on("did-finish-load", () => {
       console.log("[EPO Browser] did-finish-load, url:", win.webContents.getURL());
-      // 注入工具栏：提示用户当前状态 + "我已完成"按钮（参考 openEpoVerifyWindow 的做法）
+      // 注入工具栏（所有 CSS 属性加 !important 防止被宿主页面覆盖）
       try {
         win.webContents.executeJavaScript(`
           (function() {
             if (document.getElementById("patentlens-epo-direct-bar")) return;
             var bar = document.createElement("div");
             bar.id = "patentlens-epo-direct-bar";
-            bar.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:99999;background:#2563eb;color:#fff;padding:8px 16px;display:flex;align-items:center;gap:12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.2);box-sizing:border-box;";
+            bar.style.cssText = "position:fixed !important;left:0 !important;right:0 !important;top:0 !important;z-index:2147483647 !important;background:#2563eb !important;color:#fff !important;padding:10px 16px !important;display:flex !important;align-items:center !important;gap:12px !important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif !important;font-size:14px !important;box-shadow:0 2px 8px rgba(0,0,0,0.3) !important;box-sizing:border-box !important;";
             var hint = document.createElement("span");
             hint.id = "patentlens-verify-hint";
-            hint.style.cssText = "flex:1;min-width:0;";
-            hint.textContent = ${JSON.stringify(
-              wantPdf
-                ? "PatentLens: 正在从 EPO Register 获取审查文档 PDF，请稍候... 若页面卡在 Cloudflare 验证，请完成验证后点击右侧按钮"
-                : viaEspacenet
-                  ? "PatentLens: 正在通过 Espacenet 查找 Global Dossier 入口... 若页面卡在 Cloudflare 验证，请完成验证后点击右侧按钮"
-                  : "PatentLens: 正在从 EPO Register 获取审查文档列表，请稍候... 若页面卡在 Cloudflare 验证，请完成验证后点击右侧按钮"
-            )};
+            hint.style.cssText = "flex:1 !important;min-width:0 !important;color:#fff !important;";
+            hint.textContent = "PatentLens: 正在启动...";
             var btn = document.createElement("button");
             btn.id = "patentlens-verify-btn";
-            btn.textContent = "✓ 我已完成验证，继续";
-            btn.style.cssText = "background:#22c55e;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:13px;cursor:pointer;white-space:nowrap;";
+            btn.textContent = "✓ 我已完成验证，提取数据";
+            btn.style.cssText = "background:#22c55e !important;color:#fff !important;border:none !important;padding:8px 16px !important;border-radius:6px !important;font-size:14px !important;cursor:pointer !important;white-space:nowrap !important;font-weight:bold !important;box-shadow:0 1px 4px rgba(0,0,0,0.2) !important;";
             btn.addEventListener("click", function() {
-              hint.textContent = "✅ 验证完成，正在保存会话并提取数据...";
+              hint.textContent = "✅ 验证完成，正在提取数据...";
               window.postMessage({ type: "patentlens-epo-direct-done" }, "*");
             });
             bar.appendChild(hint);
             bar.appendChild(btn);
             (document.body || document.documentElement).appendChild(bar);
-            if (document.body) document.body.style.setProperty('margin-top', '40px', 'important');
+            if (document.body) document.body.style.setProperty('margin-top', '48px', 'important');
           })();
         `, true).catch(() => {});
       } catch (_) {}
@@ -1018,7 +1024,6 @@ async function epoFetchViaBrowser(targetUrl, options) {
       checkUserDone();
     }, 2000);
 
-    // 超时（120s，给 CF 人工验证留足时间）
     setTimeout(() => {
       if (!settled) {
         finish({ cloudflare: true, error: `Browser fetch timeout (${timeout}ms)` });
@@ -1029,7 +1034,6 @@ async function epoFetchViaBrowser(targetUrl, options) {
       if (!settled) finish({ error: "window closed by user" });
     });
 
-    // 加载 URL（不设 userAgent，用 Electron 默认 UA，与 espacenet 弹窗一致）
     console.log("[EPO Browser] loading URL (visible window, default UA, default session):", targetUrl);
     win.loadURL(targetUrl).catch(e => {
       console.warn("[EPO Browser] loadURL failed:", e.message);
@@ -1042,16 +1046,11 @@ async function epoFetchViaBrowser(targetUrl, options) {
 // 非 EP 局：无法直接构造 ipfwretrieve URL（需要申请号，前端拿到的可能是公开号），
 //          改为加载 espacenet 搜索页，通过详情页上的 "Global Dossier" 链接获取正确申请号 URL
 function epoBuildDocListUrl(office, docNumber, kindCode) {
-  const isEp = office.toUpperCase() === "EP";
-  if (isEp) {
-    return {
-      url: `${EPO_REGISTER_BASE}/application?number=EP${encodeURIComponent(docNumber)}&lng=en&tab=doclist`,
-      viaEspacenet: false,
-    };
-  }
-  // 非 EP 局：走 espacenet 详情页找 Global Dossier 链接（与前端 espacenet 跳转一致）
+  // 所有局统一走 espacenet 搜索页 → 详情页 → Global Dossier 链接 → register.epo.org
+  // 搜索词：office + docNumber（如 EP3762180、US12304032），与详情页 espacenet 按钮一致
+  const searchTerm = office.toUpperCase() + docNumber;
   return {
-    url: `https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(docNumber)}`,
+    url: `https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(searchTerm)}`,
     viaEspacenet: true,
   };
 }
@@ -1186,10 +1185,14 @@ async function proxyGdApi(urlPath, res) {
 
   try {
     if (isDocContent && docId) {
-      // EPO 直走模式：用隐藏 BrowserWindow + 默认 session（复用 espacenet 弹窗成功策略过 CF）
+      // EPO 直走模式：先加载 doclist 页面（via espacenet）建立 session，再 fetch PDF
       // 非 EPO 直走模式：保留原 curl 路径
       const epoResult = epoDirect
-        ? await epoFetchViaBrowser(epoBuildPdfUrl(office, docNumber, docId), { wantPdf: true })
+        ? await epoFetchViaBrowser(epoBuildDocListUrl(office, docNumber, "A").url, {
+            wantPdf: true,
+            pdfUrl: epoBuildPdfUrl(office, docNumber, docId),
+            viaEspacenet: epoBuildDocListUrl(office, docNumber, "A").viaEspacenet,
+          })
         : await epoFetchPdf(office, docNumber, docId);
       if (epoResult.body) {
         console.log(`[EPO Fallback] EPO PDF succeeded for ${office}/${docNumber}/${docId}, size=${epoResult.body.length}`);
@@ -1214,7 +1217,7 @@ async function proxyGdApi(urlPath, res) {
       res.writeHead(502, { "Content-Type": "application/json", ...corsHeaders });
       res.end(JSON.stringify({
         error: `GD: ${gdFailReason}; EPO: ${epoResult.error || "failed"}`,
-        cloudflare: true,
+        cloudflare: !epoDirect && true, // EPO 直走模式下不标记 cloudflare，避免触发旧验证窗口
         browserUrl: `https://register.epo.org/application?number=${office}${docNumber}&lng=en&tab=doclist`,
       }));
     } else if (isDocList) {
@@ -1264,7 +1267,7 @@ async function proxyGdApi(urlPath, res) {
       res.writeHead(502, { "Content-Type": "application/json", ...corsHeaders });
       res.end(JSON.stringify({
         error: `GD: ${gdFailReason}; EPO: ${epoResult.error || "failed"}`,
-        cloudflare: true,
+        cloudflare: !epoDirect && true, // EPO 直走模式下不标记 cloudflare，避免触发旧验证窗口
         browserUrl: epoResult.browserUrl || (`https://register.epo.org/application?number=${office}${docNumber}&lng=en&tab=doclist`),
       }));
     } else if (isFamily) {
@@ -1324,7 +1327,7 @@ async function proxyGdApi(urlPath, res) {
     res.writeHead(502, corsHeaders);
     res.end(JSON.stringify({
       error: `GD: ${gdFailReason}; EPO exception: ${e.message}`,
-      cloudflare: true,
+      cloudflare: !epoDirect && true, // EPO 直走模式下不标记 cloudflare，避免触发旧验证窗口
       browserUrl: office && docNumber ? `https://register.epo.org/application?number=${office}${docNumber}&lng=en&tab=doclist` : null,
     }));
   }
@@ -2193,10 +2196,16 @@ async function extractPdfText(req, res) {
   if (!pdfBuffer && epSupported && epDocId) {
     console.log(`[EPO Fallback] extractPdfText GD failed (${gdFailReason}), trying EPO for ${epOffice}/${epDocNum}/${epDocId}...`);
     try {
-      // EPO 直走模式：用隐藏 BrowserWindow 获取 PDF（参考 espacenet 弹窗策略过 CF）
+      // EPO 直走模式：先加载 doclist 页面（via espacenet）建立 session，再 fetch PDF
       // 非 EPO 直走模式：保留原 curl 路径
+      const _urlInfo = epoBuildDocListUrl(epOffice, epDocNum, "A");
       const epoResult = epoDirect
-        ? await epoFetchViaBrowser(epoBuildPdfUrl(epOffice, epDocNum, epDocId), { wantPdf: true, timeout: 90000 })
+        ? await epoFetchViaBrowser(_urlInfo.url, {
+            wantPdf: true,
+            pdfUrl: epoBuildPdfUrl(epOffice, epDocNum, epDocId),
+            viaEspacenet: _urlInfo.viaEspacenet,
+            timeout: 120000,
+          })
         : await epoFetchPdf(epOffice, epDocNum, epDocId);
       if (epoResult.body) {
         console.log(`[EPO Fallback] extractPdfText EPO PDF succeeded, size=${epoResult.body.length}`);

@@ -1439,6 +1439,11 @@ function parsePatentNumber(input) {
 let _gdEpoPromptedAt = 0;
 let _gdEpoVerifying = false;  // 正在内嵌窗口验证中，避免重复触发
 function _promptGdEpoBrowserOpen(e, kind) {
+  // EPO 直走模式下，可见窗口已经处理了 CF 验证，不再弹旧的验证窗口
+  if (getEpoDirectMode()) {
+    console.info("[GD→EPO] EPO 直走模式已开启，跳过旧验证窗口弹框", kind);
+    return;
+  }
   console.info("[GD→EPO] _promptGdEpoBrowserOpen called", {
     kind,
     hasError: !!e,
