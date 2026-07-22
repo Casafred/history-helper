@@ -712,6 +712,34 @@ async function epoFetchPdf(office, docNumber, docId) {
   return { body: result.body };
 }
 
+// 用缓存的 session cookies 直接 curl 请求 PDF（不弹窗）
+// doclist 成功后从 BrowserWindow session 提取的 cookies 包含 CF clearance，
+// curl 带上这些 cookies 即可通过 Cloudflare，无需再次弹窗
+async function epoFetchPdfWithSession(office, docNumber, pdfUrl) {
+  const cookies = getCachedEpoCookies(office, docNumber);
+  if (!cookies) return { error: "no cached session cookies" };
+
+  const args = [
+    "-s", "-w", " HTTP_CODE_%{http_code}",
+    "--max-time", "60",
+    "-L",
+    "-H", "Accept: application/pdf,*/*",
+    "-H", "Referer: https://register.epo.org/",
+    "-H", "Cookie: " + cookies,
+    "-H", "User-Agent: " + EPO_UA,
+    pdfUrl,
+  ];
+  let result;
+  try { result = await epoCurl(args, true); } catch (e) { return { error: "curl error: " + e.message }; }
+  if (result.httpCode !== 200) return { error: `HTTP ${result.httpCode}` };
+  if (result.body.length < 100) return { error: "PDF content too small" };
+  const headStr = result.body.slice(0, Math.min(2000, result.body.length)).toString("utf-8");
+  if (epoDetectCloudflare(headStr)) return { cloudflare: true, error: "Cloudflare verification required (cookies may have expired)" };
+  const isPdf = result.body.length > 4 && result.body[0] === 0x25 && result.body[1] === 0x50 && result.body[2] === 0x44 && result.body[3] === 0x46;
+  if (!isPdf) return { error: "not a PDF, size=" + result.body.length };
+  return { body: result.body };
+}
+
 // ── EPO Register via 可见 BrowserWindow（参考 espacenet 弹窗成功策略）─────
 // 完全复制 espacenet 弹窗过 Cloudflare 的策略：
 //   1. 可见 BrowserWindow（show:true）+ 默认 session（复用 mainWindow 已通过的 CF cookie）
@@ -744,6 +772,17 @@ function getCachedRealApn(office, docNumber) {
 }
 function setCachedRealApn(office, docNumber, apn) {
   _realApnCache.set(_dossierCacheKey(office, docNumber), apn);
+}
+
+// Session cookies 缓存：office+docNumber → cookie string
+// doclist 成功后从 BrowserWindow session 提取 cookies 并缓存，
+// 后续 PDF 请求用 curl + 缓存 cookies 直接请求，不再弹窗
+const _epoSessionCookies = new Map();
+function getCachedEpoCookies(office, docNumber) {
+  return _epoSessionCookies.get(_dossierCacheKey(office, docNumber)) || null;
+}
+function setCachedEpoCookies(office, docNumber, cookies) {
+  _epoSessionCookies.set(_dossierCacheKey(office, docNumber), cookies);
 }
 async function epoFetchViaBrowser(targetUrl, options) {
   options = options || {};
@@ -822,12 +861,57 @@ async function epoFetchViaBrowser(targetUrl, options) {
 
     const extractHtml = async () => {
       try {
-        const html = await win.webContents.executeJavaScript(
-          "document.documentElement.outerHTML", true
-        );
-        if (!html || html.length < 500) return { error: "html too short: " + (html ? html.length : 0) };
-        if (epoDetectCloudflare(html)) return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
-        return { body: html };
+        const result = await win.webContents.executeJavaScript(`
+          (function() {
+            try {
+              var html = document.documentElement.outerHTML;
+              if (!html || html.length < 500) return { error: "html too short: " + (html ? html.length : 0) };
+
+              // 从 DOM 提取文档列表（比正则更可靠，能处理 javascript:openNewWindow 等各种链接格式）
+              var docs = [];
+              var links = document.querySelectorAll('a[href*="documentView"], a[href*="ipApplication"], a[onclick*="documentView"], a[onclick*="openNewWindow"]');
+              links.forEach(function(link) {
+                var href = link.getAttribute('href') || '';
+                var onclick = link.getAttribute('onclick') || '';
+                var text = link.textContent.trim();
+                if (!text) return;
+                // 从 href 或 onclick 中提取 documentView/ipApplication 的 query string
+                var match = href.match(/documentView\\?([^"'\\s)]+)/) || onclick.match(/documentView\\?([^"'\\s)]+)/);
+                if (!match) match = href.match(/ipApplication\\?([^"'\\s)]+)/) || onclick.match(/ipApplication\\?([^"'\\s)]+)/);
+                if (!match) return;
+                var qs = match[1].replace(/&amp;/g, '&');
+                var numberMatch = qs.match(/number=([^&'"\\s<)]+)/);
+                var docIdMatch = qs.match(/documentId=([^&'"\\s<)]+)/);
+                if (!docIdMatch) return;
+                // 从父行提取日期和页数
+                var row = link.closest('tr');
+                var date = '', pages = 1;
+                if (row) {
+                  var cells = row.querySelectorAll('td');
+                  if (cells.length > 0) date = cells[0].textContent.trim();
+                  if (cells.length > 2) {
+                    var pagesText = cells[cells.length - 1].textContent.trim();
+                    var pagesMatch = pagesText.match(/\\d+/);
+                    if (pagesMatch) pages = parseInt(pagesMatch[0], 10) || 1;
+                  }
+                }
+                docs.push({
+                  date: date,
+                  desc: text,
+                  pages: pages,
+                  number: numberMatch ? numberMatch[1] : '',
+                  docId: docIdMatch[1]
+                });
+              });
+
+              if (/just a moment|attention required|checking your browser|performing security|verifying you are human/i.test(html)) {
+                return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
+              }
+              return { body: html, docList: docs };
+            } catch(e) { return { error: e.message }; }
+          })();
+        `, true);
+        return result;
       } catch (e) {
         return { error: e.message };
       }
@@ -1000,14 +1084,27 @@ async function epoFetchViaBrowser(targetUrl, options) {
           }
           finish(result);
         } else {
-          // HTML 模式：提取 outerHTML
+          // HTML 模式：提取 outerHTML + DOM 文档列表
           updateHint("PatentLens: 审查档案已就绪，正在提取文档列表...");
           const result = await extractHtml();
           if (result.error && /fetch|network|Failed to fetch/i.test(result.error)) {
             return;
           }
           if (result.body) {
-            console.log("[EPO Browser] HTML extracted successfully, closing window");
+            console.log("[EPO Browser] HTML extracted successfully, docList=" + (result.docList ? result.docList.length : 0) + " docs, closing window");
+            // 提取 session cookies 并缓存（供后续 PDF 请求复用，避免再次弹窗）
+            if (office && docNumber) {
+              try {
+                const _cookies = await session.defaultSession.cookies.get({ domain: "epo.org" });
+                const _cookieStr = _cookies.map(c => c.name + "=" + c.value).join("; ");
+                if (_cookieStr) {
+                  setCachedEpoCookies(office, docNumber, _cookieStr);
+                  console.log(`[EPO Browser] cached ${_cookies.length} session cookies for ${office}/${docNumber}`);
+                }
+              } catch (e) {
+                console.warn("[EPO Browser] failed to extract cookies:", e.message);
+              }
+            }
           }
           finish(result);
         }
@@ -1126,6 +1223,25 @@ function epoBuildPdfUrl(office, docNumber, docId) {
     ? `EP${docNumber}`
     : `${office}.${docNumber}.A`);
   return `${EPO_REGISTER_BASE}/documentView?number=${encodeURIComponent(apn)}&documentId=${encodeURIComponent(docId)}`;
+}
+
+// 从 DOM 提取的结构化文档列表构建 EPO doclist 结果（比正则解析 HTML 更可靠）
+function epoParseDocListFromDom(domDocs, office, docNumber, kindCode) {
+  const isEp = office.toUpperCase() === "EP";
+  const docs = domDocs.map(d => {
+    const realApn = d.number || (isEp ? "EP" + docNumber : `${office}.${docNumber}.${kindCode || "A"}`);
+    const docId = d.docId;
+    const cls = epoClassifyDoc(d.desc, "");
+    const pdfUrl = `${EPO_REGISTER_BASE}/documentView?number=${encodeURIComponent(realApn)}&documentId=${encodeURIComponent(docId)}`;
+    return {
+      docId, docCode: cls.docCode, docDesc: d.desc, documentDescription: d.desc,
+      documentDate: epoNormalizeDate(d.date), date: epoNormalizeDate(d.date),
+      numberOfPages: d.pages || 1, docFormat: "pdf",
+      documentType: cls.docCode, countryCode: office, epoDocType: isEp ? "ep" : "gd",
+      apn: realApn, epoPdfUrl: pdfUrl,
+    };
+  });
+  return { docs, title: "", docNumber, source: isEp ? "EPO Register" : "EPO Global Dossier", totalDocs: docs.length };
 }
 
 // 解析 EPO doclist HTML（提取自 epoFetchDocList，供 browser 路径复用）
@@ -1251,22 +1367,42 @@ async function proxyGdApi(urlPath, res) {
 
   try {
     if (isDocContent && docId) {
-      // EPO 直走模式：先加载 doclist 页面（via espacenet 或缓存）建立 session，再 fetch PDF
+      // EPO 直走模式：优先用缓存的 session cookies 直接 curl 请求 PDF（不弹窗），
+      // 失败时 fallback 到 BrowserWindow 弹窗（建立/刷新 session）
       // 非 EPO 直走模式：保留原 curl 路径
       const _urlInfo2 = epoBuildDocListUrl(office, docNumber, "A");
       // 优先使用前端传来的 epoPdfUrl（从 dossier 页面解析的 documentView 链接），
       // 兜底用 epoBuildPdfUrl 构造
       const _effectivePdfUrl = epoPdfUrlParam || epoBuildPdfUrl(office, docNumber, docId);
       console.log(`[EPO Direct] doc-content PDF URL: ${_effectivePdfUrl}${epoPdfUrlParam ? " (from epoPdfUrl param)" : " (constructed)"}`);
-      const epoResult = epoDirect
-        ? await epoFetchViaBrowser(_urlInfo2.url, {
+
+      let epoResult = null;
+      if (epoDirect) {
+        // 1) 优先用缓存的 session cookies 直接 curl 请求（不弹窗，速度快）
+        const cachedCookies = getCachedEpoCookies(office, docNumber);
+        if (cachedCookies) {
+          console.log(`[EPO Direct] trying PDF with cached session cookies for ${office}/${docNumber}`);
+          epoResult = await epoFetchPdfWithSession(office, docNumber, _effectivePdfUrl);
+          if (epoResult.body) {
+            console.log(`[EPO Direct] PDF succeeded via cached session, size=${epoResult.body.length}`);
+          } else {
+            console.log(`[EPO Direct] cached session PDF failed (${epoResult.error}), falling back to browser window...`);
+            epoResult = null;
+          }
+        }
+        // 2) 缓存 cookies 失败或无缓存，fallback 到 BrowserWindow 弹窗
+        if (!epoResult) {
+          epoResult = await epoFetchViaBrowser(_urlInfo2.url, {
             wantPdf: true,
             pdfUrl: _effectivePdfUrl,
             viaEspacenet: _urlInfo2.viaEspacenet,
             office,
             docNumber,
-          })
-        : await epoFetchPdf(office, docNumber, docId);
+          });
+        }
+      } else {
+        epoResult = await epoFetchPdf(office, docNumber, docId);
+      }
       if (epoResult.body) {
         console.log(`[EPO Fallback] EPO PDF succeeded for ${office}/${docNumber}/${docId}, size=${epoResult.body.length}`);
         res.writeHead(200, {
@@ -1307,7 +1443,15 @@ async function proxyGdApi(urlPath, res) {
           docNumber,
         });
         if (browserResult.body) {
-          epoResult = epoParseDocListHtml(browserResult.body, office, docNumber, "A");
+          // 优先使用 DOM 提取的文档列表（更可靠，能处理各种链接格式），
+          // fallback 到正则解析 HTML
+          if (browserResult.docList && browserResult.docList.length > 0) {
+            epoResult = epoParseDocListFromDom(browserResult.docList, office, docNumber, "A");
+            console.log(`[EPO Browser] parsed ${epoResult.docs.length} docs from DOM extraction`);
+          } else {
+            epoResult = epoParseDocListHtml(browserResult.body, office, docNumber, "A");
+            console.log(`[EPO Browser] parsed ${epoResult.docs.length} docs from regex`);
+          }
           // 缓存真实 APN（从解析结果中取第一个文档的 apn，用于后续 PDF URL 构造）
           if (epoResult.docs && epoResult.docs.length > 0 && epoResult.docs[0].apn) {
             const realApn = epoResult.docs[0].apn;
