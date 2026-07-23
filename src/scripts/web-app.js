@@ -11407,51 +11407,68 @@ function renderTimeline(data) {
     misc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
   };
 
-  // Build horizontal snake/zig-zag timeline
-  // Use CSS grid with alternating rows for zig-zag effect
+  // ── S-shaped (boustrophedon) wrapping layout ──
+  // Calculate items per row based on board width
+  const boardWidth = board.clientWidth || 800;
+  const minItemWidth = 185;
+  const itemsPerRow = Math.max(3, Math.min(8, Math.floor(boardWidth / minItemWidth)));
+
+  // Group items into rows
+  const rows = [];
+  for (let i = 0; i < sorted.length; i += itemsPerRow) {
+    rows.push(sorted.slice(i, i + itemsPerRow));
+  }
+
   let html = '<div class="tl-snake">';
-  html += '<div class="tl-snake-track"></div>';
 
-  sorted.forEach((it, i) => {
-    const dotClass = dotClassMap[it.type] || "tl-dot-misc";
-    const typeLabel = typeLabelMap[it.type] || "其他";
-    const typeIcon = typeIconMap[it.type] || typeIconMap.misc;
-    const isTop = i % 2 === 0;
-    const isSelected = _tlSelected.has(it.idx);
-    const isFirst = i === 0;
-    const isLast = i === sorted.length - 1;
+  rows.forEach((row, rowIdx) => {
+    const isReversed = rowIdx % 2 === 1;
+    const isLastRow = rowIdx === rows.length - 1;
 
-    // For top nodes (even index): card above → connector down → dot on center line
-    // For bottom nodes (odd index): dot on center line → connector down → card below
-    html += `<div class="tl-node ${isTop ? 'tl-node-top' : 'tl-node-bottom'} ${isSelected ? 'selected' : ''} ${isFirst ? 'tl-node-first' : ''} ${isLast ? 'tl-node-last' : ''}" data-idx="${it.idx}">`;
+    html += `<div class="tl-row ${isReversed ? 'tl-row-reversed' : ''}">`;
+    // Horizontal track line for this row
+    html += '<div class="tl-row-track"></div>';
 
-    if (isTop) {
-      // Card above the line
-      html += `  <div class="tl-node-card" onclick="_jumpToDocFromTimeline(${it.idx})">`;
-      html += `    <div class="tl-node-date">${escapeHtml(it.date || '')}</div>`;
-      html += `    <div class="tl-node-title" title="${escapeHtml(it.name || '')}">${escapeHtml(it.name || '')}</div>`;
-      html += `    <div class="tl-node-meta">`;
-      html += `      <span class="tl-node-code">${escapeHtml(it.docCode || '')}</span>`;
-      html += `      <span class="tl-node-badge ${dotClass}">${typeLabel}</span>`;
-      html += `    </div>`;
+    row.forEach((it, colIdx) => {
+      const globalIdx = rowIdx * itemsPerRow + colIdx;
+      const dotClass = dotClassMap[it.type] || "tl-dot-misc";
+      const typeLabel = typeLabelMap[it.type] || "其他";
+      const typeIcon = typeIconMap[it.type] || typeIconMap.misc;
+      // Alternate cards above/below based on global index
+      const isTop = globalIdx % 2 === 0;
+      const isSelected = _tlSelected.has(it.idx);
+
+      html += `<div class="tl-node ${isTop ? 'tl-node-top' : 'tl-node-bottom'} ${isSelected ? 'selected' : ''}" data-idx="${it.idx}">`;
+
+      // Checkbox indicator for select mode
+      html += `<div class="tl-node-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>`;
+
+      // Dot on the track line
+      html += `<div class="tl-node-dot ${dotClass}">${typeIcon}</div>`;
+
+      // Connector from dot to card
+      html += `<div class="tl-node-connector"></div>`;
+
+      // Card
+      html += `<div class="tl-node-card" onclick="_jumpToDocFromTimeline(${it.idx})">`;
+      html += `  <div class="tl-node-date">${escapeHtml(it.date || '')}</div>`;
+      html += `  <div class="tl-node-title" title="${escapeHtml(it.name || '')}">${escapeHtml(it.name || '')}</div>`;
+      html += `  <div class="tl-node-meta">`;
+      html += `    <span class="tl-node-code">${escapeHtml(it.docCode || '')}</span>`;
+      html += `    <span class="tl-node-badge ${dotClass}">${typeLabel}</span>`;
       html += `  </div>`;
-      html += `  <div class="tl-node-connector"></div>`;
-      html += `  <div class="tl-node-dot ${dotClass}">${typeIcon}</div>`;
-    } else {
-      // Dot on the line, card below
-      html += `  <div class="tl-node-dot ${dotClass}">${typeIcon}</div>`;
-      html += `  <div class="tl-node-connector"></div>`;
-      html += `  <div class="tl-node-card" onclick="_jumpToDocFromTimeline(${it.idx})">`;
-      html += `    <div class="tl-node-date">${escapeHtml(it.date || '')}</div>`;
-      html += `    <div class="tl-node-title" title="${escapeHtml(it.name || '')}">${escapeHtml(it.name || '')}</div>`;
-      html += `    <div class="tl-node-meta">`;
-      html += `      <span class="tl-node-code">${escapeHtml(it.docCode || '')}</span>`;
-      html += `      <span class="tl-node-badge ${dotClass}">${typeLabel}</span>`;
-      html += `    </div>`;
-      html += `  </div>`;
+      html += `</div>`;
+
+      html += `</div>`;
+    });
+
+    html += '</div>';
+
+    // Row connector: vertical line linking rows at the turning point
+    if (!isLastRow) {
+      const side = isReversed ? 'left' : 'right';
+      html += `<div class="tl-row-connector tl-row-connector-${side}"></div>`;
     }
-
-    html += `</div>`;
   });
 
   html += '</div>';
@@ -13969,6 +13986,10 @@ window.addEventListener("resize", () => {
   if (cm) cm.remove();
   const fb = document.getElementById("text-selection-float-btn");
   if (fb) fb.remove();
+  // Re-render timeline to recalculate S-shape row layout
+  if (typeof currentData !== "undefined" && currentData && document.getElementById("tab-timeline")?.classList.contains("active")) {
+    try { renderTimeline(currentData); } catch (e) { /* ignore */ }
+  }
 });
 
 // ===== PDF keyword search =====
