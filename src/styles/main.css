@@ -4056,6 +4056,381 @@ body {
   padding: 16px;
 }
 
+/* ── Timeline Header (new tl-* naming) ── */
+#timeline-tab-content {
+  padding: 16px;
+}
+
+.tl-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.tl-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tl-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tl-filter-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.tl-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tl-title .svg-icon-sm { width: 16px; height: 16px; }
+
+.tl-status {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.tl-action-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tl-action-bar .btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+/* ── Timeline Board ── */
+.tl-board {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0;
+  position: relative;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.tl-board .placeholder {
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.tl-board::-webkit-scrollbar { height: 8px; }
+.tl-board::-webkit-scrollbar-track { background: var(--bg-secondary); border-radius: 4px; }
+.tl-board::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* ── Horizontal Snake / Zig-Zag Timeline ── */
+.tl-snake {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-width: 100%;
+  padding: 0 48px;
+  min-height: 320px;
+}
+
+/* Central horizontal track line at 50% */
+.tl-snake-track {
+  position: absolute;
+  left: 48px;
+  right: 48px;
+  top: 50%;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), #818cf8, var(--accent));
+  border-radius: 2px;
+  transform: translateY(-50%);
+  z-index: 0;
+}
+
+/* ── Timeline Node ── */
+.tl-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 180px;
+  flex: 0 0 auto;
+  z-index: 1;
+  cursor: pointer;
+  justify-content: center;
+}
+
+/* Dot always sits on center line */
+.tl-node-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 3px solid var(--bg-card);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+  z-index: 3;
+  transition: transform 0.2s, box-shadow 0.2s;
+  color: #fff;
+}
+
+.tl-node-dot svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Connector line: vertical line from dot to card */
+.tl-node-connector {
+  position: absolute;
+  left: 50%;
+  width: 2px;
+  background: var(--border);
+  transition: background 0.2s;
+  transform: translateX(-50%);
+  z-index: 1;
+}
+
+/* Top nodes: card in upper half, connector from card bottom down to dot */
+.tl-node-top {
+  /* No extra positioning needed - card is absolutely positioned */
+}
+.tl-node-top .tl-node-card {
+  position: absolute;
+  bottom: calc(50% + 52px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+.tl-node-top .tl-node-connector {
+  top: calc(50% - 48px);
+  height: 44px;
+}
+
+/* Bottom nodes: card in lower half, connector from dot down to card top */
+.tl-node-bottom .tl-node-card {
+  position: absolute;
+  top: calc(50% + 52px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+.tl-node-bottom .tl-node-connector {
+  top: calc(50% + 4px);
+  height: 44px;
+}
+
+/* Card */
+.tl-node-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  width: 170px;
+  transition: all 0.2s;
+  white-space: normal;
+}
+
+.tl-node-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.15);
+  transform: translateX(-50%) translateY(-3px) !important;
+}
+
+/* Card connector arrow pointing toward the dot/connector */
+.tl-node-top .tl-node-card::after {
+  content: '';
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid var(--border);
+}
+
+.tl-node-bottom .tl-node-card::after {
+  content: '';
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 7px solid var(--border);
+}
+
+.tl-node-top .tl-node-card:hover::after { border-top-color: var(--accent); }
+.tl-node-bottom .tl-node-card:hover::after { border-bottom-color: var(--accent); }
+
+/* Card content */
+.tl-node-date {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 4px;
+  letter-spacing: 0.02em;
+}
+
+.tl-node-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.tl-node-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tl-node-code {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.tl-node-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+/* Dot / badge colors by type */
+.tl-dot-oa { background: var(--danger); box-shadow: 0 0 0 2px rgba(248,113,113,0.3); }
+.tl-dot-response { background: var(--accent); box-shadow: 0 0 0 2px rgba(96,165,250,0.3); }
+.tl-dot-request { background: var(--warning); box-shadow: 0 0 0 2px rgba(251,191,36,0.3); }
+.tl-dot-allowance { background: var(--success); box-shadow: 0 0 0 2px rgba(52,211,153,0.3); }
+.tl-dot-notification { background: #a78bfa; box-shadow: 0 0 0 2px rgba(167,139,250,0.3); }
+.tl-dot-citation { background: #06b6d4; box-shadow: 0 0 0 2px rgba(6,182,212,0.3); }
+.tl-dot-patentdoc { background: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.3); }
+.tl-dot-misc { background: var(--text-muted); box-shadow: 0 0 0 2px rgba(156,163,175,0.3); }
+
+/* Badge colors matching dots */
+.tl-dot-oa.tl-node-badge { background: rgba(248,113,113,0.12); color: var(--danger); }
+.tl-dot-response.tl-node-badge { background: rgba(96,165,250,0.12); color: var(--accent); }
+.tl-dot-request.tl-node-badge { background: rgba(251,191,36,0.12); color: var(--warning); }
+.tl-dot-allowance.tl-node-badge { background: rgba(52,211,153,0.12); color: var(--success); }
+.tl-dot-notification.tl-node-badge { background: rgba(167,139,250,0.12); color: #a78bfa; }
+.tl-dot-citation.tl-node-badge { background: rgba(6,182,212,0.12); color: #06b6d4; }
+.tl-dot-patentdoc.tl-node-badge { background: rgba(99,102,241,0.12); color: #6366f1; }
+.tl-dot-misc.tl-node-badge { background: rgba(156,163,175,0.12); color: var(--text-muted); }
+
+/* ── Selection mode ── */
+.tl-board.select-mode .tl-node { cursor: pointer; }
+.tl-board.select-mode .tl-node.selected .tl-node-card {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.06);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+}
+.tl-board.select-mode .tl-node.selected .tl-node-dot {
+  transform: scale(1.15);
+}
+.tl-board.select-mode .tl-node.selected .tl-node-connector {
+  background: var(--accent);
+}
+
+/* First/last node spacing */
+.tl-node-first { margin-left: 0; }
+.tl-node-last { margin-right: 0; }
+
+/* ── Select Bar (appears when in select mode) ── */
+.tl-select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, rgba(99,102,241,0.08), rgba(99,102,241,0.03));
+  border: 1px solid rgba(99,102,241,0.25);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+.tl-select-bar.hidden { display: none; }
+
+.tl-select-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+#tl-select-mode-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.tl-select-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tl-select-bar .summary-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tl-select-bar .summary-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.tl-select-bar .summary-sep {
+  color: var(--text-muted);
+  margin: 0 4px;
+}
+
+#tl-selected-summary {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 100px;
+}
+
+/* ── Legacy timeline styles (for overview mini-timeline) ── */
 .timeline-header {
   display: flex;
   align-items: center;

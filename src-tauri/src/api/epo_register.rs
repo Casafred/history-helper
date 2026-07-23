@@ -177,6 +177,7 @@ impl EpoRegisterClient {
             || lower.contains("intention to grant")
             || lower.contains("grant notification")
             || lower.contains("issue notification")
+            || lower.contains("issue information")
             || lower.contains("decision to grant")
             || lower.contains("grant of patent")
             || (lower.contains("allowance") && !lower.contains("fee"))
@@ -184,6 +185,10 @@ impl EpoRegisterClient {
             doc_type = "allowance".to_string();
             stage = "授权通知".to_string();
             "NOA"
+        } else if lower.contains("search information") {
+            doc_type = "citation".to_string();
+            stage = "审查员引用".to_string();
+            "SRFW"
         } else if lower.contains("information disclosure")
             || lower.contains("(ids)")
             || lower.contains("list of references")

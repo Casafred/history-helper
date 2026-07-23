@@ -524,7 +524,7 @@ function classifyDocCode(code, desc) {
   if (/search report|supplementary.*search report|priority search results|isr cited documents/i.test(text)) return "citation";
   if (/list of references cited|cited by (examiner|applicant)|foreign reference|non-patent literature cited/i.test(text)) return "citation";
   if (/search strategy|information on search strategy/i.test(text)) return "citation";
-  if (/search information.*classification/i.test(text)) return "citation";
+  if (/search information.*classification|search information.*databases/i.test(text)) return "citation";
   if (/bibliographic data|bibliograph/i.test(text)) return "citation";
   if (/recherche/.test(descLower)) return "citation";
   if (/information disclosure statement|\bids\b/i.test(text)) return "citation";
@@ -561,6 +561,7 @@ function classifyDocCode(code, desc) {
   if (/erteilungsbescheid/.test(descLower)) return "allowance";
   if (/erteilung/.test(descLower) && !/antrag/.test(descLower)) return "allowance";
   if (/decision to grant a patent/.test(descLower)) return "allowance";
+  if (/issue information.*classification|issue notification/i.test(text)) return "allowance";
   if (/^NOA$|^AIPA$|^IIFW$|^ISSUE|^EGRN$|^NTC\.EGRN$|^EGRT$|^EGRANT|^ISS\.NTF$|^2004$|^2006A$|^2035-4$|^DREX$|^EDREX/.test(codeUpper)) return "allowance";
   if (/^200201-CN$|^A01/.test(codeUpper)) return "allowance";
   if (/授权|allowance/.test(text)) return "allowance";
@@ -698,6 +699,7 @@ var EPO_DESC_MAP = {
   "intention to grant": "授权意向 (Intention to Grant)",
   "grant notification": "授权通知 (Grant Notification)",
   "issue notification": "授权公告通知 (Issue Notification)",
+  "issue information": "授权信息 (Issue Information)",
   "decision to grant": "授权决定 (Decision to Grant)",
   "grant of patent": "专利授权 (Grant of Patent)",
   // ── 引用文献/IDS类 ──
@@ -710,6 +712,7 @@ var EPO_DESC_MAP = {
   "european search report": "欧洲检索报告 (European Search Report)",
   "search report": "检索报告 (Search Report)",
   "search strategy": "检索策略 (Search Strategy)",
+  "search information": "检索信息 (Search Information including Classification, Databases and Other Search Related Notes)",
   // ── 专利文件类 ──
   "claims": "权利要求 (Claims)",
   "specification": "说明书 (Specification)",
@@ -763,12 +766,12 @@ function _classifyEpoDescType(key) {
        "request for continued examination", "appeal brief", "reply brief"].includes(key)) return "response";
   // 授权通知类
   if (["notice of allowance", "intention to grant", "grant notification",
-       "issue notification", "decision to grant", "grant of patent"].includes(key)) return "allowance";
+       "issue notification", "issue information", "decision to grant", "grant of patent"].includes(key)) return "allowance";
   // 引用文献/IDS类（检索策略归入此类，与 classifyDocCode 和 EP codeMap 保持一致）
   if (["information disclosure", "foreign reference",
        "priority documents electronically retrieved", "list of references",
        "cited by examiner", "references cited", "european search report",
-       "search report", "search strategy"].includes(key)) return "citation";
+       "search report", "search strategy", "search information"].includes(key)) return "citation";
   // 专利文件类
   if (["claims", "specification", "drawings-only black and white line drawings",
        "drawings", "abstract", "bibliographic data", "sequence listing",
@@ -782,7 +785,7 @@ function _classifyEpoDescType(key) {
 // 根据 EPO 描述键推断审查阶段
 function _classifyEpoDescStage(key) {
   if (["notice of allowance", "intention to grant", "grant notification",
-       "issue notification", "decision to grant", "grant of patent",
+       "issue notification", "issue information", "decision to grant", "grant of patent",
        "issue fee"].includes(key)) return "授权";
   if (["appeal brief", "reply brief"].includes(key)) return "复审";
   if (["filing receipt", "electronic filing system acknowledgment receipt",
