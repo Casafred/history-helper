@@ -1697,168 +1697,29 @@ async function epoFetchViaBrowser(targetUrl, options) {
             // 手动模式：等待用户点击 PDF 链接，不自动 fetch
             return;
           }
-          // 如果 pdfUrl 是用 GD 格式 docId 构造的（非 EPO documentView 格式），
-          // 不跳手动模式，改为从 DOM 查找
-          if (pdfUrl && !pdfUrl.includes("documentView") && !pdfUrl.includes("ipApplication")) {
-            console.log("[EPO Browser] pdfUrl is not documentView format, will try DOM lookup instead:", pdfUrl);
+          // PDF 模式：直接进入手动选取模式，让用户点击文档链接
+          // 用户每点击一个文档链接，handleManualPdfClick 会自动提取 PDF 并缓存
+          // 提取完成后自动回到 doclist 页面继续选择
+          manualMode = true;
+          pdfRetryCount = 99; // 阻止自动 fetch
+          // 缓存当前 dossier URL，用于提取完成后回到此页面
+          if (office && docNumber) {
+            setCachedDossierUrl(office, docNumber, win.webContents.getURL());
           }
-
-          // 先从 DOM 中查找目标 docId 对应的精确链接（优先使用 DOM 中的真实链接）
-          let precisePdfUrl = null;
-          const _urlDocIdMatch = pdfUrl ? pdfUrl.match(/documentId=([^&]+)/) : null;
-          const _targetDocId = _urlDocIdMatch ? decodeURIComponent(_urlDocIdMatch[1]) : null;
-          if (_targetDocId) {
-            try {
-              const domResult = await win.webContents.executeJavaScript(`
-                (function() {
-                  try {
-                    var targetDocId = ${JSON.stringify(_targetDocId)};
-                    var links = document.querySelectorAll('a[href*="documentView"], a[href*="ipApplication"], a[href*="openNewWindow"]');
-                    for (var i = 0; i < links.length; i++) {
-                      var link = links[i];
-                      var href = link.getAttribute('href') || '';
-                      var onclick = link.getAttribute('onclick') || '';
-                      var combined = href + ' ' + onclick;
-                      if (combined.indexOf(targetDocId) !== -1) {
-                        var jsMatch = href.match(/openNewWindow\\s*\\(\\s*['"](.+?)['"]/);
-                        if (jsMatch) {
-                          return jsMatch[1].replace(/&amp;/g, '&');
-                        }
-                        if (href.indexOf('documentView') !== -1 || href.indexOf('ipApplication') !== -1) {
-                          return href;
-                        }
-                      }
-                    }
-                    return null;
-                  } catch(e) { return null; }
-                })();
-              `, true);
-              if (domResult && typeof domResult === "string") {
-                const base = domResult.startsWith("http") ? "" : EPO_REGISTER_BASE + "/";
-                precisePdfUrl = base + domResult.replace(/^\//, "");
-                console.log("[EPO Browser] found precise PDF URL from DOM for docId " + _targetDocId + ":", precisePdfUrl);
-              }
-            } catch (e) {
-              console.warn("[EPO Browser] failed to find precise PDF URL from DOM:", e.message);
+          console.log("[EPO Browser] doclist ready, entering manual selection mode");
+          updateHint("PatentLens: 审查档案已就绪。请点击下方需要的文档链接，系统会自动提取 PDF。选完后点击右上角按钮发送到主应用");
+          updateButton("✓ 发送到主应用并返回", "#22c55e");
+          // 标记按钮为"点击后关闭窗口"模式
+          win.webContents.executeJavaScript(`
+            var btn = document.getElementById("patentlens-verify-btn");
+            if (btn) {
+              btn.onclick = function() {
+                var hint = document.getElementById("patentlens-verify-hint");
+                if (hint) hint.textContent = "PatentLens: __DONE__ 正在返回主应用...";
+                window.postMessage({ type: "patentlens-epo-direct-done" }, "*");
+              };
             }
-          }
-
-          // 如果没有精确匹配到 docId，或 pdfUrl 为空，从 DOM 查找第一个 documentView 链接
-          if (!precisePdfUrl) {
-            try {
-              const firstLinkResult = await win.webContents.executeJavaScript(`
-                (function() {
-                  try {
-                    var links = document.querySelectorAll('a[href*="documentView"], a[href*="ipApplication"], a[href*="openNewWindow"]');
-                    for (var i = 0; i < links.length; i++) {
-                      var href = links[i].getAttribute('href') || '';
-                      var jsMatch = href.match(/openNewWindow\\s*\\(\\s*['"](.+?)['"]/);
-                      if (jsMatch) {
-                        return jsMatch[1].replace(/&amp;/g, '&');
-                      }
-                      if (href.indexOf('documentView') !== -1 || href.indexOf('ipApplication') !== -1) {
-                        return href;
-                      }
-                    }
-                    return null;
-                  } catch(e) { return null; }
-                })();
-              `, true);
-              if (firstLinkResult && typeof firstLinkResult === "string") {
-                const base = firstLinkResult.startsWith("http") ? "" : EPO_REGISTER_BASE + "/";
-                precisePdfUrl = base + firstLinkResult.replace(/^\//, "");
-                console.log("[EPO Browser] found first PDF URL from DOM (no docId match):", precisePdfUrl);
-              }
-            } catch (e) {
-              console.warn("[EPO Browser] failed to find first PDF URL from DOM:", e.message);
-            }
-          }
-
-          // 如果还是找不到任何链接，说明不是 doclist 页面，切换到手动模式
-          if (!precisePdfUrl && !pdfUrl) {
-            manualMode = true;
-            pdfRetryCount = 99;
-            console.log("[EPO Browser] no PDF URL found anywhere, switching to manual mode");
-            updateHint("PatentLens: 自动获取 PDF 失败。请点击右侧按钮开始选取文档，或直接点击下方文档 PDF 链接");
-            updateButton("✓ 开始手动选取文档", "#f59e0b");
-            return;
-          }
-
-          // PDF 模式：从 doclist 页面内 fetch PDF（有 session + Referer）
-          pdfRetryCount++;
-          if (pdfRetryCount <= 2) {
-            updateHint(`PatentLens: 审查档案已就绪，正在下载文档 PDF... (尝试 ${pdfRetryCount}/3)`);
-            updateButton("✓ 手动选取文档", "#f59e0b");
-            const fetchTarget = precisePdfUrl || pdfUrl;
-            const result = await fetchPdfFromPage(fetchTarget);
-            if (result.body) {
-              console.log("[EPO Browser] PDF fetched successfully via in-page fetch, size=" + result.body.length + ", closing window");
-              // 缓存成功获取的 session cookies（一次成功说明 cookie 有效，后续可用 curl 复用）
-              if (office && docNumber) {
-                try {
-                  const _cookies = await session.defaultSession.cookies.get({ domain: "epo.org" });
-                  const _cookieStr = _cookies.map(c => c.name + "=" + c.value).join("; ");
-                  if (_cookieStr) setCachedEpoCookies(office, docNumber, _cookieStr);
-                } catch (_) {}
-              }
-              // 缓存 PDF buffer
-              const _fetchDocIdMatch = fetchTarget.match(/documentId=([^&]+)/);
-              const _fetchDocId = _fetchDocIdMatch ? decodeURIComponent(_fetchDocIdMatch[1]) : null;
-              if (office && docNumber && _fetchDocId) {
-                setCachedEpoPdf(office, docNumber, _fetchDocId, result.body);
-              }
-              finish(result);
-              return;
-            }
-            if (result.error) {
-              console.log(`[EPO Browser] PDF in-page fetch error (attempt ${pdfRetryCount}/2):`, result.error);
-            }
-            if (pdfRetryCount < 2) return; // 继续重试一次
-          }
-          // 页面内 fetch 失败，自动导航到 documentView 页面（模拟用户点击链接）
-          let navTarget = precisePdfUrl || pdfUrl;
-          if (navTarget) {
-            // 确保 URL 是完整的绝对路径
-            if (!navTarget.startsWith('http')) {
-              if (navTarget.startsWith('/')) {
-                navTarget = 'https://register.epo.org' + navTarget;
-              } else {
-                navTarget = 'https://register.epo.org/' + navTarget;
-              }
-            }
-          }
-          if (navTarget && autoPdfPhase === 'idle') {
-            autoPdfPhase = 'navigating';
-            autoPdfTargetUrl = navTarget;
-            console.log("[EPO Browser] in-page fetch failed, auto-navigating to documentView:", navTarget);
-            updateHint("PatentLens: 正在打开文档查看器页面获取 PDF...");
-            // 超时保护：15秒后如果还没获取到，进入手动模式
-            autoPdfNavTimeout = setTimeout(() => {
-              if (!settled && autoPdfPhase !== 'done') {
-                console.log("[EPO Browser] auto navigation timeout, falling back to manual mode");
-                autoPdfPhase = 'idle';
-                manualMode = true;
-                pdfRetryCount = 99;
-                updateHint("PatentLens: 自动获取超时。请手动点击文档 PDF 链接，或点击右上角按钮返回");
-                updateButton("✓ 开始手动选取文档", "#f59e0b");
-              }
-            }, 20000);
-            try {
-              win.webContents.loadURL(navTarget);
-            } catch (e) {
-              console.warn("[EPO Browser] failed to navigate to documentView:", e.message);
-              autoPdfPhase = 'idle';
-              if (autoPdfNavTimeout) clearTimeout(autoPdfNavTimeout);
-            }
-            return;
-          }
-          // 自动导航也失败，切换到手动模式
-          if (autoPdfPhase === 'idle') {
-            manualMode = true;
-            console.log("[EPO Browser] auto PDF fetch failed, switching to manual mode");
-            updateHint("PatentLens: 自动获取 PDF 失败。请点击右侧按钮开始手动选取文档，或直接点击下方文档 PDF 链接");
-            updateButton("✓ 开始手动选取文档", "#f59e0b");
-          }
+          `, true).catch(() => {});
           return;
         } else {
           // HTML 模式：提取 outerHTML + DOM 文档列表
@@ -1893,13 +1754,30 @@ async function epoFetchViaBrowser(targetUrl, options) {
     };
 
     // 监听用户主动点击工具栏按钮
-    // 按钮在不同状态下有不同行为：
-    // - CF 验证页：点击后强制提取数据
-    // - doclist 就绪（wantPdf=false）：点击后提取文档列表并关闭
-    // - doclist 就绪（wantPdf=true）：点击后切换到手动选取模式，不关窗
+    // wantPdf 模式：doclist 就绪后按钮直接是"发送到主应用并返回"，点击后关闭窗口
+    // 非 wantPdf 模式：点击后强制提取数据
     const checkUserDone = async () => {
       if (settled || win.isDestroyed()) return;
       try {
+        // 检测 __DONE__ 标记（wantPdf 模式下按钮 onclick 直接设置）
+        const doneClicked = await win.webContents.executeJavaScript(`
+          (function() {
+            try {
+              var hint = document.getElementById("patentlens-verify-hint");
+              if (!hint) return false;
+              var text = hint.textContent;
+              if (text.includes("__DONE__")) return true;
+              return false;
+            } catch(e) { return false; }
+          })();
+        `, true).catch(() => false);
+        if (doneClicked && !manualDoneClicked) {
+          manualDoneClicked = true;
+          console.log("[EPO Browser] user clicked 'done' button, closing window");
+          finish({ body: null, error: "manual done", manualDone: true });
+          return;
+        }
+        // 检测 __CLICKED__ 标记（非 wantPdf 模式或 CF 验证后点击）
         const clicked = await win.webContents.executeJavaScript(`
           (function() {
             try {
@@ -1913,43 +1791,11 @@ async function epoFetchViaBrowser(targetUrl, options) {
         `, true).catch(() => false);
         if (clicked && !userClickedDone) {
           userClickedDone = true;
-          console.log("[EPO Browser] user clicked toolbar button, mode: " + (wantPdf ? "PDF-manual" : "doclist-extract"));
-          if (wantPdf && doclistReady) {
-            // PDF 模式 + doclist 就绪：切换到手动选取模式，不关窗
-            manualMode = true;
-            pdfRetryCount = 99; // 阻止自动重试
-            updateHint("PatentLens: 已进入手动选取模式。请逐一点击下方所需文档的 PDF 链接，系统会自动捕获。全部选完后点击右上角按钮发送到主应用");
-            updateButton("✓ 发送到主应用并返回", "#22c55e");
-            // 标记按钮为"第二次点击"模式：点击后关闭窗口
-            win.webContents.executeJavaScript(`
-              var btn = document.getElementById("patentlens-verify-btn");
-              if (btn) {
-                btn.onclick = function() {
-                  var hint = document.getElementById("patentlens-verify-hint");
-                  if (hint) hint.textContent = "PatentLens: __DONE__ 现在您可以回到主应用审查看板工作了";
-                  window.postMessage({ type: "patentlens-epo-direct-done" }, "*");
-                };
-              }
-            `, true).catch(() => {});
-          } else {
-            // 其他模式：强制提取一次
+          console.log("[EPO Browser] user clicked toolbar button (non-pdf mode)");
+          if (!wantPdf) {
             updateHint("PatentLens: 正在提取数据...");
             setTimeout(tryExtract, 500);
           }
-        }
-        // 检测第二次点击（全部选完）
-        const doneClicked = await win.webContents.executeJavaScript(`
-          (function() {
-            try {
-              var hint = document.getElementById("patentlens-verify-hint");
-              return hint && hint.textContent.includes("__DONE__") ? true : false;
-            } catch(e) { return false; }
-          })();
-        `, true).catch(() => false);
-        if (doneClicked && !manualDoneClicked) {
-          manualDoneClicked = true;
-          console.log("[EPO Browser] user clicked 'done' button, closing window");
-          finish({ body: null, error: "manual done", manualDone: true });
         }
       } catch (_) {}
     };
