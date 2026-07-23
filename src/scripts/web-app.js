@@ -243,10 +243,16 @@ function _switchToTab(tabName) {
   if (target) target.classList.add("active");
   const app = document.getElementById("app");
   if (app) {
-    app.classList.toggle("wide-layout", ["kanban", "ai-analysis"].includes(tabName));
+    app.classList.toggle("wide-layout", ["kanban", "ai-analysis", "timeline"].includes(tabName));
   }
+  // Exit select modes when leaving their tabs
+  if (tabName !== "kanban") exitKanbanSelectMode();
+  if (tabName !== "timeline") exitTimelineSelectMode();
   if (tabName === "ai-analysis") {
     _updateAIAnalysisView();
+  }
+  if (tabName === "timeline") {
+    renderTimeline(currentData);
   }
 }
 
@@ -591,8 +597,9 @@ function _dossierApplyTab(tab) {
   try { renderFamily(currentData); } catch (e) { console.error("renderFamily:", e); }
   try { renderTimeline(currentData); } catch (e) { console.error("renderTimeline:", e); }
 
-  // Restore the inner sub-tab (overview/family/kanban/ai-analysis)
-  const targetInner = tab.activeInnerTab || "overview";
+  // Restore the inner sub-tab (overview/timeline/kanban/ai-analysis)
+  let targetInner = tab.activeInnerTab || "overview";
+  if (targetInner === "family") targetInner = "overview"; // family tab removed, redirect to overview
   document.querySelectorAll(".tabs-wrapper .tab-btn").forEach(b => {
     b.classList.toggle("active", b.dataset.tab === targetInner);
   });
@@ -601,7 +608,7 @@ function _dossierApplyTab(tab) {
   if (targetContent) targetContent.classList.add("active");
   const appElInner = document.getElementById("app");
   if (appElInner) {
-    appElInner.classList.toggle("wide-layout", ["kanban", "ai-analysis"].includes(targetInner));
+    appElInner.classList.toggle("wide-layout", ["kanban", "ai-analysis", "timeline"].includes(targetInner));
   }
 
   // Re-enable manual select buttons since documents are loaded
@@ -7164,6 +7171,14 @@ function renderKanban(data) {
   if (kanbanAiBtn) kanbanAiBtn.style.display = canAnalyze ? "" : "none";
   if (citedAiBtn) citedAiBtn.style.display = canAnalyze ? "" : "none";
 
+  // Show timeline action buttons as well
+  const tlMergeBtn = document.getElementById("tl-merge-export-btn");
+  const tlReviewBtn = document.getElementById("tl-select-review-btn");
+  const tlCitedBtn = document.getElementById("tl-select-cited-btn");
+  if (tlMergeBtn) tlMergeBtn.style.display = hasDownloadable ? "" : "none";
+  if (tlReviewBtn) tlReviewBtn.style.display = canAnalyze ? "" : "none";
+  if (tlCitedBtn) tlCitedBtn.style.display = canAnalyze ? "" : "none";
+
   // Exit any pending select mode from previous state
   exitKanbanSelectMode();
   analysisChatHistory = [];
@@ -9307,7 +9322,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.classList.add("active");
     document.getElementById("tab-" + tabName).classList.add("active");
     const app = document.getElementById("app");
-    const wideTabs = ["kanban", "ai-analysis"];
+    const wideTabs = ["kanban", "ai-analysis", "timeline"];
     if (wideTabs.includes(tabName)) {
       app.classList.add("wide-layout");
     } else {
@@ -9317,9 +9332,17 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
     if (tabName !== "kanban") {
       exitKanbanSelectMode();
     }
+    // Exit timeline select mode when leaving timeline tab
+    if (tabName !== "timeline") {
+      exitTimelineSelectMode();
+    }
     // Update AI analysis view when entering that tab
     if (tabName === "ai-analysis") {
       _updateAIAnalysisView();
+    }
+    // Render timeline when entering timeline tab
+    if (tabName === "timeline") {
+      renderTimeline(currentData);
     }
   });
 });
@@ -11204,9 +11227,125 @@ function onTraceClick(blockIdStr) {
   }, 800);
 }
 
+// ── Timeline select mode state ──
+let _tlSelectMode = null; // null | "review" | "citedRefs" | "mergeExport"
+const _tlSelected = new Set();
+
+function exitTimelineSelectMode() {
+  _tlSelectMode = null;
+  _tlSelected.clear();
+  const board = document.getElementById("tl-board");
+  if (board) board.classList.remove("select-mode");
+  const selectBar = document.getElementById("tl-select-bar");
+  if (selectBar) selectBar.classList.add("hidden");
+  document.querySelectorAll(".tl-node.selected").forEach(n => n.classList.remove("selected"));
+}
+
+function enterTimelineSelectMode(mode) {
+  if (!kanbanState.documents || kanbanState.documents.length === 0) {
+    showError("请先查询专利并加载审查文档");
+    return;
+  }
+  const office = currentData && currentData.office;
+  const canAnalyze = office === "US" || office === "EP" || office === "CN" || office === "WO" || office === "KR";
+  if (!canAnalyze && mode !== "mergeExport") {
+    showError("当前国家/地区暂不支持AI梳理");
+    return;
+  }
+  exitTimelineSelectMode();
+  _tlSelectMode = mode;
+  const board = document.getElementById("tl-board");
+  if (board) board.classList.add("select-mode");
+  const selectBar = document.getElementById("tl-select-bar");
+  if (selectBar) selectBar.classList.remove("hidden");
+  const modeLabel = document.getElementById("tl-select-mode-label");
+  if (modeLabel) {
+    if (mode === "citedRefs") modeLabel.textContent = "选择引用文献文件";
+    else if (mode === "mergeExport") modeLabel.textContent = "选择要合并导出的文档";
+    else modeLabel.textContent = "选择审查意见文件";
+  }
+  const confirmBtn = document.getElementById("tl-select-confirm-btn");
+  if (confirmBtn) {
+    if (mode === "citedRefs") confirmBtn.textContent = "确认并梳理引用文献";
+    else if (mode === "mergeExport") confirmBtn.textContent = "确认合并导出";
+    else confirmBtn.textContent = "确认并梳理审查意见";
+  }
+  // Default selection
+  _tlSelected.clear();
+  kanbanState.documents.forEach(it => {
+    let shouldSelect = false;
+    if (mode === "review") {
+      shouldSelect = shouldDefaultSelectForAnalysis(it);
+    } else if (mode === "mergeExport") {
+      shouldSelect = shouldDefaultSelectForAnalysis(it) && !!buildMergeDownloadUrl(it);
+    } else {
+      const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
+      shouldSelect = CITED_DOC_CODES.includes(it.docCode);
+    }
+    if (shouldSelect) _tlSelected.add(it.idx);
+  });
+  _applyTimelineSelection();
+  _updateTimelineSelectSummary();
+  renderTimeline(currentData);
+}
+
+function _applyTimelineSelection() {
+  document.querySelectorAll(".tl-node").forEach(node => {
+    const idx = parseInt(node.dataset.idx);
+    if (_tlSelected.has(idx)) {
+      node.classList.add("selected");
+    } else {
+      node.classList.remove("selected");
+    }
+  });
+}
+
+function _updateTimelineSelectSummary() {
+  const summaryEl = document.getElementById("tl-selected-summary");
+  const confirmBtn = document.getElementById("tl-select-confirm-btn");
+  if (!summaryEl) return;
+  const count = _tlSelected.size;
+  if (count === 0) {
+    summaryEl.innerHTML = '<span class="summary-empty">未选择任何文档</span>';
+  } else {
+    const names = [..._tlSelected].map(idx => {
+      const it = (kanbanState.documents || []).find(d => d.idx === idx);
+      return it ? escapeHtml(it.docCode + ' - ' + (it.name || '')) : '';
+    }).filter(Boolean);
+    summaryEl.innerHTML = '<span class="summary-label">已选 ' + count + ' 份：</span>' + names.join('<span class="summary-sep">、</span>');
+  }
+  if (confirmBtn) confirmBtn.disabled = count === 0;
+}
+
+function _toggleTimelineNode(idx) {
+  if (!_tlSelectMode) return;
+  if (_tlSelected.has(idx)) {
+    _tlSelected.delete(idx);
+  } else {
+    _tlSelected.add(idx);
+  }
+  _applyTimelineSelection();
+  _updateTimelineSelectSummary();
+}
+
+function _jumpToDocFromTimeline(idx) {
+  if (_tlSelectMode) {
+    _toggleTimelineNode(idx);
+    return;
+  }
+  // Switch to kanban tab and open reader for this doc
+  _switchToTab("kanban");
+  setTimeout(() => {
+    if (typeof openReaderForDoc === "function") {
+      openReaderForDoc(idx, true);
+    }
+  }, 100);
+}
+
 function renderTimeline(data) {
-  const board = document.getElementById("timeline-board");
-  const statusEl = document.getElementById("timeline-status");
+  // Support both old (overview) and new (timeline tab) containers
+  const board = document.getElementById("tl-board") || document.getElementById("timeline-board");
+  const statusEl = document.getElementById("tl-status") || document.getElementById("timeline-status");
   if (!board) return;
 
   const items = kanbanState.documents;
@@ -11216,44 +11355,35 @@ function renderTimeline(data) {
     return;
   }
 
-  const importantTypes = ["office_action", "response", "allowance", "notification"];
-  const importantDocCodes = ["IDS", "WDR", "ETCL", "DAFP", "AFCP", "BRAP", "EXBR", "REBR", "CTNF", "CTFR", "CTRA", "CTAL"];
-  // Exclude receipt and payment types from timeline
   const excludeDocCodes = ["N417", "N417.PYMT", "APP.FILE.REC", "WFEE", "PTO.FEE", "IFEE", "RCFR", "RECEIPT-OLF", "FEES-RO", "PAYREJ"];
-  const excludeNamePatterns = /回执|缴费|receipt|payment|fee/i;
+  const excludeNamePatterns = /回执|缴费|receipt|payment|fee worksheet/i;
   const timelineItems = items.filter(it => {
     if (excludeDocCodes.includes(it.docCode)) return false;
     if (excludeNamePatterns.test(it.name || "")) return false;
-    return importantTypes.indexOf(it.type) !== -1 || importantDocCodes.includes(it.docCode);
+    return true;
   });
 
+  // Reverse chronological order (newest first)
   const sorted = [...timelineItems].sort((a, b) => {
     const da = parseDate(a.date);
     const db = parseDate(b.date);
-    return da - db;
+    return db - da;
   });
 
   if (sorted.length === 0) {
-    board.innerHTML = '<p class="placeholder">未找到关键审查节点</p>';
+    board.innerHTML = '<p class="placeholder">未找到审查节点</p>';
     return;
   }
 
   const dotClassMap = {
-    office_action: "dot-oa",
-    response: "dot-response",
-    request: "dot-request",
-    allowance: "dot-allowance",
-    notification: "dot-notification",
-    misc: "dot-misc",
-  };
-
-  const badgeClassMap = {
-    office_action: "badge-oa",
-    response: "badge-response",
-    request: "badge-request",
-    allowance: "badge-allowance",
-    notification: "badge-notification",
-    misc: "badge-misc",
+    office_action: "tl-dot-oa",
+    response: "tl-dot-response",
+    request: "tl-dot-request",
+    allowance: "tl-dot-allowance",
+    notification: "tl-dot-notification",
+    citation: "tl-dot-citation",
+    patent_doc: "tl-dot-patentdoc",
+    misc: "tl-dot-misc",
   };
 
   const typeLabelMap = {
@@ -11262,31 +11392,73 @@ function renderTimeline(data) {
     request: "申请人请求",
     allowance: "授权通知",
     notification: "通知",
+    citation: "审查员引用",
+    patent_doc: "专利文件",
     misc: "其他",
   };
 
-  let html = '<div class="timeline-line"></div><div class="timeline-items">';
-  sorted.forEach(it => {
-    const dotClass = dotClassMap[it.type] || "dot-misc";
-    const badgeClass = badgeClassMap[it.type] || "badge-misc";
+  const typeIconMap = {
+    office_action: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+    response: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>',
+    allowance: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+    notification: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+    citation: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    patent_doc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+    misc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+  };
+
+  // Build horizontal snake/zig-zag timeline
+  // Use CSS grid with alternating rows for zig-zag effect
+  let html = '<div class="tl-snake">';
+  html += '<div class="tl-snake-track"></div>';
+
+  sorted.forEach((it, i) => {
+    const dotClass = dotClassMap[it.type] || "tl-dot-misc";
     const typeLabel = typeLabelMap[it.type] || "其他";
-    html += `
-      <div class="timeline-item">
-        <div class="timeline-dot ${dotClass}"></div>
-        <div class="timeline-card">
-          <div class="timeline-card-date">${escapeHtml(it.date)}</div>
-          <div class="timeline-card-title">${escapeHtml(it.name)}</div>
-          <div class="timeline-card-desc">${escapeHtml(it.docCode)} · ${escapeHtml(it.stage)}</div>
-          <span class="timeline-card-badge ${badgeClass}">${typeLabel}</span>
-        </div>
-      </div>
-    `;
+    const typeIcon = typeIconMap[it.type] || typeIconMap.misc;
+    const isTop = i % 2 === 0;
+    const isSelected = _tlSelected.has(it.idx);
+    const isFirst = i === 0;
+    const isLast = i === sorted.length - 1;
+
+    // For top nodes (even index): card above → connector down → dot on center line
+    // For bottom nodes (odd index): dot on center line → connector down → card below
+    html += `<div class="tl-node ${isTop ? 'tl-node-top' : 'tl-node-bottom'} ${isSelected ? 'selected' : ''} ${isFirst ? 'tl-node-first' : ''} ${isLast ? 'tl-node-last' : ''}" data-idx="${it.idx}">`;
+
+    if (isTop) {
+      // Card above the line
+      html += `  <div class="tl-node-card" onclick="_jumpToDocFromTimeline(${it.idx})">`;
+      html += `    <div class="tl-node-date">${escapeHtml(it.date || '')}</div>`;
+      html += `    <div class="tl-node-title" title="${escapeHtml(it.name || '')}">${escapeHtml(it.name || '')}</div>`;
+      html += `    <div class="tl-node-meta">`;
+      html += `      <span class="tl-node-code">${escapeHtml(it.docCode || '')}</span>`;
+      html += `      <span class="tl-node-badge ${dotClass}">${typeLabel}</span>`;
+      html += `    </div>`;
+      html += `  </div>`;
+      html += `  <div class="tl-node-connector"></div>`;
+      html += `  <div class="tl-node-dot ${dotClass}">${typeIcon}</div>`;
+    } else {
+      // Dot on the line, card below
+      html += `  <div class="tl-node-dot ${dotClass}">${typeIcon}</div>`;
+      html += `  <div class="tl-node-connector"></div>`;
+      html += `  <div class="tl-node-card" onclick="_jumpToDocFromTimeline(${it.idx})">`;
+      html += `    <div class="tl-node-date">${escapeHtml(it.date || '')}</div>`;
+      html += `    <div class="tl-node-title" title="${escapeHtml(it.name || '')}">${escapeHtml(it.name || '')}</div>`;
+      html += `    <div class="tl-node-meta">`;
+      html += `      <span class="tl-node-code">${escapeHtml(it.docCode || '')}</span>`;
+      html += `      <span class="tl-node-badge ${dotClass}">${typeLabel}</span>`;
+      html += `    </div>`;
+      html += `  </div>`;
+    }
+
+    html += `</div>`;
   });
+
   html += '</div>';
   board.innerHTML = html;
 
   if (statusEl) {
-    statusEl.textContent = "共 " + sorted.length + " 个关键审查节点";
+    statusEl.textContent = "共 " + sorted.length + " 个审查节点";
   }
 }
 
@@ -11298,6 +11470,101 @@ function parseDate(dateStr) {
   }
   return new Date(dateStr).getTime();
 }
+
+// ── Timeline select bar button bindings ──
+function _bindTimelineSelectButtons() {
+  const tlAll = document.getElementById("tl-select-all-btn");
+  if (tlAll && !tlAll._bound) {
+    tlAll._bound = true;
+    tlAll.addEventListener("click", () => {
+      if (!_tlSelectMode) return;
+      _tlSelected.clear();
+      kanbanState.documents.forEach(it => _tlSelected.add(it.idx));
+      _applyTimelineSelection();
+      _updateTimelineSelectSummary();
+    });
+  }
+  const tlNone = document.getElementById("tl-select-none-btn");
+  if (tlNone && !tlNone._bound) {
+    tlNone._bound = true;
+    tlNone.addEventListener("click", () => {
+      if (!_tlSelectMode) return;
+      _tlSelected.clear();
+      _applyTimelineSelection();
+      _updateTimelineSelectSummary();
+    });
+  }
+  const tlDefault = document.getElementById("tl-select-default-btn");
+  if (tlDefault && !tlDefault._bound) {
+    tlDefault._bound = true;
+    tlDefault.addEventListener("click", () => {
+      if (!_tlSelectMode) return;
+      _tlSelected.clear();
+      kanbanState.documents.forEach(it => {
+        let shouldSelect = false;
+        if (_tlSelectMode === "review") {
+          shouldSelect = shouldDefaultSelectForAnalysis(it);
+        } else if (_tlSelectMode === "mergeExport") {
+          shouldSelect = shouldDefaultSelectForAnalysis(it) && !!buildMergeDownloadUrl(it);
+        } else {
+          const CITED_DOC_CODES = ["FOR", "892", "1449", "IDS", "SRNT", "SRFW"];
+          shouldSelect = CITED_DOC_CODES.includes(it.docCode);
+        }
+        if (shouldSelect) _tlSelected.add(it.idx);
+      });
+      _applyTimelineSelection();
+      _updateTimelineSelectSummary();
+    });
+  }
+  const tlCancel = document.getElementById("tl-select-cancel-btn");
+  if (tlCancel && !tlCancel._bound) {
+    tlCancel._bound = true;
+    tlCancel.addEventListener("click", () => exitTimelineSelectMode());
+  }
+  const tlConfirm = document.getElementById("tl-select-confirm-btn");
+  if (tlConfirm && !tlConfirm._bound) {
+    tlConfirm._bound = true;
+    tlConfirm.addEventListener("click", async () => {
+      if (!_tlSelectMode || _tlSelected.size === 0) return;
+      const selectedIdxs = [..._tlSelected];
+      const mode = _tlSelectMode;
+      exitTimelineSelectMode();
+      if (mode === "mergeExport") {
+        await doMergeExportWithItems(selectedIdxs);
+      } else if (mode === "citedRefs") {
+        _switchToTab("ai-analysis");
+        if (typeof runCitedRefsAnalysis === "function") {
+          await runCitedRefsAnalysis(selectedIdxs);
+        }
+      } else {
+        _switchToTab("ai-analysis");
+        if (typeof startReviewAnalysis === "function") {
+          await startReviewAnalysis(selectedIdxs);
+        }
+      }
+    });
+  }
+
+  // Timeline header action buttons
+  const tlReviewBtn = document.getElementById("tl-select-review-btn");
+  if (tlReviewBtn && !tlReviewBtn._bound) {
+    tlReviewBtn._bound = true;
+    tlReviewBtn.addEventListener("click", () => enterTimelineSelectMode("review"));
+  }
+  const tlCitedBtn = document.getElementById("tl-select-cited-btn");
+  if (tlCitedBtn && !tlCitedBtn._bound) {
+    tlCitedBtn._bound = true;
+    tlCitedBtn.addEventListener("click", () => enterTimelineSelectMode("citedRefs"));
+  }
+  const tlMergeBtn = document.getElementById("tl-merge-export-btn");
+  if (tlMergeBtn && !tlMergeBtn._bound) {
+    tlMergeBtn._bound = true;
+    tlMergeBtn.addEventListener("click", () => enterTimelineSelectMode("mergeExport"));
+  }
+}
+
+// Bind timeline buttons at module load (like kanban buttons)
+_bindTimelineSelectButtons();
 
 function openReader(defaultToPdf = true, skipRender = false) {
   if (!readerModal) return;

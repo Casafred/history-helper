@@ -646,10 +646,13 @@ function epoClassifyDoc(desc, phase) {
     || lower.includes("intention to grant")
     || lower.includes("grant notification")
     || lower.includes("issue notification")
+    || lower.includes("issue information")
     || lower.includes("decision to grant")
     || lower.includes("grant of patent")
     || (lower.includes("allowance") && !lower.includes("fee"))) {
     docCode = "NOA"; docType = "allowance"; stage = "授权通知";
+  } else if (lower.includes("search information")) {
+    docCode = "SRFW"; docType = "citation"; stage = "审查员引用";
   } else if (lower.includes("information disclosure")
     || lower.includes("(ids)")
     || lower.includes("list of references")
