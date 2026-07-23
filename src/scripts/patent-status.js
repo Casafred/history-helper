@@ -681,7 +681,6 @@ var EPO_DESC_MAP = {
   "examination communication": "审查通信 (Examination Communication)",
   "search opinion": "检索意见 (Search Opinion)",
   "written opinion": "书面意见 (Written Opinion)",
-  "search strategy": "检索策略 (Search Strategy)",
   // ── 申请人答复类 ──
   "amendment after non-final": "非最终驳回后修改 (Amendment after Non-Final)",
   "amendment": "修改 (Amendment)",
@@ -710,6 +709,7 @@ var EPO_DESC_MAP = {
   "references cited": "引用文献 (References Cited)",
   "european search report": "欧洲检索报告 (European Search Report)",
   "search report": "检索报告 (Search Report)",
+  "search strategy": "检索策略 (Search Strategy)",
   // ── 专利文件类 ──
   "claims": "权利要求 (Claims)",
   "specification": "说明书 (Specification)",
@@ -756,7 +756,7 @@ function _classifyEpoDescType(key) {
   // 审查意见类
   if (["non-final rejection", "final rejection", "examiner's answer", "office action",
        "examination report", "examination communication", "search opinion",
-       "written opinion", "search strategy"].includes(key)) return "office_action";
+       "written opinion"].includes(key)) return "office_action";
   // 申请人答复类
   if (["amendment after non-final", "amendment", "response", "reply", "observations",
        "remarks", "arguments", "request for reconsideration",
@@ -764,11 +764,11 @@ function _classifyEpoDescType(key) {
   // 授权通知类
   if (["notice of allowance", "intention to grant", "grant notification",
        "issue notification", "decision to grant", "grant of patent"].includes(key)) return "allowance";
-  // 引用文献/IDS类
+  // 引用文献/IDS类（检索策略归入此类，与 classifyDocCode 和 EP codeMap 保持一致）
   if (["information disclosure", "foreign reference",
        "priority documents electronically retrieved", "list of references",
        "cited by examiner", "references cited", "european search report",
-       "search report"].includes(key)) return "citation";
+       "search report", "search strategy"].includes(key)) return "citation";
   // 专利文件类
   if (["claims", "specification", "drawings-only black and white line drawings",
        "drawings", "abstract", "bibliographic data", "sequence listing",

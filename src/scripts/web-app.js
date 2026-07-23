@@ -1694,7 +1694,7 @@ patentInput.addEventListener("input", () => {
 });
 
 patentInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") searchBtn.click();
+  if (e.key === "Enter" && !e.isComposing) searchBtn.click();
 });
 
 async function _promptCacheChoice(cacheKey) {
@@ -2444,7 +2444,7 @@ function openInAppWebview(url, title, opts) {
       wvDebouncedFind();
     });
     wvFindInput.addEventListener("keydown", function(e) {
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && !e.isComposing) {
         e.preventDefault();
         if (wvFindDebounce) { clearTimeout(wvFindDebounce); wvFindDebounce = null; }
         if (e.shiftKey) doWvFindPrev(); else doWvFindNext();
@@ -8803,7 +8803,7 @@ function _initPatentAskBindings() {
   const inputEl = document.getElementById("patent-ask-input");
   if (inputEl) {
     inputEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendPatentAsk(); }
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendPatentAsk(); }
     });
   }
   // Initialize provider/model selectors
@@ -15341,7 +15341,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (pdfPageInput) {
     pdfPageInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && !e.isComposing) {
         e.preventDefault();
         const p = parseInt(pdfPageInput.value, 10);
         if (!isNaN(p)) pdfGoToPage(p);
@@ -15590,7 +15590,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (pdfSearchInput) {
     pdfSearchInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && !e.isComposing) {
         e.preventDefault();
         if (pdfViewState.searchMatches.length > 0) {
           searchPdfNext();
@@ -15676,7 +15676,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (chatInput) {
     chatInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         sendChatMessage();
       }
@@ -16249,7 +16249,7 @@ async function sendAnalysisChatMessage() {
 
   if (analysisChatInput) {
     analysisChatInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         sendAnalysisChatMessage();
       }
@@ -17833,7 +17833,7 @@ if (pdFindInput) {
     _findTimer = setTimeout(() => { _doFind(pdFindInput.value); }, 200);
   });
   pdFindInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !e.isComposing) {
       e.preventDefault();
       if (e.shiftKey) _findPrev(); else _findNext();
     } else if (e.key === "Escape") {
@@ -19019,21 +19019,44 @@ async function openExtractDocAndJump(patentNo, docIdx, cell) {
   if (appEl) appEl.classList.remove("home-mode");
 
   const afterJump = () => {
+    // 使用与 onTraceClick 相同的 pendingHighlight 机制，让 renderPdfView
+    // 在 PDF 渲染完成后自动消费高亮，避免依赖固定延时。
+    pdfViewState.pendingHighlight = cell.blockId;
+    pdfViewState.pendingHighlightRange = null;
+    pdfViewState.traceJumpPending = true;
+    pdfViewState.currentDocIdx = cell.docIdx;
+
+    // 以 PDF 视图打开阅读器（skipRender=true，由 selectReaderDoc 负责渲染）
+    if (typeof openReader === "function") openReader(true, true);
+    if (!pdfViewState.active && typeof togglePdfView === "function") {
+      togglePdfView(true);
+    }
+    // 切换到目标文档——这会触发 renderPdfView，在 PDF 块渲染完成后消费 pendingHighlight
+    if (typeof selectReaderDoc === "function") selectReaderDoc(cell.docIdx, true);
+
+    // 兜底：若 PDF 已渲染完成（pendingHighlight 已被消费）则无需处理；
+    // 若仍未消费，尝试直接高亮或按页降级
     setTimeout(() => {
-      if (typeof openReader === "function") openReader();
-      setTimeout(() => {
-        if (cell.blockId) {
-          const el = readerPdfContainer?.querySelector(`.pdf-block-overlay[data-block-id="${cell.blockId}"]`);
-          if (el) {
+      if (pdfViewState.active && !pdfViewState.pendingHighlight) return;
+      if (pdfViewState.active && cell.blockId) {
+        const el = readerPdfContainer?.querySelector(`.pdf-block-overlay[data-block-id="${cell.blockId}"]`);
+        if (el) {
+          if (typeof highlightPdfBlock === "function") {
+            highlightPdfBlock(cell.blockId);
+          } else {
             el.scrollIntoView({ behavior: "smooth", block: "center" });
             el.classList.add("highlight");
             setTimeout(() => el.classList.remove("highlight"), 2500);
-          } else if (cell.page && typeof pdfGoToPage === "function") {
-            pdfGoToPage(cell.page);
           }
+          pdfViewState.pendingHighlight = null;
+          pdfViewState.traceJumpPending = false;
+        } else if (cell.page && typeof pdfGoToPage === "function") {
+          pdfGoToPage(cell.page);
         }
-      }, 1500);
-    }, 500);
+      } else if (cell.page && typeof pdfGoToPage === "function") {
+        pdfGoToPage(cell.page);
+      }
+    }, 800);
   };
 
   const cachedMeta = PatentCache.get(patentNo);

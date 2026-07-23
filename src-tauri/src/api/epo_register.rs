@@ -145,7 +145,6 @@ impl EpoRegisterClient {
         } else if lower.contains("search opinion")
             || lower.contains("written opinion")
             || lower.contains("esop")
-            || lower.contains("search strategy")
         {
             doc_type = "office_action".to_string();
             stage = "审查意见".to_string();
@@ -157,6 +156,10 @@ impl EpoRegisterClient {
             doc_type = "citation".to_string();
             stage = "审查员引用".to_string();
             "ESR"
+        } else if lower.contains("search strategy") || lower.contains("srchstraep") {
+            doc_type = "citation".to_string();
+            stage = "审查员引用".to_string();
+            "SRCHSTRAEP"
         } else if lower.contains("amendment after non-final")
             || lower.contains("amendment/request")
             || (lower.contains("amendment") && !lower.contains("acknowledgment"))

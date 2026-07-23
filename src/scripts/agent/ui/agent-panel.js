@@ -340,7 +340,7 @@ var AgentUI = (function () {
     });
 
     inputEl.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         sendMessage();
       }
@@ -512,7 +512,7 @@ var AgentUI = (function () {
     var pnInputEl = document.getElementById("agent-pn-input");
     if (pnInputEl) {
       pnInputEl.addEventListener("keydown", function(e) {
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && !e.isComposing) {
           e.preventDefault();
           var firstBtn = messagesEl.querySelector(".agent-quick-btn");
           if (firstBtn) firstBtn.click();
