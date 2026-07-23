@@ -1636,13 +1636,22 @@ async function epoFetchViaBrowser(targetUrl, options) {
           (function() {
             try {
               var html = document.documentElement ? document.documentElement.outerHTML : "";
+              var hasDocListElement = !!document.querySelector(
+                "table.docListTable, #documents, div.docListTable, " +
+                "#resultData, #applicationForm, table.publicationData, " +
+                "#proc_table, div.proceedings, table.biblio, " +
+                "#DataList, table.dataTable, div.documentList, " +
+                "#content table, #main table"
+              );
+              // GD 页面可能没有上述元素，但会有 documentView/openNewWindow 链接
+              var hasDocLinks = !!document.querySelector(
+                'a[href*="documentView"], a[href*="ipApplication"], ' +
+                'a[href*="openNewWindow"], a[onclick*="openNewWindow"]'
+              );
               return {
                 isRetrieving: /being retrieved|Dossier documents are being/i.test(html),
-                hasDocList: !!document.querySelector(
-                  "table.docListTable, #documents, div.docListTable, " +
-                  "#resultData, #applicationForm, table.publicationData, " +
-                  "#proc_table, div.proceedings, table.biblio"
-                ),
+                hasDocList: hasDocListElement || hasDocLinks,
+                hasDocLinks: hasDocLinks,
                 title: document.title,
                 htmlLen: html.length,
                 url: window.location.href
@@ -1681,58 +1690,90 @@ async function epoFetchViaBrowser(targetUrl, options) {
             return;
           }
           // 如果 pdfUrl 是用 GD 格式 docId 构造的（非 EPO documentView 格式），
-          // 直接跳到手动模式，因为自动 fetch 注定会失败
+          // 不跳手动模式，改为从 DOM 查找
           if (pdfUrl && !pdfUrl.includes("documentView") && !pdfUrl.includes("ipApplication")) {
-            console.log("[EPO Browser] pdfUrl is not documentView format, skipping auto-fetch, going manual:", pdfUrl);
-            manualMode = true;
-            pdfRetryCount = 99;
-            updateHint("PatentLens: 已进入文档列表。请点击右侧按钮开始选取文档，或直接点击下方文档 PDF 链接");
-            updateButton("✓ 开始手动选取文档", "#f59e0b");
-            return;
+            console.log("[EPO Browser] pdfUrl is not documentView format, will try DOM lookup instead:", pdfUrl);
           }
 
           // 先从 DOM 中查找目标 docId 对应的精确链接（优先使用 DOM 中的真实链接）
           let precisePdfUrl = null;
-          if (pdfUrl) {
-            const urlDocIdMatch = pdfUrl.match(/documentId=([^&]+)/);
-            const targetDocId = urlDocIdMatch ? decodeURIComponent(urlDocIdMatch[1]) : null;
-            if (targetDocId) {
-              try {
-                const domResult = await win.webContents.executeJavaScript(`
-                  (function() {
-                    try {
-                      var targetDocId = ${JSON.stringify(targetDocId)};
-                      var links = document.querySelectorAll('a[href*="documentView"], a[href*="ipApplication"], a[href*="openNewWindow"]');
-                      for (var i = 0; i < links.length; i++) {
-                        var link = links[i];
-                        var href = link.getAttribute('href') || '';
-                        var onclick = link.getAttribute('onclick') || '';
-                        var combined = href + ' ' + onclick;
-                        if (combined.indexOf(targetDocId) !== -1) {
-                          // 从 openNewWindow 调用中提取 URL
-                          var jsMatch = href.match(/openNewWindow\\s*\\(\\s*['"](.+?)['"]/);
-                          if (jsMatch) {
-                            return jsMatch[1].replace(/&amp;/g, '&');
-                          }
-                          // 直接 href
-                          if (href.indexOf('documentView') !== -1 || href.indexOf('ipApplication') !== -1) {
-                            return href;
-                          }
+          const _urlDocIdMatch = pdfUrl ? pdfUrl.match(/documentId=([^&]+)/) : null;
+          const _targetDocId = _urlDocIdMatch ? decodeURIComponent(_urlDocIdMatch[1]) : null;
+          if (_targetDocId) {
+            try {
+              const domResult = await win.webContents.executeJavaScript(`
+                (function() {
+                  try {
+                    var targetDocId = ${JSON.stringify(_targetDocId)};
+                    var links = document.querySelectorAll('a[href*="documentView"], a[href*="ipApplication"], a[href*="openNewWindow"]');
+                    for (var i = 0; i < links.length; i++) {
+                      var link = links[i];
+                      var href = link.getAttribute('href') || '';
+                      var onclick = link.getAttribute('onclick') || '';
+                      var combined = href + ' ' + onclick;
+                      if (combined.indexOf(targetDocId) !== -1) {
+                        var jsMatch = href.match(/openNewWindow\\s*\\(\\s*['"](.+?)['"]/);
+                        if (jsMatch) {
+                          return jsMatch[1].replace(/&amp;/g, '&');
+                        }
+                        if (href.indexOf('documentView') !== -1 || href.indexOf('ipApplication') !== -1) {
+                          return href;
                         }
                       }
-                      return null;
-                    } catch(e) { return null; }
-                  })();
-                `, true);
-                if (domResult && typeof domResult === "string") {
-                  const base = domResult.startsWith("http") ? "" : EPO_REGISTER_BASE + "/";
-                  precisePdfUrl = base + domResult.replace(/^\//, "");
-                  console.log("[EPO Browser] found precise PDF URL from DOM for docId " + targetDocId + ":", precisePdfUrl);
-                }
-              } catch (e) {
-                console.warn("[EPO Browser] failed to find precise PDF URL from DOM:", e.message);
+                    }
+                    return null;
+                  } catch(e) { return null; }
+                })();
+              `, true);
+              if (domResult && typeof domResult === "string") {
+                const base = domResult.startsWith("http") ? "" : EPO_REGISTER_BASE + "/";
+                precisePdfUrl = base + domResult.replace(/^\//, "");
+                console.log("[EPO Browser] found precise PDF URL from DOM for docId " + _targetDocId + ":", precisePdfUrl);
               }
+            } catch (e) {
+              console.warn("[EPO Browser] failed to find precise PDF URL from DOM:", e.message);
             }
+          }
+
+          // 如果没有精确匹配到 docId，或 pdfUrl 为空，从 DOM 查找第一个 documentView 链接
+          if (!precisePdfUrl) {
+            try {
+              const firstLinkResult = await win.webContents.executeJavaScript(`
+                (function() {
+                  try {
+                    var links = document.querySelectorAll('a[href*="documentView"], a[href*="ipApplication"], a[href*="openNewWindow"]');
+                    for (var i = 0; i < links.length; i++) {
+                      var href = links[i].getAttribute('href') || '';
+                      var jsMatch = href.match(/openNewWindow\\s*\\(\\s*['"](.+?)['"]/);
+                      if (jsMatch) {
+                        return jsMatch[1].replace(/&amp;/g, '&');
+                      }
+                      if (href.indexOf('documentView') !== -1 || href.indexOf('ipApplication') !== -1) {
+                        return href;
+                      }
+                    }
+                    return null;
+                  } catch(e) { return null; }
+                })();
+              `, true);
+              if (firstLinkResult && typeof firstLinkResult === "string") {
+                const base = firstLinkResult.startsWith("http") ? "" : EPO_REGISTER_BASE + "/";
+                precisePdfUrl = base + firstLinkResult.replace(/^\//, "");
+                console.log("[EPO Browser] found first PDF URL from DOM (no docId match):", precisePdfUrl);
+              }
+            } catch (e) {
+              console.warn("[EPO Browser] failed to find first PDF URL from DOM:", e.message);
+            }
+          }
+
+          // 如果还是找不到任何链接，说明不是 doclist 页面，切换到手动模式
+          if (!precisePdfUrl && !pdfUrl) {
+            manualMode = true;
+            pdfRetryCount = 99;
+            console.log("[EPO Browser] no PDF URL found anywhere, switching to manual mode");
+            updateHint("PatentLens: 自动获取 PDF 失败。请点击右侧按钮开始选取文档，或直接点击下方文档 PDF 链接");
+            updateButton("✓ 开始手动选取文档", "#f59e0b");
+            return;
           }
 
           // PDF 模式：从 doclist 页面内 fetch PDF（有 session + Referer）
