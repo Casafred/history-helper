@@ -3,8 +3,8 @@ import os
 from weasyprint import HTML, CSS
 
 workspace = '/workspace'
-html_file = os.path.join(workspace, 'user-manual-v0.6.html')
-pdf_file = os.path.join(workspace, 'PatentLens-用户使用说明书-V0.6.0.pdf')
+html_file = os.path.join(workspace, 'user-manual-v0.7.html')
+pdf_file = os.path.join(workspace, 'PatentLens-用户使用说明书-V0.7.0.pdf')
 font_file = os.path.join(workspace, 'fonts', 'NotoSansSC-Regular.ttf')
 
 css_string = '''
@@ -14,16 +14,22 @@ css_string = '''
     font-weight: normal;
     font-style: normal;
 }
-body {
+* {
+    font-family: "NotoSansSC", "Noto Sans CJK SC", "WenQuanYi Zen Hei", "Microsoft YaHei", sans-serif !important;
+}
+svg text {
     font-family: "NotoSansSC", "Noto Sans CJK SC", "WenQuanYi Zen Hei", "Microsoft YaHei", sans-serif !important;
 }
 '''
 
 print(f"Generating PDF from {html_file}...")
+print(f"Font file: {font_file}")
+print(f"Font exists: {os.path.exists(font_file)}")
 HTML(filename=html_file, base_url=workspace).write_pdf(
     pdf_file,
     stylesheets=[CSS(string=css_string)],
     presentational_hints=True
 )
 print(f"PDF generated: {pdf_file}")
-print(f"File size: {os.path.getsize(pdf_file) / 1024 / 1024:.2f} MB")
+file_size = os.path.getsize(pdf_file) / 1024 / 1024
+print(f"File size: {file_size:.2f} MB")
