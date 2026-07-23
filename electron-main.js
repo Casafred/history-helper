@@ -302,13 +302,14 @@ function epoClassifyDoc(desc, phase) {
     docCode = "OA"; docType = "office_action"; stage = "审查意见";
   } else if (lower.includes("search opinion")
     || lower.includes("written opinion")
-    || lower.includes("esop")
-    || lower.includes("search strategy")) {
+    || lower.includes("esop")) {
     docCode = "ESOP"; docType = "office_action"; stage = "审查意见";
   } else if (lower.includes("european search report")
     || (lower.includes("search report") && !lower.includes("search strategy"))
     || lower.includes("esr")) {
     docCode = "ESR"; docType = "citation"; stage = "审查员引用";
+  } else if (lower.includes("search strategy") || lower.includes("srchstraep")) {
+    docCode = "SRCHSTRAEP"; docType = "citation"; stage = "审查员引用";
   } else if (lower.includes("amendment after non-final")
     || lower.includes("amendment/request")
     || (lower.includes("amendment") && !lower.includes("acknowledgment"))

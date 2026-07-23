@@ -103,7 +103,7 @@ patentInput.addEventListener("input", async () => {
 });
 
 patentInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") searchBtn.click();
+  if (e.key === "Enter" && !e.isComposing) searchBtn.click();
 });
 
 searchBtn.addEventListener("click", async () => {
