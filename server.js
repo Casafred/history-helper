@@ -571,6 +571,33 @@ function epoHtmlUnescape(s) {
     .trim();
 }
 
+function epoExtractUrlFromHref(hrefAttr) {
+  if (!hrefAttr) return null;
+  const href = epoHtmlUnescape(hrefAttr).trim();
+
+  if (href.startsWith("javascript:")) {
+    const jsMatch = href.match(/openNewWindow\s*\(\s*(['"])(.+?)\1/);
+    if (jsMatch) {
+      let url = jsMatch[2].trim();
+      url = epoHtmlUnescape(url);
+      return url;
+    }
+    return null;
+  }
+
+  if (/documentView\?|ipApplication\?|application\?/.test(href)) {
+    const qIdx = href.indexOf("?");
+    if (qIdx !== -1) {
+      const path = href.substring(0, qIdx);
+      if (path.endsWith("documentView") || path.endsWith("ipApplication") || path.endsWith("application")) {
+        return href.substring(path.lastIndexOf("/") !== -1 ? path.lastIndexOf("/") + 1 : 0);
+      }
+    }
+    return href;
+  }
+  return null;
+}
+
 function epoNormalizeDate(dateStr) {
   const cleaned = String(dateStr || "").trim();
   const parts = cleaned.split(".");
@@ -676,70 +703,86 @@ function epoClassifyDoc(desc, phase) {
 
 function epoParseEpDocList(html, appNumber) {
   const docs = [];
-  const re = /<tr>\s*<td[^>]*>\s*<input[^>]*type="checkbox"[^>]*value="([^"]+)"[^>]*>\s*<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>(?:<a[^>]*href="([^"]*)"[^>]*>)?(.*?)(?:<\/a>)?<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>([^<]*)<\/td>/gi;
+  const realApn = "EP" + appNumber;
+  const re = /<tr[^>]*>\s*<td[^>]*>\s*<input[^>]*type="checkbox"[^>]*value="([^"]+)"[^>]*>\s*<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>\s*(<a[^>]*>)?(.*?)(?:<\/a>)?\s*<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>([^<]*)<\/td>/gi;
+  const hrefRe = /<a[^>]*\shref\s*=\s*"([^"]*)"[^>]*>/i;
   let m;
   while ((m = re.exec(html)) !== null) {
     const docId = m[1];
     const date = epoHtmlUnescape(m[2]);
-    const href = m[3] || "";
-    const desc = epoHtmlUnescape(m[4].replace(/<[^>]+>/g, ""));
+    const aTag = m[3] || "";
+    const descRaw = m[4];
     const phase = epoHtmlUnescape(m[5].replace(/<[^>]+>/g, ""));
     const pages = parseInt(String(m[6]).trim(), 10) || 1;
+    const desc = epoHtmlUnescape(descRaw.replace(/<[^>]+>/g, ""));
     if (!docId || !desc || !date) continue;
-    let epoPdfUrl = null;
-    if (href) {
-      try {
-        epoPdfUrl = new URL(href, EPO_REGISTER_BASE).href;
-      } catch (_) {
-        epoPdfUrl = href.startsWith("http") ? href : EPO_REGISTER_BASE + (href.startsWith("/") ? "" : "/") + href;
+
+    let pdfUrl = `${EPO_REGISTER_BASE}/documentView?number=${encodeURIComponent(realApn)}&documentId=${encodeURIComponent(docId)}`;
+    if (aTag) {
+      const hrefMatch = aTag.match(hrefRe);
+      if (hrefMatch) {
+        const extracted = epoExtractUrlFromHref(hrefMatch[1]);
+        if (extracted) {
+          const base = extracted.startsWith("http") ? "" : EPO_REGISTER_BASE + "/";
+          pdfUrl = base + extracted;
+        }
       }
     }
-    docs.push({
-      docId,
-      date: epoNormalizeDate(date),
-      name: desc,
-      desc,
-      pages,
-      phase,
-      isGdDoc: false,
-      apn: "EP" + appNumber,
-      epoPdfUrl,
-    });
+    docs.push({ docId, date: epoNormalizeDate(date), name: desc, desc, pages, phase, isGdDoc: false, apn: realApn, epoPdfUrl: pdfUrl });
   }
   return docs;
 }
 
 function epoParseGdDocList(html, apn) {
   const docs = [];
-  const re = /<tr>\s*<td[^>]*>([^<]+)<\/td>\s*<td[^>]*>\s*<a[^>]*href="([^"]*documentId=[A-Z0-9]+[^"]*)"[^>]*>([^<]+)<\/a>\s*<\/td>\s*<td[^>]*>([^<]*)<\/td>/gi;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    const date = epoHtmlUnescape(m[1]);
-    const href = m[2] || "";
-    const docIdMatch = href.match(/documentId=([A-Z0-9]+)/);
-    const docId = docIdMatch ? docIdMatch[1] : null;
-    const desc = epoHtmlUnescape(m[3]);
-    const pages = parseInt(String(m[4]).trim(), 10) || 1;
-    if (!docId || !desc || !date) continue;
-    let epoPdfUrl = null;
-    if (href) {
-      try {
-        epoPdfUrl = new URL(href, EPO_REGISTER_BASE).href;
-      } catch (_) {
-        epoPdfUrl = href.startsWith("http") ? href : EPO_REGISTER_BASE + (href.startsWith("/") ? "" : "/") + href;
-      }
+  const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  const dateRe = /<td[^>]*>\s*([^<]+?)\s*<\/td>/i;
+  const aHrefRe = /<a[^>]*\shref\s*=\s*"([^"]*)"[^>]*>([\s\S]*?)<\/a>/i;
+
+  let trMatch;
+  while ((trMatch = trRe.exec(html)) !== null) {
+    const trContent = trMatch[1];
+    if (!/documentView|ipApplication|openNewWindow/i.test(trContent)) continue;
+
+    const aMatch = trContent.match(aHrefRe);
+    if (!aMatch) continue;
+
+    const hrefVal = aMatch[1];
+    const desc = epoHtmlUnescape(aMatch[2].replace(/<[^>]+>/g, ""));
+
+    const dateMatch = trContent.match(dateRe);
+    const date = dateMatch ? epoHtmlUnescape(dateMatch[1]) : "";
+
+    let pages = 1;
+    const tds = trContent.match(/<td[^>]*>([\s\S]*?)<\/td>/gi) || [];
+    for (let i = tds.length - 1; i >= 0; i--) {
+      const numMatch = tds[i].match(/(\d+)/);
+      if (numMatch) { pages = parseInt(numMatch[1], 10) || 1; break; }
     }
-    docs.push({
-      docId,
-      date: epoNormalizeDate(date),
-      name: desc,
-      desc,
-      pages,
-      phase: "",
-      isGdDoc: true,
-      apn: apn,
-      epoPdfUrl,
-    });
+
+    if (!desc || !date) continue;
+
+    const extracted = epoExtractUrlFromHref(hrefVal);
+
+    const urlToParse = extracted || "";
+    const qIdx = urlToParse.indexOf("?");
+    const queryString = qIdx !== -1 ? epoHtmlUnescape(urlToParse.substring(qIdx + 1)) : "";
+    const numberMatch = queryString.match(/number=([^&'"\s<)]+)/);
+    const docIdMatch = queryString.match(/documentId=([^&'"\s<)]+)/);
+    const realApn = numberMatch ? decodeURIComponent(numberMatch[1]) : apn;
+    const docId = docIdMatch ? decodeURIComponent(docIdMatch[1]) : "";
+
+    if (!docId) continue;
+
+    let pdfUrl;
+    if (extracted && extracted.startsWith("http")) {
+      pdfUrl = extracted;
+    } else if (extracted) {
+      pdfUrl = `${EPO_REGISTER_BASE}/${extracted.replace(/^\//, "")}`;
+    } else {
+      pdfUrl = `${EPO_REGISTER_BASE}/documentView?number=${encodeURIComponent(realApn)}&documentId=${encodeURIComponent(docId)}`;
+    }
+    docs.push({ docId, date: epoNormalizeDate(date), name: desc, desc, pages, phase: "", isGdDoc: true, apn: realApn, epoPdfUrl: pdfUrl });
   }
   return docs;
 }

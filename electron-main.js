@@ -241,6 +241,41 @@ function epoHtmlUnescape(s) {
     .trim();
 }
 
+// 从 <a> 标签的 href 属性值中提取真实 EPO URL
+// 支持两种格式：
+//   1. 直接链接："?documentView?number=..." 或 "documentView?number=..."
+//   2. javascript 调用："javascript:openNewWindow('documentView?...', '...')"
+function epoExtractUrlFromHref(hrefAttr) {
+  if (!hrefAttr) return null;
+  const href = epoHtmlUnescape(hrefAttr).trim();
+
+  if (href.startsWith("javascript:")) {
+    // 匹配 openNewWindow('...', 或 openNewWindow("...",  提取第一个参数中的 URL
+    const jsMatch = href.match(/openNewWindow\s*\(\s*(['"])(.+?)\1/);
+    if (jsMatch) {
+      let url = jsMatch[2].trim();
+      // 解码 HTML 实体
+      url = epoHtmlUnescape(url);
+      return url;
+    }
+    return null;
+  }
+
+  // 直接链接：检查是否包含 EPO 文档端点
+  if (/documentView\?|ipApplication\?|application\?/.test(href)) {
+    // 去除可能的前缀路径
+    const qIdx = href.indexOf("?");
+    if (qIdx !== -1) {
+      const path = href.substring(0, qIdx);
+      if (path.endsWith("documentView") || path.endsWith("ipApplication") || path.endsWith("application")) {
+        return href.substring(path.lastIndexOf("/") !== -1 ? path.lastIndexOf("/") + 1 : 0);
+      }
+    }
+    return href;
+  }
+  return null;
+}
+
 function epoNormalizeDate(dateStr) {
   const cleaned = String(dateStr || "").trim();
   const parts = cleaned.split(".");
@@ -347,18 +382,41 @@ function epoClassifyDoc(desc, phase) {
 function epoParseEpDocList(html, appNumber) {
   const docs = [];
   const realApn = "EP" + appNumber;
-  const re = /<tr>\s*<td[^>]*>\s*<input[^>]*type="checkbox"[^>]*value="([^"]+)"[^>]*>\s*<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>(?:<a[^>]*href="([^"]*)")?(.*?)(?:<\/a>)?<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>([^<]*)<\/td>/gi;
+  // EP doclist 格式：
+  // <tr>
+  //   <td><input type="checkbox" value="docId"></td>
+  //   <td>日期</td>
+  //   <td><a href="javascript:openNewWindow('...', '...');">文档名</a></td>
+  //   <td>phase</td>
+  //   <td>页数</td>
+  // </tr>
+  const re = /<tr[^>]*>\s*<td[^>]*>\s*<input[^>]*type="checkbox"[^>]*value="([^"]+)"[^>]*>\s*<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>\s*(<a[^>]*>)?(.*?)(?:<\/a>)?\s*<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>([^<]*)<\/td>/gi;
+  // 额外匹配 <a href="..."> 的正则
+  const hrefRe = /<a[^>]*\shref\s*=\s*"([^"]*)"[^>]*>/i;
   let m;
   while ((m = re.exec(html)) !== null) {
     const docId = m[1];
     const date = epoHtmlUnescape(m[2]);
-    const href = m[3] || "";
-    const desc = epoHtmlUnescape(m[4].replace(/<[^>]+>/g, ""));
+    const aTag = m[3] || "";
+    const descRaw = m[4];
     const phase = epoHtmlUnescape(m[5].replace(/<[^>]+>/g, ""));
     const pages = parseInt(String(m[6]).trim(), 10) || 1;
+    const desc = epoHtmlUnescape(descRaw.replace(/<[^>]+>/g, ""));
     if (!docId || !desc || !date) continue;
-    // 构造 documentView PDF 链接
-    const pdfUrl = `${EPO_REGISTER_BASE}/documentView?number=${encodeURIComponent(realApn)}&documentId=${encodeURIComponent(docId)}`;
+
+    // 从 <a> 标签中提取 href
+    let pdfUrl = `${EPO_REGISTER_BASE}/documentView?number=${encodeURIComponent(realApn)}&documentId=${encodeURIComponent(docId)}`;
+    if (aTag) {
+      const hrefMatch = aTag.match(hrefRe);
+      if (hrefMatch) {
+        const extracted = epoExtractUrlFromHref(hrefMatch[1]);
+        if (extracted) {
+          // 构造完整 URL
+          const base = extracted.startsWith("http") ? "" : EPO_REGISTER_BASE + "/";
+          pdfUrl = base + extracted;
+        }
+      }
+    }
     docs.push({ docId, date: epoNormalizeDate(date), name: desc, desc, pages, phase, isGdDoc: false, apn: realApn, pdfUrl });
   }
   return docs;
@@ -366,26 +424,72 @@ function epoParseEpDocList(html, appNumber) {
 
 function epoParseGdDocList(html, apn) {
   const docs = [];
-  // 正则提取真实 APN（number=...）和 docId，保留完整 documentView 链接
-  // 链接格式1（直接链接）：documentView?number=CN.201980017909.A&documentId=201980017909910000120200908_CN
-  // 链接格式2（javascript）：javascript:openNewWindow('documentView?number=CN.201980017909.A&amp;documentId=...', '...')
-  const re = /<tr>\s*<td[^>]*>([^<]+)<\/td>\s*<td[^>]*>\s*<a[^>]*href="[^"]*(?:documentView|ipApplication|application)\?([^"]*)"[^>]*>([^<]+)<\/a>\s*<\/td>\s*<td[^>]*>([^<]*)<\/td>/gi;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    const date = epoHtmlUnescape(m[1]);
-    // 先解码 HTML 实体（&amp; → &），再解析 query 参数
-    const queryString = epoHtmlUnescape(m[2]);
-    const desc = epoHtmlUnescape(m[3]);
-    const pages = parseInt(String(m[4]).trim(), 10) || 1;
-    // 从 query string 解析 number 和 documentId
-    // 用 [^&'"\s<)]+ 精确匹配值边界，避免 javascript: 链接中引号/括号后的内容被误捕获
+  // GD doclist (ipfwretrieve) 格式：
+  // <tr>
+  //   <td>日期</td>
+  //   <td><a href="javascript:openNewWindow('documentView?number=...&documentId=...', '...');">文档名</a></td>
+  //   <td>页数</td>
+  // </tr>
+  // 更健壮的正则：匹配所有 <tr> 行，包含 <a> 标签
+  const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  const dateRe = /<td[^>]*>\s*([^<]+?)\s*<\/td>/i;
+  const aHrefRe = /<a[^>]*\shref\s*=\s*"([^"]*)"[^>]*>([\s\S]*?)<\/a>/i;
+  const pagesRe = /<td[^>]*>\s*(\d+)\s*<\/td>/gi;
+
+  let trMatch;
+  while ((trMatch = trRe.exec(html)) !== null) {
+    const trContent = trMatch[1];
+    // 必须包含 documentView 或 ipApplication 相关链接
+    if (!/documentView|ipApplication|openNewWindow/i.test(trContent)) continue;
+
+    const aMatch = trContent.match(aHrefRe);
+    if (!aMatch) continue;
+
+    const hrefVal = aMatch[1];
+    const desc = epoHtmlUnescape(aMatch[2].replace(/<[^>]+>/g, ""));
+
+    // 提取日期（第一个 <td>）
+    const dateMatch = trContent.match(dateRe);
+    const date = dateMatch ? epoHtmlUnescape(dateMatch[1]) : "";
+
+    // 提取页数（最后一个包含数字的 <td>）
+    let pages = 1;
+    const tds = trContent.match(/<td[^>]*>([\s\S]*?)<\/td>/gi) || [];
+    for (let i = tds.length - 1; i >= 0; i--) {
+      const numMatch = tds[i].match(/(\d+)/);
+      if (numMatch) { pages = parseInt(numMatch[1], 10) || 1; break; }
+    }
+
+    if (!desc || !date) continue;
+
+    // 从 href 中提取 URL
+    const extracted = epoExtractUrlFromHref(hrefVal);
+    if (!extracted) {
+      // 降级：尝试从 trContent 正则匹配
+      const qsMatch = trContent.match(/(?:documentView|ipApplication|application)\?(?:[^"'\s<)]|&amp;|&)+/);
+      if (!qsMatch) continue;
+    }
+
+    // 从提取的 URL 中解析 number 和 documentId
+    const urlToParse = extracted || "";
+    const qIdx = urlToParse.indexOf("?");
+    const queryString = qIdx !== -1 ? epoHtmlUnescape(urlToParse.substring(qIdx + 1)) : "";
     const numberMatch = queryString.match(/number=([^&'"\s<)]+)/);
     const docIdMatch = queryString.match(/documentId=([^&'"\s<)]+)/);
     const realApn = numberMatch ? decodeURIComponent(numberMatch[1]) : apn;
     const docId = docIdMatch ? decodeURIComponent(docIdMatch[1]) : "";
-    if (!docId || !desc || !date) continue;
+
+    if (!docId) continue;
+
     // 构造完整 PDF 链接（documentView 端点）
-    const pdfUrl = `${EPO_REGISTER_BASE}/documentView?number=${encodeURIComponent(realApn)}&documentId=${encodeURIComponent(docId)}`;
+    let pdfUrl;
+    if (extracted && extracted.startsWith("http")) {
+      pdfUrl = extracted;
+    } else if (extracted) {
+      pdfUrl = `${EPO_REGISTER_BASE}/${extracted.replace(/^\//, "")}`;
+    } else {
+      pdfUrl = `${EPO_REGISTER_BASE}/documentView?number=${encodeURIComponent(realApn)}&documentId=${encodeURIComponent(docId)}`;
+    }
     docs.push({ docId, date: epoNormalizeDate(date), name: desc, desc, pages, phase: "", isGdDoc: true, apn: realApn, pdfUrl });
   }
   return docs;
@@ -853,6 +957,10 @@ async function epoFetchViaBrowser(targetUrl, options) {
     let manualMode = false; // 是否已切换到手动模式（用户手动点击 PDF 链接）
     let manualDoneClicked = false; // 用户是否点击了"全部选完"按钮
     let willDownloadHandler = null; // will-download 事件处理器（手动模式下载用）
+    // 自动导航获取 PDF 状态：'idle' → 'navigating' → 'extracting' → 'done'
+    let autoPdfPhase = 'idle';
+    let autoPdfTargetUrl = null;
+    let autoPdfNavTimeout = null;
     const CF_WAITING_KEYWORDS = [
       "just a moment", "attention required", "checking your browser",
       "performing security", "verifying you are human", "请稍候", "请稍等",
@@ -962,6 +1070,11 @@ async function epoFetchViaBrowser(targetUrl, options) {
 
     // 从 doclist 页面内 fetch PDF（此时有 session cookie + 正确 Referer）
     // urlOverride: 用户手动点击的 PDF 链接（可选，不传则用原始 pdfUrl）
+    // 增强版逻辑：自动处理 documentView 返回 HTML 的情况：
+    //   1. fetch documentView URL
+    //   2. 如果返回的是 PDF（%PDF 头），直接返回
+    //   3. 如果返回 HTML，解析 DOM 找到 embed/iframe/object/.pdf 链接
+    //   4. fetch 实际 PDF URL
     const fetchPdfFromPage = async (urlOverride) => {
       const targetUrl = urlOverride || pdfUrl;
       if (!targetUrl) return { error: "no PDF URL" };
@@ -969,25 +1082,115 @@ async function epoFetchViaBrowser(targetUrl, options) {
         const result = await win.webContents.executeJavaScript(`
           (async function() {
             try {
-              const resp = await fetch(${JSON.stringify(targetUrl)}, {
-                credentials: 'include',
-                headers: { 'Accept': 'application/pdf,*/*' },
-                redirect: 'follow'
-              });
-              if (!resp.ok) return { error: 'HTTP ' + resp.status };
-              const ab = await resp.arrayBuffer();
-              const arr = Array.from(new Uint8Array(ab));
-              return { buffer: arr, contentType: resp.headers.get('content-type') || '' };
+              function isPdfBuffer(buf) {
+                return buf && buf.length > 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
+              }
+
+              async function fetchAsBuffer(url, acceptPdf) {
+                const headers = { credentials: 'include', redirect: 'follow' };
+                if (acceptPdf) headers.headers = { 'Accept': 'application/pdf,*/*' };
+                const resp = await fetch(url, headers);
+                if (!resp.ok) return { error: 'HTTP ' + resp.status, status: resp.status };
+                const ab = await resp.arrayBuffer();
+                const arr = Array.from(new Uint8Array(ab));
+                return {
+                  buffer: arr,
+                  contentType: resp.headers.get('content-type') || '',
+                  finalUrl: resp.url
+                };
+              }
+
+              function extractPdfUrlFromHtml(html, baseUrl) {
+                try {
+                  var parser = new DOMParser();
+                  var doc = parser.parseFromString(html, 'text/html');
+                  // 1. 优先查找 embed/iframe/object
+                  var embeds = doc.querySelectorAll('embed[src], iframe[src], object[data]');
+                  for (var i = 0; i < embeds.length; i++) {
+                    var el = embeds[i];
+                    var src = el.getAttribute('src') || el.getAttribute('data') || '';
+                    if (!src) continue;
+                    try { src = new URL(src, baseUrl).href; } catch(e) {}
+                    if (src.toLowerCase().includes('.pdf') || (el.type && el.type.includes('pdf'))) {
+                      return src;
+                    }
+                  }
+                  // 2. 查找包含 pdf 的链接
+                  var links = doc.querySelectorAll('a[href]');
+                  for (var j = 0; j < links.length; j++) {
+                    var href = links[j].getAttribute('href');
+                    if (href) {
+                      try { href = new URL(href, baseUrl).href; } catch(e) {}
+                      if (href.toLowerCase().includes('pdf') || href.toLowerCase().includes('showpdf') || href.toLowerCase().includes('documentstream')) {
+                        return href;
+                      }
+                    }
+                  }
+                  // 3. 正则查找 PDF URL 模式
+                  var pdfMatch = html.match(/['"]([^'"]*(?:\.pdf|documentstream|showPdf|pdfstream)[^'"]*)['"]/i);
+                  if (pdfMatch) {
+                    try { return new URL(pdfMatch[1], baseUrl).href; } catch(e) { return pdfMatch[1]; }
+                  }
+                  // 4. 查找 iframe （EPO documentView 常用 iframe 嵌套）
+                  var iframes = doc.querySelectorAll('iframe[src]');
+                  for (var k = 0; k < iframes.length; k++) {
+                    var isrc = iframes[k].getAttribute('src');
+                    if (isrc) {
+                      try { isrc = new URL(isrc, baseUrl).href; } catch(e) {}
+                      // 递归检查 iframe 内容（同源的话）
+                      return isrc;
+                    }
+                  }
+                  return null;
+                } catch(e) { return null; }
+              }
+
+              // 第一步：fetch documentView URL
+              var r1 = await fetchAsBuffer(${JSON.stringify(targetUrl)}, true);
+              if (r1.error) return { error: r1.error };
+              var buf1 = new Uint8Array(r1.buffer);
+              if (isPdfBuffer(buf1)) {
+                return { buffer: r1.buffer, contentType: r1.contentType, url: r1.finalUrl };
+              }
+              // 返回的是 HTML（或其他），尝试提取 PDF URL
+              var text1 = new TextDecoder('utf-8', { fatal: false }).decode(buf1);
+              var pdfRealUrl = extractPdfUrlFromHtml(text1, r1.finalUrl || ${JSON.stringify(targetUrl)});
+              if (pdfRealUrl && pdfRealUrl !== r1.finalUrl) {
+                // 第二步：fetch 实际 PDF URL
+                var r2 = await fetchAsBuffer(pdfRealUrl, true);
+                if (r2.error) {
+                  // 尝试从 iframe HTML 中继续查找
+                  return { error: 'PDF embed fetch failed: ' + r2.error, htmlSnippet: text1.substring(0, 1000) };
+                }
+                var buf2 = new Uint8Array(r2.buffer);
+                if (isPdfBuffer(buf2)) {
+                  return { buffer: r2.buffer, contentType: r2.contentType, url: r2.finalUrl };
+                }
+                // 还是 HTML？可能是 iframe 嵌套，再提取一次
+                var text2 = new TextDecoder('utf-8', { fatal: false }).decode(buf2);
+                var pdfRealUrl2 = extractPdfUrlFromHtml(text2, r2.finalUrl || pdfRealUrl);
+                if (pdfRealUrl2 && pdfRealUrl2 !== pdfRealUrl && pdfRealUrl2 !== r2.finalUrl) {
+                  var r3 = await fetchAsBuffer(pdfRealUrl2, true);
+                  if (!r3.error) {
+                    var buf3 = new Uint8Array(r3.buffer);
+                    if (isPdfBuffer(buf3)) {
+                      return { buffer: r3.buffer, contentType: r3.contentType, url: r3.finalUrl };
+                    }
+                  }
+                }
+                return { error: 'not a PDF after following embed, contentType=' + r2.contentType + ', size=' + r2.buffer.length, htmlSnippet: text2.substring(0, 1000) };
+              }
+              return { error: 'could not find PDF URL in documentView page, contentType=' + r1.contentType + ', size=' + r1.buffer.length, htmlSnippet: text1.substring(0, 1000) };
             } catch(e) { return { error: e.message }; }
           })();
         `, true);
-        if (result.error) return { error: result.error };
+        if (result.error) return { error: result.error, htmlSnippet: result.htmlSnippet };
         const buf = Buffer.from(result.buffer);
         const isPdf = buf.length > 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
         if (!isPdf) {
           const headStr = buf.slice(0, Math.min(2000, buf.length)).toString("utf-8");
           if (epoDetectCloudflare(headStr)) return { cloudflare: true, error: "EPO Register requires Cloudflare verification" };
-          return { error: "not a PDF, contentType=" + result.contentType + ", size=" + buf.length };
+          return { error: "not a PDF, contentType=" + (result.contentType || "") + ", size=" + buf.length, htmlSnippet: result.htmlSnippet };
         }
         return { body: buf };
       } catch (e) {
@@ -1188,6 +1391,8 @@ async function epoFetchViaBrowser(targetUrl, options) {
       // 拦截新窗口打开（EPO 页面用 javascript:openNewWindow 调用 window.open）
       win.webContents.setWindowOpenHandler(({ url }) => {
         if (settled || win.isDestroyed()) return { action: "deny" };
+        // 自动导航模式下不拦截（我们自己 loadURL 导航的）
+        if (autoPdfPhase === 'navigating' || autoPdfPhase === 'extracting') return { action: "deny" };
         if (url.includes("documentView") || url.includes("ipApplication")) {
           const fullUrl = url.startsWith("http") ? url : EPO_REGISTER_BASE + "/" + url.replace(/^\//, "");
           handleManualPdfClick(fullUrl);
@@ -1198,6 +1403,8 @@ async function epoFetchViaBrowser(targetUrl, options) {
       // 拦截直接导航（普通 <a href> 点击）
       win.webContents.on("will-navigate", (event, url) => {
         if (settled || win.isDestroyed()) return;
+        // 自动导航模式下不拦截（我们自己 loadURL 导航的）
+        if (autoPdfPhase === 'navigating' || autoPdfPhase === 'extracting') return;
         if (url.includes("documentView") || url.includes("ipApplication")) {
           event.preventDefault();
           handleManualPdfClick(url);
@@ -1222,6 +1429,149 @@ async function epoFetchViaBrowser(targetUrl, options) {
             finish({ cloudflare: true, error: "Cloudflare verification timeout (120s)" });
           }
           return;
+        }
+
+        // 自动导航到 documentView 页面后，自动提取 PDF
+        if (wantPdf && autoPdfPhase === 'navigating') {
+          const currentUrl = win.webContents.getURL();
+          if (currentUrl.includes("documentView") || currentUrl.includes("ipApplication") || currentUrl.includes("application?showPdfPage")) {
+            autoPdfPhase = 'extracting';
+            if (autoPdfNavTimeout) { clearTimeout(autoPdfNavTimeout); autoPdfNavTimeout = null; }
+            console.log("[EPO Browser] auto-navigated to PDF viewer page, extracting PDF automatically, url:", currentUrl);
+            updateHint("PatentLens: 文档查看器已打开，正在提取 PDF...");
+            // 等待页面渲染完成（PDF embed 可能需要一点时间加载）
+            await new Promise(r => setTimeout(r, 2000));
+            try {
+              const autoResult = await win.webContents.executeJavaScript(`
+                (async function() {
+                  function isPdfBuffer(buf) {
+                    return buf && buf.length > 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
+                  }
+                  function bufToBase64(buf) {
+                    var bin = '';
+                    var bytes = new Uint8Array(buf);
+                    var chunk = 0x8000;
+                    for (var i = 0; i < bytes.length; i += chunk) {
+                      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+                    }
+                    return btoa(bin);
+                  }
+                  function extractPdfUrlFromHtml(html, baseUrl) {
+                    var parser = new DOMParser();
+                    var doc = parser.parseFromString(html, 'text/html');
+                    var embed = doc.querySelector('embed[type="application/pdf"]');
+                    if (embed && embed.src) return new URL(embed.src, baseUrl).href;
+                    var iframe = doc.querySelector('iframe[src*=".pdf"], iframe[src*="pdf"]');
+                    if (iframe && iframe.src) return new URL(iframe.src, baseUrl).href;
+                    var obj = doc.querySelector('object[type="application/pdf"]');
+                    if (obj && obj.data) return new URL(obj.data, baseUrl).href;
+                    var downloadLink = doc.querySelector('a[href*=".pdf"], a[href*="download"]');
+                    if (downloadLink && downloadLink.href) return new URL(downloadLink.href, baseUrl).href;
+                    // 尝试从脚本中找 PDF URL
+                    var scripts = doc.querySelectorAll('script');
+                    for (var i = 0; i < scripts.length; i++) {
+                      var sc = scripts[i].textContent || '';
+                      var m = sc.match(/["']([^"']*\\.pdf[^"']*)["']/i);
+                      if (m) return new URL(m[1], baseUrl).href;
+                    }
+                    return null;
+                  }
+                  async function fetchAsBuffer(url, acceptPdf) {
+                    try {
+                      var headers = {};
+                      if (acceptPdf) headers['Accept'] = 'application/pdf,*/*';
+                      var resp = await fetch(url, { credentials: 'include', headers: headers });
+                      if (!resp.ok) return { error: 'HTTP ' + resp.status + ' ' + resp.statusText };
+                      var buf = await resp.arrayBuffer();
+                      return { buffer: buf, contentType: resp.headers.get('content-type') || '', finalUrl: resp.url };
+                    } catch (e) {
+                      return { error: e.message };
+                    }
+                  }
+                  // 方法1：检查当前页面是否已经是 PDF（content-type 可能被浏览器识别）
+                  // 先尝试在页面中查找 embed/iframe/object
+                  var embed = document.querySelector('embed[type="application/pdf"]');
+                  var iframe = document.querySelector('iframe[src*=".pdf"], iframe[src*="pdf"], iframe[src*="showPdf"]');
+                  var obj = document.querySelector('object[type="application/pdf"]');
+                  var pdfRealUrl = null;
+                  if (embed && embed.src) pdfRealUrl = embed.src;
+                  else if (iframe && iframe.src) pdfRealUrl = iframe.src;
+                  else if (obj && obj.data) pdfRealUrl = obj.data;
+                  // 方法2：如果没找到 embed，fetch 当前 URL（可能是 HTML），从中解析
+                  if (!pdfRealUrl) {
+                    var r0 = await fetchAsBuffer(window.location.href, true);
+                    if (!r0.error) {
+                      var b0 = new Uint8Array(r0.buffer);
+                      if (isPdfBuffer(b0)) {
+                        return { base64: bufToBase64(r0.buffer), contentType: r0.contentType, url: r0.finalUrl };
+                      }
+                      var text0 = new TextDecoder('utf-8', { fatal: false }).decode(b0);
+                      pdfRealUrl = extractPdfUrlFromHtml(text0, r0.finalUrl || window.location.href);
+                    }
+                  }
+                  if (pdfRealUrl) {
+                    var r = await fetchAsBuffer(pdfRealUrl, true);
+                    if (!r.error) {
+                      var b = new Uint8Array(r.buffer);
+                      // 如果还是 HTML，尝试再解析一层 iframe
+                      if (!isPdfBuffer(b)) {
+                        var text = new TextDecoder('utf-8', { fatal: false }).decode(b);
+                        var nestedUrl = extractPdfUrlFromHtml(text, r.finalUrl || pdfRealUrl);
+                        if (nestedUrl && nestedUrl !== pdfRealUrl) {
+                          var r2 = await fetchAsBuffer(nestedUrl, true);
+                          if (!r2.error) {
+                            var b2 = new Uint8Array(r2.buffer);
+                            if (isPdfBuffer(b2)) {
+                              return { base64: bufToBase64(r2.buffer), contentType: r2.contentType, url: r2.finalUrl };
+                            }
+                          }
+                        }
+                      }
+                      if (isPdfBuffer(b)) {
+                        return { base64: bufToBase64(r.buffer), contentType: r.contentType, url: r.finalUrl };
+                      }
+                    }
+                  }
+                  return { error: 'could not find or fetch PDF from documentView page' };
+                })();
+              `, true);
+              if (autoResult && autoResult.base64) {
+                const pdfBuf = Buffer.from(autoResult.base64, 'base64');
+                if (pdfBuf.length > 4 && pdfBuf[0] === 0x25 && pdfBuf[1] === 0x50 && pdfBuf[2] === 0x44 && pdfBuf[3] === 0x46) {
+                  autoPdfPhase = 'done';
+                  console.log("[EPO Browser] PDF extracted automatically via navigation, size=" + pdfBuf.length + ", closing window");
+                  // 缓存 cookies
+                  if (office && docNumber) {
+                    try {
+                      const _cookies = await session.defaultSession.cookies.get({ domain: "epo.org" });
+                      const _cookieStr = _cookies.map(c => c.name + "=" + c.value).join("; ");
+                      if (_cookieStr) setCachedEpoCookies(office, docNumber, _cookieStr);
+                    } catch (_) {}
+                  }
+                  finish({ body: pdfBuf });
+                  return;
+                }
+              }
+              console.log("[EPO Browser] auto-extraction from documentView failed, falling back to manual mode");
+              autoPdfPhase = 'idle';
+              manualMode = true;
+              pdfRetryCount = 99;
+              updateHint("PatentLens: 自动提取失败。请手动点击文档 PDF 链接，或点击右上角按钮返回");
+              updateButton("✓ 开始手动选取文档", "#f59e0b");
+            } catch (e) {
+              console.warn("[EPO Browser] auto PDF extraction error:", e.message);
+              autoPdfPhase = 'idle';
+              manualMode = true;
+              pdfRetryCount = 99;
+              updateHint("PatentLens: 自动提取出错。请手动点击文档 PDF 链接");
+              updateButton("✓ 开始手动选取文档", "#f59e0b");
+            }
+            return;
+          }
+          // 还没到 documentView 页面，可能正在跳转或 Cloudflare 中，继续等待
+          if (currentUrl.includes("register.epo.org")) {
+            return; // 等 did-finish-load 触发下一次 tryExtract
+          }
         }
 
         // 阶段 0：espacenet 跳转阶段（viaEspacenet=true 且尚未跳到 register.epo.org）
@@ -1332,7 +1682,7 @@ async function epoFetchViaBrowser(targetUrl, options) {
           }
           // 如果 pdfUrl 是用 GD 格式 docId 构造的（非 EPO documentView 格式），
           // 直接跳到手动模式，因为自动 fetch 注定会失败
-          if (pdfUrl && !pdfUrl.includes("documentView")) {
+          if (pdfUrl && !pdfUrl.includes("documentView") && !pdfUrl.includes("ipApplication")) {
             console.log("[EPO Browser] pdfUrl is not documentView format, skipping auto-fetch, going manual:", pdfUrl);
             manualMode = true;
             pdfRetryCount = 99;
@@ -1340,27 +1690,120 @@ async function epoFetchViaBrowser(targetUrl, options) {
             updateButton("✓ 开始手动选取文档", "#f59e0b");
             return;
           }
+
+          // 先从 DOM 中查找目标 docId 对应的精确链接（优先使用 DOM 中的真实链接）
+          let precisePdfUrl = null;
+          if (pdfUrl) {
+            const urlDocIdMatch = pdfUrl.match(/documentId=([^&]+)/);
+            const targetDocId = urlDocIdMatch ? decodeURIComponent(urlDocIdMatch[1]) : null;
+            if (targetDocId) {
+              try {
+                const domResult = await win.webContents.executeJavaScript(`
+                  (function() {
+                    try {
+                      var targetDocId = ${JSON.stringify(targetDocId)};
+                      var links = document.querySelectorAll('a[href*="documentView"], a[href*="ipApplication"], a[href*="openNewWindow"]');
+                      for (var i = 0; i < links.length; i++) {
+                        var link = links[i];
+                        var href = link.getAttribute('href') || '';
+                        var onclick = link.getAttribute('onclick') || '';
+                        var combined = href + ' ' + onclick;
+                        if (combined.indexOf(targetDocId) !== -1) {
+                          // 从 openNewWindow 调用中提取 URL
+                          var jsMatch = href.match(/openNewWindow\\s*\\(\\s*['"](.+?)['"]/);
+                          if (jsMatch) {
+                            return jsMatch[1].replace(/&amp;/g, '&');
+                          }
+                          // 直接 href
+                          if (href.indexOf('documentView') !== -1 || href.indexOf('ipApplication') !== -1) {
+                            return href;
+                          }
+                        }
+                      }
+                      return null;
+                    } catch(e) { return null; }
+                  })();
+                `, true);
+                if (domResult && typeof domResult === "string") {
+                  const base = domResult.startsWith("http") ? "" : EPO_REGISTER_BASE + "/";
+                  precisePdfUrl = base + domResult.replace(/^\//, "");
+                  console.log("[EPO Browser] found precise PDF URL from DOM for docId " + targetDocId + ":", precisePdfUrl);
+                }
+              } catch (e) {
+                console.warn("[EPO Browser] failed to find precise PDF URL from DOM:", e.message);
+              }
+            }
+          }
+
           // PDF 模式：从 doclist 页面内 fetch PDF（有 session + Referer）
           pdfRetryCount++;
-          if (pdfRetryCount <= 3) {
+          if (pdfRetryCount <= 2) {
             updateHint(`PatentLens: 审查档案已就绪，正在下载文档 PDF... (尝试 ${pdfRetryCount}/3)`);
             updateButton("✓ 手动选取文档", "#f59e0b");
-            const result = await fetchPdfFromPage();
+            const fetchTarget = precisePdfUrl || pdfUrl;
+            const result = await fetchPdfFromPage(fetchTarget);
             if (result.body) {
-              console.log("[EPO Browser] PDF fetched successfully, size=" + result.body.length + ", closing window");
+              console.log("[EPO Browser] PDF fetched successfully via in-page fetch, size=" + result.body.length + ", closing window");
+              // 缓存成功获取的 session cookies（一次成功说明 cookie 有效，后续可用 curl 复用）
+              if (office && docNumber) {
+                try {
+                  const _cookies = await session.defaultSession.cookies.get({ domain: "epo.org" });
+                  const _cookieStr = _cookies.map(c => c.name + "=" + c.value).join("; ");
+                  if (_cookieStr) setCachedEpoCookies(office, docNumber, _cookieStr);
+                } catch (_) {}
+              }
               finish(result);
               return;
             }
             if (result.error) {
-              console.log(`[EPO Browser] PDF fetch error (attempt ${pdfRetryCount}/3):`, result.error);
+              console.log(`[EPO Browser] PDF in-page fetch error (attempt ${pdfRetryCount}/2):`, result.error);
             }
-            if (pdfRetryCount < 3) return; // 继续重试
+            if (pdfRetryCount < 2) return; // 继续重试一次
           }
-          // 3 次自动获取失败，切换到手动模式
-          manualMode = true;
-          console.log("[EPO Browser] auto PDF fetch failed after 3 attempts, switching to manual mode");
-          updateHint("PatentLens: 自动获取 PDF 失败。请点击右侧按钮开始手动选取文档，或直接点击下方文档 PDF 链接");
-          updateButton("✓ 开始手动选取文档", "#f59e0b");
+          // 页面内 fetch 失败，自动导航到 documentView 页面（模拟用户点击链接）
+          let navTarget = precisePdfUrl || pdfUrl;
+          if (navTarget) {
+            // 确保 URL 是完整的绝对路径
+            if (!navTarget.startsWith('http')) {
+              if (navTarget.startsWith('/')) {
+                navTarget = 'https://register.epo.org' + navTarget;
+              } else {
+                navTarget = 'https://register.epo.org/' + navTarget;
+              }
+            }
+          }
+          if (navTarget && autoPdfPhase === 'idle') {
+            autoPdfPhase = 'navigating';
+            autoPdfTargetUrl = navTarget;
+            console.log("[EPO Browser] in-page fetch failed, auto-navigating to documentView:", navTarget);
+            updateHint("PatentLens: 正在打开文档查看器页面获取 PDF...");
+            // 超时保护：15秒后如果还没获取到，进入手动模式
+            autoPdfNavTimeout = setTimeout(() => {
+              if (!settled && autoPdfPhase !== 'done') {
+                console.log("[EPO Browser] auto navigation timeout, falling back to manual mode");
+                autoPdfPhase = 'idle';
+                manualMode = true;
+                pdfRetryCount = 99;
+                updateHint("PatentLens: 自动获取超时。请手动点击文档 PDF 链接，或点击右上角按钮返回");
+                updateButton("✓ 开始手动选取文档", "#f59e0b");
+              }
+            }, 20000);
+            try {
+              win.webContents.loadURL(navTarget);
+            } catch (e) {
+              console.warn("[EPO Browser] failed to navigate to documentView:", e.message);
+              autoPdfPhase = 'idle';
+              if (autoPdfNavTimeout) clearTimeout(autoPdfNavTimeout);
+            }
+            return;
+          }
+          // 自动导航也失败，切换到手动模式
+          if (autoPdfPhase === 'idle') {
+            manualMode = true;
+            console.log("[EPO Browser] auto PDF fetch failed, switching to manual mode");
+            updateHint("PatentLens: 自动获取 PDF 失败。请点击右侧按钮开始手动选取文档，或直接点击下方文档 PDF 链接");
+            updateButton("✓ 开始手动选取文档", "#f59e0b");
+          }
           return;
         } else {
           // HTML 模式：提取 outerHTML + DOM 文档列表
