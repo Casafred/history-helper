@@ -2952,9 +2952,20 @@ function autoTriggerGoogleTranslate(scope) {
   }
   // Don't toggle off if translation is already active
   if (_googleTranslateActive) {
-    // Translation already active for previous patent; for new content, set up
-    // observer and retry linking (the new description text is being translated)
+    // GT is alive from a previous patent, but its combo was reset to "" after
+    // the last capture (keep-alive design) — meaning GT will NOT translate the
+    // newly rendered description on its own, and the polling below would find
+    // no <font> tags and silently give up (no translation, no figure links).
+    // Re-select zh-CN so GT actually translates this patent's content.
     _figLinkScope = scope;
+    _setGoogTransCookie("/auto/zh-CN");
+    var reCombo = document.querySelector(".goog-te-combo");
+    if (reCombo) {
+      if (reCombo.value !== "zh-CN") {
+        reCombo.value = "zh-CN";
+        _dispatchComboChange(reCombo);
+      }
+    }
     _onGoogleTranslateActivated();
     return;
   }
@@ -3730,6 +3741,7 @@ function toggleGoogleTranslate() {
   // Inject Google Translate widget
   _googleTranslateInjected = true;
   _googleTranslateActive = true;
+  _installGtChromeShield();
   _updateGtButtonState();
   const container = document.createElement("div");
   container.id = "google_translate_element";
@@ -3856,8 +3868,9 @@ function _selectGoogleTranslateLang(targetLang) {
 var _figLinkScope = null;
 var _figLinkPollTimer = null;
 var _figLinkPollInterval = 1000; // ms between poll attempts
-var _figLinkPollMax = 20;       // max poll attempts (~20 seconds)
+var _figLinkPollMax = 30;       // max poll attempts (~30 seconds, covers slow networks)
 var _figLinkPollCount = 0;
+var _figLinkStableCount = 0;
 var _figLinkLastTextSnapshot = '';
 
 // Auto-detect the active scope: prefer popup if it's visible, else main.
@@ -3880,6 +3893,7 @@ function _onGoogleTranslateActivated() {
   _updateGtButtonState();
   // Reset poll state
   _figLinkPollCount = 0;
+  _figLinkStableCount = 0;
   _figLinkLastTextSnapshot = '';
   if (_figLinkPollTimer) clearTimeout(_figLinkPollTimer);
   // Start polling
@@ -3908,15 +3922,29 @@ function _pollForTranslationComplete(scope) {
 
   _figLinkLastTextSnapshot = currentText;
 
-  // Condition 1: translation present (fonts exist) AND text stopped changing
+  // Condition 1: translation present (fonts exist) AND text stopped changing.
+  // Require TWO consecutive stable polls — on slow/blocked networks a hanging
+  // translate request can make the text look "stable" for a single poll while
+  // translation is still in progress, which previously caused us to capture a
+  // partial translation and cache it on the patent data.
   if (hasFonts && !textChanged && textLength > 50) {
-    console.log('[FigLink] translation stable, capturing...');
-    _captureAndApplyTranslation(scope);
-    return;
+    _figLinkStableCount = (_figLinkStableCount || 0) + 1;
+    if (_figLinkStableCount >= 2) {
+      _figLinkStableCount = 0;
+      console.log('[FigLink] translation stable (2 consecutive polls), capturing...');
+      _captureAndApplyTranslation(scope);
+      return;
+    }
+  } else {
+    _figLinkStableCount = 0;
   }
   // Condition 2: exhausted polls — give up but log state
   if (_figLinkPollCount >= _figLinkPollMax) {
     console.warn('[FigLink] poll exhausted, hasFonts=' + !!hasFonts + ', giving up');
+    // Fallback: still try to generate figure links on whatever text is there
+    // (no-op for English text without 图X matches, but guarantees links for
+    // CN-style content even if the GT flow mis-detected).
+    setTimeout(function() { linkFigureReferences(scope); }, 300);
     return;
   }
   // Keep polling
@@ -3973,20 +4001,61 @@ function _captureAndApplyTranslation(scope) {
       var afterCount = document.querySelectorAll('#patent-detail-content .pd-fig-link, #ppv-content .pd-fig-link').length;
       console.log('[FigLink] links created: before=' + beforeCount + ' after=' + afterCount);
 
-      // Safety net: 2 seconds later, verify links still exist. If they were
-      // destroyed (e.g. by residual GT activity), regenerate them once more.
-      setTimeout(function() {
-        var lateCount = document.querySelectorAll('#patent-detail-content .pd-fig-link, #ppv-content .pd-fig-link').length;
-        console.log('[FigLink] 2s later, link count=' + lateCount + ' (was ' + afterCount + ')');
-        if (lateCount < afterCount) {
-          console.warn('[FigLink] links disappeared! regenerating...');
-          linkFigureReferences(scope);
-          var finalCount = document.querySelectorAll('#patent-detail-content .pd-fig-link, #ppv-content .pd-fig-link').length;
-          console.log('[FigLink] regenerated: ' + finalCount + ' links');
-        }
-      }, 2000);
+      // Safety net: verify links still exist several times over ~9 seconds.
+      // On slow/blocked networks GT's late translation passes can fire long
+      // after capture and destroy the links (re-wrapping the description in
+      // <font> tags). A single 2s check was not enough — keep re-checking and
+      // regenerate whenever the count dropped.
+      [2000, 5000, 9000].forEach(function(delay) {
+        setTimeout(function() {
+          var lateCount = document.querySelectorAll('#patent-detail-content .pd-fig-link, #ppv-content .pd-fig-link').length;
+          console.log('[FigLink] ' + (delay / 1000) + 's later, link count=' + lateCount + ' (was ' + afterCount + ')');
+          if (lateCount < afterCount) {
+            console.warn('[FigLink] links disappeared! regenerating...');
+            linkFigureReferences(scope);
+            var finalCount = document.querySelectorAll('#patent-detail-content .pd-fig-link, #ppv-content .pd-fig-link').length;
+            console.log('[FigLink] regenerated: ' + finalCount + ' links');
+            afterCount = finalCount;
+          }
+        }, delay);
+      });
     }, 200);
   });
+}
+
+// Permanently suppress GT's visible UI chrome via an injected <style> sheet.
+// GT re-creates and re-shows its overlays (top banner iframe, spinner overlay,
+// hover tooltip, balloons) whenever it processes new DOM mutations — on slow
+// or blocked networks this can last many seconds. Those overlays sit above the
+// page (z-index 1000000+) with pointer-events:auto and silently swallow clicks
+// on figure links and inputs. Inline-style sweeps (see _hideGtChrome) get
+// undone by GT's own timers; a stylesheet with !important cannot be overridden
+// by GT's inline styles, so the chrome stays hidden for the whole session.
+// The translation engine itself is unaffected (it runs in page JS, not in
+// these UI frames), and the app provides its own translate toggle button.
+var _gtChromeShieldInstalled = false;
+function _installGtChromeShield() {
+  if (_gtChromeShieldInstalled) return;
+  _gtChromeShieldInstalled = true;
+  var style = document.createElement('style');
+  style.id = 'gt-chrome-shield';
+  style.textContent =
+    'iframe.goog-te-banner-frame, .goog-te-banner-frame, .goog-te-banner, ' +
+    'iframe[class^="VIpgJd"], iframe[class*=" VIpgJd"], ' +
+    '.goog-te-spinner-pos, .goog-te-spinner, .gt-spinner, .gt-loading, ' +
+    '#goog-gt-tt, .goog-te-balloon, .goog-te-balloon-frame, .goog-te-pos, ' +
+    '.goog-te-menu2, .goog-te-ftab-float, iframe.goog-te-menu-frame {' +
+    '  display: none !important;' +
+    '  visibility: hidden !important;' +
+    '  opacity: 0 !important;' +
+    '  pointer-events: none !important;' +
+    '  width: 0 !important; height: 0 !important;' +
+    '  position: absolute !important;' +
+    '  top: -9999px !important; left: -9999px !important;' +
+    '  overflow: hidden !important;' +
+    '}' +
+    'body { top: 0 !important; }';
+  document.head.appendChild(style);
 }
 
 // Hide GT's visible UI chrome (top banner, spinner ball, tooltips) after
@@ -3994,6 +4063,7 @@ function _captureAndApplyTranslation(scope) {
 // are kept alive (hidden) so the user can still toggle GT on/off via the
 // app's own "恢复原文" button.
 function _hideGtChrome() {
+  _installGtChromeShield();
   var chromeSelectors = '.goog-te-banner-frame, .goog-te-banner, .goog-te-spinner-pos, ' +
     '.goog-te-spinner, #goog-gt-tt, .goog-te-balloon, .goog-te-pos, ' +
     '.goog-te-menu2, .goog-te-ftab-float, .gt-spinner, .gt-loading, ' +
@@ -4424,20 +4494,23 @@ function linkFigureReferences(scope) {
   _ensureFigLinkDelegation(scope);
 }
 
-// Delegated click handler for figure links. Uses event delegation on the
-// description container so that clicks work even after GT wraps <a> elements
-// in <font> tags (which destroys per-element addEventListener handlers).
+// Delegated click handler for figure links. Uses a SINGLE document-level
+// delegated listener (registered once, never removed) so clicks keep working
+// no matter how often the description container is re-rendered or wrapped in
+// <font> tags by GT. The previous per-container delegation could silently stop
+// working when the container element was replaced after the listener was
+// attached (the scope flag stayed true while the element was gone).
 var _figLinkDelegatedScopes = {};
+var _figLinkDocDelegated = false;
 function _ensureFigLinkDelegation(scope) {
-  if (_figLinkDelegatedScopes[scope]) return; // already installed
-  var container = _getDescriptionContainer(scope);
-  if (!container) return;
   _figLinkDelegatedScopes[scope] = true;
-  container.addEventListener('click', function(e) {
+  if (_figLinkDocDelegated) return; // document-level listener already installed
+  _figLinkDocDelegated = true;
+  document.addEventListener('click', function(e) {
     // Walk up from the click target to find a .pd-fig-link ancestor
     var el = e.target;
     var linkEl = null;
-    while (el && el !== container) {
+    while (el && el !== document) {
       if (el.classList && el.classList.contains('pd-fig-link')) {
         linkEl = el;
         break;
@@ -4448,7 +4521,7 @@ function _ensureFigLinkDelegation(scope) {
     e.preventDefault();
     e.stopPropagation();
     var figNum = parseInt(linkEl.getAttribute('data-fig-num'), 10);
-    var linkScope = linkEl.getAttribute('data-fig-scope') || scope;
+    var linkScope = linkEl.getAttribute('data-fig-scope') || 'main';
     if (figNum > 0) {
       jumpToFigure(figNum, linkScope);
     }
@@ -4562,15 +4635,21 @@ function jumpToFigure(figureNum, scope) {
     toggleSplitView('description', scope);
   }
 
-  // Wait for split-view to initialize, then select the image
+  // Wait for split-view to initialize, then select the image. Retry a few
+  // times if the viewer state is not ready yet (previously a single 200ms
+  // wait would silently abort on slow machines, making the link look dead).
   var viewerId = 'sv_' + scope + '_description';
-  setTimeout(function() {
+  var trySelect = function(attempt) {
     var state = _splitViewerState[viewerId];
-    if (!state) return;
+    if (!state) {
+      if (attempt < 6) setTimeout(function() { trySelect(attempt + 1); }, 150);
+      return;
+    }
     var main = document.getElementById(viewerId + '_main');
     var thumbs = main ? main.parentElement.querySelectorAll('.pd-split-thumb') : [];
     splitViewSelectImg(viewerId, imgIdx, thumbs[imgIdx] || null);
-  }, isSplit ? 0 : 200);
+  };
+  setTimeout(function() { trySelect(0); }, isSplit ? 0 : 200);
 }
 
 // Fullscreen image viewer for patent drawings — reuses split-view controls & state

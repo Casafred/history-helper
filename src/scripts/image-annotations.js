@@ -513,19 +513,33 @@ var ImageAnnotations = (function () {
     // Store observer for cleanup in closeMarkerEditor
     markerEditorEl._gtObserver = _editorObserver;
 
-    // Also proactively remove any GT chrome overlays that might intercept clicks
+    // Also proactively remove any GT chrome overlays that might intercept clicks.
+    // GT re-creates these overlays while it is still working (slow/blocked
+    // networks can keep it busy for many seconds), so sweep continuously for
+    // as long as the editor is open instead of only once.
     var gtChromeSelectors = '.goog-te-spinner-pos, .goog-te-spinner, #goog-gt-tt, ' +
-      '.goog-te-balloon, .goog-te-pos, .skiptranslate[style*="fixed"], ' +
-      '.skiptranslate[style*="absolute"]';
-    document.querySelectorAll(gtChromeSelectors).forEach(function(el) {
-      el.style.display = 'none';
-      el.style.pointerEvents = 'none';
-    });
+      '.goog-te-balloon, .goog-te-balloon-frame, .goog-te-pos, ' +
+      'iframe.goog-te-banner-frame, .goog-te-banner-frame, iframe[class^="VIpgJd"], ' +
+      '.skiptranslate[style*="fixed"], .skiptranslate[style*="absolute"]';
+    function sweepGtChrome() {
+      document.querySelectorAll(gtChromeSelectors).forEach(function(el) {
+        el.style.display = 'none';
+        el.style.pointerEvents = 'none';
+      });
+      if (document.body && document.body.style.top) document.body.style.top = '';
+    }
+    sweepGtChrome();
+    markerEditorEl._gtSweepInterval = setInterval(function() {
+      if (!markerEditorEl) return;
+      sweepGtChrome();
+    }, 400);
 
-    // Focus the number input. Retry several times in case the browser is busy
-    // (e.g. GT MutationObserver processing, image decoding) which can delay
-    // the input becoming focusable/editable. Also clear any readOnly/disabled
-    // attributes GT may have injected onto the inputs.
+    // Focus the number input. Retry for up to ~6s in case the browser's main
+    // thread is busy (e.g. GT MutationObserver churning through freshly added
+    // split-view DOM, hanging translate requests, image decoding) — the
+    // previous 1.2s window gave up too early on slow networks, leaving the
+    // input unfocused and unresponsive until GT settled. Also clear any
+    // readOnly/disabled attributes GT may have injected onto the inputs.
     var focusAttempts = 0;
     function focusNumberInput() {
       if (!markerEditorEl) return;
@@ -539,12 +553,16 @@ var ImageAnnotations = (function () {
         el.style.pointerEvents = "";
       });
       if (!inp) return;
+      // If the user already took control of any field inside the editor,
+      // stop re-asserting focus so we never yank it away mid-typing.
+      var ae = document.activeElement;
+      if (ae && ae !== document.body && markerEditorEl.contains(ae) && ae !== inp) return;
       inp.focus();
       inp.select();
-      // Verify focus actually took; if not, retry
-      if (document.activeElement !== inp && focusAttempts < 10) {
+      // Verify focus actually took; if not, retry (up to ~6s total)
+      if (document.activeElement !== inp && focusAttempts < 40) {
         focusAttempts++;
-        setTimeout(focusNumberInput, 120);
+        setTimeout(focusNumberInput, 150);
       }
     }
     setTimeout(focusNumberInput, 50);
@@ -555,6 +573,10 @@ var ImageAnnotations = (function () {
       // Disconnect GT protection observer
       if (markerEditorEl._gtObserver) {
         try { markerEditorEl._gtObserver.disconnect(); } catch(e) {}
+      }
+      // Stop the continuous GT chrome sweep
+      if (markerEditorEl._gtSweepInterval) {
+        try { clearInterval(markerEditorEl._gtSweepInterval); } catch(e) {}
       }
       markerEditorEl.remove();
       markerEditorEl = null;
