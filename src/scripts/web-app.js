@@ -11904,10 +11904,10 @@ function renderTimeline(data) {
         const yearColor = yearColors[g.markerYear] || '#818cf8';
         // Convert hex to rgba for shadow
         const hex = yearColor.replace('#','');
-        const r = parseInt(hex.substring(0,2), 16);
-        const g = parseInt(hex.substring(2,4), 16);
-        const b = parseInt(hex.substring(4,6), 16);
-        const shadowColor = `rgba(${r},${g},${b},`;
+        const ri = parseInt(hex.substring(0,2), 16);
+        const gi = parseInt(hex.substring(2,4), 16);
+        const bi = parseInt(hex.substring(4,6), 16);
+        const shadowColor = `rgba(${ri},${gi},${bi},`;
         html += `<div class="tl-node-dot ${dotClass} tl-year-dot" data-year="${g.markerYear}" style="background:linear-gradient(135deg, ${yearColor}, ${yearColor}dd);box-shadow:0 0 0 3px ${shadowColor}0.2), 0 4px 14px ${shadowColor}0.4);--year-color:${yearColor}">`;
         html += `  <span class="tl-year-dot-label">${g.markerYear}</span>`;
         html += `</div>`;
