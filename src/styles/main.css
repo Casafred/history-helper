@@ -4122,7 +4122,7 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 50px 50px 70px 50px;
+  padding: 50px 50px 80px 50px;
   position: relative;
   overflow-x: auto;
   overflow-y: visible;
@@ -4164,7 +4164,7 @@ body {
 .tl-row {
   position: relative;
   display: block;
-  height: 280px;
+  height: 300px;
   overflow: visible;
 }
 
@@ -4179,7 +4179,7 @@ body {
   position: absolute;
   display: block;
   width: 160px;
-  height: 280px;
+  height: 300px;
   z-index: 1;
   cursor: default;
 }
@@ -4242,7 +4242,7 @@ body {
 /* Cards above the line (even rows): connector extends UP from dot to card */
 .tl-row-cards-above .tl-node-card {
   position: absolute;
-  top: calc(50% - 125px);
+  top: calc(50% - 138px);
   left: 50%;
   transform: translateX(-50%);
 }
@@ -4258,13 +4258,13 @@ body {
 /* Cards below the line (odd rows): connector extends DOWN from dot to card */
 .tl-row-cards-below .tl-node-card {
   position: absolute;
-  top: calc(50% + 60px);
+  top: calc(50% + 85px);
   left: 50%;
   transform: translateX(-50%);
 }
 .tl-row-cards-below .tl-node-connector {
   top: calc(50%);
-  height: 60px;
+  height: 73px;
   background: linear-gradient(to bottom, #818cf8, rgba(129,140,248,0.4));
 }
 .tl-row-cards-below .tl-node-date-label {
@@ -4298,17 +4298,20 @@ body {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
-  width: 148px;
+  width: 156px;
   transition: all 0.2s;
   white-space: normal;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   font-size: 12px;
+  z-index: 2;
 }
 .tl-node-card:hover {
   border-color: var(--accent);
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.18);
-  transform: translateX(-50%) translateY(-2px);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.22);
+  transform: translateX(-50%) translateY(-3px);
+  z-index: 20;
+  overflow: visible;
 }
 
 /* Card arrow */
@@ -4348,6 +4351,45 @@ body {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+/* Chinese main title (primary display) */
+.tl-node-cn-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* English subtitle (secondary, smaller & dimmer) */
+.tl-node-en-title {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+/* Hover: expand titles to show full content without clipping adjacent cards */
+.tl-node-card:hover .tl-node-cn-title,
+.tl-node-card:hover .tl-node-en-title,
+.tl-node-card:hover .tl-node-title {
+  -webkit-line-clamp: unset;
+  white-space: normal;
+  overflow: visible;
+  position: relative;
+  z-index: 21;
 }
 .tl-node-meta {
   display: flex;

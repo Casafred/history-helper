@@ -11363,11 +11363,11 @@ function renderTimeline(data) {
     return true;
   });
 
-  // Chronological order (oldest first) — S-curve starts top-left, ends bottom-right
+  // Reverse chronological order (newest first) — S-curve starts top-left with newest, ends bottom-right with oldest
   const sorted = [...timelineItems].sort((a, b) => {
     const da = parseDate(a.date);
     const db = parseDate(b.date);
-    return da - db;
+    return db - da;
   });
 
   if (sorted.length === 0) {
@@ -11410,7 +11410,7 @@ function renderTimeline(data) {
   // ── S-shaped (boustrophedon) layout with SVG continuous curve ──
   // Layout constants
   const NODE_WIDTH = 170;          // Distance between node centers
-  const ROW_HEIGHT = 280;          // Row height (space for axis + card above/below)
+  const ROW_HEIGHT = 300;          // Row height (space for axis + card above/below)
   const CURVE_RADIUS = 35;         // Radius of U-turn curves
   const EDGE_PAD = CURVE_RADIUS + 20; // Horizontal edge padding (must fit curves)
 
@@ -11531,6 +11531,12 @@ function renderTimeline(data) {
       const isSelected = _tlSelected.has(it.idx);
       const pos = getNodeCenterInRow(colPosition);
 
+      const enName = it.name || '';
+      const cnDesc = it.desc || it.docDesc || it.documentDescription || it.description || '';
+      const hasCn = /[\u4e00-\u9fff]/.test(cnDesc);
+      const displayCn = hasCn ? cnDesc.replace(/[（(].*?[）)]\s*$/, '').trim() : '';
+      const fullTitle = (displayCn ? displayCn + ' | ' : '') + enName + (it.docCode ? ' [' + it.docCode + ']' : '');
+
       html += `<div class="tl-node ${isSelected ? 'selected' : ''}" data-idx="${it.idx}" style="left:${pos.x - 80}px;top:0;">`;
 
       // Checkbox indicator for select mode
@@ -11545,9 +11551,14 @@ function renderTimeline(data) {
       // Connector from dot to card
       html += `<div class="tl-node-connector"></div>`;
 
-      // Card (date removed from card content)
-      html += `<div class="tl-node-card" onclick="_jumpToDocFromTimeline(${it.idx})">`;
-      html += `  <div class="tl-node-title" title="${escapeHtml(it.name || '')}">${escapeHtml(it.name || '')}</div>`;
+      // Card with Chinese title (main) + English title (secondary, truncated)
+      html += `<div class="tl-node-card" onclick="_jumpToDocFromTimeline(${it.idx})" title="${escapeHtml(fullTitle)}">`;
+      if (displayCn) {
+        html += `  <div class="tl-node-cn-title">${escapeHtml(displayCn)}</div>`;
+        html += `  <div class="tl-node-en-title" title="${escapeHtml(enName)}">${escapeHtml(enName)}</div>`;
+      } else {
+        html += `  <div class="tl-node-title">${escapeHtml(enName)}</div>`;
+      }
       html += `  <div class="tl-node-meta">`;
       html += `    <span class="tl-node-code">${escapeHtml(it.docCode || '')}</span>`;
       html += `    <span class="tl-node-badge ${dotClass}">${typeLabel}</span>`;
