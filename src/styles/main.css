@@ -5602,6 +5602,11 @@ body {
   margin-bottom: 16px;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg-secondary);
+  padding-top: 4px;
 }
 .pd-panel-title {
   font-size: 16px;
@@ -8527,7 +8532,7 @@ body {
 /* Hint bar shown when annotation mode is active — positioned at top of image area */
 .anno-hint-bar {
   position: absolute;
-  top: 8px;
+  top: 50px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 100;
@@ -8743,7 +8748,7 @@ body.anno-mode-active .pd-split-img-btn.anno-toggle-btn:hover {
 /* Navigation bar (prev/next occurrence) */
 .anno-nav-bar {
   position: fixed;
-  top: 16px;
+  top: 60px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 100140;

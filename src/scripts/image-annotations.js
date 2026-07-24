@@ -207,7 +207,8 @@ var ImageAnnotations = (function () {
       if (!bar) {
         bar = document.createElement("div");
         bar.id = "anno-hint-bar";
-        bar.className = "anno-hint-bar";
+        bar.className = "anno-hint-bar notranslate";
+        bar.setAttribute("translate", "no");
         bar.innerHTML =
           '<span class="anno-hint-text">' +
           "标注模式：双击鼠标位置以插入标记" +
@@ -384,17 +385,18 @@ var ImageAnnotations = (function () {
     };
 
     markerEditorEl = document.createElement("div");
-    markerEditorEl.className = "anno-editor-overlay";
+    markerEditorEl.className = "anno-editor-overlay notranslate";
+    markerEditorEl.setAttribute("translate", "no");
     markerEditorEl.innerHTML =
       '<div class="anno-editor-box">' +
       '<div class="anno-editor-title">' + (isEdit ? "编辑标记" : "添加附图标记") + "</div>" +
       '<div class="anno-editor-field">' +
       '<label>附图标号 <span style="color:var(--danger)">*</span></label>' +
-      '<input type="text" id="anno-edit-number" value="' + escapeHtmlAnno(m.number) + '" placeholder="如 100、102、30A" autofocus>' +
+      '<input type="text" class="notranslate" translate="no" id="anno-edit-number" value="' + escapeHtmlAnno(m.number) + '" placeholder="如 100、102、30A" autocomplete="off" autofocus>' +
       "</div>" +
       '<div class="anno-editor-field">' +
       "<label>注释文字（可选）</label>" +
-      '<textarea id="anno-edit-comment" rows="2" placeholder="该标号代表的部件名称或说明">' + escapeHtmlAnno(m.comment || "") + "</textarea>" +
+      '<textarea class="notranslate" translate="no" id="anno-edit-comment" rows="2" placeholder="该标号代表的部件名称或说明" autocomplete="off">' + escapeHtmlAnno(m.comment || "") + "</textarea>" +
       "</div>" +
       '<div class="anno-editor-field anno-editor-row">' +
       "<div><label>颜色</label><input type=\"color\" id=\"anno-edit-color\" value=\"" + (m.color || "#ef4444") + "\"></div>" +
@@ -467,10 +469,32 @@ var ImageAnnotations = (function () {
     });
     // Prevent mousedown from propagating to stage (which starts panning)
     markerEditorEl.addEventListener("mousedown", function (e) { e.stopPropagation(); });
-    setTimeout(function () {
+    // Focus the number input. Retry several times in case the browser is busy
+    // (e.g. GT MutationObserver processing, image decoding) which can delay
+    // the input becoming focusable/editable. Also clear any readOnly/disabled
+    // attributes GT may have injected onto the inputs.
+    var focusAttempts = 0;
+    function focusNumberInput() {
+      if (!markerEditorEl) return;
       var inp = markerEditorEl.querySelector("#anno-edit-number");
-      if (inp) { inp.focus(); inp.select(); }
-    }, 50);
+      var ta = markerEditorEl.querySelector("#anno-edit-comment");
+      // Defensive: ensure inputs are editable (GT sometimes sets readOnly)
+      [inp, ta].forEach(function(el) {
+        if (!el) return;
+        if (el.hasAttribute("readonly")) el.removeAttribute("readonly");
+        if (el.hasAttribute("disabled")) el.removeAttribute("disabled");
+        el.style.pointerEvents = "";
+      });
+      if (!inp) return;
+      inp.focus();
+      inp.select();
+      // Verify focus actually took; if not, retry
+      if (document.activeElement !== inp && focusAttempts < 10) {
+        focusAttempts++;
+        setTimeout(focusNumberInput, 120);
+      }
+    }
+    setTimeout(focusNumberInput, 50);
   }
 
   function closeMarkerEditor() {
@@ -484,7 +508,8 @@ var ImageAnnotations = (function () {
   function showMarkerContextMenu(x, y, marker, vid) {
     closeMarkerContextMenu();
     var menu = document.createElement("div");
-    menu.className = "anno-ctx-menu";
+    menu.className = "anno-ctx-menu notranslate";
+    menu.setAttribute("translate", "no");
     menu.style.left = x + "px";
     menu.style.top = y + "px";
     menu.innerHTML =
@@ -714,7 +739,8 @@ var ImageAnnotations = (function () {
     if (!pdSection || pdSection.classList.contains("hidden")) return;
 
     navBarEl = document.createElement("div");
-    navBarEl.className = "anno-nav-bar";
+    navBarEl.className = "anno-nav-bar notranslate";
+    navBarEl.setAttribute("translate", "no");
     navBarEl.innerHTML =
       '<div class="anno-nav-info">' +
       '<span class="anno-nav-num">标号 ' + escapeHtmlAnno(number) + "</span>" +
@@ -762,7 +788,8 @@ var ImageAnnotations = (function () {
   function showSendToAnnotationBtn(x, y, text, highlight) {
     closeSendToAnnotationBtn();
     var btn = document.createElement("div");
-    btn.className = "anno-send-btn";
+    btn.className = "anno-send-btn notranslate";
+    btn.setAttribute("translate", "no");
     btn.style.left = x + "px";
     btn.style.top = (y + 10) + "px";
     btn.innerHTML = "→ 发送到标记 " + escapeHtmlAnno(highlight.number) + " 注释";
@@ -824,7 +851,8 @@ var ImageAnnotations = (function () {
     var pn = getCurrentPatentNumber();
     var markers = getMarkers(pn, state.currentIdx);
     var panel = document.createElement("div");
-    panel.className = "img-anno-list-panel";
+    panel.className = "img-anno-list-panel notranslate";
+    panel.setAttribute("translate", "no");
     panel.addEventListener("mousedown", function (e) { e.stopPropagation(); });
     if (markers.length === 0) {
       panel.innerHTML = '<div class="img-anno-list-empty">当前图暂无标记</div>';
