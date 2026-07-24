@@ -11363,11 +11363,11 @@ function renderTimeline(data) {
     return true;
   });
 
-  // Reverse chronological order (newest first)
+  // Chronological order (oldest first) — S-curve starts top-left, ends bottom-right
   const sorted = [...timelineItems].sort((a, b) => {
     const da = parseDate(a.date);
     const db = parseDate(b.date);
-    return db - da;
+    return da - db;
   });
 
   if (sorted.length === 0) {
@@ -11407,41 +11407,137 @@ function renderTimeline(data) {
     misc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
   };
 
-  // ── S-shaped (boustrophedon) wrapping layout ──
-  // Calculate items per row based on board width
-  const boardWidth = board.clientWidth || 800;
-  const minItemWidth = 185;
-  const itemsPerRow = Math.max(3, Math.min(8, Math.floor(boardWidth / minItemWidth)));
+  // ── S-shaped (boustrophedon) layout with SVG continuous curve ──
+  // Layout constants
+  const NODE_WIDTH = 170;          // Distance between node centers
+  const ROW_HEIGHT = 280;          // Row height (space for axis + card above/below)
+  const CURVE_RADIUS = 35;         // Radius of U-turn curves
+  const EDGE_PAD = CURVE_RADIUS + 20; // Horizontal edge padding (must fit curves)
 
-  // Group items into rows
+  // Adaptive items per row: try to fit, minimum 3 per row, max 7
+  const boardWidth = board.clientWidth || 900;
+  const availableWidth = boardWidth - 80;
+  let itemsPerRow = Math.max(3, Math.floor((availableWidth - 2*EDGE_PAD) / NODE_WIDTH) + 1);
+  itemsPerRow = Math.min(7, itemsPerRow);
+
+  // Group items into rows (sorted is ascending: oldest first)
   const rows = [];
   for (let i = 0; i < sorted.length; i += itemsPerRow) {
     rows.push(sorted.slice(i, i + itemsPerRow));
   }
 
-  let html = '<div class="tl-snake">';
+  // Calculate dimensions
+  const firstNodeX = EDGE_PAD;
+  const lastNodeX = EDGE_PAD + (itemsPerRow - 1) * NODE_WIDTH;
+  const totalWidth = lastNodeX + EDGE_PAD;
+  const totalHeight = rows.length * ROW_HEIGHT;
 
+  // Build SVG path for continuous S-curve (boustrophedon)
+  // Path traces from top-left, going right, U-turn at right edge down,
+  // going left, U-turn at left edge down, etc.
+  function buildSnakePath() {
+    const centerY = ROW_HEIGHT / 2;
+    const r = CURVE_RADIUS;
+
+    // Start slightly before the first node (for the lead-in from top edge)
+    let d = `M ${firstNodeX} ${centerY}`;
+
+    for (let row = 0; row < rows.length; row++) {
+      const y = centerY + row * ROW_HEIGHT;
+      const nextY = centerY + (row + 1) * ROW_HEIGHT;
+      const isLast = row === rows.length - 1;
+      const goingRight = (row % 2 === 0);
+
+      if (goingRight) {
+        // This row goes LEFT → RIGHT. End at right side, curve down to next row.
+        if (isLast) {
+          // Last row: just end at last node (extend slightly to end)
+          d += ` L ${lastNodeX} ${y}`;
+        } else {
+          // Draw to rightmost node, then U-turn down
+          d += ` L ${lastNodeX} ${y}`;
+          // Right U-turn: two 90° arcs forming a smooth 180° turn going down-then-left
+          // Arc 1: from (lastNodeX, y) clockwise to (lastNodeX + r, y + r)
+          d += ` A ${r} ${r} 0 0 1 ${lastNodeX + r} ${y + r}`;
+          // Vertical segment
+          d += ` L ${lastNodeX + r} ${nextY - r}`;
+          // Arc 2: clockwise to (lastNodeX, nextY) — now facing left
+          d += ` A ${r} ${r} 0 0 1 ${lastNodeX} ${nextY}`;
+        }
+      } else {
+        // This row goes RIGHT → LEFT. End at left side, curve down to next row.
+        if (isLast) {
+          d += ` L ${firstNodeX} ${y}`;
+        } else {
+          // Draw to leftmost node, then U-turn down
+          d += ` L ${firstNodeX} ${y}`;
+          // Left U-turn: two 90° arcs forming a smooth 180° turn going down-then-right
+          // Arc 1: from (firstNodeX, y) clockwise to (firstNodeX - r, y + r)
+          d += ` A ${r} ${r} 0 0 0 ${firstNodeX - r} ${y + r}`;
+          // Vertical segment
+          d += ` L ${firstNodeX - r} ${nextY - r}`;
+          // Arc 2: clockwise to (firstNodeX, nextY) — now facing right
+          d += ` A ${r} ${r} 0 0 0 ${firstNodeX} ${nextY}`;
+        }
+      }
+    }
+
+    return d;
+  }
+
+  // Get node center position relative to the snake container
+  function getNodeCenterInRow(colPosition) {
+    const x = EDGE_PAD + colPosition * NODE_WIDTH;
+    const y = ROW_HEIGHT / 2;
+    return { x, y };
+  }
+
+  // Generate HTML
+  let html = '<div class="tl-snake" style="width:' + totalWidth + 'px;height:' + totalHeight + 'px;">';
+
+  // SVG with gradient definition and snake path
+  html += '<svg class="tl-snake-svg" viewBox="0 0 ' + totalWidth + ' ' + totalHeight + '" xmlns="http://www.w3.org/2000/svg">';
+  html += '  <defs>';
+  html += '    <linearGradient id="tl-gradient" x1="0%" y1="0%" x2="100%" y2="0%">';
+  html += '      <stop offset="0%" stop-color="#818cf8"/>';
+  html += '      <stop offset="50%" stop-color="#6366f1"/>';
+  html += '      <stop offset="100%" stop-color="#818cf8"/>';
+  html += '    </linearGradient>';
+  html += '  </defs>';
+  html += '  <path class="tl-snake-path" d="' + buildSnakePath() + '"/>';
+  html += '</svg>';
+
+  // Render each row
   rows.forEach((row, rowIdx) => {
     const isReversed = rowIdx % 2 === 1;
-    const isLastRow = rowIdx === rows.length - 1;
+    // For newest-first (descending) sort:
+    // Even rows (0,2,4): go LEFT→RIGHT, cards ABOVE the axis
+    // Odd rows (1,3,5): go RIGHT→LEFT (U-turn at right edge), cards BELOW the axis
+    const cardsAbove = !isReversed;
+    const cardPosClass = cardsAbove ? 'tl-row-cards-above' : 'tl-row-cards-below';
 
-    html += `<div class="tl-row ${isReversed ? 'tl-row-reversed' : ''}">`;
-    // Horizontal track line for this row
-    html += '<div class="tl-row-track"></div>';
+    html += `<div class="tl-row ${cardPosClass}" style="width:${totalWidth}px;height:${ROW_HEIGHT}px;">`;
 
     row.forEach((it, colIdx) => {
-      const globalIdx = rowIdx * itemsPerRow + colIdx;
+      // Calculate column position:
+      // - Forward rows (even): left-to-right, col 0 → itemsPerRow-1
+      // - Reversed rows (odd): right-to-left, itemsPerRow-1 → 0 (right-aligned for partial rows)
+      const colPosition = isReversed
+        ? (itemsPerRow - 1 - colIdx)
+        : colIdx;
       const dotClass = dotClassMap[it.type] || "tl-dot-misc";
       const typeLabel = typeLabelMap[it.type] || "其他";
       const typeIcon = typeIconMap[it.type] || typeIconMap.misc;
-      // Alternate cards above/below based on global index
-      const isTop = globalIdx % 2 === 0;
       const isSelected = _tlSelected.has(it.idx);
+      const pos = getNodeCenterInRow(colPosition);
 
-      html += `<div class="tl-node ${isTop ? 'tl-node-top' : 'tl-node-bottom'} ${isSelected ? 'selected' : ''}" data-idx="${it.idx}">`;
+      html += `<div class="tl-node ${isSelected ? 'selected' : ''}" data-idx="${it.idx}" style="left:${pos.x - 80}px;top:0;">`;
 
       // Checkbox indicator for select mode
       html += `<div class="tl-node-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>`;
+
+      // Date label on the axis, on the connector
+      html += `<div class="tl-node-date-label">${escapeHtml(it.date || '')}</div>`;
 
       // Dot on the track line
       html += `<div class="tl-node-dot ${dotClass}">${typeIcon}</div>`;
@@ -11449,9 +11545,8 @@ function renderTimeline(data) {
       // Connector from dot to card
       html += `<div class="tl-node-connector"></div>`;
 
-      // Card
+      // Card (date removed from card content)
       html += `<div class="tl-node-card" onclick="_jumpToDocFromTimeline(${it.idx})">`;
-      html += `  <div class="tl-node-date">${escapeHtml(it.date || '')}</div>`;
       html += `  <div class="tl-node-title" title="${escapeHtml(it.name || '')}">${escapeHtml(it.name || '')}</div>`;
       html += `  <div class="tl-node-meta">`;
       html += `    <span class="tl-node-code">${escapeHtml(it.docCode || '')}</span>`;
@@ -11463,12 +11558,6 @@ function renderTimeline(data) {
     });
 
     html += '</div>';
-
-    // Row connector: vertical line linking rows at the turning point
-    if (!isLastRow) {
-      const side = isReversed ? 'left' : 'right';
-      html += `<div class="tl-row-connector tl-row-connector-${side}"></div>`;
-    }
   });
 
   html += '</div>';
