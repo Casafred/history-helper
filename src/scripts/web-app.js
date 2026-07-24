@@ -11484,7 +11484,6 @@ function _jumpToDocFromTimeline(idx) {
 }
 
 function renderTimeline(data) {
-  // Support both old (overview) and new (timeline tab) containers
   const board = document.getElementById("tl-board") || document.getElementById("timeline-board");
   const statusEl = document.getElementById("tl-status") || document.getElementById("timeline-status");
   if (!board) return;
@@ -11504,7 +11503,6 @@ function renderTimeline(data) {
     return true;
   });
 
-  // Reverse chronological order (newest first) — S-curve starts top-left with newest, ends bottom-right with oldest
   const sorted = [...timelineItems].sort((a, b) => {
     const da = parseDate(a.date);
     const db = parseDate(b.date);
@@ -11515,6 +11513,25 @@ function renderTimeline(data) {
     board.innerHTML = '<p class="placeholder">未找到审查节点</p>';
     return;
   }
+
+  // Group items by date (same date → same cluster node)
+  const groups = [];
+  sorted.forEach(item => {
+    const last = groups[groups.length - 1];
+    if (last && last.date === item.date) {
+      last.items.push(item);
+    } else {
+      groups.push({ date: item.date, items: [item] });
+    }
+  });
+
+  // Determine year boundaries (a group is a year-marker if its year differs from previous group in display order)
+  // We mark year boundaries after arranging groups into rows (snake order)
+  // For now, annotate each group with its year for later detection
+  groups.forEach(g => {
+    const ts = parseDate(g.date);
+    g.year = ts ? new Date(ts).getFullYear() : null;
+  });
 
   const dotClassMap = {
     office_action: "tl-dot-oa",
@@ -11538,6 +11555,9 @@ function renderTimeline(data) {
     misc: "其他",
   };
 
+  // Key document types that get special highlight border
+  const keyTypes = new Set(["response", "office_action", "patent_doc"]);
+
   const typeIconMap = {
     office_action: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
     response: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>',
@@ -11549,38 +11569,58 @@ function renderTimeline(data) {
   };
 
   // ── S-shaped (boustrophedon) layout with SVG continuous curve ──
-  // Layout constants
-  const NODE_WIDTH = 170;          // Distance between node centers
-  const ROW_HEIGHT = 300;          // Row height (space for axis + card above/below)
-  const CURVE_RADIUS = 35;         // Radius of U-turn curves
-  const EDGE_PAD = CURVE_RADIUS + 20; // Horizontal edge padding (must fit curves)
+  const NODE_WIDTH = 190;
+  const ROW_HEIGHT = 340;
+  const CURVE_RADIUS = 38;
+  // EDGE_PAD must be large enough to accommodate multi-doc clusters (280px wide, 140px half-width)
+  const EDGE_PAD = Math.max(CURVE_RADIUS + 30, 150);
 
-  // Adaptive items per row: try to fit, minimum 3 per row, max 7
   const boardWidth = board.clientWidth || 900;
-  const availableWidth = boardWidth - 80;
+  const availableWidth = Math.max(boardWidth - 60, 600);
   let itemsPerRow = Math.max(3, Math.floor((availableWidth - 2*EDGE_PAD) / NODE_WIDTH) + 1);
-  itemsPerRow = Math.min(7, itemsPerRow);
+  itemsPerRow = Math.min(6, itemsPerRow);
 
-  // Group items into rows (sorted is ascending: oldest first)
+  // Arrange groups into rows (snake order)
   const rows = [];
-  for (let i = 0; i < sorted.length; i += itemsPerRow) {
-    rows.push(sorted.slice(i, i + itemsPerRow));
+  for (let i = 0; i < groups.length; i += itemsPerRow) {
+    rows.push(groups.slice(i, i + itemsPerRow));
   }
 
-  // Calculate dimensions
-  const firstNodeX = EDGE_PAD;
-  const lastNodeX = EDGE_PAD + (itemsPerRow - 1) * NODE_WIDTH;
-  const totalWidth = lastNodeX + EDGE_PAD;
-  const totalHeight = rows.length * ROW_HEIGHT;
+  // Mark year boundaries following snake traversal order (newest→oldest)
+  let prevYear = null;
+  const yearMarkers = [];
+  // For snake traversal: even rows go left-to-right (array order), odd rows also go in array order
+  // because colIdx=0 is at the row entry point (rightmost for odd rows after curve)
+  rows.forEach((row, rowIdx) => {
+    const goingRight = (rowIdx % 2 === 0);
+    // Traverse in the order the snake visits nodes: array order for both directions
+    // (colIdx=0 is entry point, colIdx=row.length-1 is exit point on every row)
+    row.forEach((g, colIdx) => {
+      if (g.year !== null && g.year !== prevYear) {
+        g.isYearMarker = true;
+        g.markerYear = g.year;
+        yearMarkers.push(g);
+      }
+      prevYear = g.year;
+    });
+  });
 
-  // Build SVG path for continuous S-curve (boustrophedon)
-  // Path traces from top-left, going right, U-turn at right edge down,
-  // going left, U-turn at left edge down, etc.
+  const colsInLastRow = rows[rows.length - 1].length;
+  const isLastRowReversed = (rows.length - 1) % 2 === 1;
+  const lastRowEndCol = isLastRowReversed
+    ? (itemsPerRow - colsInLastRow)
+    : (colsInLastRow - 1);
+  const lastNodeX = EDGE_PAD + lastRowEndCol * NODE_WIDTH;
+  const firstNodeX = EDGE_PAD;
+  const totalWidth = (rows.length > 1) ? (EDGE_PAD + (itemsPerRow - 1) * NODE_WIDTH + EDGE_PAD) : (lastNodeX + EDGE_PAD);
+  // Extra buffer at bottom for cards that extend below last row center line
+  const BOTTOM_BUFFER = 120;
+  const totalHeight = rows.length * ROW_HEIGHT + BOTTOM_BUFFER;
+
   function buildSnakePath() {
     const centerY = ROW_HEIGHT / 2;
     const r = CURVE_RADIUS;
 
-    // Start slightly before the first node (for the lead-in from top edge)
     let d = `M ${firstNodeX} ${centerY}`;
 
     for (let row = 0; row < rows.length; row++) {
@@ -11588,37 +11628,29 @@ function renderTimeline(data) {
       const nextY = centerY + (row + 1) * ROW_HEIGHT;
       const isLast = row === rows.length - 1;
       const goingRight = (row % 2 === 0);
+      const rowCols = rows[row].length;
 
       if (goingRight) {
-        // This row goes LEFT → RIGHT. End at right side, curve down to next row.
+        const rowEndCol = (isLast && row !== 0) ? lastRowEndCol : (itemsPerRow - 1);
+        const rowEndX = EDGE_PAD + rowEndCol * NODE_WIDTH;
         if (isLast) {
-          // Last row: just end at last node (extend slightly to end)
-          d += ` L ${lastNodeX} ${y}`;
+          d += ` L ${rowEndX} ${y}`;
         } else {
-          // Draw to rightmost node, then U-turn down
-          d += ` L ${lastNodeX} ${y}`;
-          // Right U-turn: two 90° arcs forming a smooth 180° turn going down-then-left
-          // Arc 1: from (lastNodeX, y) clockwise to (lastNodeX + r, y + r)
-          d += ` A ${r} ${r} 0 0 1 ${lastNodeX + r} ${y + r}`;
-          // Vertical segment
-          d += ` L ${lastNodeX + r} ${nextY - r}`;
-          // Arc 2: clockwise to (lastNodeX, nextY) — now facing left
-          d += ` A ${r} ${r} 0 0 1 ${lastNodeX} ${nextY}`;
+          d += ` L ${rowEndX} ${y}`;
+          d += ` A ${r} ${r} 0 0 1 ${rowEndX + r} ${y + r}`;
+          d += ` L ${rowEndX + r} ${nextY - r}`;
+          d += ` A ${r} ${r} 0 0 1 ${rowEndX} ${nextY}`;
         }
       } else {
-        // This row goes RIGHT → LEFT. End at left side, curve down to next row.
+        const rowEndCol = isLast ? lastRowEndCol : 0;
+        const rowEndX = EDGE_PAD + rowEndCol * NODE_WIDTH;
         if (isLast) {
-          d += ` L ${firstNodeX} ${y}`;
+          d += ` L ${rowEndX} ${y}`;
         } else {
-          // Draw to leftmost node, then U-turn down
-          d += ` L ${firstNodeX} ${y}`;
-          // Left U-turn: two 90° arcs forming a smooth 180° turn going down-then-right
-          // Arc 1: from (firstNodeX, y) clockwise to (firstNodeX - r, y + r)
-          d += ` A ${r} ${r} 0 0 0 ${firstNodeX - r} ${y + r}`;
-          // Vertical segment
-          d += ` L ${firstNodeX - r} ${nextY - r}`;
-          // Arc 2: clockwise to (firstNodeX, nextY) — now facing right
-          d += ` A ${r} ${r} 0 0 0 ${firstNodeX} ${nextY}`;
+          d += ` L ${rowEndX} ${y}`;
+          d += ` A ${r} ${r} 0 0 0 ${rowEndX - r} ${y + r}`;
+          d += ` L ${rowEndX - r} ${nextY - r}`;
+          d += ` A ${r} ${r} 0 0 0 ${rowEndX} ${nextY}`;
         }
       }
     }
@@ -11626,85 +11658,289 @@ function renderTimeline(data) {
     return d;
   }
 
-  // Get node center position relative to the snake container
   function getNodeCenterInRow(colPosition) {
     const x = EDGE_PAD + colPosition * NODE_WIDTH;
     const y = ROW_HEIGHT / 2;
     return { x, y };
   }
 
-  // Generate HTML
+  function extractCnTitle(it) {
+    const enName = it.name || '';
+    const cnDesc = it.desc || it.docDesc || it.documentDescription || it.description || '';
+    const hasCn = /[\u4e00-\u9fff]/.test(cnDesc);
+    const displayCn = hasCn ? cnDesc.replace(/[（(].*?[）)]\s*$/, '').trim() : '';
+    return { enName, displayCn };
+  }
+
+  function buildCardHtml(it, isCompact) {
+    const dotClass = dotClassMap[it.type] || "tl-dot-misc";
+    const typeLabel = typeLabelMap[it.type] || "其他";
+    const isSelected = _tlSelected.has(it.idx);
+    const isKey = keyTypes.has(it.type);
+    const { enName, displayCn } = extractCnTitle(it);
+    const fullTitle = (displayCn ? displayCn + ' | ' : '') + enName + (it.docCode ? ' [' + it.docCode + ']' : '');
+
+    const compactClass = isCompact ? ' tl-card-compact' : '';
+    const keyClass = isKey ? ' tl-card-key tl-card-key-' + dotClass : '';
+    const selectedClass = isSelected ? ' tl-card-selected' : '';
+
+    let h = `<div class="tl-node-card${compactClass}${keyClass}${selectedClass}" onclick="_jumpToDocFromTimeline(${it.idx})" title="${escapeHtml(fullTitle)}">`;
+    if (displayCn) {
+      h += `  <div class="tl-node-cn-title">${escapeHtml(displayCn)}</div>`;
+      h += `  <div class="tl-node-en-title" title="${escapeHtml(enName)}">${escapeHtml(enName)}</div>`;
+    } else {
+      h += `  <div class="tl-node-title">${escapeHtml(enName)}</div>`;
+    }
+    h += `  <div class="tl-node-meta">`;
+    h += `    <span class="tl-node-code">${escapeHtml(it.docCode || '')}</span>`;
+    h += `    <span class="tl-node-badge ${dotClass}">${typeLabel}</span>`;
+    h += `  </div>`;
+    h += `</div>`;
+    return h;
+  }
+
   let html = '<div class="tl-snake" style="width:' + totalWidth + 'px;height:' + totalHeight + 'px;">';
 
-  // SVG with gradient definition and snake path
+  // ── Build ordered list of all node positions in snake traversal order for year-segmented path ──
+  const centerY = ROW_HEIGHT / 2;
+  const r = CURVE_RADIUS;
+  // Each waypoint: { x, y, year, isYearStart, g (group ref), rowIdx, colIdx }
+  // Snake traversal order: colIdx=0 is always entry point, colIdx=row.length-1 is exit point,
+  // for BOTH even (going right) and odd (going left) rows.
+  const waypoints = [];
+  rows.forEach((row, rowIdx) => {
+    const goingRight = (rowIdx % 2 === 0);
+    row.forEach((g, colIdx) => {
+      const colPosition = goingRight ? colIdx : (itemsPerRow - 1 - colIdx);
+      const x = EDGE_PAD + colPosition * NODE_WIDTH;
+      const y = centerY + rowIdx * ROW_HEIGHT;
+      waypoints.push({ x, y, year: g.year, isYearStart: g.isYearMarker, g, rowIdx, colIdx, colPosition });
+    });
+  });
+
+  // ── Build per-year path segments ──
+  // Year color palette (rotating subtle indigo/violet/blue tints)
+  const yearColors = {
+    // Will be assigned dynamically
+  };
+  const uniqueYears = [...new Set(waypoints.map(w => w.year).filter(y => y !== null))].sort();
+  const yearColorPalette = ['#818cf8','#a78bfa','#60a5fa','#c084fc','#38bdf8','#f472b6','#4ade80','#facc15'];
+  uniqueYears.forEach((yr, i) => {
+    yearColors[yr] = yearColorPalette[i % yearColorPalette.length];
+  });
+
+  function buildAllSegments() {
+    const segments = []; // {d, color}
+    let currentYear = waypoints[0] ? waypoints[0].year : null;
+    let segStart = 0;
+
+    for (let i = 1; i < waypoints.length; i++) {
+      const prev = waypoints[i-1];
+      const curr = waypoints[i];
+      const sameRow = prev.rowIdx === curr.rowIdx;
+
+      if (curr.isYearStart && i > 0) {
+        // Draw segment from segStart to i (ending at curr, since year marker IS the start of new year)
+        // Actually we draw up to curr position, and curr gets the new year color
+        // But for visual clarity, year transitions happen AT the year marker dot.
+        // So segment [segStart..i-1] is in previous year color, ending at prev.
+        // Segment starting at i uses new color.
+        segments.push({
+          from: segStart,
+          to: i-1,
+          year: currentYear,
+          color: yearColors[currentYear] || '#818cf8'
+        });
+        segStart = i;
+        currentYear = curr.year;
+      }
+    }
+    // Final segment
+    segments.push({
+      from: segStart,
+      to: waypoints.length - 1,
+      year: currentYear,
+      color: yearColors[currentYear] || '#818cf8'
+    });
+
+    // Now build actual SVG path for each segment.
+    // A segment covers waypoints[fromIdx] through waypoints[toIdx], inclusive,
+    // and may span one or more rows (curves at row ends).
+    return segments.map(seg => {
+      const fromWp = waypoints[seg.from];
+      const toWp = waypoints[seg.to];
+      let d = `M ${fromWp.x} ${fromWp.y}`;
+
+      for (let i = seg.from; i < seg.to; i++) {
+        const a = waypoints[i];
+        const b = waypoints[i+1];
+        if (a.rowIdx === b.rowIdx) {
+          // Same row: horizontal line
+          d += ` L ${b.x} ${b.y}`;
+        } else {
+          // Row transition: U-curve (down-right for even→odd, down-left for odd→even)
+          const goingRightAtEndOfRow = (a.rowIdx % 2 === 0);
+          const y = a.y;
+          const nextY = b.y;
+          if (goingRightAtEndOfRow) {
+            // Right side curve: goes right from a.x, curves down, comes to b.x (which is a.x)
+            const xEnd = a.x; // rightmost col
+            d += ` L ${xEnd} ${y}`;
+            d += ` A ${r} ${r} 0 0 1 ${xEnd + r} ${y + r}`;
+            d += ` L ${xEnd + r} ${nextY - r}`;
+            d += ` A ${r} ${r} 0 0 1 ${xEnd} ${nextY}`;
+            // After curve, continue horizontal on next row to b.x
+            if (b.x !== xEnd) {
+              d += ` L ${b.x} ${nextY}`;
+            }
+          } else {
+            // Left side curve: goes left from a.x, curves down
+            const xEnd = a.x; // leftmost col
+            d += ` L ${xEnd} ${y}`;
+            d += ` A ${r} ${r} 0 0 0 ${xEnd - r} ${y + r}`;
+            d += ` L ${xEnd - r} ${nextY - r}`;
+            d += ` A ${r} ${r} 0 0 0 ${xEnd} ${nextY}`;
+            if (b.x !== xEnd) {
+              d += ` L ${b.x} ${nextY}`;
+            }
+          }
+        }
+      }
+
+      return { d, color: seg.color, year: seg.year, fromIdx: seg.from, toIdx: seg.to };
+    });
+  }
+
+  const yearSegments = buildAllSegments();
+
   html += '<svg class="tl-snake-svg" viewBox="0 0 ' + totalWidth + ' ' + totalHeight + '" xmlns="http://www.w3.org/2000/svg">';
   html += '  <defs>';
-  html += '    <linearGradient id="tl-gradient" x1="0%" y1="0%" x2="100%" y2="0%">';
-  html += '      <stop offset="0%" stop-color="#818cf8"/>';
-  html += '      <stop offset="50%" stop-color="#6366f1"/>';
-  html += '      <stop offset="100%" stop-color="#818cf8"/>';
-  html += '    </linearGradient>';
+  uniqueYears.forEach(yr => {
+    const c = yearColors[yr];
+    html += `    <linearGradient id="tl-grad-${yr}" x1="0%" y1="0%" x2="100%" y2="0%">`;
+    html += `      <stop offset="0%" stop-color="${c}" stop-opacity="0.6"/>`;
+    html += `      <stop offset="50%" stop-color="${c}"/>`;
+    html += `      <stop offset="100%" stop-color="${c}" stop-opacity="0.6"/>`;
+    html += `    </linearGradient>`;
+  });
+  html += '    <filter id="tl-year-glow" x="-50%" y="-50%" width="200%" height="200%">';
+  html += '      <feGaussianBlur stdDeviation="5" result="blur"/>';
+  html += '      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>';
+  html += '    </filter>';
   html += '  </defs>';
-  html += '  <path class="tl-snake-path" d="' + buildSnakePath() + '"/>';
+
+  // Draw year segments as colored strokes (glow base layer first, then crisp top layer)
+  yearSegments.forEach(seg => {
+    html += `  <path d="${seg.d}" fill="none" stroke="${seg.color}" stroke-opacity="0.18" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" filter="url(#tl-year-glow)"/>`;
+  });
+  yearSegments.forEach(seg => {
+    html += `  <path class="tl-snake-path tl-year-seg" d="${seg.d}" stroke="url(#tl-grad-${seg.year})" data-year="${seg.year}"/>`;
+  });
+
+  // Year-marker rings and large year labels in SVG
+  waypoints.forEach((wp, idx) => {
+    if (wp.isYearStart) {
+      const c = yearColors[wp.year];
+      html += `  <circle class="tl-year-ring" cx="${wp.x}" cy="${wp.y}" r="24" fill="none" stroke="${c}" stroke-opacity="0.3" stroke-width="2" stroke-dasharray="4 3"/>`;
+      html += `  <circle class="tl-year-ring-inner" cx="${wp.x}" cy="${wp.y}" r="18" fill="none" stroke="${c}" stroke-opacity="0.2" stroke-width="1"/>`;
+      // Large year label placed next to the dot, positioned based on row direction
+      const labelX = wp.x;
+      const goingRight = wp.rowIdx % 2 === 0;
+      let labelY, anchorY;
+      if (goingRight) {
+        labelY = wp.y - 52;
+        anchorY = 'end';
+      } else {
+        labelY = wp.y + 68;
+        anchorY = 'start';
+      }
+      html += `  <g class="tl-year-label-group" transform="translate(${labelX}, ${labelY})">`;
+      html += `    <rect x="-32" y="-14" width="64" height="24" rx="12" fill="${c}" fill-opacity="0.12" stroke="${c}" stroke-opacity="0.4" stroke-width="1"/>`;
+      html += `    <text x="0" y="0" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="800" fill="${c}" letter-spacing="0.5">${wp.year}</text>`;
+      html += `  </g>`;
+    }
+  });
   html += '</svg>';
 
-  // Render each row
   rows.forEach((row, rowIdx) => {
     const isReversed = rowIdx % 2 === 1;
-    // For newest-first (descending) sort:
-    // Even rows (0,2,4): go LEFT→RIGHT, cards ABOVE the axis
-    // Odd rows (1,3,5): go RIGHT→LEFT (U-turn at right edge), cards BELOW the axis
     const cardsAbove = !isReversed;
     const cardPosClass = cardsAbove ? 'tl-row-cards-above' : 'tl-row-cards-below';
+    const goingRight = !isReversed;
 
     html += `<div class="tl-row ${cardPosClass}" style="width:${totalWidth}px;height:${ROW_HEIGHT}px;">`;
 
-    row.forEach((it, colIdx) => {
-      // Calculate column position:
-      // - Forward rows (even): left-to-right, col 0 → itemsPerRow-1
-      // - Reversed rows (odd): right-to-left, itemsPerRow-1 → 0 (right-aligned for partial rows)
-      const colPosition = isReversed
-        ? (itemsPerRow - 1 - colIdx)
-        : colIdx;
-      const dotClass = dotClassMap[it.type] || "tl-dot-misc";
-      const typeLabel = typeLabelMap[it.type] || "其他";
-      const typeIcon = typeIconMap[it.type] || typeIconMap.misc;
-      const isSelected = _tlSelected.has(it.idx);
+    row.forEach((g, colIdx) => {
+      const colPosition = goingRight ? colIdx : (itemsPerRow - 1 - colIdx);
       const pos = getNodeCenterInRow(colPosition);
+      const isMulti = g.items.length > 1;
+      const isFirstInGroup = true;
 
-      const enName = it.name || '';
-      const cnDesc = it.desc || it.docDesc || it.documentDescription || it.description || '';
-      const hasCn = /[\u4e00-\u9fff]/.test(cnDesc);
-      const displayCn = hasCn ? cnDesc.replace(/[（(].*?[）)]\s*$/, '').trim() : '';
-      const fullTitle = (displayCn ? displayCn + ' | ' : '') + enName + (it.docCode ? ' [' + it.docCode + ']' : '');
+      // Determine dominant type for the cluster dot (use the type of the first item, or priority: response > oa > patent_doc > others)
+      const priorityOrder = ["response", "office_action", "patent_doc", "allowance", "request", "notification", "citation", "misc"];
+      let domItem = g.items[0];
+      for (const p of priorityOrder) {
+        const found = g.items.find(it => it.type === p);
+        if (found) { domItem = found; break; }
+      }
+      const dotClass = dotClassMap[domItem.type] || "tl-dot-misc";
+      const domTypeLabel = typeLabelMap[domItem.type] || "其他";
+      const domTypeIcon = typeIconMap[domItem.type] || typeIconMap.misc;
 
-      html += `<div class="tl-node ${isSelected ? 'selected' : ''}" data-idx="${it.idx}" style="left:${pos.x - 80}px;top:0;">`;
+      // Check if any item in group is selected
+      const anySelected = g.items.some(it => _tlSelected.has(it.idx));
 
-      // Checkbox indicator for select mode
+      const nodeWidthClass = isMulti ? 'tl-node-multi' : '';
+      const nodeLeftOffset = isMulti ? (pos.x - 140) : (pos.x - 80);
+      html += `<div class="tl-node ${nodeWidthClass} ${anySelected ? 'selected' : ''}" style="left:${nodeLeftOffset}px;top:0;">`;
+
       html += `<div class="tl-node-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>`;
 
-      // Date label on the axis, on the connector
-      html += `<div class="tl-node-date-label">${escapeHtml(it.date || '')}</div>`;
+      // Date label — one per group (shared)
+      html += `<div class="tl-node-date-label">${escapeHtml(g.date || '')}</div>`;
 
-      // Dot on the track line
-      html += `<div class="tl-node-dot ${dotClass}">${typeIcon}</div>`;
+      // Cluster dot
+      if (g.isYearMarker) {
+        const yearColor = yearColors[g.markerYear] || '#818cf8';
+        // Convert hex to rgba for shadow
+        const hex = yearColor.replace('#','');
+        const r = parseInt(hex.substring(0,2), 16);
+        const g = parseInt(hex.substring(2,4), 16);
+        const b = parseInt(hex.substring(4,6), 16);
+        const shadowColor = `rgba(${r},${g},${b},`;
+        html += `<div class="tl-node-dot ${dotClass} tl-year-dot" data-year="${g.markerYear}" style="background:linear-gradient(135deg, ${yearColor}, ${yearColor}dd);box-shadow:0 0 0 3px ${shadowColor}0.2), 0 4px 14px ${shadowColor}0.4);--year-color:${yearColor}">`;
+        html += `  <span class="tl-year-dot-label">${g.markerYear}</span>`;
+        html += `</div>`;
+      } else if (isMulti) {
+        html += `<div class="tl-node-dot ${dotClass} tl-cluster-dot">${domTypeIcon}`;
+        html += `  <span class="tl-cluster-count">${g.items.length}</span>`;
+        html += `</div>`;
+      } else {
+        html += `<div class="tl-node-dot ${dotClass}">${domTypeIcon}</div>`;
+      }
 
-      // Connector from dot to card
+      // Connector
       html += `<div class="tl-node-connector"></div>`;
 
-      // Card with Chinese title (main) + English title (secondary, truncated)
-      html += `<div class="tl-node-card" onclick="_jumpToDocFromTimeline(${it.idx})" title="${escapeHtml(fullTitle)}">`;
-      if (displayCn) {
-        html += `  <div class="tl-node-cn-title">${escapeHtml(displayCn)}</div>`;
-        html += `  <div class="tl-node-en-title" title="${escapeHtml(enName)}">${escapeHtml(enName)}</div>`;
+      // Card cluster container
+      if (isMulti) {
+        html += `<div class="tl-card-cluster">`;
+        html += `<div class="tl-card-cluster-bg"></div>`;
+        const clusterSize = g.items.length <= 2 ? 'tl-cluster-' + g.items.length : 'tl-cluster-n';
+        html += `<div class="tl-card-cluster-inner ${clusterSize}">`;
+        g.items.forEach(it => {
+          html += buildCardHtml(it, true);
+        });
+        html += `</div></div>`;
       } else {
-        html += `  <div class="tl-node-title">${escapeHtml(enName)}</div>`;
+        html += buildCardHtml(g.items[0], false);
       }
-      html += `  <div class="tl-node-meta">`;
-      html += `    <span class="tl-node-code">${escapeHtml(it.docCode || '')}</span>`;
-      html += `    <span class="tl-node-badge ${dotClass}">${typeLabel}</span>`;
-      html += `  </div>`;
-      html += `</div>`;
+
+      // Large year label for year markers (placed outside cards)
+      if (g.isYearMarker) {
+        const yearColor = yearColors[g.markerYear] || '#818cf8';
+        html += `<div class="tl-year-big-label" style="--year-color:${yearColor}">${g.markerYear}</div>`;
+      }
 
       html += `</div>`;
     });
@@ -11713,10 +11949,42 @@ function renderTimeline(data) {
   });
 
   html += '</div>';
-  board.innerHTML = html;
+
+  // Build legend HTML
+  let legendHtml = '<div class="tl-legend">';
+  legendHtml += '<div class="tl-legend-title">图例说明</div>';
+  legendHtml += '<div class="tl-legend-section">';
+  legendHtml += '<span class="tl-legend-section-label">重点文档：</span>';
+  legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#3b82f6"></span>申请人答复</span>';
+  legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#ef4444"></span>审查意见</span>';
+  legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#6366f1"></span>专利文件</span>';
+  legendHtml += '</div>';
+  legendHtml += '<div class="tl-legend-section">';
+  legendHtml += '<span class="tl-legend-section-label">其他类型：</span>';
+  legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#22c55e"></span>授权通知</span>';
+  legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#fbbf24"></span>申请人请求</span>';
+  legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#6b7280"></span>其他</span>';
+  legendHtml += '</div>';
+  if (uniqueYears.length > 1) {
+    legendHtml += '<div class="tl-legend-section">';
+    legendHtml += '<span class="tl-legend-section-label">时间分段：</span>';
+    uniqueYears.forEach(yr => {
+      legendHtml += `<span class="tl-legend-item"><span class="tl-legend-line" style="background:${yearColors[yr]}"></span>${yr}年</span>`;
+    });
+    legendHtml += '</div>';
+  }
+  legendHtml += '</div>';
+
+  // Wrap in a centering container with legend on top
+  board.innerHTML = legendHtml + '<div class="tl-snake-wrapper">' + html + '</div>';
 
   if (statusEl) {
-    statusEl.textContent = "共 " + sorted.length + " 个审查节点";
+    const groupCount = groups.length;
+    const multiCount = groups.filter(g => g.items.length > 1).length;
+    let status = "共 " + sorted.length + " 个审查节点（" + groupCount + " 个日期";
+    if (multiCount > 0) status += "，" + multiCount + " 个日期含多文档";
+    status += "）";
+    statusEl.textContent = status;
   }
 }
 
