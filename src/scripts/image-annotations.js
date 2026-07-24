@@ -469,6 +469,59 @@ var ImageAnnotations = (function () {
     });
     // Prevent mousedown from propagating to stage (which starts panning)
     markerEditorEl.addEventListener("mousedown", function (e) { e.stopPropagation(); });
+
+    // ── GT protection: MutationObserver to detect and revert GT interference ──
+    // GT's MutationObserver may wrap inputs in <font> tags, set readonly/disabled,
+    // or steal focus. This observer watches the editor and immediately reverts
+    // any such modifications, keeping the inputs editable.
+    var _editorObserver = new MutationObserver(function(mutations) {
+      if (!markerEditorEl) return;
+      mutations.forEach(function(mut) {
+        // Revert attribute changes on inputs (readonly, disabled, contenteditable)
+        if (mut.type === 'attributes' && mut.target && mut.target.tagName) {
+          var tag = mut.target.tagName.toLowerCase();
+          if (tag === 'input' || tag === 'textarea') {
+            if (mut.target.hasAttribute('readonly')) mut.target.removeAttribute('readonly');
+            if (mut.target.hasAttribute('disabled')) mut.target.removeAttribute('disabled');
+            mut.target.style.pointerEvents = '';
+          }
+        }
+        // Remove any <font> tags GT inserts inside the editor
+        if (mut.type === 'childList' && mut.addedNodes) {
+          mut.addedNodes.forEach(function(node) {
+            if (node.nodeType === 1) {
+              if (node.tagName === 'FONT' || (node.classList && node.classList.contains('skiptranslate'))) {
+                // Unwrap font tags: move children to parent, then remove font
+                while (node.firstChild) {
+                  node.parentNode.insertBefore(node.firstChild, node);
+                }
+                node.remove();
+              }
+            }
+          });
+        }
+      });
+    });
+    _editorObserver.observe(markerEditorEl, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['readonly', 'disabled', 'contenteditable', 'style', 'class']
+    });
+    // Stop observing when editor closes
+    var _origCloseEditor = closeMarkerEditor;
+    // Store observer for cleanup in closeMarkerEditor
+    markerEditorEl._gtObserver = _editorObserver;
+
+    // Also proactively remove any GT chrome overlays that might intercept clicks
+    var gtChromeSelectors = '.goog-te-spinner-pos, .goog-te-spinner, #goog-gt-tt, ' +
+      '.goog-te-balloon, .goog-te-pos, .skiptranslate[style*="fixed"], ' +
+      '.skiptranslate[style*="absolute"]';
+    document.querySelectorAll(gtChromeSelectors).forEach(function(el) {
+      el.style.display = 'none';
+      el.style.pointerEvents = 'none';
+    });
+
     // Focus the number input. Retry several times in case the browser is busy
     // (e.g. GT MutationObserver processing, image decoding) which can delay
     // the input becoming focusable/editable. Also clear any readOnly/disabled
@@ -499,6 +552,10 @@ var ImageAnnotations = (function () {
 
   function closeMarkerEditor() {
     if (markerEditorEl) {
+      // Disconnect GT protection observer
+      if (markerEditorEl._gtObserver) {
+        try { markerEditorEl._gtObserver.disconnect(); } catch(e) {}
+      }
       markerEditorEl.remove();
       markerEditorEl = null;
     }

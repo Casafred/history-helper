@@ -5408,8 +5408,9 @@ body {
   padding: 16px;
   width: 100%;
 }
-/* 当标签栏显示时，在wide-layout下占满宽度 */
-#app.wide-layout .patent-detail-section.has-tabs {
+/* 当标签栏显示时，占满宽度（不再依赖 #app.wide-layout，避免其他代码路径
+   移除 wide-layout 时导致容器突然收窄） */
+.patent-detail-section.has-tabs {
   max-width: 100%;
   padding: 0 32px 24px;
 }
@@ -5918,7 +5919,8 @@ body {
   font-size: 13px;
   line-height: 1.7;
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
   transition: background 0.15s;
 }
@@ -5961,9 +5963,25 @@ body {
 .pd-claim-text {
   color: var(--text-secondary);
   flex: 1;
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 .pd-claim-item.claim-independent .pd-claim-text {
   color: var(--text-primary);
+}
+/* Claim main row (num + type + text + translate button) */
+.pd-claim-main {
+  width: 100%;
+  min-width: 0;
+}
+/* Per-claim translation result (streaming) */
+.pd-claim-translation {
+  width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  box-sizing: border-box;
 }
 
 /* Description */

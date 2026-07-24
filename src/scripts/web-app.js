@@ -2854,6 +2854,11 @@ function renderPatentDetail(data) {
 
   patentDetailContent.innerHTML = html;
 
+  // Reset fig-link delegation flags — old container (with listener) was
+  // replaced by innerHTML, so delegation must be re-attached for the new
+  // .pd-description-text element.
+  _figLinkDelegatedScopes = {};
+
   // Bind patent link clicks
   patentDetailContent.querySelectorAll(".pd-patent-link").forEach(link => {
     link.addEventListener("click", (e) => {
@@ -3621,14 +3626,55 @@ let _gtActivationTriggered = false;
 // Permanent GT error suppressor — GT's internal code (el_main, el_conf) throws
 // errors after we reset/purge it. These are harmless but noisy. Install once.
 if (!window._gtErrorSuppressor) {
-  window._gtErrorSuppressor = function(msg, url, line, col, err) {
-    if (url && (url.indexOf('el_main') >= 0 || url.indexOf('el_conf') >= 0 ||
-        url.indexOf('translate.google') >= 0 || url.indexOf('google.com/translate') >= 0)) {
+  window._gtErrorSuppressor = function(event) {
+    // Handle both ErrorEvent (from addEventListener) and legacy (msg,url,...)
+    var srcUrl = '';
+    var errMsg = '';
+    var stack = '';
+    if (event && event.target) {
+      // ErrorEvent has: message, filename, error
+      srcUrl = event.filename || (event.error && event.error.stack) || '';
+      errMsg = event.message || '';
+      stack = (event.error && event.error.stack) || '';
+    }
+    // Check if the error originates from GT's minified code
+    var gtPatterns = ['el_main', 'el_conf', 'translate.google', 'google.com/translate',
+                      'goog-te', 'googlegroups'];
+    var isGtError = false;
+    for (var i = 0; i < gtPatterns.length; i++) {
+      if ((srcUrl && srcUrl.indexOf(gtPatterns[i]) >= 0) ||
+          (errMsg && errMsg.indexOf(gtPatterns[i]) >= 0) ||
+          (stack && stack.indexOf(gtPatterns[i]) >= 0)) {
+        isGtError = true;
+        break;
+      }
+    }
+    // Also check for the specific null setAttribute error from GT's body listener
+    if (!isGtError && errMsg &&
+        errMsg.indexOf('setAttribute') >= 0 &&
+        errMsg.indexOf('null') >= 0) {
+      isGtError = true;
+    }
+    if (isGtError) {
+      event.preventDefault();
+      event.stopPropagation();
       return true; // suppress
     }
     return false;
   };
   window.addEventListener('error', window._gtErrorSuppressor, true);
+  // Also install legacy onerror as a backup
+  window.onerror = function(msg, url, line, col, err) {
+    var gtPatterns = ['el_main', 'el_conf', 'translate.google', 'google.com/translate'];
+    for (var i = 0; i < gtPatterns.length; i++) {
+      if ((url && url.indexOf(gtPatterns[i]) >= 0) ||
+          (err && err.stack && err.stack.indexOf(gtPatterns[i]) >= 0) ||
+          (typeof msg === 'string' && msg.indexOf('setAttribute') >= 0 && msg.indexOf('null') >= 0)) {
+        return true; // suppress
+      }
+    }
+    return false;
+  };
   // Also suppress unhandled promise rejections from GT
   window.addEventListener('unhandledrejection', function(e) {
     if (e.reason && e.reason.stack && (
@@ -3952,12 +3998,27 @@ function _hideGtChrome() {
     '.goog-te-spinner, #goog-gt-tt, .goog-te-balloon, .goog-te-pos, ' +
     '.goog-te-menu2, .goog-te-ftab-float, .gt-spinner, .gt-loading, ' +
     'iframe.goog-te-banner-frame, iframe.goog-te-menu-frame';
+  // HIDE elements instead of removing them. GT's internal JavaScript holds
+  // references to these elements and calls setAttribute on them via body event
+  // listeners. Removing them causes "Cannot read properties of null" errors.
+  // Hiding keeps the elements alive (so GT's code doesn't crash) while making
+  // them completely invisible and non-interactive.
+  var HIDE_STYLE = 'display:none !important;visibility:hidden !important;' +
+    'opacity:0 !important;pointer-events:none !important;' +
+    'height:0 !important;width:0 !important;overflow:hidden !important;' +
+    'position:absolute !important;top:-9999px !important;left:-9999px !important;';
   function sweep() {
-    document.querySelectorAll(chromeSelectors).forEach(function(el) { el.remove(); });
+    document.querySelectorAll(chromeSelectors).forEach(function(el) {
+      // Only apply if not already hidden (avoid redundant style writes)
+      if (el.style.display !== 'none' || !el.dataset.gtHidden) {
+        el.style.cssText += ';' + HIDE_STYLE;
+        el.dataset.gtHidden = '1';
+      }
+    });
+    // Also reset body offset GT adds to accommodate the banner
+    document.body.style.top = '';
   }
   sweep();
-  // Reset body offset GT adds to accommodate the banner
-  document.body.style.top = '';
   // GT may re-create elements via its internal timers — keep sweeping for 3s
   var cleanupCount = 0;
   var cleanupInterval = setInterval(function() {
@@ -4065,7 +4126,8 @@ function _disableGoogleTranslateQuiet(onReady) {
 // Fully remove all GT traces from the page
 function _purgeGoogleTranslateCompletely() {
   try {
-    // 1. Remove all GT-injected DOM elements (comprehensive selector list)
+    // 1. Hide all GT-injected DOM elements (hide instead of remove to avoid
+    //    null-reference errors in GT's internal event listeners on body)
     var gtEls = document.querySelectorAll(
       "#goog-gt-tt, .goog-te-spinner-pos, .goog-te-banner-frame, .goog-te-banner, " +
       ".goog-te-gadget-icon, #goog-gt-tt, .goog-te-balloon, .goog-te-pos, " +
@@ -4073,7 +4135,13 @@ function _purgeGoogleTranslateCompletely() {
       "iframe.goog-te-menu-frame, .goog-te-menu2, .goog-te-ftab-float, " +
       ".goog-te-spinner, .gt-spinner, .gt-loading"
     );
-    gtEls.forEach(function(el) { el.remove(); });
+    var _gtHideStyle = 'display:none !important;visibility:hidden !important;' +
+      'pointer-events:none !important;position:absolute !important;' +
+      'top:-9999px !important;left:-9999px !important;width:0 !important;' +
+      'height:0 !important;overflow:hidden !important;';
+    gtEls.forEach(function(el) {
+      el.style.cssText += ';' + _gtHideStyle;
+    });
 
     // 2. Remove the GT script tag
     var gtScript = document.getElementById('google-translate-script');
@@ -4102,7 +4170,7 @@ function _purgeGoogleTranslateCompletely() {
     // 7. Error suppressor is now installed permanently at module init — no
     //    need for a temporary one here.
 
-    // 8. Recurring cleanup: remove any GT elements that get re-created by
+    // 8. Recurring cleanup: hide any GT elements that get re-created by
     //    residual GT code. Run every 500ms for 5 seconds.
     var cleanupCount = 0;
     var cleanupInterval = setInterval(function() {
@@ -4111,7 +4179,9 @@ function _purgeGoogleTranslateCompletely() {
         '.skiptranslate, .goog-te-spinner-pos, .goog-te-banner-frame, ' +
         '#goog-gt-tt, .goog-te-balloon, .goog-te-pos'
       );
-      reappeared.forEach(function(el) { el.remove(); });
+      reappeared.forEach(function(el) {
+        el.style.cssText += ';' + _gtHideStyle;
+      });
       if (cleanupCount >= 10) clearInterval(cleanupInterval);
     }, 500);
 
@@ -4349,6 +4419,40 @@ function linkFigureReferences(scope) {
     var m = matches[mi];
     _wrapFigMatch(m, offsetMap, scope);
   }
+
+  // Ensure delegated click handler is installed (survives GT <font> wrapping)
+  _ensureFigLinkDelegation(scope);
+}
+
+// Delegated click handler for figure links. Uses event delegation on the
+// description container so that clicks work even after GT wraps <a> elements
+// in <font> tags (which destroys per-element addEventListener handlers).
+var _figLinkDelegatedScopes = {};
+function _ensureFigLinkDelegation(scope) {
+  if (_figLinkDelegatedScopes[scope]) return; // already installed
+  var container = _getDescriptionContainer(scope);
+  if (!container) return;
+  _figLinkDelegatedScopes[scope] = true;
+  container.addEventListener('click', function(e) {
+    // Walk up from the click target to find a .pd-fig-link ancestor
+    var el = e.target;
+    var linkEl = null;
+    while (el && el !== container) {
+      if (el.classList && el.classList.contains('pd-fig-link')) {
+        linkEl = el;
+        break;
+      }
+      el = el.parentNode;
+    }
+    if (!linkEl) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var figNum = parseInt(linkEl.getAttribute('data-fig-num'), 10);
+    var linkScope = linkEl.getAttribute('data-fig-scope') || scope;
+    if (figNum > 0) {
+      jumpToFigure(figNum, linkScope);
+    }
+  });
 }
 
 // Helper: wrap a single figure reference match in a link
@@ -4376,15 +4480,16 @@ function _wrapFigMatch(m, offsetMap, scope) {
 
   // Create the link element
   var link = document.createElement('a');
-  link.className = 'pd-fig-link';
+  link.className = 'pd-fig-link notranslate';
   link.title = '点击查看' + m.fullMatch;
   link.href = 'javascript:void(0)';
-  (function(fn, sc) {
-    link.addEventListener('click', function(e) {
-      e.preventDefault();
-      jumpToFigure(fn, sc);
-    });
-  })(m.figureNum, scope);
+  // Store figure number & scope as data attributes so event delegation can
+  // recover them even after GT wraps the <a> in <font> tags (which destroys
+  // direct addEventListener handlers). The delegated listener on the
+  // container survives GT's DOM rewrites.
+  link.setAttribute('data-fig-num', m.figureNum);
+  link.setAttribute('data-fig-scope', scope);
+  link.setAttribute('translate', 'no');
 
   if (startNodeIdx === endNodeIdx) {
     // Simple case: match within a single text node
@@ -4863,6 +4968,8 @@ setInterval(() => {
 }, 30 * 60 * 1000);
 
 function _bindPpvContentEvents(content, data) {
+  // Reset fig-link delegation for popup scope — old container was replaced
+  try { delete _figLinkDelegatedScopes['popup']; } catch(e) { _figLinkDelegatedScopes['popup'] = false; }
   // Bind drawing clicks
   content.querySelectorAll(".pd-drawing-item").forEach(item => {
     item.addEventListener("click", () => {
@@ -6717,22 +6824,21 @@ function refreshHistoryList() {
     const unifiedEntries = entries.map(e => ({ ...e, _type: "dossier" }));
     Object.entries(patentHistory).forEach(([pn, item]) => {
       if (item.timestamp) {
-        // Skip if already shown as dossier entry (avoid duplicate display)
-        if (!unifiedEntries.find(e => e.patentNumber === pn)) {
-          unifiedEntries.push({
-            patentNumber: pn,
-            office: item.source === "jplatpat" ? "JP" : "GP",
-            timestamp: item.timestamp,
-            isCached: false,
-            hasOCR: false,
-            hasAnalysis: false,
-            hasCitedRefs: false,
-            applicantName: item.applicantName || "",
-            title: item.title || "",
-            source: item.source || "gp",
-            _type: "patent",
-          });
-        }
+        // Show patent-mode entries as separate items alongside dossier entries
+        // for the same patent number, so users can jump to the correct mode.
+        unifiedEntries.push({
+          patentNumber: pn,
+          office: item.source === "jplatpat" ? "JP" : "GP",
+          timestamp: item.timestamp,
+          isCached: false,
+          hasOCR: false,
+          hasAnalysis: false,
+          hasCitedRefs: false,
+          applicantName: item.applicantName || "",
+          title: item.title || "",
+          source: item.source || "gp",
+          _type: "patent",
+        });
       }
     });
     unifiedEntries.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -6763,7 +6869,9 @@ function refreshHistoryList() {
       const isSelectMode = historyList.classList.contains("select-mode");
       historyList.innerHTML = displayEntries.map(e => {
         const currentPatent = currentData ? (currentData.raw || (currentData.office + currentData.applicationNumber)) : "";
-        const isActive = e.patentNumber === currentPatent;
+        // Active state: match BOTH patent number AND type (dossier vs patent),
+        // so only the entry matching the current mode is highlighted.
+        const isActive = e.patentNumber === currentPatent && e._type === searchMode;
         let badges = "";
         if (e._type === "patent") {
           if (e.source === "jplatpat") {
