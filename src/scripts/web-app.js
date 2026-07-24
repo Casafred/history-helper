@@ -11582,34 +11582,43 @@ function renderTimeline(data) {
     return true;
   });
 
-  const sorted = [...timelineItems].sort((a, b) => {
+  // Sort newest first for display
+  const sortedNewest = [...timelineItems].sort((a, b) => {
     const da = parseDate(a.date);
     const db = parseDate(b.date);
     return db - da;
   });
+
+  // For chronological layout (left=newest, right=oldest), we keep newest-first order
+  const sorted = sortedNewest;
 
   if (sorted.length === 0) {
     board.innerHTML = '<p class="placeholder">未找到审查节点</p>';
     return;
   }
 
-  // Group items by date (same date → same cluster node)
-  const groups = [];
+  // Key types that get full card display
+  const keyTypes = new Set(["response", "office_action", "patent_doc"]);
+
+  // Group by date
+  const dateGroups = [];
   sorted.forEach(item => {
-    const last = groups[groups.length - 1];
+    const last = dateGroups[dateGroups.length - 1];
     if (last && last.date === item.date) {
       last.items.push(item);
     } else {
-      groups.push({ date: item.date, items: [item] });
+      dateGroups.push({ date: item.date, items: [item] });
     }
   });
 
-  // Determine year boundaries (a group is a year-marker if its year differs from previous group in display order)
-  // We mark year boundaries after arranging groups into rows (snake order)
-  // For now, annotate each group with its year for later detection
-  groups.forEach(g => {
+  // Annotate each group with year and key/non-key classification
+  dateGroups.forEach((g, idx) => {
     const ts = parseDate(g.date);
     g.year = ts ? new Date(ts).getFullYear() : null;
+    g.timestamp = ts;
+    g.hasKey = g.items.some(it => keyTypes.has(it.type));
+    g.keyItems = g.items.filter(it => keyTypes.has(it.type));
+    g.otherItems = g.items.filter(it => !keyTypes.has(it.type));
   });
 
   const dotClassMap = {
@@ -11634,9 +11643,6 @@ function renderTimeline(data) {
     misc: "其他",
   };
 
-  // Key document types that get special highlight border
-  const keyTypes = new Set(["response", "office_action", "patent_doc"]);
-
   const typeIconMap = {
     office_action: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
     response: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>',
@@ -11645,102 +11651,18 @@ function renderTimeline(data) {
     citation: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
     patent_doc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
     misc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+    request: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   };
 
-  // ── S-shaped (boustrophedon) layout with SVG continuous curve ──
-  const NODE_WIDTH = 190;
-  const ROW_HEIGHT = 340;
-  const CURVE_RADIUS = 38;
-  // EDGE_PAD must be large enough to accommodate multi-doc clusters (280px wide, 140px half-width)
-  const EDGE_PAD = Math.max(CURVE_RADIUS + 30, 150);
+  // Priority order for dominant type in a group
+  const priorityOrder = ["office_action", "response", "patent_doc", "allowance", "notification", "request", "citation", "misc"];
 
-  const boardWidth = board.clientWidth || 900;
-  const availableWidth = Math.max(boardWidth - 60, 600);
-  let itemsPerRow = Math.max(3, Math.floor((availableWidth - 2*EDGE_PAD) / NODE_WIDTH) + 1);
-  itemsPerRow = Math.min(6, itemsPerRow);
-
-  // Arrange groups into rows (snake order)
-  const rows = [];
-  for (let i = 0; i < groups.length; i += itemsPerRow) {
-    rows.push(groups.slice(i, i + itemsPerRow));
-  }
-
-  // Mark year boundaries following snake traversal order (newest→oldest)
-  let prevYear = null;
-  const yearMarkers = [];
-  // For snake traversal: even rows go left-to-right (array order), odd rows also go in array order
-  // because colIdx=0 is at the row entry point (rightmost for odd rows after curve)
-  rows.forEach((row, rowIdx) => {
-    const goingRight = (rowIdx % 2 === 0);
-    // Traverse in the order the snake visits nodes: array order for both directions
-    // (colIdx=0 is entry point, colIdx=row.length-1 is exit point on every row)
-    row.forEach((g, colIdx) => {
-      if (g.year !== null && g.year !== prevYear) {
-        g.isYearMarker = true;
-        g.markerYear = g.year;
-        yearMarkers.push(g);
-      }
-      prevYear = g.year;
-    });
-  });
-
-  const colsInLastRow = rows[rows.length - 1].length;
-  const isLastRowReversed = (rows.length - 1) % 2 === 1;
-  const lastRowEndCol = isLastRowReversed
-    ? (itemsPerRow - colsInLastRow)
-    : (colsInLastRow - 1);
-  const lastNodeX = EDGE_PAD + lastRowEndCol * NODE_WIDTH;
-  const firstNodeX = EDGE_PAD;
-  const totalWidth = (rows.length > 1) ? (EDGE_PAD + (itemsPerRow - 1) * NODE_WIDTH + EDGE_PAD) : (lastNodeX + EDGE_PAD);
-  // Extra buffer at bottom for cards that extend below last row center line
-  const BOTTOM_BUFFER = 120;
-  const totalHeight = rows.length * ROW_HEIGHT + BOTTOM_BUFFER;
-
-  function buildSnakePath() {
-    const centerY = ROW_HEIGHT / 2;
-    const r = CURVE_RADIUS;
-
-    let d = `M ${firstNodeX} ${centerY}`;
-
-    for (let row = 0; row < rows.length; row++) {
-      const y = centerY + row * ROW_HEIGHT;
-      const nextY = centerY + (row + 1) * ROW_HEIGHT;
-      const isLast = row === rows.length - 1;
-      const goingRight = (row % 2 === 0);
-      const rowCols = rows[row].length;
-
-      if (goingRight) {
-        const rowEndCol = (isLast && row !== 0) ? lastRowEndCol : (itemsPerRow - 1);
-        const rowEndX = EDGE_PAD + rowEndCol * NODE_WIDTH;
-        if (isLast) {
-          d += ` L ${rowEndX} ${y}`;
-        } else {
-          d += ` L ${rowEndX} ${y}`;
-          d += ` A ${r} ${r} 0 0 1 ${rowEndX + r} ${y + r}`;
-          d += ` L ${rowEndX + r} ${nextY - r}`;
-          d += ` A ${r} ${r} 0 0 1 ${rowEndX} ${nextY}`;
-        }
-      } else {
-        const rowEndCol = isLast ? lastRowEndCol : 0;
-        const rowEndX = EDGE_PAD + rowEndCol * NODE_WIDTH;
-        if (isLast) {
-          d += ` L ${rowEndX} ${y}`;
-        } else {
-          d += ` L ${rowEndX} ${y}`;
-          d += ` A ${r} ${r} 0 0 0 ${rowEndX - r} ${y + r}`;
-          d += ` L ${rowEndX - r} ${nextY - r}`;
-          d += ` A ${r} ${r} 0 0 0 ${rowEndX} ${nextY}`;
-        }
-      }
+  function getDominantType(items) {
+    for (const p of priorityOrder) {
+      const found = items.find(it => it.type === p);
+      if (found) return found;
     }
-
-    return d;
-  }
-
-  function getNodeCenterInRow(colPosition) {
-    const x = EDGE_PAD + colPosition * NODE_WIDTH;
-    const y = ROW_HEIGHT / 2;
-    return { x, y };
+    return items[0];
   }
 
   function extractCnTitle(it) {
@@ -11778,290 +11700,280 @@ function renderTimeline(data) {
     return h;
   }
 
-  let html = '<div class="tl-snake" style="width:' + totalWidth + 'px;height:' + totalHeight + 'px;">';
+  // ── Horizontal layout ──
+  const NODE_SPACING = 180; // Horizontal distance between nodes
+  const START_PAD = 80;
+  const END_PAD = 80;
+  const LINE_Y = 200; // Y position of the main timeline line
+  const CARD_OFFSET = 120; // Distance from line to card
 
-  // ── Build ordered list of all node positions in snake traversal order for year-segmented path ──
-  const centerY = ROW_HEIGHT / 2;
-  const r = CURVE_RADIUS;
-  // Each waypoint: { x, y, year, isYearStart, g (group ref), rowIdx, colIdx }
-  // Snake traversal order: colIdx=0 is always entry point, colIdx=row.length-1 is exit point,
-  // for BOTH even (going right) and odd (going left) rows.
-  const waypoints = [];
-  rows.forEach((row, rowIdx) => {
-    const goingRight = (rowIdx % 2 === 0);
-    row.forEach((g, colIdx) => {
-      const colPosition = goingRight ? colIdx : (itemsPerRow - 1 - colIdx);
-      const x = EDGE_PAD + colPosition * NODE_WIDTH;
-      const y = centerY + rowIdx * ROW_HEIGHT;
-      waypoints.push({ x, y, year: g.year, isYearStart: g.isYearMarker, g, rowIdx, colIdx, colPosition });
-    });
+  // Build display nodes: merge key docs with other docs at the same date into one position
+  // Each display node corresponds to one date group
+  const displayNodes = [];
+  let cardSide = 0; // 0 = above line, 1 = below line (alternating)
+
+  // Detect year boundaries for year dividers
+  let prevYear = null;
+
+  dateGroups.forEach((g, idx) => {
+    const x = START_PAD + idx * NODE_SPACING;
+    const isYearStart = (g.year !== null && g.year !== prevYear);
+
+    if (g.hasKey) {
+      // Show each key doc as a separate sub-node at this date position
+      // If multiple key docs at same date, stack them slightly offset
+      const keyCount = g.keyItems.length;
+      g.keyItems.forEach((it, kidx) => {
+        const offsetX = keyCount > 1 ? (kidx - (keyCount - 1) / 2) * 70 : 0;
+        displayNodes.push({
+          type: 'key',
+          x: x + offsetX,
+          y: LINE_Y,
+          item: it,
+          date: g.date,
+          year: g.year,
+          isYearStart: kidx === 0 && isYearStart,
+          cardSide: cardSide,
+          otherItems: g.otherItems,
+          groupKeyCount: keyCount,
+          totalItems: g.items.length,
+          groupIdx: idx
+        });
+        cardSide = 1 - cardSide; // Alternate
+      });
+      // If there are other items, add a fold dot at same x? No, we'll attach them to the last key doc as hover
+    } else {
+      // All items are non-key: show a single fold dot with count
+      displayNodes.push({
+        type: 'folded',
+        x: x,
+        y: LINE_Y,
+        items: g.otherItems,
+        date: g.date,
+        year: g.year,
+        isYearStart: isYearStart,
+        cardSide: cardSide,
+        totalItems: g.items.length,
+        groupIdx: idx
+      });
+      // Folded nodes don't alternate side (no card)
+    }
+    prevYear = g.year;
   });
 
-  // ── Build per-year path segments ──
-  // Year color palette (rotating subtle indigo/violet/blue tints)
-  const yearColors = {
-    // Will be assigned dynamically
-  };
-  const uniqueYears = [...new Set(waypoints.map(w => w.year).filter(y => y !== null))].sort();
+  const totalWidth = START_PAD + (dateGroups.length - 1) * NODE_SPACING + END_PAD + 60;
+  const totalHeight = LINE_Y * 2 + 40;
+
+  // Year colors
+  const uniqueYears = [...new Set(dateGroups.map(g => g.year).filter(y => y !== null))].sort((a,b) => b - a);
+  const yearColors = {};
   const yearColorPalette = ['#818cf8','#a78bfa','#60a5fa','#c084fc','#38bdf8','#f472b6','#4ade80','#facc15'];
   uniqueYears.forEach((yr, i) => {
     yearColors[yr] = yearColorPalette[i % yearColorPalette.length];
   });
 
-  function buildAllSegments() {
-    const segments = []; // {d, color}
-    let currentYear = waypoints[0] ? waypoints[0].year : null;
-    let segStart = 0;
-
-    for (let i = 1; i < waypoints.length; i++) {
-      const prev = waypoints[i-1];
-      const curr = waypoints[i];
-      const sameRow = prev.rowIdx === curr.rowIdx;
-
-      if (curr.isYearStart && i > 0) {
-        // Draw segment from segStart to i (ending at curr, since year marker IS the start of new year)
-        // Actually we draw up to curr position, and curr gets the new year color
-        // But for visual clarity, year transitions happen AT the year marker dot.
-        // So segment [segStart..i-1] is in previous year color, ending at prev.
-        // Segment starting at i uses new color.
-        segments.push({
-          from: segStart,
-          to: i-1,
-          year: currentYear,
-          color: yearColors[currentYear] || '#818cf8'
-        });
-        segStart = i;
-        currentYear = curr.year;
-      }
+  // Build year segments
+  const yearSegments = [];
+  let currentYear = displayNodes[0] ? displayNodes[0].year : null;
+  let segStartX = START_PAD - 40;
+  displayNodes.forEach((n, i) => {
+    if (n.isYearStart && i > 0) {
+      yearSegments.push({
+        x1: segStartX,
+        x2: n.x - NODE_SPACING / 2,
+        year: currentYear,
+        color: yearColors[currentYear] || '#818cf8'
+      });
+      segStartX = n.x - NODE_SPACING / 2;
+      currentYear = n.year;
     }
-    // Final segment
-    segments.push({
-      from: segStart,
-      to: waypoints.length - 1,
-      year: currentYear,
-      color: yearColors[currentYear] || '#818cf8'
-    });
+  });
+  yearSegments.push({
+    x1: segStartX,
+    x2: totalWidth - END_PAD + 40,
+    year: currentYear,
+    color: yearColors[currentYear] || '#818cf8'
+  });
 
-    // Now build actual SVG path for each segment.
-    // A segment covers waypoints[fromIdx] through waypoints[toIdx], inclusive,
-    // and may span one or more rows (curves at row ends).
-    return segments.map(seg => {
-      const fromWp = waypoints[seg.from];
-      const toWp = waypoints[seg.to];
-      let d = `M ${fromWp.x} ${fromWp.y}`;
+  // Build HTML
+  let html = '<div class="tl-horizontal" style="width:' + totalWidth + 'px;min-height:' + totalHeight + 'px;">';
 
-      for (let i = seg.from; i < seg.to; i++) {
-        const a = waypoints[i];
-        const b = waypoints[i+1];
-        if (a.rowIdx === b.rowIdx) {
-          // Same row: horizontal line
-          d += ` L ${b.x} ${b.y}`;
-        } else {
-          // Row transition: U-curve (down-right for even→odd, down-left for odd→even)
-          const goingRightAtEndOfRow = (a.rowIdx % 2 === 0);
-          const y = a.y;
-          const nextY = b.y;
-          if (goingRightAtEndOfRow) {
-            // Right side curve: goes right from a.x, curves down, comes to b.x (which is a.x)
-            const xEnd = a.x; // rightmost col
-            d += ` L ${xEnd} ${y}`;
-            d += ` A ${r} ${r} 0 0 1 ${xEnd + r} ${y + r}`;
-            d += ` L ${xEnd + r} ${nextY - r}`;
-            d += ` A ${r} ${r} 0 0 1 ${xEnd} ${nextY}`;
-            // After curve, continue horizontal on next row to b.x
-            if (b.x !== xEnd) {
-              d += ` L ${b.x} ${nextY}`;
-            }
-          } else {
-            // Left side curve: goes left from a.x, curves down
-            const xEnd = a.x; // leftmost col
-            d += ` L ${xEnd} ${y}`;
-            d += ` A ${r} ${r} 0 0 0 ${xEnd - r} ${y + r}`;
-            d += ` L ${xEnd - r} ${nextY - r}`;
-            d += ` A ${r} ${r} 0 0 0 ${xEnd} ${nextY}`;
-            if (b.x !== xEnd) {
-              d += ` L ${b.x} ${nextY}`;
-            }
-          }
-        }
-      }
-
-      return { d, color: seg.color, year: seg.year, fromIdx: seg.from, toIdx: seg.to };
-    });
-  }
-
-  const yearSegments = buildAllSegments();
-
-  html += '<svg class="tl-snake-svg" viewBox="0 0 ' + totalWidth + ' ' + totalHeight + '" xmlns="http://www.w3.org/2000/svg">';
+  // SVG for timeline line
+  html += '<svg class="tl-hline-svg" viewBox="0 0 ' + totalWidth + ' ' + totalHeight + '" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;">';
   html += '  <defs>';
   uniqueYears.forEach(yr => {
     const c = yearColors[yr];
-    html += `    <linearGradient id="tl-grad-${yr}" x1="0%" y1="0%" x2="100%" y2="0%">`;
-    html += `      <stop offset="0%" stop-color="${c}" stop-opacity="0.6"/>`;
-    html += `      <stop offset="50%" stop-color="${c}"/>`;
-    html += `      <stop offset="100%" stop-color="${c}" stop-opacity="0.6"/>`;
+    html += `    <linearGradient id="tl-hgrad-${yr}" x1="0%" y1="0%" x2="100%" y2="0%">`;
+    html += `      <stop offset="0%" stop-color="${c}" stop-opacity="0.3"/>`;
+    html += `      <stop offset="50%" stop-color="${c}" stop-opacity="0.9"/>`;
+    html += `      <stop offset="100%" stop-color="${c}" stop-opacity="0.3"/>`;
     html += `    </linearGradient>`;
   });
-  html += '    <filter id="tl-year-glow" x="-50%" y="-50%" width="200%" height="200%">';
-  html += '      <feGaussianBlur stdDeviation="5" result="blur"/>';
-  html += '      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>';
-  html += '    </filter>';
   html += '  </defs>';
 
-  // Draw year segments as colored strokes (glow base layer first, then crisp top layer)
+  // Draw year segments
   yearSegments.forEach(seg => {
-    html += `  <path d="${seg.d}" fill="none" stroke="${seg.color}" stroke-opacity="0.18" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" filter="url(#tl-year-glow)"/>`;
-  });
-  yearSegments.forEach(seg => {
-    html += `  <path class="tl-snake-path tl-year-seg" d="${seg.d}" stroke="url(#tl-grad-${seg.year})" data-year="${seg.year}"/>`;
+    html += `  <line x1="${seg.x1}" y1="${LINE_Y}" x2="${seg.x2}" y2="${LINE_Y}" stroke="url(#tl-hgrad-${seg.year})" stroke-width="3" stroke-linecap="round"/>`;
   });
 
-  // Year-marker rings and large year labels in SVG
-  waypoints.forEach((wp, idx) => {
-    if (wp.isYearStart) {
-      const c = yearColors[wp.year];
-      html += `  <circle class="tl-year-ring" cx="${wp.x}" cy="${wp.y}" r="24" fill="none" stroke="${c}" stroke-opacity="0.3" stroke-width="2" stroke-dasharray="4 3"/>`;
-      html += `  <circle class="tl-year-ring-inner" cx="${wp.x}" cy="${wp.y}" r="18" fill="none" stroke="${c}" stroke-opacity="0.2" stroke-width="1"/>`;
-      // Large year label placed next to the dot, positioned based on row direction
-      const labelX = wp.x;
-      const goingRight = wp.rowIdx % 2 === 0;
-      let labelY, anchorY;
-      if (goingRight) {
-        labelY = wp.y - 52;
-        anchorY = 'end';
-      } else {
-        labelY = wp.y + 68;
-        anchorY = 'start';
-      }
-      html += `  <g class="tl-year-label-group" transform="translate(${labelX}, ${labelY})">`;
-      html += `    <rect x="-32" y="-14" width="64" height="24" rx="12" fill="${c}" fill-opacity="0.12" stroke="${c}" stroke-opacity="0.4" stroke-width="1"/>`;
-      html += `    <text x="0" y="0" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="800" fill="${c}" letter-spacing="0.5">${wp.year}</text>`;
+  // Year divider labels on the line
+  displayNodes.forEach(n => {
+    if (n.isYearStart && n.year) {
+      const c = yearColors[n.year];
+      html += `  <g transform="translate(${n.x}, ${LINE_Y})">`;
+      html += `    <circle cx="0" cy="0" r="20" fill="${c}" fill-opacity="0.12" stroke="${c}" stroke-width="1.5"/>`;
+      html += `    <text x="0" y="0" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="800" fill="${c}" letter-spacing="0.5">${n.year}</text>`;
       html += `  </g>`;
     }
   });
   html += '</svg>';
 
-  rows.forEach((row, rowIdx) => {
-    const isReversed = rowIdx % 2 === 1;
-    const cardsAbove = !isReversed;
-    const cardPosClass = cardsAbove ? 'tl-row-cards-above' : 'tl-row-cards-below';
-    const goingRight = !isReversed;
+  // Render nodes
+  displayNodes.forEach((n, idx) => {
+    if (n.type === 'key') {
+      const it = n.item;
+      const dotClass = dotClassMap[it.type] || "tl-dot-misc";
+      const typeLabel = typeLabelMap[it.type] || "其他";
+      const typeIcon = typeIconMap[it.type] || typeIconMap.misc;
+      const isAbove = n.cardSide === 0;
 
-    html += `<div class="tl-row ${cardPosClass}" style="width:${totalWidth}px;height:${ROW_HEIGHT}px;">`;
+      // Position the card
+      const cardTop = isAbove ? (LINE_Y - CARD_OFFSET - 130) : (LINE_Y + CARD_OFFSET);
+      const connectorDir = isAbove ? 1 : -1;
 
-    row.forEach((g, colIdx) => {
-      const colPosition = goingRight ? colIdx : (itemsPerRow - 1 - colIdx);
-      const pos = getNodeCenterInRow(colPosition);
-      const isMulti = g.items.length > 1;
-      const isFirstInGroup = true;
+      // Build hover popup for other items at same date
+      let popupHtml = '';
+      const otherItems = n.otherItems || [];
+      const otherAtKey = otherItems.length > 0;
+      // Also include sibling key items if multiple at same date
+      const siblingKeyItems = (n.groupKeyCount > 1) ? dateGroups[n.groupIdx].keyItems.filter(k => k.idx !== it.idx) : [];
+      const hasPopup = otherAtKey || siblingKeyItems.length > 0;
 
-      // Determine dominant type for the cluster dot (use the type of the first item, or priority: response > oa > patent_doc > others)
-      const priorityOrder = ["response", "office_action", "patent_doc", "allowance", "request", "notification", "citation", "misc"];
-      let domItem = g.items[0];
-      for (const p of priorityOrder) {
-        const found = g.items.find(it => it.type === p);
-        if (found) { domItem = found; break; }
+      const nodeClasses = ['tl-hnode', 'tl-hnode-key', 'tl-hnode-' + dotClass];
+      if (hasPopup) nodeClasses.push('tl-hnode-has-popup');
+      if (_tlSelected.has(it.idx)) nodeClasses.push('selected');
+
+      html += `<div class="${nodeClasses.join(' ')}" style="left:${n.x}px;top:${LINE_Y}px;" data-idx="${it.idx}">`;
+
+      // Dot on line
+      html += `  <div class="tl-hdot ${dotClass}">${typeIcon}</div>`;
+
+      // Date label
+      html += `  <div class="tl-hdate">${escapeHtml(n.date)}</div>`;
+
+      // Connector line
+      html += `  <div class="tl-hconnector" style="height:${CARD_OFFSET - 30}px;${isAbove ? 'top:auto;bottom:0;' : 'top:0;'}"></div>`;
+
+      // Card
+      const cardStyle = `position:absolute;left:50%;transform:translateX(-50%);${isAbove ? 'bottom:' + (CARD_OFFSET - 20) + 'px;' : 'top:' + (CARD_OFFSET - 20) + 'px;'}`;
+      html += `  <div class="tl-hcard-wrap" style="${cardStyle}">`;
+      html += buildCardHtml(it, false);
+
+      // Fold badge if there are other items at this date
+      if (hasPopup) {
+        const foldCount = otherItems.length + siblingKeyItems.length;
+        html += `<div class="tl-hfold-badge">+${foldCount}</div>`;
       }
-      const dotClass = dotClassMap[domItem.type] || "tl-dot-misc";
-      const domTypeLabel = typeLabelMap[domItem.type] || "其他";
-      const domTypeIcon = typeIconMap[domItem.type] || typeIconMap.misc;
+      html += `  </div>`;
 
-      // Check if any item in group is selected
-      const anySelected = g.items.some(it => _tlSelected.has(it.idx));
-
-      const nodeWidthClass = isMulti ? 'tl-node-multi' : '';
-      const nodeLeftOffset = isMulti ? (pos.x - 140) : (pos.x - 80);
-      html += `<div class="tl-node ${nodeWidthClass} ${anySelected ? 'selected' : ''}" style="left:${nodeLeftOffset}px;top:0;">`;
-
-      html += `<div class="tl-node-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>`;
-
-      // Date label — one per group (shared)
-      html += `<div class="tl-node-date-label">${escapeHtml(g.date || '')}</div>`;
-
-      // Cluster dot
-      if (g.isYearMarker) {
-        const yearColor = yearColors[g.markerYear] || '#818cf8';
-        // Convert hex to rgba for shadow
-        const hex = yearColor.replace('#','');
-        const ri = parseInt(hex.substring(0,2), 16);
-        const gi = parseInt(hex.substring(2,4), 16);
-        const bi = parseInt(hex.substring(4,6), 16);
-        const shadowColor = `rgba(${ri},${gi},${bi},`;
-        html += `<div class="tl-node-dot ${dotClass} tl-year-dot" data-year="${g.markerYear}" style="background:linear-gradient(135deg, ${yearColor}, ${yearColor}dd);box-shadow:0 0 0 3px ${shadowColor}0.2), 0 4px 14px ${shadowColor}0.4);--year-color:${yearColor}">`;
-        html += `  <span class="tl-year-dot-label">${g.markerYear}</span>`;
-        html += `</div>`;
-      } else if (isMulti) {
-        html += `<div class="tl-node-dot ${dotClass} tl-cluster-dot">${domTypeIcon}`;
-        html += `  <span class="tl-cluster-count">${g.items.length}</span>`;
-        html += `</div>`;
-      } else {
-        html += `<div class="tl-node-dot ${dotClass}">${domTypeIcon}</div>`;
-      }
-
-      // Connector
-      html += `<div class="tl-node-connector"></div>`;
-
-      // Card cluster container
-      if (isMulti) {
-        html += `<div class="tl-card-cluster">`;
-        html += `<div class="tl-card-cluster-bg"></div>`;
-        const clusterSize = g.items.length <= 2 ? 'tl-cluster-' + g.items.length : 'tl-cluster-n';
-        html += `<div class="tl-card-cluster-inner ${clusterSize}">`;
-        g.items.forEach(it => {
-          html += buildCardHtml(it, true);
+      // Popup overlay for folded items (shown on hover)
+      if (hasPopup) {
+        html += `<div class="tl-hpopup">`;
+        html += `<div class="tl-hpopup-title">${escapeHtml(n.date)} 全部文档 (${n.totalItems})</div>`;
+        // Show all items at this date
+        const allGroupItems = dateGroups[n.groupIdx].items;
+        allGroupItems.forEach(popIt => {
+          const isKeyItem = keyTypes.has(popIt.type);
+          const popDotClass = dotClassMap[popIt.type] || "tl-dot-misc";
+          const popTypeLabel = typeLabelMap[popIt.type] || "其他";
+          const popIcon = typeIconMap[popIt.type] || typeIconMap.misc;
+          const { enName: pEn, displayCn: pCn } = extractCnTitle(popIt);
+          const popClass = isKeyItem ? 'tl-hpopup-item tl-hpopup-key' : 'tl-hpopup-item';
+          html += `<div class="${popClass}" onclick="_jumpToDocFromTimeline(${popIt.idx})">`;
+          html += `  <span class="tl-hpopup-dot ${popDotClass}">${popIcon}</span>`;
+          html += `  <div class="tl-hpopup-text">`;
+          if (pCn) {
+            html += `    <div class="tl-hpopup-cn">${escapeHtml(pCn)}</div>`;
+          }
+          html += `    <div class="tl-hpopup-en">${escapeHtml(pEn)}${popIt.docCode ? ' [' + escapeHtml(popIt.docCode) + ']' : ''}</div>`;
+          html += `    <span class="tl-hpopup-badge ${popDotClass}">${popTypeLabel}</span>`;
+          html += `  </div>`;
+          html += `</div>`;
         });
-        html += `</div></div>`;
-      } else {
-        html += buildCardHtml(g.items[0], false);
-      }
-
-      // Large year label for year markers (placed outside cards)
-      if (g.isYearMarker) {
-        const yearColor = yearColors[g.markerYear] || '#818cf8';
-        html += `<div class="tl-year-big-label" style="--year-color:${yearColor}">${g.markerYear}</div>`;
+        html += `</div>`;
       }
 
       html += `</div>`;
-    });
+    } else {
+      // Folded node: small dot with count, hover shows popup with all items
+      const domItem = getDominantType(n.items);
+      const dotClass = dotClassMap[domItem.type] || "tl-dot-misc";
+      const typeIcon = typeIconMap[domItem.type] || typeIconMap.misc;
 
-    html += '</div>';
+      html += `<div class="tl-hnode tl-hnode-folded" style="left:${n.x}px;top:${LINE_Y}px;">`;
+      html += `  <div class="tl-hdot tl-hdot-folded ${dotClass}">`;
+      html += `    <span class="tl-hfold-count">${n.totalItems}</span>`;
+      html += `  </div>`;
+      html += `  <div class="tl-hdate tl-hdate-folded">${escapeHtml(n.date)}</div>`;
+
+      // Popup
+      html += `<div class="tl-hpopup">`;
+      html += `<div class="tl-hpopup-title">${escapeHtml(n.date)} (${n.totalItems}个文档)</div>`;
+      n.items.forEach(popIt => {
+        const isKeyItem = keyTypes.has(popIt.type);
+        const popDotClass = dotClassMap[popIt.type] || "tl-dot-misc";
+        const popTypeLabel = typeLabelMap[popIt.type] || "其他";
+        const popIcon = typeIconMap[popIt.type] || typeIconMap.misc;
+        const { enName: pEn, displayCn: pCn } = extractCnTitle(popIt);
+        const popClass = isKeyItem ? 'tl-hpopup-item tl-hpopup-key' : 'tl-hpopup-item';
+        html += `<div class="${popClass}" onclick="_jumpToDocFromTimeline(${popIt.idx})">`;
+        html += `  <span class="tl-hpopup-dot ${popDotClass}">${popIcon}</span>`;
+        html += `  <div class="tl-hpopup-text">`;
+        if (pCn) {
+            html += `    <div class="tl-hpopup-cn">${escapeHtml(pCn)}</div>`;
+          }
+        html += `    <div class="tl-hpopup-en">${escapeHtml(pEn)}${popIt.docCode ? ' [' + escapeHtml(popIt.docCode) + ']' : ''}</div>`;
+        html += `    <span class="tl-hpopup-badge ${popDotClass}">${popTypeLabel}</span>`;
+        html += `  </div>`;
+        html += `</div>`;
+      });
+      html += `</div>`;
+
+      html += `</div>`;
+    }
   });
 
   html += '</div>';
 
-  // Build legend HTML
-  let legendHtml = '<div class="tl-legend">';
+  // Legend
+  let legendHtml = '<div class="tl-legend tl-hlegend">';
   legendHtml += '<div class="tl-legend-title">图例说明</div>';
   legendHtml += '<div class="tl-legend-section">';
-  legendHtml += '<span class="tl-legend-section-label">重点文档：</span>';
   legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#3b82f6"></span>申请人答复</span>';
   legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#ef4444"></span>审查意见</span>';
   legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#6366f1"></span>专利文件</span>';
-  legendHtml += '</div>';
-  legendHtml += '<div class="tl-legend-section">';
-  legendHtml += '<span class="tl-legend-section-label">其他类型：</span>';
-  legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#22c55e"></span>授权通知</span>';
-  legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#fbbf24"></span>申请人请求</span>';
-  legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#6b7280"></span>其他</span>';
+  legendHtml += '<span class="tl-legend-item"><span class="tl-legend-folded-dot"></span>折叠文档</span>';
   legendHtml += '</div>';
   if (uniqueYears.length > 1) {
     legendHtml += '<div class="tl-legend-section">';
-    legendHtml += '<span class="tl-legend-section-label">时间分段：</span>';
-    uniqueYears.forEach(yr => {
-      legendHtml += `<span class="tl-legend-item"><span class="tl-legend-line" style="background:${yearColors[yr]}"></span>${yr}年</span>`;
+    legendHtml += '<span class="tl-legend-section-label">年份：</span>';
+    uniqueYears.slice(0, 5).forEach(yr => {
+      legendHtml += `<span class="tl-legend-item"><span class="tl-legend-line" style="background:${yearColors[yr]}"></span>${yr}</span>`;
     });
     legendHtml += '</div>';
   }
+  legendHtml += '<div class="tl-legend-hint">悬浮节点可查看该日期全部文档</div>';
   legendHtml += '</div>';
 
-  // Wrap in a centering container with legend on top
-  board.innerHTML = legendHtml + '<div class="tl-snake-wrapper">' + html + '</div>';
+  // Wrap in scroll container
+  board.innerHTML = legendHtml + '<div class="tl-hscroll">' + html + '</div>';
 
   if (statusEl) {
-    const groupCount = groups.length;
-    const multiCount = groups.filter(g => g.items.length > 1).length;
-    let status = "共 " + sorted.length + " 个审查节点（" + groupCount + " 个日期";
-    if (multiCount > 0) status += "，" + multiCount + " 个日期含多文档";
+    const keyCount = sorted.filter(it => keyTypes.has(it.type)).length;
+    const otherCount = sorted.length - keyCount;
+    let status = "共 " + sorted.length + " 个文档";
+    status += "（重点展示 " + keyCount + " 个关键文档";
+    if (otherCount > 0) status += "，" + otherCount + " 个已折叠";
     status += "）";
     statusEl.textContent = status;
   }
