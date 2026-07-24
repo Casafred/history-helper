@@ -3613,6 +3613,10 @@ function copyPatentSectionText(sectionType) {
 // ── Google Translate Widget Injection ──
 let _googleTranslateInjected = false;
 let _googleTranslateActive = false;
+// Separate flag: tracks whether _onGoogleTranslateActivated has been triggered
+// for the current GT session. _googleTranslateActive is set early (for button
+// state), so it can't be used as a guard inside _pollSelectGoogleTranslateLang.
+let _gtActivationTriggered = false;
 
 // Permanent GT error suppressor — GT's internal code (el_main, el_conf) throws
 // errors after we reset/purge it. These are harmless but noisy. Install once.
@@ -3650,6 +3654,7 @@ function toggleGoogleTranslate() {
     }
     _setGoogTransCookie("");
     _googleTranslateActive = false;
+    _gtActivationTriggered = false;
     // Stop any pending fig-link polling and clear scope so next GT activation
     // re-detects the scope from scratch.
     if (_figLinkPollTimer) { clearTimeout(_figLinkPollTimer); _figLinkPollTimer = null; }
@@ -3750,10 +3755,10 @@ function _dispatchComboChange(combo) {
 
 // Poll for the combo and auto-select the target language (fallback for cookie approach)
 function _pollSelectGoogleTranslateLang(targetLang, attempts) {
-  if (_googleTranslateActive) return;
+  if (_gtActivationTriggered) return;
   if (attempts > 10) {
     if (document.querySelector('font')) {
-      _googleTranslateActive = true;
+      _gtActivationTriggered = true;
       _onGoogleTranslateActivated();
     }
     return;
@@ -3764,19 +3769,19 @@ function _pollSelectGoogleTranslateLang(targetLang, attempts) {
     return;
   }
   if (combo.value === targetLang) {
-    _googleTranslateActive = true;
+    _gtActivationTriggered = true;
     _onGoogleTranslateActivated();
     return;
   }
   combo.value = targetLang;
   _dispatchComboChange(combo);
   setTimeout(function() {
-    if (_googleTranslateActive) return;
+    if (_gtActivationTriggered) return;
     if (combo.value === targetLang || document.querySelector(".goog-te-banner-frame")) {
-      _googleTranslateActive = true;
+      _gtActivationTriggered = true;
       _onGoogleTranslateActivated();
     } else if (document.querySelector('font')) {
-      _googleTranslateActive = true;
+      _gtActivationTriggered = true;
       _onGoogleTranslateActivated();
     } else {
       _pollSelectGoogleTranslateLang(targetLang, attempts + 1);
@@ -3793,6 +3798,7 @@ function _selectGoogleTranslateLang(targetLang) {
     _dispatchComboChange(combo);
   }
   _googleTranslateActive = true;
+  _gtActivationTriggered = true;
   _onGoogleTranslateActivated();
 }
 
@@ -3911,6 +3917,8 @@ function _captureAndApplyTranslation(scope) {
       descContainer.classList.add('notranslate');
       descContainer.setAttribute('translate', 'no');
     }
+    // Hide GT's visible UI (banner, spinner) now that translation is captured
+    _hideGtChrome();
     console.log('[FigLink] re-rendered with translation, generating links...');
     // Now generate figure links on the clean DOM
     setTimeout(function() {
@@ -3933,6 +3941,30 @@ function _captureAndApplyTranslation(scope) {
       }, 2000);
     }, 200);
   });
+}
+
+// Hide GT's visible UI chrome (top banner, spinner ball, tooltips) after
+// translation has been captured and applied. The widget container and combo
+// are kept alive (hidden) so the user can still toggle GT on/off via the
+// app's own "恢复原文" button.
+function _hideGtChrome() {
+  var chromeSelectors = '.goog-te-banner-frame, .goog-te-banner, .goog-te-spinner-pos, ' +
+    '.goog-te-spinner, #goog-gt-tt, .goog-te-balloon, .goog-te-pos, ' +
+    '.goog-te-menu2, .goog-te-ftab-float, .gt-spinner, .gt-loading, ' +
+    'iframe.goog-te-banner-frame, iframe.goog-te-menu-frame';
+  function sweep() {
+    document.querySelectorAll(chromeSelectors).forEach(function(el) { el.remove(); });
+  }
+  sweep();
+  // Reset body offset GT adds to accommodate the banner
+  document.body.style.top = '';
+  // GT may re-create elements via its internal timers — keep sweeping for 3s
+  var cleanupCount = 0;
+  var cleanupInterval = setInterval(function() {
+    cleanupCount++;
+    sweep();
+    if (cleanupCount >= 6) clearInterval(cleanupInterval);
+  }, 500);
 }
 
 // Update the GT toggle button text/state in the patent detail header
@@ -4062,6 +4094,7 @@ function _purgeGoogleTranslateCompletely() {
     // 5. Reset internal state flags
     _googleTranslateActive = false;
     _googleTranslateInjected = false;
+    _gtActivationTriggered = false;
 
     // 6. Stop any pending fig-link poll timer
     if (_figLinkPollTimer) { clearTimeout(_figLinkPollTimer); _figLinkPollTimer = null; }
