@@ -11569,7 +11569,7 @@ function renderTimeline(data) {
 
   const items = kanbanState.documents;
   if (!items || items.length === 0) {
-    board.innerHTML = '<p class="placeholder">未查询到审查文档</p>';
+    board.innerHTML = '<p class="placeholder">请先查询专利，审查文档加载后可生成时间轴。</p>';
     if (statusEl) statusEl.textContent = "";
     return;
   }
@@ -11582,44 +11582,19 @@ function renderTimeline(data) {
     return true;
   });
 
-  // Sort newest first for display
-  const sortedNewest = [...timelineItems].sort((a, b) => {
+  // ── 时间倒序：最新文档在前 ──
+  const sorted = [...timelineItems].sort((a, b) => {
     const da = parseDate(a.date);
     const db = parseDate(b.date);
     return db - da;
   });
-
-  // For chronological layout (left=newest, right=oldest), we keep newest-first order
-  const sorted = sortedNewest;
 
   if (sorted.length === 0) {
     board.innerHTML = '<p class="placeholder">未找到审查节点</p>';
     return;
   }
 
-  // Key types that get full card display
   const keyTypes = new Set(["response", "office_action", "patent_doc"]);
-
-  // Group by date
-  const dateGroups = [];
-  sorted.forEach(item => {
-    const last = dateGroups[dateGroups.length - 1];
-    if (last && last.date === item.date) {
-      last.items.push(item);
-    } else {
-      dateGroups.push({ date: item.date, items: [item] });
-    }
-  });
-
-  // Annotate each group with year and key/non-key classification
-  dateGroups.forEach((g, idx) => {
-    const ts = parseDate(g.date);
-    g.year = ts ? new Date(ts).getFullYear() : null;
-    g.timestamp = ts;
-    g.hasKey = g.items.some(it => keyTypes.has(it.type));
-    g.keyItems = g.items.filter(it => keyTypes.has(it.type));
-    g.otherItems = g.items.filter(it => !keyTypes.has(it.type));
-  });
 
   const dotClassMap = {
     office_action: "tl-dot-oa",
@@ -11654,17 +11629,110 @@ function renderTimeline(data) {
     request: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   };
 
-  // Priority order for dominant type in a group
-  const priorityOrder = ["office_action", "response", "patent_doc", "allowance", "notification", "request", "citation", "misc"];
-
-  function getDominantType(items) {
-    for (const p of priorityOrder) {
-      const found = items.find(it => it.type === p);
-      if (found) return found;
+  // ── 按日期分组 ──
+  const groups = [];
+  sorted.forEach(item => {
+    const last = groups[groups.length - 1];
+    if (last && last.date === item.date) {
+      last.items.push(item);
+    } else {
+      groups.push({ date: item.date, items: [item] });
     }
-    return items[0];
+  });
+
+  groups.forEach(g => {
+    const ts = parseDate(g.date);
+    g.year = ts ? new Date(ts).getFullYear() : null;
+    g.timestamp = ts;
+    g.keyItems = g.items.filter(it => keyTypes.has(it.type));
+    g.otherItems = g.items.filter(it => !keyTypes.has(it.type));
+    g.hasKey = g.keyItems.length > 0;
+    g.primaryItem = g.hasKey ? g.keyItems[0] : g.items[0];
+    g.extraKeyItems = g.hasKey ? g.keyItems.slice(1) : [];
+  });
+
+  // ── 稳定S轴布局参数（倒序：第一行从左到右是最新→较旧，蛇形向下） ──
+  const COL_WIDTH = 200;
+  const ROW_HEIGHT = 240;
+  const EDGE_PAD = 80;
+  const CURVE_R = 22;
+  const TOP_PAD = 120;
+  const BOTTOM_PAD = 120;
+
+  const boardWidth = Math.max(board.clientWidth || 960, 640);
+  const usableWidth = boardWidth - 48;
+  let colsPerRow = Math.max(3, Math.floor((usableWidth - EDGE_PAD * 2) / COL_WIDTH) + 1);
+  colsPerRow = Math.min(5, colsPerRow);
+
+  // 按蛇形排列分组 - 预计算每个节点精确位置
+  const nodePositions = [];
+  const totalNodes = groups.length;
+  const totalRows = Math.ceil(totalNodes / colsPerRow);
+  const totalWidth = EDGE_PAD * 2 + (colsPerRow - 1) * COL_WIDTH;
+  const totalHeight = TOP_PAD + BOTTOM_PAD + (totalRows - 1) * ROW_HEIGHT;
+
+  // 预计算每个节点的位置（蛇形路径，时间倒序：idx=0是最新）
+  groups.forEach((g, idx) => {
+    const rowIdx = Math.floor(idx / colsPerRow);
+    const colInRow = idx % colsPerRow;
+    const isEvenRow = (rowIdx % 2 === 0);
+    const goingRight = isEvenRow;
+    const colPos = isEvenRow ? colInRow : (colsPerRow - 1 - colInRow);
+    
+    nodePositions.push({
+      group: g,
+      x: EDGE_PAD + colPos * COL_WIDTH,
+      y: TOP_PAD + rowIdx * ROW_HEIGHT,
+      rowIdx,
+      colPos,
+      isEvenRow,
+      cardsAbove: isEvenRow
+    });
+  });
+
+  // ── 构建精确稳定的S路径：逐个节点连接 ──
+  function buildStableSPath() {
+    const r = CURVE_R;
+    let d = '';
+    
+    for (let i = 0; i < nodePositions.length; i++) {
+      const np = nodePositions[i];
+      const nextNp = nodePositions[i + 1];
+      
+      if (i === 0) {
+        d += `M ${np.x} ${np.y}`;
+      }
+      
+      if (!nextNp) break;
+      
+      const sameRow = (np.rowIdx === nextNp.rowIdx);
+      
+      if (sameRow) {
+        d += ` L ${nextNp.x} ${nextNp.y}`;
+      } else {
+        const y = np.y;
+        const nextY = nextNp.y;
+        const endX = np.x;
+        const nextStartX = nextNp.x;
+        const goingRight = np.isEvenRow;
+        
+        if (goingRight) {
+          d += ` A ${r} ${r} 0 0 1 ${endX + r} ${y + r}`;
+          d += ` L ${nextStartX + r} ${nextY - r}`;
+          d += ` A ${r} ${r} 0 0 1 ${nextStartX} ${nextY}`;
+        } else {
+          d += ` A ${r} ${r} 0 0 0 ${endX - r} ${y + r}`;
+          d += ` L ${nextStartX - r} ${nextY - r}`;
+          d += ` A ${r} ${r} 0 0 0 ${nextStartX} ${nextY}`;
+        }
+      }
+    }
+    return d;
   }
 
+  const stablePath = buildStableSPath();
+
+  // ── Helpers ──
   function extractCnTitle(it) {
     const enName = it.name || '';
     const cnDesc = it.desc || it.docDesc || it.documentDescription || it.description || '';
@@ -11673,309 +11741,143 @@ function renderTimeline(data) {
     return { enName, displayCn };
   }
 
-  function buildCardHtml(it, isCompact) {
+  function buildCardHtml(it) {
     const dotClass = dotClassMap[it.type] || "tl-dot-misc";
     const typeLabel = typeLabelMap[it.type] || "其他";
     const isSelected = _tlSelected.has(it.idx);
     const isKey = keyTypes.has(it.type);
     const { enName, displayCn } = extractCnTitle(it);
-    const fullTitle = (displayCn ? displayCn + ' | ' : '') + enName + (it.docCode ? ' [' + it.docCode + ']' : '');
 
-    const compactClass = isCompact ? ' tl-card-compact' : '';
-    const keyClass = isKey ? ' tl-card-key tl-card-key-' + dotClass : '';
-    const selectedClass = isSelected ? ' tl-card-selected' : '';
+    const keyClass = isKey ? ' tl-s-key tl-s-key-' + dotClass : '';
+    const selectedClass = isSelected ? ' tl-s-selected' : '';
 
-    let h = `<div class="tl-node-card${compactClass}${keyClass}${selectedClass}" onclick="_jumpToDocFromTimeline(${it.idx})" title="${escapeHtml(fullTitle)}">`;
+    let h = `<div class="tl-s-card${keyClass}${selectedClass}" onclick="_jumpToDocFromTimeline(${it.idx})">`;
     if (displayCn) {
-      h += `  <div class="tl-node-cn-title">${escapeHtml(displayCn)}</div>`;
-      h += `  <div class="tl-node-en-title" title="${escapeHtml(enName)}">${escapeHtml(enName)}</div>`;
+      h += `<div class="tl-s-cn">${escapeHtml(displayCn)}</div>`;
+      h += `<div class="tl-s-en" title="${escapeHtml(enName)}">${escapeHtml(enName)}</div>`;
     } else {
-      h += `  <div class="tl-node-title">${escapeHtml(enName)}</div>`;
+      h += `<div class="tl-s-title">${escapeHtml(enName)}</div>`;
     }
-    h += `  <div class="tl-node-meta">`;
-    h += `    <span class="tl-node-code">${escapeHtml(it.docCode || '')}</span>`;
-    h += `    <span class="tl-node-badge ${dotClass}">${typeLabel}</span>`;
-    h += `  </div>`;
+    h += `<div class="tl-s-meta">`;
+    h += `  <span class="tl-s-code">${escapeHtml(it.docCode || '')}</span>`;
+    h += `  <span class="tl-s-badge ${dotClass}">${typeLabel}</span>`;
+    h += `</div>`;
     h += `</div>`;
     return h;
   }
 
-  // ── Horizontal layout ──
-  const NODE_SPACING = 180; // Horizontal distance between nodes
-  const START_PAD = 80;
-  const END_PAD = 80;
-  const LINE_Y = 200; // Y position of the main timeline line
-  const CARD_OFFSET = 120; // Distance from line to card
-
-  // Build display nodes: merge key docs with other docs at the same date into one position
-  // Each display node corresponds to one date group
-  const displayNodes = [];
-  let cardSide = 0; // 0 = above line, 1 = below line (alternating)
-
-  // Detect year boundaries for year dividers
-  let prevYear = null;
-
-  dateGroups.forEach((g, idx) => {
-    const x = START_PAD + idx * NODE_SPACING;
-    const isYearStart = (g.year !== null && g.year !== prevYear);
-
-    if (g.hasKey) {
-      // Show each key doc as a separate sub-node at this date position
-      // If multiple key docs at same date, stack them slightly offset
-      const keyCount = g.keyItems.length;
-      g.keyItems.forEach((it, kidx) => {
-        const offsetX = keyCount > 1 ? (kidx - (keyCount - 1) / 2) * 70 : 0;
-        displayNodes.push({
-          type: 'key',
-          x: x + offsetX,
-          y: LINE_Y,
-          item: it,
-          date: g.date,
-          year: g.year,
-          isYearStart: kidx === 0 && isYearStart,
-          cardSide: cardSide,
-          otherItems: g.otherItems,
-          groupKeyCount: keyCount,
-          totalItems: g.items.length,
-          groupIdx: idx
-        });
-        cardSide = 1 - cardSide; // Alternate
-      });
-      // If there are other items, add a fold dot at same x? No, we'll attach them to the last key doc as hover
-    } else {
-      // All items are non-key: show a single fold dot with count
-      displayNodes.push({
-        type: 'folded',
-        x: x,
-        y: LINE_Y,
-        items: g.otherItems,
-        date: g.date,
-        year: g.year,
-        isYearStart: isYearStart,
-        cardSide: cardSide,
-        totalItems: g.items.length,
-        groupIdx: idx
-      });
-      // Folded nodes don't alternate side (no card)
-    }
-    prevYear = g.year;
-  });
-
-  const totalWidth = START_PAD + (dateGroups.length - 1) * NODE_SPACING + END_PAD + 60;
-  const totalHeight = LINE_Y * 2 + 40;
-
-  // Year colors
-  const uniqueYears = [...new Set(dateGroups.map(g => g.year).filter(y => y !== null))].sort((a,b) => b - a);
+  // 年份颜色映射 - 简洁配色
+  const uniqueYears = [...new Set(groups.map(g => g.year).filter(y => y !== null))].sort((a, b) => b - a);
   const yearColors = {};
-  const yearColorPalette = ['#818cf8','#a78bfa','#60a5fa','#c084fc','#38bdf8','#f472b6','#4ade80','#facc15'];
-  uniqueYears.forEach((yr, i) => {
-    yearColors[yr] = yearColorPalette[i % yearColorPalette.length];
-  });
+  const yrPal = ['#6366f1','#3b82f6','#0ea5e9','#10b981','#f59e0b','#ef4444','#ec4899','#8b5cf6'];
+  uniqueYears.forEach((yr, i) => { yearColors[yr] = yrPal[i % yrPal.length]; });
 
-  // Build year segments
-  const yearSegments = [];
-  let currentYear = displayNodes[0] ? displayNodes[0].year : null;
-  let segStartX = START_PAD - 40;
-  displayNodes.forEach((n, i) => {
-    if (n.isYearStart && i > 0) {
-      yearSegments.push({
-        x1: segStartX,
-        x2: n.x - NODE_SPACING / 2,
-        year: currentYear,
-        color: yearColors[currentYear] || '#818cf8'
-      });
-      segStartX = n.x - NODE_SPACING / 2;
-      currentYear = n.year;
-    }
-  });
-  yearSegments.push({
-    x1: segStartX,
-    x2: totalWidth - END_PAD + 40,
-    year: currentYear,
-    color: yearColors[currentYear] || '#818cf8'
-  });
+  // ── 构建HTML ──
+  let html = `<div class="tl-s-wrapper"><div class="tl-s-container" style="width:${totalWidth}px;height:${totalHeight}px;">`;
 
-  // Build HTML
-  let html = '<div class="tl-horizontal" style="width:' + totalWidth + 'px;min-height:' + totalHeight + 'px;">';
+  // SVG路径 - 简洁稳定的S曲线，无多余发光
+  html += `<svg class="tl-s-svg" viewBox="0 0 ${totalWidth} ${totalHeight}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">`;
+  html += `<path class="tl-s-path" d="${stablePath}" fill="none" stroke="var(--border)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+  html += `</svg>`;
 
-  // SVG for timeline line
-  html += '<svg class="tl-hline-svg" viewBox="0 0 ' + totalWidth + ' ' + totalHeight + '" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;">';
-  html += '  <defs>';
-  uniqueYears.forEach(yr => {
-    const c = yearColors[yr];
-    html += `    <linearGradient id="tl-hgrad-${yr}" x1="0%" y1="0%" x2="100%" y2="0%">`;
-    html += `      <stop offset="0%" stop-color="${c}" stop-opacity="0.3"/>`;
-    html += `      <stop offset="50%" stop-color="${c}" stop-opacity="0.9"/>`;
-    html += `      <stop offset="100%" stop-color="${c}" stop-opacity="0.3"/>`;
-    html += `    </linearGradient>`;
-  });
-  html += '  </defs>';
+  // 渲染节点
+  let prevYear = null;
+  nodePositions.forEach((np, idx) => {
+    const g = np.group;
+    const x = np.x;
+    const y = np.y;
+    const cardsAbove = np.cardsAbove;
 
-  // Draw year segments
-  yearSegments.forEach(seg => {
-    html += `  <line x1="${seg.x1}" y1="${LINE_Y}" x2="${seg.x2}" y2="${LINE_Y}" stroke="url(#tl-hgrad-${seg.year})" stroke-width="3" stroke-linecap="round"/>`;
-  });
+    const isYearStart = (g.year !== null && g.year !== prevYear);
+    if (g.year !== null) prevYear = g.year;
 
-  // Year divider labels on the line
-  displayNodes.forEach(n => {
-    if (n.isYearStart && n.year) {
-      const c = yearColors[n.year];
-      html += `  <g transform="translate(${n.x}, ${LINE_Y})">`;
-      html += `    <circle cx="0" cy="0" r="20" fill="${c}" fill-opacity="0.12" stroke="${c}" stroke-width="1.5"/>`;
-      html += `    <text x="0" y="0" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="800" fill="${c}" letter-spacing="0.5">${n.year}</text>`;
-      html += `  </g>`;
-    }
-  });
-  html += '</svg>';
+    const primaryItem = g.primaryItem;
+    const dotClass = dotClassMap[primaryItem.type] || "tl-dot-misc";
+    const typeIcon = typeIconMap[primaryItem.type] || typeIconMap.misc;
+    const totalAtDate = g.items.length;
+    const hasFolded = totalAtDate > 1;
 
-  // Render nodes
-  displayNodes.forEach((n, idx) => {
-    if (n.type === 'key') {
-      const it = n.item;
-      const dotClass = dotClassMap[it.type] || "tl-dot-misc";
-      const typeLabel = typeLabelMap[it.type] || "其他";
-      const typeIcon = typeIconMap[it.type] || typeIconMap.misc;
-      const isAbove = n.cardSide === 0;
+    html += `<div class="tl-s-node ${cardsAbove ? 'tl-s-above' : 'tl-s-below'}${g.hasKey ? '' : ' tl-s-folded-node'}" style="left:${x}px;top:${y}px;">`;
 
-      // Position the card
-      const cardTop = isAbove ? (LINE_Y - CARD_OFFSET - 130) : (LINE_Y + CARD_OFFSET);
-      const connectorDir = isAbove ? 1 : -1;
-
-      // Build hover popup for other items at same date
-      let popupHtml = '';
-      const otherItems = n.otherItems || [];
-      const otherAtKey = otherItems.length > 0;
-      // Also include sibling key items if multiple at same date
-      const siblingKeyItems = (n.groupKeyCount > 1) ? dateGroups[n.groupIdx].keyItems.filter(k => k.idx !== it.idx) : [];
-      const hasPopup = otherAtKey || siblingKeyItems.length > 0;
-
-      const nodeClasses = ['tl-hnode', 'tl-hnode-key', 'tl-hnode-' + dotClass];
-      if (hasPopup) nodeClasses.push('tl-hnode-has-popup');
-      if (_tlSelected.has(it.idx)) nodeClasses.push('selected');
-
-      html += `<div class="${nodeClasses.join(' ')}" style="left:${n.x}px;top:${LINE_Y}px;" data-idx="${it.idx}">`;
-
-      // Dot on line
-      html += `  <div class="tl-hdot ${dotClass}">${typeIcon}</div>`;
-
-      // Date label
-      html += `  <div class="tl-hdate">${escapeHtml(n.date)}</div>`;
-
-      // Connector line
-      html += `  <div class="tl-hconnector" style="height:${CARD_OFFSET - 30}px;${isAbove ? 'top:auto;bottom:0;' : 'top:0;'}"></div>`;
-
-      // Card
-      const cardStyle = `position:absolute;left:50%;transform:translateX(-50%);${isAbove ? 'bottom:' + (CARD_OFFSET - 20) + 'px;' : 'top:' + (CARD_OFFSET - 20) + 'px;'}`;
-      html += `  <div class="tl-hcard-wrap" style="${cardStyle}">`;
-      html += buildCardHtml(it, false);
-
-      // Fold badge if there are other items at this date
-      if (hasPopup) {
-        const foldCount = otherItems.length + siblingKeyItems.length;
-        html += `<div class="tl-hfold-badge">+${foldCount}</div>`;
-      }
-      html += `  </div>`;
-
-      // Popup overlay for folded items (shown on hover)
-      if (hasPopup) {
-        html += `<div class="tl-hpopup">`;
-        html += `<div class="tl-hpopup-title">${escapeHtml(n.date)} 全部文档 (${n.totalItems})</div>`;
-        // Show all items at this date
-        const allGroupItems = dateGroups[n.groupIdx].items;
-        allGroupItems.forEach(popIt => {
-          const isKeyItem = keyTypes.has(popIt.type);
-          const popDotClass = dotClassMap[popIt.type] || "tl-dot-misc";
-          const popTypeLabel = typeLabelMap[popIt.type] || "其他";
-          const popIcon = typeIconMap[popIt.type] || typeIconMap.misc;
-          const { enName: pEn, displayCn: pCn } = extractCnTitle(popIt);
-          const popClass = isKeyItem ? 'tl-hpopup-item tl-hpopup-key' : 'tl-hpopup-item';
-          html += `<div class="${popClass}" onclick="_jumpToDocFromTimeline(${popIt.idx})">`;
-          html += `  <span class="tl-hpopup-dot ${popDotClass}">${popIcon}</span>`;
-          html += `  <div class="tl-hpopup-text">`;
-          if (pCn) {
-            html += `    <div class="tl-hpopup-cn">${escapeHtml(pCn)}</div>`;
-          }
-          html += `    <div class="tl-hpopup-en">${escapeHtml(pEn)}${popIt.docCode ? ' [' + escapeHtml(popIt.docCode) + ']' : ''}</div>`;
-          html += `    <span class="tl-hpopup-badge ${popDotClass}">${popTypeLabel}</span>`;
-          html += `  </div>`;
-          html += `</div>`;
-        });
-        html += `</div>`;
-      }
-
+    // 年份标记（仅在每行第一个或新年份时显示）
+    if (isYearStart && g.year) {
+      const yc = yearColors[g.year];
+      html += `<div class="tl-s-yr-tick" style="--yc:${yc}">`;
+      html += `  <div class="tl-s-yr-label">${g.year}</div>`;
       html += `</div>`;
+    }
+
+    // 连接器
+    html += `<div class="tl-s-connector"></div>`;
+
+    // 节点圆点
+    const dotSizeClass = g.hasKey ? 'tl-s-dot-key' : 'tl-s-dot-mini';
+    html += `<div class="tl-s-dot ${dotClass} ${dotSizeClass}">`;
+    if (g.hasKey) {
+      html += typeIcon;
     } else {
-      // Folded node: small dot with count, hover shows popup with all items
-      const domItem = getDominantType(n.items);
-      const dotClass = dotClassMap[domItem.type] || "tl-dot-misc";
-      const typeIcon = typeIconMap[domItem.type] || typeIconMap.misc;
+      html += `<span class="tl-s-mini-count">${totalAtDate}</span>`;
+    }
+    html += `</div>`;
 
-      html += `<div class="tl-hnode tl-hnode-folded" style="left:${n.x}px;top:${LINE_Y}px;">`;
-      html += `  <div class="tl-hdot tl-hdot-folded ${dotClass}">`;
-      html += `    <span class="tl-hfold-count">${n.totalItems}</span>`;
-      html += `  </div>`;
-      html += `  <div class="tl-hdate tl-hdate-folded">${escapeHtml(n.date)}</div>`;
+    // 日期标签
+    html += `<div class="tl-s-date">${escapeHtml(g.date)}</div>`;
 
-      // Popup
-      html += `<div class="tl-hpopup">`;
-      html += `<div class="tl-hpopup-title">${escapeHtml(n.date)} (${n.totalItems}个文档)</div>`;
-      n.items.forEach(popIt => {
-        const isKeyItem = keyTypes.has(popIt.type);
-        const popDotClass = dotClassMap[popIt.type] || "tl-dot-misc";
-        const popTypeLabel = typeLabelMap[popIt.type] || "其他";
-        const popIcon = typeIconMap[popIt.type] || typeIconMap.misc;
-        const { enName: pEn, displayCn: pCn } = extractCnTitle(popIt);
-        const popClass = isKeyItem ? 'tl-hpopup-item tl-hpopup-key' : 'tl-hpopup-item';
-        html += `<div class="${popClass}" onclick="_jumpToDocFromTimeline(${popIt.idx})">`;
-        html += `  <span class="tl-hpopup-dot ${popDotClass}">${popIcon}</span>`;
-        html += `  <div class="tl-hpopup-text">`;
-        if (pCn) {
-            html += `    <div class="tl-hpopup-cn">${escapeHtml(pCn)}</div>`;
-          }
-        html += `    <div class="tl-hpopup-en">${escapeHtml(pEn)}${popIt.docCode ? ' [' + escapeHtml(popIt.docCode) + ']' : ''}</div>`;
-        html += `    <span class="tl-hpopup-badge ${popDotClass}">${popTypeLabel}</span>`;
-        html += `  </div>`;
-        html += `</div>`;
-      });
-      html += `</div>`;
-
+    // 关键文档卡片
+    if (g.hasKey) {
+      html += `<div class="tl-s-card-wrap">`;
+      html += buildCardHtml(primaryItem);
+      if (hasFolded) {
+        const foldN = g.otherItems.length + g.extraKeyItems.length;
+        html += `<div class="tl-s-fold-badge" title="还有${foldN}个文档，悬浮查看">+${foldN}</div>`;
+      }
       html += `</div>`;
     }
+
+    // 悬浮弹出框（显示该日期所有文档）
+    html += `<div class="tl-s-popup">`;
+    html += `<div class="tl-s-popup-title">${escapeHtml(g.date)} · ${totalAtDate}个文档</div>`;
+    g.items.forEach(popIt => {
+      const pk = keyTypes.has(popIt.type);
+      const pdc = dotClassMap[popIt.type] || "tl-dot-misc";
+      const pLabel = typeLabelMap[popIt.type] || "其他";
+      const pIcon = typeIconMap[popIt.type] || typeIconMap.misc;
+      const { enName: pEn, displayCn: pCn } = extractCnTitle(popIt);
+      html += `<div class="tl-s-popup-item${pk ? ' tl-s-popup-key' : ''}" onclick="_jumpToDocFromTimeline(${popIt.idx})">`;
+      html += `  <span class="tl-s-popup-dot ${pdc}">${pIcon}</span>`;
+      html += `  <div class="tl-s-popup-text">`;
+      if (pCn) html += `<div class="tl-s-popup-cn">${escapeHtml(pCn)}</div>`;
+      html += `    <div class="tl-s-popup-en">${escapeHtml(pEn)}${popIt.docCode ? ' [' + escapeHtml(popIt.docCode) + ']' : ''}</div>`;
+      html += `    <span class="tl-s-popup-badge ${pdc}">${pLabel}</span>`;
+      html += `  </div>`;
+      html += `</div>`;
+    });
+    html += `</div>`;
+
+    html += `</div>`;
   });
 
-  html += '</div>';
+  html += `</div></div>`;
 
-  // Legend
-  let legendHtml = '<div class="tl-legend tl-hlegend">';
-  legendHtml += '<div class="tl-legend-title">图例说明</div>';
+  // 图例
+  let legendHtml = '<div class="tl-legend tl-s-legend">';
   legendHtml += '<div class="tl-legend-section">';
   legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#3b82f6"></span>申请人答复</span>';
   legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#ef4444"></span>审查意见</span>';
   legendHtml += '<span class="tl-legend-item"><span class="tl-legend-dot" style="background:#6366f1"></span>专利文件</span>';
-  legendHtml += '<span class="tl-legend-item"><span class="tl-legend-folded-dot"></span>折叠文档</span>';
+  legendHtml += '<span class="tl-legend-item"><span class="tl-legend-folded-dot"></span>折叠节点</span>';
   legendHtml += '</div>';
-  if (uniqueYears.length > 1) {
-    legendHtml += '<div class="tl-legend-section">';
-    legendHtml += '<span class="tl-legend-section-label">年份：</span>';
-    uniqueYears.slice(0, 5).forEach(yr => {
-      legendHtml += `<span class="tl-legend-item"><span class="tl-legend-line" style="background:${yearColors[yr]}"></span>${yr}</span>`;
-    });
-    legendHtml += '</div>';
-  }
-  legendHtml += '<div class="tl-legend-hint">悬浮节点可查看该日期全部文档</div>';
+  legendHtml += '<div class="tl-legend-hint">时间倒序（最新在左上）· 悬浮节点查看全部文档 · 点击卡片跳转</div>';
   legendHtml += '</div>';
 
-  // Wrap in scroll container
-  board.innerHTML = legendHtml + '<div class="tl-hscroll">' + html + '</div>';
+  board.innerHTML = legendHtml + '<div class="tl-s-scroll">' + html + '</div>';
 
   if (statusEl) {
     const keyCount = sorted.filter(it => keyTypes.has(it.type)).length;
-    const otherCount = sorted.length - keyCount;
-    let status = "共 " + sorted.length + " 个文档";
-    status += "（重点展示 " + keyCount + " 个关键文档";
-    if (otherCount > 0) status += "，" + otherCount + " 个已折叠";
-    status += "）";
-    statusEl.textContent = status;
+    const dateCount = groups.length;
+    let s = `共 ${sorted.length} 个文档 / ${dateCount} 个日期节点（倒序）`;
+    s += ` · 重点展示 ${keyCount} 个关键文档，其余已折叠`;
+    statusEl.textContent = s;
   }
 }
 
